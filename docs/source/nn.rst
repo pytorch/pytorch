@@ -349,6 +349,12 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: CELU
     :members:
 
+:hidden:`GELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: GELU
+    :members:
+
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
@@ -489,6 +495,12 @@ Normalization layers
 
 Recurrent layers
 ----------------------------------
+
+:hidden:`RNNBase`
+~~~~~~~~~~~~~
+
+.. autoclass:: RNNBase
+    :members:
 
 :hidden:`RNN`
 ~~~~~~~~~~~~~
@@ -794,12 +806,6 @@ DataParallel layers (multi-GPU, distributed)
 .. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
-:hidden:`DistributedDataParallelCPU`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: torch.nn.parallel.DistributedDataParallelCPU
-    :members:
-
 
 Utilities
 ---------
@@ -876,6 +882,17 @@ Utilities
 
 .. autofunction:: torch.nn.utils.rnn.pack_sequence
 
+.. currentmodule:: torch.nn
+
+:hidden:`Flatten`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Flatten
+    :members:
 
 
+Quantized Functions
+--------------------
 
+Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than
+floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the :ref:`quantization-doc` documentation.

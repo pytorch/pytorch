@@ -8,7 +8,14 @@
 #include <sstream>
 #include <string>
 #include <cstdlib>
+#include <functional>
 #include <c10/macros/Macros.h>
+
+
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+  __GNUC__ < 5
+#error "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
+#endif
 
 /*
  * This header adds some polyfills with C++14 and C++17 functionality
@@ -91,6 +98,12 @@ make_unique(Args&&...) = delete;
 
 #endif
 
+template <typename Base, typename Child, typename... Args>
+typename std::enable_if<!std::is_array<Base>::value && !std::is_array<Base>::value && std::is_base_of<Base, Child>::value, std::unique_ptr<Base>>::type
+make_unique_base(Args&&... args) {
+  return std::unique_ptr<Base>(new Child(c10::guts::forward<Args>(args)...));
+}
+
 
 
 #ifdef __cpp_lib_integer_sequence
@@ -109,9 +122,9 @@ template<class T, T... Ints> struct integer_sequence {
 };
 template<std::size_t... Ints> using index_sequence = integer_sequence<std::size_t, Ints...>;
 namespace detail {
-  template<class T, std::size_t I, std::size_t N, T... Ints>
+  template<class T, std::size_t INDEX, std::size_t N, T... Ints>
   struct make_integer_sequence_ {
-    using type = typename make_integer_sequence_<T, I+1, N, Ints..., I>::type;
+    using type = typename make_integer_sequence_<T, INDEX+1, N, Ints..., INDEX>::type;
   };
   template<class T, std::size_t N, T... Ints>
   struct make_integer_sequence_<T, N, N, Ints...> {
@@ -195,14 +208,25 @@ inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 // Implementation from http://en.cppreference.com/w/cpp/utility/apply (but modified)
 // TODO This is an incomplete implementation of std::apply, not working for member functions.
 namespace detail {
-template <class F, class Tuple, std::size_t... I>
-constexpr auto apply_impl(F&& f, Tuple&& t, guts::index_sequence<I...>) -> decltype(c10::guts::forward<F>(f)(std::get<I>(c10::guts::forward<Tuple>(t))...))
+template <class F, class Tuple, std::size_t... INDEX>
+#if defined(_MSC_VER)
+// MSVC has a problem with the decltype() return type, but it also doesn't need it
+// Also, nvcc on Windows needs C10_HOST_DEVICE here.
+C10_HOST_DEVICE constexpr auto apply_impl(F&& f, Tuple&& t, guts::index_sequence<INDEX...>)
+#else
+// GCC/Clang need the decltype() return type and rocm doesn't like the C10_HOST_DEVICE
+constexpr auto apply_impl(F&& f, Tuple&& t, guts::index_sequence<INDEX...>)
+-> decltype(c10::guts::forward<F>(f)(std::get<INDEX>(c10::guts::forward<Tuple>(t))...))
+#endif
 {
-    return c10::guts::forward<F>(f)(std::get<I>(c10::guts::forward<Tuple>(t))...);
+    return c10::guts::forward<F>(f)(std::get<INDEX>(c10::guts::forward<Tuple>(t))...);
 }
 }  // namespace detail
 
 template <class F, class Tuple>
+#if defined(_MSC_VER)
+C10_HOST_DEVICE // rocm doesn't like the C10_HOST_DEVICE
+#endif
 constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
     c10::guts::forward<F>(f), c10::guts::forward<Tuple>(t),
     guts::make_index_sequence<std::tuple_size<guts::remove_reference_t<Tuple>>::value>{}))
@@ -217,18 +241,21 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 
 
 
-#if defined(_MSC_VER) && defined(__CUDACC__) && \
-    (__CUDACC_VER_MAJOR__ >= 10 || (__CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ >= 2))
-// workaround: CUDA >= v9.2 compiler cannot compile correctly on Windows.
-#  define AT_CPP14_CONSTEXPR
-#else
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
-#  define AT_CPP14_CONSTEXPR constexpr
-#else
-#  define AT_CPP14_CONSTEXPR
-#endif
-#endif
+template <typename Functor, typename... Args>
+typename std::enable_if<
+    std::is_member_pointer<typename std::decay<Functor>::type>::value,
+    typename std::result_of<Functor && (Args && ...)>::type>::type
+invoke(Functor&& f, Args&&... args) {
+  return std::mem_fn(f)(std::forward<Args>(args)...);
+}
 
+template <typename Functor, typename... Args>
+typename std::enable_if<
+    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
+    typename std::result_of<Functor && (Args && ...)>::type>::type
+invoke(Functor&& f, Args&&... args) {
+  return std::forward<Functor>(f)(std::forward<Args>(args)...);
+}
 
 
 
@@ -243,6 +270,7 @@ namespace std {
 // std::to_string() call, then you're calling std::to_string() but should be calling
 // c10::guts::to_string().
 inline std::string to_string(c10::guts::detail::DummyClassForToString) { return ""; }
+
 }
 namespace c10 { namespace guts { namespace detail {
 
@@ -266,6 +294,15 @@ template<class T> inline std::string to_string(T value) {
     return detail::to_string_<T>::call(value);
 }
 
+template <class T>
+constexpr const T& min(const T& a, const T& b) {
+  return (b < a) ? b : a;
+}
+
+template <class T>
+constexpr const T& max(const T& a, const T& b) {
+  return (a < b) ? b : a;
+}
 }}
 
 #endif // C10_UTIL_CPP17_H_

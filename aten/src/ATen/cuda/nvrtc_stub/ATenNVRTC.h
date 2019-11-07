@@ -2,10 +2,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
-
-#ifndef __HIP_PLATFORM_HCC__
 #include <nvrtc.h>
-#endif
 
 namespace at { namespace cuda {
 
@@ -57,20 +54,29 @@ namespace at { namespace cuda {
 //
 // ATen's NVRTC stub library, caffe2_nvrtc, provides dynamic loading of both
 // NVRTC and driver APIs. While the former is not yet suppoted for HIP, the
-// later is supported and needed.
+// later is supported and needed (e.g., in CUDAHooks::getDeviceWithPrimaryContext()
+// used by tensor.pin_memory()).
 //
 // The macro below strips out certain unsupported operations on HIP from the full
 // list above.
 //
 // HIP doesn't have
-//   nvrtc*
-//   cuOccupancyMaxActiveBlocksPerMultiprocessor
 //   cuGetErrorString  (maps to non-functional hipGetErrorString___)
 
 #define AT_FORALL_NVRTC(_)                       \
+  _(nvrtcVersion)                                \
+  _(nvrtcCreateProgram)                          \
+  _(nvrtcDestroyProgram)                         \
+  _(nvrtcGetPTXSize)                             \
+  _(nvrtcGetPTX)                                 \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
+  _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
+  _(nvrtcGetErrorString)                         \
+  _(nvrtcGetProgramLogSize)                      \
+  _(nvrtcGetProgramLog)                          \
   _(cuLaunchKernel)                              \
+  _(nvrtcCompileProgram)                         \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)
@@ -83,6 +89,6 @@ extern "C" typedef struct NVRTC {
 #undef CREATE_MEMBER
 } NVRTC;
 
-extern "C" AT_CUDA_API NVRTC* load_nvrtc();
+extern "C" TORCH_CUDA_API NVRTC* load_nvrtc();
 
 }} // at::cuda

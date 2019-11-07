@@ -93,40 +93,18 @@ if(CUDA_FOUND)
 endif()
 
 # Find cuDNN.
-if(CAFFE2_STATIC_LINK_CUDA)
-  SET(CUDNN_LIBNAME "libcudnn_static.a")
-else()
-  SET(CUDNN_LIBNAME "cudnn")
+if(CAFFE2_STATIC_LINK_CUDA AND NOT USE_STATIC_CUDNN)
+  message(WARNING "cuDNN will be linked statically because CAFFE2_STATIC_LINK_CUDA is ON. "
+    "Set USE_STATIC_CUDNN to ON to suppress this warning.")
 endif()
-include(FindPackageHandleStandardArgs)
-
-if(DEFINED ENV{CUDNN_ROOT_DIR})
-  set(CUDNN_ROOT_DIR $ENV{CUDNN_ROOT_DIR} CACHE PATH "Folder contains NVIDIA cuDNN")
+if(CAFFE2_STATIC_LINK_CUDA OR USE_STATIC_CUDNN)
+  set(CUDNN_STATIC ON CACHE BOOL "")
 else()
-  set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+  set(CUDNN_STATIC OFF CACHE BOOL "")
 endif()
 
-if(DEFINED ENV{CUDNN_INCLUDE_DIR})
-  set(CUDNN_INCLUDE_DIR $ENV{CUDNN_INCLUDE_DIR})
-else()
-  find_path(CUDNN_INCLUDE_DIR cudnn.h
-    HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES cuda/include include)
-endif()
+find_package(CUDNN)
 
-if(DEFINED ENV{CUDNN_LIBRARY})
-  set(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
-  if (CUDNN_LIBRARY MATCHES ".*cudnn_static.a")
-    SET(CUDNN_STATIC_LINKAGE ON)
-  endif()
-else()
-  find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
-    HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
-endif()
-
-find_package_handle_standard_args(
-    CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
 if(NOT CUDNN_FOUND)
   message(WARNING
     "Caffe2: Cannot find cuDNN library. Turning the option off")
@@ -145,9 +123,23 @@ if(CAFFE2_USE_TENSORRT)
     PATH_SUFFIXES lib lib64 lib/x64)
   find_package_handle_standard_args(
     TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
-  if(NOT TENSORRT_FOUND)
+  if(TENSORRT_FOUND)
+    execute_process(COMMAND /bin/sh -c "[ -r \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\" ] && awk '/^\#define NV_TENSORRT_MAJOR/ {print $3}' \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\"" OUTPUT_VARIABLE TENSORRT_VERSION_MAJOR)
+    execute_process(COMMAND /bin/sh -c "[ -r \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\" ] && awk '/^\#define NV_TENSORRT_MINOR/ {print $3}' \"${TENSORRT_INCLUDE_DIR}/NvInferVersion.h\"" OUTPUT_VARIABLE TENSORRT_VERSION_MINOR)
+    if(TENSORRT_VERSION_MAJOR)
+      string(STRIP ${TENSORRT_VERSION_MAJOR} TENSORRT_VERSION_MAJOR)
+      string(STRIP ${TENSORRT_VERSION_MINOR} TENSORRT_VERSION_MINOR)
+      set(TENSORRT_VERSION "${TENSORRT_VERSION_MAJOR}.${TENSORRT_VERSION_MINOR}")
+      #CAFFE2_USE_TRT is set in Dependencies
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTENSORRT_VERSION_MAJOR=${TENSORRT_VERSION_MAJOR}")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTENSORRT_VERSION_MINOR=${TENSORRT_VERSION_MINOR}")
+    else()
+      message(WARNING "Caffe2: Cannot find ${TENSORRT_INCLUDE_DIR}/NvInferVersion.h. Assuming TRT 5.0 which is no longer supported. Turning the option off.")
+      set(CAFFE2_USE_TENSORRT OFF)
+    endif()
+  else()
     message(WARNING
-      "Caffe2: Cannot find TensorRT library. Turning the option off")
+      "Caffe2: Cannot find TensorRT library. Turning the option off.")
     set(CAFFE2_USE_TENSORRT OFF)
   endif()
 endif()
@@ -155,7 +147,7 @@ endif()
 # ---[ Extract versions
 if(CAFFE2_USE_CUDNN)
   # Get cuDNN version
-  file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
+  file(READ ${CUDNN_INCLUDE_PATH}/cudnn.h CUDNN_HEADER_CONTENTS)
   string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
                CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
   string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
@@ -175,7 +167,7 @@ if(CAFFE2_USE_CUDNN)
     set(CUDNN_VERSION
         "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
   endif()
-  message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
+  message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_PATH}, library: ${CUDNN_LIBRARY_PATH})")
   if(CUDNN_VERSION VERSION_LESS "7.0.0")
     message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
   endif()
@@ -214,9 +206,10 @@ set_property(
 # library.
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt dl)
+    target_link_libraries(torch::cudart INTERFACE "${CUDA_cudart_static_LIBRARY}")
+    if (NOT WIN32)
+      target_link_libraries(torch::cudart INTERFACE rt dl)
+    endif()
 else()
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
@@ -232,18 +225,24 @@ if(CAFFE2_USE_CUDNN)
   add_library(caffe2::cudnn UNKNOWN IMPORTED)
   set_property(
       TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-      ${CUDNN_LIBRARY})
+      ${CUDNN_LIBRARY_PATH})
   set_property(
       TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${CUDNN_INCLUDE_DIR})
+      ${CUDNN_INCLUDE_PATH})
+  if(CUDNN_STATIC AND NOT WIN32)
+    target_link_libraries(caffe2::cudnn INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+  endif()
 endif()
 
 # curand
 add_library(caffe2::curand UNKNOWN IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
+    target_link_libraries(caffe2::curand INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
@@ -256,10 +255,10 @@ set_property(
 # cufft. CUDA_CUFFT_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cufft INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+    target_link_libraries(caffe2::cufft INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a"
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
@@ -283,10 +282,15 @@ endif()
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cublas INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
+    if (CUDA_VERSION VERSION_EQUAL 10.1)
+      set_property(
+        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+    endif()
 else()
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
@@ -399,7 +403,9 @@ endforeach()
 
 # Set C++11 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
-if (NOT MSVC)
+if (MSVC)
+  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "/EHa")
+else()
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()

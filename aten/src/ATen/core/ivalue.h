@@ -1,14 +1,18 @@
 #pragma once
 
+#include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Tensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
+class CustomClassHolder : public c10::intrusive_ptr_target {};
 struct Function;
 namespace script {
 struct CompilationUnit;
+struct Module;
 }
 } // namespace jit
 } // namespace torch
@@ -17,6 +21,8 @@ template<class Key, class Value> class Dict;
 template<class T> class List;
 struct IValue;
 struct ClassType;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -49,8 +55,9 @@ struct Object;
   _(GenericDict) \
   _(Future) \
   _(Device) \
+  _(Object) \
   _(Uninitialized) \
-  _(Object)
+  _(Capsule)
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -102,6 +109,15 @@ struct CAFFE2_API IValue final {
     // Other types can be compared by their ptr value
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+
+    return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
+  }
+
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
@@ -148,8 +164,26 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() &&;
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
+  // Capsule
+  IValue(intrusive_ptr<torch::jit::CustomClassHolder> blob);
+  bool isCapsule() const {
+    return Tag::Capsule == tag;
+  }
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() &&;
+  c10::intrusive_ptr<torch::jit::CustomClassHolder> toCapsule() const &;
+
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
+
+  template <
+      typename... Args,
+      c10::guts::enable_if_t<
+          !c10::guts::disjunction<
+              std::is_lvalue_reference<Args>...,
+              c10::guts::negation<std::is_constructible<IValue, Args>>...>::
+              value,
+          std::nullptr_t> = nullptr>
+  IValue(const std::tuple<Args...>& t);
   bool isTuple() const { return Tag::Tuple == tag; }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;
@@ -293,6 +327,9 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Object> toObject() const & ;
   const ivalue::Object& toObjectRef() const;
 
+  torch::jit::script::Module toModule() const;
+  bool isModule() const;
+
   // None
   bool isNone() const {
     return Tag::None == tag;
@@ -341,16 +378,22 @@ struct CAFFE2_API IValue final {
   }
 
   // ScalarType
+  IValue(ScalarType t)
+  : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
   at::ScalarType toScalarType() const {
     return static_cast<at::ScalarType>(toInt());
   }
 
   // Layout
+  IValue(Layout l)
+  : IValue(static_cast<std::underlying_type<Layout>::type>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
 
   // MemoryFormat
+  IValue(MemoryFormat m)
+  : IValue(static_cast<std::underlying_type<MemoryFormat>::type>(m)) {}
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
   }
@@ -410,6 +453,8 @@ struct CAFFE2_API IValue final {
     return payload.as_intrusive_ptr;
   }
 
+  TypePtr type() const;
+
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
@@ -433,7 +478,7 @@ struct CAFFE2_API IValue final {
     tag = Tag::None;
     is_intrusive_ptr = false;
   }
-private:
+
   union Payload {
     int64_t as_int;
     double as_double;
@@ -564,6 +609,43 @@ struct StrongTypePtr {
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
   std::shared_ptr<ClassType> type_;
 };
+
+TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
+
+#ifndef C10_MOBILE
+
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  auto tmap = c10::getCustomClassTypeMap();
+  auto res = tmap.find(typeid(T).name());
+  if (res == tmap.end()) {
+    throw c10::Error("Can't find class id in custom class type map", "");
+  }
+  return res->second;
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  auto tmap = c10::getCustomClassTypeMap();
+  return tmap.find(typeid(T).name()) != tmap.end();
+}
+
+#else  // C10_MOBILE
+
+template<typename T>
+c10::StrongTypePtr getCustomClassType() {
+  throw c10::Error("Custom class is not supported on mobile.", "");
+}
+
+template<typename T>
+inline bool isCustomClassRegistered() {
+  return false;
+}
+
+#endif  // C10_MOBILE
+
+TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter();
 }
 
 #include <ATen/core/ivalue_inl.h>

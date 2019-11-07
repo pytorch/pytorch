@@ -1,6 +1,8 @@
 def while_if_test(a: Tensor,
     b: Tensor) -> Tensor:
-  a0, c, b0 = a, 0, b
+  a0 = a
+  c = 0
+  b0 = b
   _0 = bool(torch.lt(a, 10))
   while _0:
     a1 = torch.add(a0, 1, 1)

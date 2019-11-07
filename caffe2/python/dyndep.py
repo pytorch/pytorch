@@ -7,7 +7,7 @@ from __future__ import unicode_literals
 
 import ctypes
 import os
-
+from threading import Lock
 from caffe2.python import core, extension_loader
 
 
@@ -36,6 +36,7 @@ def InitOpsLibrary(name):
 
 
 _IMPORTED_DYNDEPS = set()
+dll_lock = Lock()
 
 
 def GetImportedOpsLibraries():
@@ -43,8 +44,9 @@ def GetImportedOpsLibraries():
 
 
 def _init_impl(path):
-    _IMPORTED_DYNDEPS.add(path)
-    with extension_loader.DlopenGuard():
-        ctypes.CDLL(path)
-    # reinitialize available ops
-    core.RefreshRegisteredOperators()
+    with dll_lock:
+        _IMPORTED_DYNDEPS.add(path)
+        with extension_loader.DlopenGuard():
+            ctypes.CDLL(path)
+        # reinitialize available ops
+        core.RefreshRegisteredOperators()

@@ -5,8 +5,8 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
 using namespace c10d::test;
@@ -268,8 +268,7 @@ struct ReduceScatterNCCLTest : NCCLTest {
       deviceGuard.set_index(i);
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         inputs_[i][j].fill_(
-          pg_->getRank() * numDevices_ * worldSize_ + i * worldSize_ + j
-        );
+            pg_->getRank() * numDevices_ * worldSize_ + i * worldSize_ + j);
       }
     }
 
@@ -290,7 +289,7 @@ void testAllreduce(const std::string& path, int rank, int size) {
   auto tensors = test.getTensors();
   for (size_t j = 0; j < tensors.size(); j++) {
     auto& tensor = tensors[j];
-    auto data = tensor.data<float>();
+    auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
       if (data[k] != expected) {
         throw std::runtime_error("BOOM!");
@@ -318,7 +317,7 @@ void testBroadcast(const std::string& path, int rank, int size) {
       auto tensors = test.getTensors();
       for (size_t j = 0; j < tensors.size(); j++) {
         auto& tensor = tensors[j];
-        auto data = tensor.data<float>();
+        auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
           if (data[k] != expected) {
             throw std::runtime_error("BOOM!");
@@ -349,7 +348,7 @@ void testReduce(const std::string& path, int rank, int size) {
       auto tensors = test.getTensors();
       if (rank == rootRank) {
         auto& tensor = tensors[rootTensor];
-        auto data = tensor.data<float>();
+        auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
           if (data[k] != expected) {
             throw std::runtime_error("BOOM!");
@@ -376,7 +375,7 @@ void testAllgather(const std::string& path, int rank, int size) {
     for (size_t j = 0; j < tensors[i].size(); ++j) {
       const auto expected = j;
       auto& tensor = tensors[i][j];
-      auto data = tensor.data<float>();
+      auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
@@ -404,7 +403,7 @@ void testReduceScatter(const std::string& path, int rank, int size) {
     const auto modifier = participants * (rank * participants + i);
     const auto expected = base + modifier;
     auto& tensor = tensors[i];
-    auto data = tensor.data<float>();
+    auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
       if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
@@ -415,6 +414,10 @@ void testReduceScatter(const std::string& path, int rank, int size) {
 }
 
 int main(int argc, char** argv) {
+  if (!at::cuda::is_available()) {
+    LOG(INFO) << "CUDA not available, skipping test";
+    return EXIT_SUCCESS;
+  }
   // Use WORLD_SIZE and RANK environmental variables to do multi-node
   // distributed testing
   auto sizeEnv = std::getenv("WORLD_SIZE");

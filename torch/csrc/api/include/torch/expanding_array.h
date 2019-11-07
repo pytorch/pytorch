@@ -26,7 +26,13 @@ class ExpandingArray {
   /*implicit*/ ExpandingArray(std::initializer_list<T> list)
       : ExpandingArray(at::ArrayRef<T>(list)) {}
 
-  /// Constructs an `ExpandingArray` from an `initializer_list`. The extent of
+  /// Constructs an `ExpandingArray` from an `std::vector`. The extent of
+  /// the length is checked against the `ExpandingArray`'s extent parameter `D`
+  /// at runtime.
+  /*implicit*/ ExpandingArray(std::vector<T> vec)
+      : ExpandingArray(at::ArrayRef<T>(vec)) {}
+
+  /// Constructs an `ExpandingArray` from an `at::ArrayRef`. The extent of
   /// the length is checked against the `ExpandingArray`'s extent parameter `D`
   /// at runtime.
   /*implicit*/ ExpandingArray(at::ArrayRef<T> values) {

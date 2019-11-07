@@ -20,7 +20,15 @@ LBFGSOptions::LBFGSOptions(double learning_rate)
 Tensor LBFGS::gather_flat_grad() {
   std::vector<Tensor> views;
   for (auto& parameter : parameters_) {
-    views.push_back(parameter.grad().view(-1));
+    if (!parameter.grad().defined()) {
+      views.push_back(parameter.new_empty({parameter.numel()}).zero_());
+    }
+    else if (parameter.grad().is_sparse()) {
+      views.push_back(parameter.grad().to_dense().view(-1));
+    }
+    else {
+      views.push_back(parameter.grad().view(-1));
+    }
   }
   return torch::cat(views);
 }
@@ -39,28 +47,28 @@ void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
 
 torch::Tensor LBFGS::step(LossClosure closure) {
   torch::Tensor orig_loss = closure();
-  torch::Tensor loss = orig_loss.clone();
+  torch::Tensor loss = orig_loss.clone(at::MemoryFormat::Contiguous);
   int64_t current_evals = 1;
   func_evals += 1;
 
   Tensor flat_grad = gather_flat_grad();
   Tensor abs_grad_sum = flat_grad.abs().sum();
 
-  if (abs_grad_sum.item<float>() <= options.tolerance_grad_) {
+  if (abs_grad_sum.item<float>() <= options.tolerance_grad()) {
     return loss;
   }
 
   Tensor ONE = torch::tensor(1, flat_grad.options());
 
   int64_t n_iter = 0;
-  while (n_iter < options.max_iter_) {
+  while (n_iter < options.max_iter()) {
     n_iter++;
     state_n_iter++;
 
     if (state_n_iter == 1) {
       d = flat_grad.neg();
       H_diag = ONE;
-      prev_flat_grad = flat_grad.clone();
+      prev_flat_grad = flat_grad.clone(at::MemoryFormat::Contiguous);
     } else {
       Tensor y = flat_grad.sub(prev_flat_grad);
       Tensor s = d.mul(t);
@@ -69,7 +77,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       if (ys.item<float>() > 1e-10) {
         // updating memory
 
-        if (old_dirs.size() == options.history_size_) {
+        if (old_dirs.size() == options.history_size()) {
           // shift history by one (limited memory)
           old_dirs.pop_front();
           old_stps.pop_front();
@@ -108,20 +116,20 @@ torch::Tensor LBFGS::step(LossClosure closure) {
     }
 
     /**
-     * comute step length
+     * compute step length
      */
 
     // reset initial guess for step size
     if (n_iter == 1) {
-      t = torch::min(ONE, ONE / abs_grad_sum) * options.learning_rate_;
+      t = torch::min(ONE, ONE / abs_grad_sum) * options.learning_rate();
     } else {
-      t = torch::tensor(options.learning_rate_, torch::kFloat32);
+      t = torch::tensor(options.learning_rate(), flat_grad.options());
     }
 
     Tensor gtd = flat_grad.dot(d);
     add_grad(t, d);
     int64_t ls_func_evals = 0;
-    if (n_iter != options.max_iter_) {
+    if (n_iter != options.max_iter()) {
       // re-evaluate function only if not in last iteration
       // the reason we do this: in a stochastic setting,
       // no use to re-evaluate that function here
@@ -137,20 +145,20 @@ torch::Tensor LBFGS::step(LossClosure closure) {
      * Check conditions
      */
 
-    if (n_iter == options.max_iter_) {
+    if (n_iter == options.max_iter()) {
       break;
-    } else if (current_evals >= options.max_eval_) {
+    } else if (current_evals >= options.max_eval()) {
       break;
-    } else if (abs_grad_sum.item<float>() <= options.tolerance_grad_) {
+    } else if (abs_grad_sum.item<float>() <= options.tolerance_grad()) {
       break;
-    } else if (gtd.item<float>() > -options.tolerance_grad_) {
+    } else if (gtd.item<float>() > -options.tolerance_grad()) {
       break;
     } else if (
-        d.mul(t).abs_().sum().item<float>() <= options.tolerance_change_) {
+        d.mul(t).abs_().sum().item<float>() <= options.tolerance_change()) {
       break;
     } else if (
         std::abs(loss.item<float>() - prev_loss.item<float>()) <
-        options.tolerance_change_) {
+        options.tolerance_change()) {
       break;
     }
   }

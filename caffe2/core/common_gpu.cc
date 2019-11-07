@@ -257,6 +257,14 @@ const char* cublasGetErrorString(cublasStatus_t error) {
 #ifdef __HIP_PLATFORM_HCC__
   case rocblas_status_invalid_size:
     return "rocblas_status_invalid_size";
+  case rocblas_status_perf_degraded:
+    return "rocblas_status_perf_degraded";
+  case rocblas_status_size_query_mismatch:
+    return "rocblas_status_size_query_mismatch";
+  case rocblas_status_size_increased:
+    return "rocblas_status_size_increased";
+  case rocblas_status_size_unchanged:
+    return "rocblas_status_size_unchanged";
 #endif
   }
   // To suppress compiler warning.

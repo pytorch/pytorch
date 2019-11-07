@@ -7,7 +7,12 @@ import functools
 import numpy as np
 import timeit
 import json
+import torch
 
+# needs to be imported after torch
+import cpp_extension # noqa
+
+import cpp_extension # noqa
 import benchmark_utils
 from collections import namedtuple
 
@@ -17,9 +22,9 @@ This module contains core functionalities for performance microbenchmark tests.
 """
 
 """
-This is used to store configs of tests 
-An example input is: 
-TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
+This is used to store configs of tests
+An example input is:
+TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
     tag='long', run_backward=False)
 """
 TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
@@ -29,12 +34,12 @@ BENCHMARK_TESTER = {}
 
 
 def _register_test(test_case):
-    """ This method is used to register test. func_name is a global unique 
-    string. For PyTorch add operator with M=8, N=2, K=1, tag = long, here 
+    """ This method is used to register test. func_name is a global unique
+    string. For PyTorch add operator with M=8, N=2, K=1, tag = long, here
     are the values for the members in test_case:
     op.module_name: add
     framework: PyTorch
-    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
+    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
         tag='long', run_backward=False)
     func_name: addPyTorchTestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
                                     tag='long', run_backward=False)
@@ -50,29 +55,35 @@ class BenchmarkRunner(object):
     benchmark test groups.
 
     Attributes:
-        tag_filter (str): control the benchmarks which matches the tag. 
+        tag_filter (str): control the benchmarks which matches the tag.
         operator (str): only run benchmark test cases that contains
     this filter string in the test case's id.
         test_name (str): only run benchmark test cases that matches this filter,
         this is a case-sensitive substring match and it happens in
-        the _keep_test method. 
+        the _keep_test method.
     """
     def __init__(self, args):
         # TODO: consider time-bound constraints as well.
         self.args = args
-        self.iters = 100
+        self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.predefined_minimum_secs = 4
+        self.predefined_minimum_secs = 2
         self.max_iters = 1e6
         self.use_jit = args.use_jit
-        if self.args.iterations:
+        self.num_runs = args.num_runs
+        self.print_per_iter = False
+        # 100 is the default warmup iterations
+        if self.args.warmup_iterations == -1:
+            self.args.warmup_iterations = 100
+        if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
-        # when a specific test is selected by a user, we don't need 
-        # to match the tag anymore 
-        if self.args.test_name is not None: 
+        # when a specific test is selected by a user, we don't need
+        # to match the tag anymore
+        if self.args.test_name is not None:
             self.args.tag_filter = None
+
 
     def _print_header(self):
         DASH_LINE = '-' * 40
@@ -86,101 +97,131 @@ class BenchmarkRunner(object):
                 print("# {}".format(test_case.test_config.test_name))
         elif self.args.list_ops:
             print("# List of Operators to run:")
-            if self.args.operator is None:
+            if self.args.operators is None:
                 ops = set(test_case.op_bench.module_name()
                           for _, test_case in BENCHMARK_TESTER.items())
-                for op in ops: 
+                for op in ops:
                     print("# {}".format(op))
             else:
-                print("# {}".format(self.args.operator))
+                print("# {}".format(self.args.operators))
 
     def _print_perf_result(self, reported_run_time_us, test_case):
         if self.args.ai_pep_format:
             # Output for AI-PEP
+            # Print out per iteration execution time instead of avg time
+            return
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
-            print("Caffe2Observer " + json.dumps(
-                {
-                    "type": test_name,
-                    "metric": "latency",
-                    "unit": "us",
-                    "value": str(reported_run_time_us),
-                }
-            ))
+            for run in range(self.num_runs):
+                print("{}Observer ".format(test_case.framework) + json.dumps(
+                    {
+                        "type": test_name,
+                        "metric": "latency",
+                        "unit": "us",
+                        "value": str(reported_run_time_us[run]),
+                    }
+                ))
         else:
-            # FIXME: change the print format here 
-            output = "# Name: {}\n" \
-                     "# Input: {}\n" \
-                     "{} Execution Time (us) : {:.3f}\n"
             if test_case.framework == "PyTorch":
-                output = "# Mode: {}\n". \
-                    format("JIT" if self.use_jit else "Eager") + output
-            print(output.format(
-                test_case.test_config.test_name,
-                test_case.test_config.input_config,
-                "Backward" if test_case.test_config.run_backward else "Forward", reported_run_time_us))
+                print("# Mode: {}".format("JIT" if self.use_jit else "Eager"))
+
+            print("# Name: {}\n"
+                  "# Input: {}".format(
+                      test_case.test_config.test_name,
+                      test_case.test_config.input_config))
+
+            mode = "Backward" if test_case.test_config.run_backward else "Forward"
+            if self.num_runs > 1:
+                for run in range(self.num_runs):
+                    print("Run: {}, {} Execution Time (us) : {:.3f}".format(
+                        run,
+                        mode, reported_run_time_us[run]))
+                print()
+            else:
+                print("{} Execution Time (us) : {:.3f}\n".format(
+                    mode, reported_run_time_us[0]))
 
     def _predict_num_iter_needed(self, i):
         return (i * self.multiplier)
 
     def _iteration_result_is_significant(self, iters, run_time_sec, curr_test_total_time, has_explicit_iteration_count):
-        """ This function decides whether the measured time can be reported based on the 
+        """ This function decides whether the measured time can be reported based on the
         following conditions: 1) the number of iterations is larger than the max_iters.
         2) the execution time is larger than the predefined minimum_time
-        3) the execution time is larger than user defined minimum_time 
+        3) the execution time is larger than user defined minimum_time
         """
         return ((iters > self.max_iters or
-                run_time_sec > self.predefined_minimum_secs or 
+                run_time_sec > self.predefined_minimum_secs or
                 has_explicit_iteration_count) and
                 curr_test_total_time > self.args.min_time_per_test)
 
-    def _launch_forward(self, test_case, iters):
+    def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(functools.partial(func, iters), number=1)
+        forward_time = timeit.timeit(functools.partial(func, iters, print_per_iter), number=1)
         return forward_time
 
-    def _launch_backward(self, test_case, iters):
-        """ This function runs forward path of an op to get an output. Then the backward path is executed 
+    def _launch_backward(self, test_case, iters, print_per_iter=False):
+        """ This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1)
+        test_case.run_forward(num_runs=1, print_per_iter=False)
         if test_case.framework == "PyTorch":
             test_case._output_mean()
-        backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters), number=1)
+        backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters,
+                                                        print_per_iter),
+                                      number=1)
         return backward_time
 
-    def _measure_time(self, launch_test, test_case, iters):
+    def _measure_time(self, launch_test, test_case, iters, print_per_iter):
         """
-        This function execute the operator for <iters> iterations then look at the time. 
-        If it's not significant, the number of iterations will be increased before rerun. 
+        This function execute the operator for <iters> iterations then look at the time.
+        If it's not significant, the number of iterations will be increased before rerun.
         The execution stops when the time becomes significant.
         """
         curr_test_total_time = 0
+        time_trace = []
         while True:
-            run_time_sec = launch_test(test_case, iters)
+            # Wipe cache
+            if self.args.wipe_cache:
+                torch.ops.operator_benchmark._clear_cache()
+
+            run_time_sec = launch_test(test_case, iters, print_per_iter)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
                 iters, run_time_sec, curr_test_total_time, self.has_explicit_iteration_count)
 
+            report_run_time = 1e6 * run_time_sec / iters
+            time_trace.append(report_run_time)
+            # Print out the time spent in each epoch in ms
+            if self.args.ai_pep_format:
+                mode = "JIT" if self.use_jit else "Eager"
+                test_name = '_'.join([test_case.framework, test_case.test_config.test_name, mode])
+                print("PyTorchObserver " + json.dumps(
+                    {
+                        "type": test_name,
+                        "metric": "latency",
+                        "unit": "ms",
+                        "value": str(report_run_time / 1e3),
+                    }
+                ))
             if results_are_significant:
                 break
 
             # Re-estimate the hopefully-sufficient
             # iteration count, and run the benchmark again...
             iters = self._predict_num_iter_needed(iters)
-
-        reported_run_time_us = (1e6 * run_time_sec / iters)
+        reported_run_time_us = np.percentile(np.array(time_trace), 50)
         return reported_run_time_us
 
     def _check_keep(self, test_flag, cmd_flag):
         return (cmd_flag is None or test_flag == cmd_flag)
 
     def _check_keep_list(self, test_flag, cmd_flag_list):
-        if (cmd_flag_list is None or 
+        if (cmd_flag_list is None or
                 any(test_flag == cmd_flag for cmd_flag in cmd_flag_list)):
             return True
         return False
@@ -191,14 +232,17 @@ class BenchmarkRunner(object):
         op_test_config = test_case.test_config
 
         if self.args.framework:
-            frameworks = benchmark_utils.get_requested_frameworks(self.args.framework)
+            frameworks = benchmark_utils.process_arg_list(self.args.framework)
+
+        operators = benchmark_utils.process_arg_list(self.args.operators) if self.args.operators else None
 
         # Filter framework, operator, test_name, tag, forward_only
         if (self._check_keep(op_test_config.test_name, self.args.test_name) and
             self._check_keep(op_test_config.tag, self.args.tag_filter) and
-            self._check_keep(test_case.op_bench.module_name(), self.args.operator) and
+            self._check_keep_list(test_case.op_bench.module_name(), operators) and
             self._check_keep_list(test_case.framework, frameworks) and
-                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only)):
+                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only) and
+                (self.args.device == 'None' or self.args.device in op_test_config.test_name)):
             return True
 
         return False
@@ -210,7 +254,7 @@ class BenchmarkRunner(object):
             return
 
         for full_test_id, test_case in BENCHMARK_TESTER.items():
-            op_test_config = test_case.test_config 
+            op_test_config = test_case.test_config
 
             if not self._keep_test(test_case):
                 continue
@@ -227,14 +271,15 @@ class BenchmarkRunner(object):
                 test_case.op_bench.module_name()))
 
             if op_test_config.run_backward:
-                # Warmup
-                self._launch_backward(test_case, self.args.warmup_iterations)
-                # Actual Execution
-                reported_time = self._measure_time(self._launch_backward, test_case, self.iters)
-            else: 
-                # Warmup
-                self._launch_forward(test_case, self.args.warmup_iterations)
-                # Actual Execution
-                reported_time = self._measure_time(self._launch_forward, test_case, self.iters)
+                launch_func = self._launch_backward
+            else:
+                launch_func = self._launch_forward
+
+            # Warmup
+            launch_func(test_case, self.args.warmup_iterations, print_per_iter=False)
+            # Actual Execution
+            reported_time = [self._measure_time(launch_func, test_case,
+                                                self.iters, self.print_per_iter)
+                             for _ in range(self.num_runs)]
 
             self._print_perf_result(reported_time, test_case)

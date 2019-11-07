@@ -89,6 +89,10 @@ show docstring and examples through ``torch.hub.help()`` and load the pre-traine
 
 .. autofunction:: load
 
+.. autofunction:: download_url_to_file
+
+.. autofunction:: load_state_dict_from_url
+
 Running a loaded model:
 ^^^^^^^^^^^^^^^^^^^^^^^
 

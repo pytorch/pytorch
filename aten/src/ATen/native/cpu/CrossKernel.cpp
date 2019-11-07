@@ -17,9 +17,9 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
   int64_t b_stride = b.stride(dim);
   int64_t r_stride = result.stride(dim);
 
-  scalar_t *a_ptr = a.data<scalar_t>();
-  scalar_t *b_ptr = b.data<scalar_t>();
-  scalar_t *r_ptr = result.data<scalar_t>();
+  scalar_t *a_ptr = a.data_ptr<scalar_t>();
+  scalar_t *b_ptr = b.data_ptr<scalar_t>();
+  scalar_t *r_ptr = result.data_ptr<scalar_t>();
 
   parallel_for(0, total, internal::GRAIN_SIZE, [&](int64_t s, int64_t e) {
     const int64_t a_dim = a.dim();
@@ -65,7 +65,7 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
 }
 
 static void cross_kernel_impl(Tensor& result, const Tensor& a, const Tensor& b, const int64_t dim) {
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "cross", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "cross", [&]() {
     apply_cross<scalar_t>(result, a, b, dim);
   });
 }

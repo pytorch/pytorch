@@ -122,7 +122,6 @@ class OnnxifiOp final : public Operator<Context> {
     // cached backend and therefore there is no need to repeat the above
     // process.
     buildBackendAndGraph(ws, property_pointers, onnx_model_str);
-
   }
 
   ~OnnxifiOp() {
@@ -211,7 +210,7 @@ class OnnxifiOp final : public Operator<Context> {
           ONNXIFI_STATUS_SUCCESS);
 
       // Release unused backend ids.
-      for (auto i = 0; i < num_backends; ++i) {
+      for (size_t i = 0; i < num_backends; ++i) {
         if (i == backend_index) {
           continue;
         }
@@ -231,7 +230,7 @@ class OnnxifiOp final : public Operator<Context> {
 
       // Extra weight shapes
       std::unordered_map<std::string, ShapeInfo> weight_shape_info;
-      for (int i = 0; i < weight_names.size(); ++i) {
+      for (size_t i = 0; i < weight_names.size(); ++i) {
         TensorShape shape;
         const auto& shape0 = weight_shapes[i];
         for (const auto d : shape0) {
@@ -241,6 +240,10 @@ class OnnxifiOp final : public Operator<Context> {
             ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
       }
 
+      Blob* defered_blob_reader = nullptr;
+      if (ws->HasBlob("__DEFERRED_BLOB_READER__")) {
+        defered_blob_reader = ws->GetBlob("__DEFERRED_BLOB_READER__");
+      }
       onnxGraph graph{nullptr};
       CAFFE_ENFORCE_EQ(
           lib_->onnxInitGraph(
@@ -250,7 +253,8 @@ class OnnxifiOp final : public Operator<Context> {
               (const void*)(onnx_model_str.c_str()),
               weight_descs.size(),
               weight_descs.data(),
-              &graph),
+              &graph,
+              defered_blob_reader),
           ONNXIFI_STATUS_SUCCESS);
 
       return std::make_shared<onnx::BackendGraphInfo>(

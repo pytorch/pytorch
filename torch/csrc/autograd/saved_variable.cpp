@@ -14,12 +14,13 @@
 
 namespace torch { namespace autograd {
 
-SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
+SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view) {
   if (variable.defined()) {
     was_default_constructed_ = false;
     output_nr_ = variable.output_nr();
     requires_grad_ = variable.requires_grad();
     has_grad_fn_ = !variable.is_leaf();
+    is_inplace_view_ = is_inplace_view;
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
@@ -27,13 +28,15 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
       grad_accumulator_ = variable.grad_accumulator();
     } else if (!is_output) {
       grad_fn_ = variable.grad_fn();
+    } else if (is_inplace_view) {
+      weak_grad_fn_ = variable.grad_fn();
     }
     version_counter_ = variable.version_counter();
     saved_version_ = version_counter_.current_version();
   }
 }
 
-Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
+Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (!data_.defined()) {
     if (!was_default_constructed_) {
       throw std::runtime_error(ERR_BACKWARD_TWICE);
@@ -41,7 +44,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
     return Variable();
   }
 
-  auto grad_fn = grad_fn_;
+  auto grad_fn = is_inplace_view_ ? weak_grad_fn_.lock() : grad_fn_;
   if (has_grad_fn_ && !grad_fn) {
     if (!saved_for) {
       // If saving the grad_fn would create a circular reference, then it must

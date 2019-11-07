@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
+#include <torch/nn/options/batchnorm.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -8,29 +9,6 @@
 
 namespace torch {
 namespace nn {
-
-/// Options for the `BatchNorm` module.
-struct TORCH_API BatchNormOptions {
-  /* implicit */ BatchNormOptions(int64_t features);
-  /// The number of features of the input tensor.
-  /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG(int64_t, features);
-  /// Whether to learn a scale and bias that are applied in an affine
-  /// transformation on the input.
-  /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG(bool, affine) = true;
-  /// Whether to store and update batch statistics (mean and variance) in the
-  /// module. If `false`, you should call `pure_forward` and supply those batch
-  /// statistics yourself.
-  /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG(bool, stateful) = true;
-  /// The epsilon value added for numerical stability.
-  /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(double, eps) = 1e-5;
-  /// A momentum multiplier for the mean and variance.
-  /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(double, momentum) = 0.1;
-};
 
 /// Applies [Batch Normalization](https://arxiv.org/abs/1502.03167) to an input.
 ///
@@ -47,9 +25,9 @@ struct TORCH_API BatchNormOptions {
 /// \endrst
 class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
  public:
-  explicit BatchNormImpl(int64_t features)
-      : BatchNormImpl(BatchNormOptions(features)) {}
-  explicit BatchNormImpl(BatchNormOptions options);
+  explicit BatchNormImpl(int64_t num_features)
+      : BatchNormImpl(BatchNormOptions(num_features)) {}
+  explicit BatchNormImpl(const BatchNormOptions& options_);
 
   void reset() override;
 
@@ -59,7 +37,7 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   /// Applies batch normalization on the `input` using the stored mean and
   /// variance.
   ///
-  /// The module must be constructed with `stateful = true` when calling this
+  /// The module must be constructed with `track_running_stats = true` when calling this
   /// method, as the module will otherwise not store running statistics. If you
   /// want to supply the mean and variance yourself, use `pure_forward`.
   Tensor forward(const Tensor& input);
@@ -83,11 +61,11 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   Tensor bias;
 
   /// The running mean.
-  /// Only defined if the `stateful` option was `true` upon construction.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
   Tensor running_mean;
 
   /// The running variance.
-  /// Only defined if the `stateful` option was `true` upon construction.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
   Tensor running_var;
 };
 
@@ -96,6 +74,89 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(BatchNorm);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Base class for all (dimension-specialized) batchnorm modules.
+template <size_t D, typename Derived>
+class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) = 0;
+
+ public:
+  explicit BatchNormImplBase(const BatchNormOptions& options_);
+
+  Tensor forward(const Tensor& input);
+
+  void reset_running_stats();
+
+  void reset() override;
+
+  /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this module was constructed.
+  BatchNormOptions options;
+
+  /// The learned weight.
+  /// Only defined if the `affine` option was `true` upon construction.
+  Tensor weight;
+
+  /// The learned bias.
+  /// Only defined if the `affine` option was `true` upon construction.
+  Tensor bias;
+
+  /// The running mean.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  Tensor running_mean;
+
+  /// The running variance.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  Tensor running_var;
+
+  /// The number of the forward call.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  Tensor num_batches_tracked;
+};
+
+/// Applies the BatchNorm1d function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
+/// about the exact behavior of this module.
+class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) override;
+
+ public:
+  using BatchNormImplBase<1, BatchNorm1dImpl>::BatchNormImplBase;
+};
+
+TORCH_MODULE(BatchNorm1d);
+
+/// Applies the BatchNorm2d function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
+/// about the exact behavior of this module.
+class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) override;
+
+ public:
+  using BatchNormImplBase<2, BatchNorm2dImpl>::BatchNormImplBase;
+};
+
+TORCH_MODULE(BatchNorm2d);
+
+/// Applies the BatchNorm3d function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
+/// about the exact behavior of this module.
+class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) override;
+
+ public:
+  using BatchNormImplBase<3, BatchNorm3dImpl>::BatchNormImplBase;
+};
+
+TORCH_MODULE(BatchNorm3d);
 
 } // namespace nn
 } // namespace torch

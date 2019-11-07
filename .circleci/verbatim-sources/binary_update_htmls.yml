@@ -1,4 +1,4 @@
-  
+
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -12,8 +12,7 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *binary_checkout
     # N.B. we do not run binary_populate_env. The only variable we need is
@@ -67,8 +66,7 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *setup_linux_system_environment
+    - setup_linux_system_environment
     - run:
         <<: *binary_checkout
     - run:

@@ -13,10 +13,10 @@
 
 namespace torch { namespace autograd {
 
-struct TORCH_API CopyBackwards : public Function {
+struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
 
-  at::DeprecatedTypeProperties *src_type = nullptr; // initialized for safety.
+  at::TensorOptions src_options;
   at::Device src_device = at::kCPU;
 };
 
@@ -27,18 +27,18 @@ struct TORCH_API CopyBackwards : public Function {
 // grad_fn is updated to become a `CopySlice` wrapping the backward of the
 // in-place operation.
 // See NOTE [ Autograd View Variables ].
-struct TORCH_API CopySlices : public Function {
+struct TORCH_API CopySlices : public Node {
   CopySlices(
       const Variable& base_var,
       at::TensorGeometry view_,
-      std::shared_ptr<Function> fn_);
+      std::shared_ptr<Node> fn_);
 
   variable_list apply(variable_list&& inputs) override;
   void release_variables() override;
 
   at::TensorGeometry base;
   at::TensorGeometry view;
-  std::shared_ptr<Function> fn;
+  std::shared_ptr<Node> fn;
 };
 
 }}

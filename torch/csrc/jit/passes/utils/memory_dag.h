@@ -64,6 +64,7 @@ class TORCH_API MemoryDAG {
 
   // Converts from the compressed index representation
   const Element* fromIndex(unsigned x) const;
+  Element* fromIndex(unsigned x);
 
  private:
   bool mayAliasImpl(const Element* a, const Element* b) const;
@@ -72,9 +73,7 @@ class TORCH_API MemoryDAG {
   void collectAllContainedMemoryLocations(
     const Element* elem, MemoryLocations& cont) const;
 
-  std::vector<std::unique_ptr<Element>> indexToElementMap;
-
-  friend class AliasDB;
+  std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
 // `Element` represents the vertex in the points-to graph. It represents
@@ -117,6 +116,7 @@ struct Element {
   // Do a breadth-first search over the graph, starting at `this` and
   // traversing in the direction `dir`.`fn` will be run on each element.
   void bfs(BfsDirection dir, MemoryLocations& res) const;
+  friend class MemoryDAG;
 };
 
 } // namespace jit

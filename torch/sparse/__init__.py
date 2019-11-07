@@ -9,6 +9,7 @@ __all__ = [
 
 
 def addmm(mat, mat1, mat2, beta=1, alpha=1):
+    # type: (Tensor, Tensor, Tensor, float, float) -> Tensor
     r"""
     This function does exact same thing as :func:`torch.addmm` in the forward,
     except that it supports backward for sparse matrix :attr:`mat1`. :attr:`mat1`
@@ -68,6 +69,7 @@ def mm(mat1, mat2):
 
 
 def sum(input, dim=None, dtype=None):
+    # type: (Tensor, Optional[Tuple[int]], Optional[int]) -> Tensor
     r"""
     Returns the sum of each row of SparseTensor :attr:`input` in the given
     dimensions :attr:`dim`. If :attr:`dim` is a list of dimensions,

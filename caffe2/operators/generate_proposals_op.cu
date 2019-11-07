@@ -6,6 +6,10 @@
 #include "caffe2/operators/generate_proposals_op_util_nms.h"
 #include "caffe2/operators/generate_proposals_op_util_nms_gpu.h"
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <cfloat>
+#endif
+
 using caffe2::utils::RotatedBox;
 
 namespace caffe2 {

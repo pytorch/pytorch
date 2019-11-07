@@ -176,7 +176,7 @@ class DNNLowPOp : public Operator<CPUContext> {
 
     float* ref = Fp32Op_()->Get()->Output(0)->template mutable_data<float>();
     if (followed_by_ == "Relu") {
-      for (int i = 0; i < Output(0)->numel(); ++i) {
+      for (int i = 0; i < OutputTensorCPU_(0)->numel(); ++i) {
         ref[i] = std::max(0.f, ref[i]);
       }
     }

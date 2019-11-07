@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/utils/six.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <torch/csrc/autograd/grad_mode.h>
 
@@ -12,11 +13,14 @@ using namespace at;
 
 // Alphabet used to describe structure of inputs/outputs (D for desc)
 namespace D {
+static constexpr char DictOpen = '<';
+static constexpr char DictClose = '>';
 static constexpr char ListOpen = '[';
 static constexpr char ListClose = ']';
 static constexpr char TupleOpen = '(';
 static constexpr char TupleClose = ')';
 static constexpr char Variable = 'v';
+static constexpr char String = 's';
 } // namespace D
 
 namespace {
@@ -42,6 +46,17 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     for (auto item : py::reinterpret_borrow<py::list>(obj))
       flatten_rec(item.ptr(), args);
     structure.push_back(D::ListClose);
+  } else if (PyDict_Check(obj)) {
+    auto dict_items = PyDict_Items(obj);
+    structure.push_back(D::DictOpen);
+    for (auto item : py::reinterpret_borrow<py::list>(dict_items)){
+      flatten_rec(item.ptr(), args);
+    }
+    structure.push_back(D::DictClose);
+  } else if (THPUtils_checkString(obj)) {
+    string str = THPUtils_unpackString(obj);
+    args.desc.strings.emplace_back(str);
+    args.desc.structure.push_back(D::String);
   } else if (THPVariable_Check(obj)) {
     auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
     args.vars.push_back(var);
@@ -49,7 +64,9 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::Variable);
   } else {
     std::string msg =
-        "Only tuples, lists and Variables supported as JIT inputs, but got ";
+        "Only tuples, lists and Variables supported as JIT inputs/outputs. "
+        "Dictionaries and strings are also accepted but their usage is not "
+        "recommended. But got unsupported type ";
     msg += THPUtils_typename(obj);
     throw std::runtime_error(msg);
   }
@@ -75,24 +92,49 @@ py::object cast_sequence(std::vector<py::object> objs) {
   return std::move(sequence);
 }
 
+py::object cast_dict(std::vector<py::object> objs) {
+  auto num_objs = objs.size();
+  py::dict sequence = {};
+  for (size_t i = 0; i < num_objs; ++i){
+    py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
+    sequence[obj[0]] = std::move(obj[1]);
+  }
+  return std::move(sequence);
+}
+
 py::object unflatten_rec(
     ArrayRef<Variable>::iterator& var_it,
     ArrayRef<Variable>::iterator& var_it_end,
-    std::string::const_iterator& desc_it) {
+    std::string::const_iterator& desc_it,
+    std::vector<string>::const_iterator& str_it,
+    std::vector<string>::const_iterator& str_it_end) {
   char type = *desc_it++;
   if (type == D::TupleOpen) {
     std::vector<py::object> objs;
     while (*desc_it != D::TupleClose)
-      objs.push_back(unflatten_rec(var_it, var_it_end, desc_it));
+      objs.push_back(unflatten_rec(var_it, var_it_end, desc_it, str_it, str_it_end));
     ++desc_it;
     return cast_sequence<py::tuple>(objs);
   } else if (type == D::ListOpen) {
     std::vector<py::object> objs;
     while (*desc_it != D::ListClose)
-      objs.push_back(unflatten_rec(var_it, var_it_end, desc_it));
+      objs.push_back(unflatten_rec(var_it, var_it_end, desc_it,str_it, str_it_end));
     ++desc_it;
     return cast_sequence<py::list>(objs);
-  } else {
+  } else if (type == D::DictOpen) {
+    std::vector<py::object> objs;
+    while (*desc_it != D::DictClose){
+      objs.push_back(unflatten_rec(var_it, var_it_end, desc_it,str_it, str_it_end));
+    }
+    ++desc_it;
+    return cast_dict(objs);
+  } else if (type == D::String) {
+    if (str_it == str_it_end)
+      throw std::runtime_error("Not enough Variables given to unflatten");
+    auto str = *str_it++;
+    return py::reinterpret_borrow<py::object>(THPUtils_packString(str));
+  }
+  else {
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto var = *var_it++;
@@ -108,7 +150,9 @@ PyObject* unflatten(ArrayRef<Variable> vars, const IODescriptor& desc) {
   auto vars_it = vars.begin();
   auto vars_it_end = vars.end();
   auto desc_it = desc.structure.begin();
-  auto output = unflatten_rec(vars_it, vars_it_end, desc_it);
+  std::vector<std::string>::const_iterator str_it = desc.strings.begin();
+  std::vector<std::string>::const_iterator str_end = desc.strings.end();
+  auto output = unflatten_rec(vars_it, vars_it_end, desc_it, str_it, str_end);
   if (vars_it != vars_it_end)
     throw std::runtime_error("Too many Variables given to unflatten");
   return output.release().ptr();

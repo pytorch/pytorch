@@ -26,9 +26,9 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
   int64_t inputHeight = input.size(dimh);
   int64_t inputWidth = input.size(dimw);
 
-  auto* rawInput = input.data<scalar_t>();
-  auto* rawIndices = indices.data<int64_t>();
-  auto* rawOutput = output.data<scalar_t>();
+  auto* rawInput = input.data_ptr<scalar_t>();
+  auto* rawIndices = indices.data_ptr<int64_t>();
+  auto* rawOutput = output.data_ptr<scalar_t>();
 
   for (int64_t n = 0; n < numBatch; n++) {
     int64_t nOutputOffset = n * numChannels * owidth * oheight;
@@ -100,7 +100,6 @@ Tensor& max_unpooling2d_forward_out_cpu(
   auto indices = indices_.contiguous();
 
   if (self.ndimension() == 3) {
-    int64_t numBatch = 1;
     int64_t numChannels = self.size(0);
     output.resize_({numChannels, oheight, owidth});
   } else {
@@ -158,9 +157,9 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
   int64_t iH = input.size(dimh);
   int64_t iW = input.size(dimw);
 
-  scalar_t* input_data = input.data<scalar_t>();
-  scalar_t* output_data = output.data<scalar_t>();
-  int64_t* indices_data = indices.data<int64_t>();
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+  int64_t* indices_data = indices.data_ptr<int64_t>();
 
   for (int64_t p = 0; p < nBatch; p++) {
     int64_t inputOffset = p * nSlices * iT * iW * iH;
@@ -449,9 +448,9 @@ Tensor& max_unpooling2d_backward_out_cpu(
           auto inputOffset = p * nslices * iheight * iwidth;
           auto outputOffset = p * nslices * oheight * owidth;
           max_unpooling2d_backward_out_cpu_frame<scalar_t>(
-              grad_input.data<scalar_t>() + inputOffset,
-              grad_output.data<scalar_t>() + outputOffset,
-              indices.data<int64_t>() + inputOffset,
+              grad_input.data_ptr<scalar_t>() + inputOffset,
+              grad_output.data_ptr<scalar_t>() + outputOffset,
+              indices.data_ptr<int64_t>() + inputOffset,
               nslices,
               iheight,
               iwidth,
@@ -467,7 +466,7 @@ Tensor max_unpooling2d_backward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntArrayRef output_size) {
-  auto grad_input = at::empty_like(self);
+  auto grad_input = at::empty_like(self, at::MemoryFormat::Contiguous);
   max_unpooling2d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size);
   return grad_input;
@@ -579,9 +578,9 @@ Tensor& max_unpooling3d_backward_out_cpu(
           int inputOffset = p * nslices * iT * iH * iW;
           int outputOffset = p * nslices * oT * oH * oW;
           max_unpooling3d_backward_out_cpu_frame<scalar_t>(
-              grad_input.data<scalar_t>() + inputOffset,
-              grad_output.data<scalar_t>() + outputOffset,
-              indices.data<int64_t>() + inputOffset,
+              grad_input.data_ptr<scalar_t>() + inputOffset,
+              grad_output.data_ptr<scalar_t>() + outputOffset,
+              indices.data_ptr<int64_t>() + inputOffset,
               nslices,
               iT,
               iH,
@@ -601,7 +600,7 @@ Tensor max_unpooling3d_backward_cpu(
     IntArrayRef output_size,
     IntArrayRef stride,
     IntArrayRef padding) {
-  auto grad_input = at::empty_like(self);
+  auto grad_input = at::empty_like(self, at::MemoryFormat::Contiguous);
   max_unpooling3d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;

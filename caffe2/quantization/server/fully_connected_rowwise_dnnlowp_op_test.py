@@ -24,7 +24,7 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
     @given(
         input_channels=st.sampled_from([3, 4, 5, 8, 16, 32]),
         output_channels=st.integers(2, 16),
-        batch_size=st.integers(1, 16),
+        batch_size=st.integers(0, 16),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         prepack_weight=st.booleans(),
@@ -41,9 +41,6 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        print("@given M ", batch_size, " K ", input_channels, " N ", output_channels)
-        print("@given in_quantized ", in_quantized, " out_quantized ", out_quantized)
-
         # X has scale 1, so exactly represented after quantization
         X_min = -77
         X_max = X_min + 255
@@ -54,7 +51,8 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         # input channels 0 and 1 are all X_min to avoid overflow from vpmaddubsw
         # when multiplied with W_min and W_max
         X[:, 0:2] = X_min
-        X[0, 2] = X_max
+        if batch_size != 0:
+            X[0, 2] = X_max
 
         # Each row of W has scale 1 but with different offset, so row-wise
         # quantization shouldn't have any input quantization error.
@@ -110,7 +108,9 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
-            x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
+            X_min = 0 if X.size == 0 else X.min()
+            X_max = 0 if X.size == 0 else X.max()
+            x_q_param = dnnlowp_utils.choose_quantization_params(X_min, X_max)
 
             if do_prepack_weight:
                 inputs = ["W"]

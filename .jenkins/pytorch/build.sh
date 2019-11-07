@@ -46,7 +46,7 @@ echo "CMake version:"
 cmake --version
 
 # TODO: Don't run this...
-pip install -q -r requirements.txt || true
+pip_install -r requirements.txt || true
 
 # TODO: Don't install this here
 if ! which conda; then
@@ -54,7 +54,7 @@ if ! which conda; then
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda9-cudnn7-py3-* ]]; then
-    pip install -q mkl mkl-devel
+    pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
@@ -65,9 +65,16 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   build_args=()
-  build_args+=("-DBUILD_CAFFE2_MOBILE=OFF")
-  build_args+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
-  build_args+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  if [[ "${BUILD_ENVIRONMENT}" == *-arm-v7a* ]]; then
+    build_args+=("-DANDROID_ABI=armeabi-v7a")
+  elif [[ "${BUILD_ENVIRONMENT}" == *-arm-v8a* ]]; then
+    build_args+=("-DANDROID_ABI=arm64-v8a")
+  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_32* ]]; then
+    build_args+=("-DANDROID_ABI=x86")
+  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
+    build_args+=("-DANDROID_ABI=x86_64")
+  fi
+  export BUILD_PYTORCH_MOBILE=1
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -90,7 +97,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     fi
 
     # Setup wrapper scripts
-    for compiler in cc c++ gcc g++; do
+    for compiler in cc c++ gcc g++ clang clang++; do
       (
         echo "#!/bin/sh"
         echo "exec $SCCACHE $(which $compiler) \"\$@\""
@@ -105,9 +112,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
-  # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
-  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+  python setup.py install --user
+
+  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+  bash tools/amd_build/unwrap_clang.sh
+
   exit 0
 fi
 
@@ -126,7 +135,7 @@ if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
 
@@ -136,6 +145,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   ./xla/scripts/apply_patches.sh
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
+  export CC=clang
+  export CXX=clang++
+fi
+
 
 # check that setup.py would fail with bad arguments
 echo "The next three invocations are expected to fail with invalid command error messages."
@@ -143,39 +157,60 @@ echo "The next three invocations are expected to fail with invalid command error
 ( ! get_exit_code python setup.py clean] )
 ( ! get_exit_code python setup.py clean bad_argument )
 
-# ppc64le build fails when WERROR=1
-# set only when building other architectures
-# only use for "python setup.py install" line
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
-  WERROR=1 python setup.py install
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+
+  # ppc64le build fails when WERROR=1
+  # set only when building other architectures
+  # only use for "python setup.py install" line
+  if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    WERROR=1 python setup.py install
+  else
+    python setup.py install
+  fi
+
+  # TODO: I'm not sure why, but somehow we lose verbose commands
+  set -x
+
+  if which sccache > /dev/null; then
+    echo 'PyTorch Build Statistics'
+    sccache --show-stats
+  fi
+
+  assert_git_not_dirty
+
+  # Test documentation build
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    pushd docs
+    # TODO: Don't run this here
+    pip_install -r requirements.txt || true
+    LC_ALL=C make html
+    popd
+    assert_git_not_dirty
+  fi
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  python --version
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
 else
-  python setup.py install
-fi
+  # Test standalone c10 build
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    mkdir -p c10/build
+    pushd c10/build
+    cmake ..
+    make -j
+    popd
+    assert_git_not_dirty
+  fi
 
-assert_git_not_dirty
-
-# Test documentation build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-  pushd docs
-  # TODO: Don't run this here
-  pip install -q -r requirements.txt || true
-  LC_ALL=C make html
-  popd
-  assert_git_not_dirty
-fi
-
-# Test standalone c10 build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-  mkdir -p c10/build
-  pushd c10/build
-  cmake ..
-  make -j
-  popd
-  assert_git_not_dirty
-fi
-
-# Test no-Python build
-if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+  # Test no-Python build
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
@@ -184,27 +219,16 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   pushd ../cpp-build/caffe2
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
   popd
-
-  # Build custom operator tests.
-  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-  CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  mkdir "$CUSTOM_OP_BUILD"
-  pushd "$CUSTOM_OP_BUILD"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
-  make VERBOSE=1
-  popd
-  assert_git_not_dirty
 fi
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
 
-  pip install -q lark-parser
+  pip_install lark-parser
 
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
-  sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
+  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-7 main"
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
   sudo apt-get -qq update
 
@@ -235,7 +259,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     exit 1
   fi
 
-  bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
+  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
   pushd xla
   export CC=clang-7 CXX=clang++-7
   # Use cloud cache to build when available.

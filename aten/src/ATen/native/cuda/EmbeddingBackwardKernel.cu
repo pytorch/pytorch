@@ -14,6 +14,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
@@ -32,12 +33,6 @@ constexpr int MAX_BLOCK_SIZE = 1024;
   make the size of the thread blocks in the final sum in step 2) too small.
 */
 constexpr int NROWS_PER_THREAD = 10;
-
-#ifdef __HIP_PLATFORM_HCC__
-    constexpr int WARP_SIZE = 64;
-#else
-    constexpr int WARP_SIZE = 32;
-#endif
 
 // Fast ceil division (no overflow checking)
 __host__ __device__ __forceinline__
@@ -128,7 +123,6 @@ __global__ void compute_grad_weight(
     int64_t* segment_offsets,
     int64_t num_of_segments,
     acc_type<scalar_t, true> *grad_weight_per_segment,
-    int padding_idx,
     const int64_t stride_warped) {
 
   using accscalar_t = acc_type<scalar_t, true>;
@@ -147,10 +141,8 @@ __global__ void compute_grad_weight(
   accscalar_t weight = 0;
   for (int idx=idx_begin; idx < idx_end; ++idx) {
     const int64_t target_row = indices[idx];
-    if (target_row != padding_idx) {
-      const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
-      weight += gradOutput[target_row * stride + startFeature] * scale;
-    }
+    const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
+    weight += gradOutput[target_row * stride + startFeature] * scale;
   }
   grad_weight_per_segment[id * stride + startFeature] = weight;
 }
@@ -162,6 +154,7 @@ __global__ void sum_and_scatter(
     int64_t* segment_offsets, int64_t num_of_segments,
     const acc_type<scalar_t, true> *grad_weight_per_segment,
     const int64_t *segment_sizes_offsets, int64_t num_of_partial_segments,
+    const int64_t padding_idx,
     const int64_t stride_warped) {
 
   const int gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -180,8 +173,10 @@ __global__ void sum_and_scatter(
   for (int idx=idx_begin; idx < idx_end; ++idx) {
     weight += grad_weight_per_segment[idx*stride + startFeature];
   }
-  const int weightRow = input[segment_offsets[id]] * stride;
-  gradWeight[weightRow + startFeature] = weight;
+  int64_t target_row = input[segment_offsets[id]];
+  if (target_row != padding_idx) {
+    gradWeight[target_row * stride + startFeature] = weight;
+  }
 }
 
 } // anon namespace
@@ -214,16 +209,16 @@ Tensor embedding_backward_cuda_kernel(
   auto segment_offsets = at::empty({numel}, orig_indices.options());
   int64_t num_of_segments;
   {
-    auto sorted_indices_dev = thrust::device_ptr<int64_t>(sorted_indices.data<int64_t>());
-    auto dummy = at::empty_like(sorted_indices);
-    auto dummy_dev = thrust::device_ptr<int64_t>(dummy.data<int64_t>());
+    auto sorted_indices_dev = thrust::device_ptr<int64_t>(sorted_indices.data_ptr<int64_t>());
+    auto dummy = at::empty_like(sorted_indices, at::MemoryFormat::Contiguous);
+    auto dummy_dev = thrust::device_ptr<int64_t>(dummy.data_ptr<int64_t>());
     auto ends = thrust::unique_by_key_copy(
             policy,
             sorted_indices_dev,
             sorted_indices_dev + numel,
             thrust::make_counting_iterator(0),
             dummy_dev,
-            thrust::device_ptr<int64_t>(segment_offsets.data<int64_t>()));
+            thrust::device_ptr<int64_t>(segment_offsets.data_ptr<int64_t>()));
     num_of_segments = thrust::get<0>(ends) - dummy_dev;
   }
 
@@ -233,8 +228,8 @@ Tensor embedding_backward_cuda_kernel(
   auto partials_per_segment = at::empty({num_of_segments}, orig_indices.options());
   {
     krn_partials_per_segment<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
-            partials_per_segment.data<int64_t>(),
-            segment_offsets.data<int64_t>(),
+            partials_per_segment.data_ptr<int64_t>(),
+            segment_offsets.data_ptr<int64_t>(),
             num_of_segments,
             numel);
   }
@@ -246,9 +241,9 @@ Tensor embedding_backward_cuda_kernel(
   auto partials_per_segment_offset = at::empty({num_of_segments}, orig_indices.options());
   thrust::exclusive_scan(
           policy,
-          thrust::device_ptr<int64_t>(partials_per_segment.data<int64_t>()),
-          thrust::device_ptr<int64_t>(partials_per_segment.data<int64_t>()+num_of_segments),
-          thrust::device_ptr<int64_t>(partials_per_segment_offset.data<int64_t>()));
+          thrust::device_ptr<int64_t>(partials_per_segment.data_ptr<int64_t>()),
+          thrust::device_ptr<int64_t>(partials_per_segment.data_ptr<int64_t>()+num_of_segments),
+          thrust::device_ptr<int64_t>(partials_per_segment_offset.data_ptr<int64_t>()));
 
   // The total number of partial-segments is the sum of `partials_per_segment_offset`
   const int num_of_partial_segments = partials_per_segment[num_of_segments-1].item<int64_t>() +
@@ -259,14 +254,14 @@ Tensor embedding_backward_cuda_kernel(
   auto partial_segment_offset = at::empty({num_of_partial_segments}, orig_indices.options());
   {
     krn_partial_segment_offset<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
-            partial_segment_offset.data<int64_t>(),
-            partials_per_segment.data<int64_t>(),
-            partials_per_segment_offset.data<int64_t>(),
-            segment_offsets.data<int64_t>(),
+            partial_segment_offset.data_ptr<int64_t>(),
+            partials_per_segment.data_ptr<int64_t>(),
+            partials_per_segment_offset.data_ptr<int64_t>(),
+            segment_offsets.data_ptr<int64_t>(),
             num_of_segments);
   }
 
-  const int stride_warped = ceil_div(stride, WARP_SIZE)*WARP_SIZE;
+  const int stride_warped = ceil_div(stride, C10_WARP_SIZE)*C10_WARP_SIZE;
   const int block = std::min(stride_warped, MAX_BLOCK_SIZE);
   const int grid = ceil_div(num_of_partial_segments*stride_warped, block);
 
@@ -285,26 +280,25 @@ Tensor embedding_backward_cuda_kernel(
       // Compute the sum of each partial-segment and handle bags
       if (offset2bag.defined()) {
             compute_grad_weight_bags<scalar_t><<<grid, block, 0, stream>>>(
-              orig_indices.data<int64_t>(),
-              grad.data<scalar_t>(),
-              offset2bag.data<int64_t>(),
-              count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
-              mode_mean, bag_size.data<int64_t>(),
-              per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
+              orig_indices.data_ptr<int64_t>(),
+              grad.data_ptr<scalar_t>(),
+              offset2bag.data_ptr<int64_t>(),
+              count.defined() ? count.data_ptr<int64_t>() : nullptr, numel, stride,
+              mode_mean, bag_size.data_ptr<int64_t>(),
+              per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
               per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-              partial_segment_offset.data<int64_t>(),
-              num_of_partial_segments, grad_weight_per_segment.data<partial_weight_t>(),
+              partial_segment_offset.data_ptr<int64_t>(),
+              num_of_partial_segments, grad_weight_per_segment.data_ptr<partial_weight_t>(),
               stride_warped);
       } else {
             compute_grad_weight<scalar_t><<<grid, block, 0, stream>>>(
-              orig_indices.data<int64_t>(),
-              grad.data<scalar_t>(),
-              count.defined() ? count.data<int64_t>() : nullptr,
+              orig_indices.data_ptr<int64_t>(),
+              grad.data_ptr<scalar_t>(),
+              count.defined() ? count.data_ptr<int64_t>() : nullptr,
               numel, stride,
-              partial_segment_offset.data<int64_t>(),
+              partial_segment_offset.data_ptr<int64_t>(),
               num_of_partial_segments,
-              grad_weight_per_segment.data<partial_weight_t>(),
-              padding_idx,
+              grad_weight_per_segment.data_ptr<partial_weight_t>(),
               stride_warped);
       }
       THCudaCheck(cudaGetLastError());
@@ -313,13 +307,15 @@ Tensor embedding_backward_cuda_kernel(
       // into `grad_weight`.
       const int grid2 = ceil_div(num_of_segments*stride_warped, block);
           sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
-            sorted_indices.data<int64_t>(),
-            grad_weight.data<scalar_t>(),
+            sorted_indices.data_ptr<int64_t>(),
+            grad_weight.data_ptr<scalar_t>(),
             stride,
-            segment_offsets.data<int64_t>(),
-            num_of_segments, grad_weight_per_segment.data<partial_weight_t>(),
-            partials_per_segment_offset.data<int64_t>(),
-            num_of_partial_segments, stride_warped);
+            segment_offsets.data_ptr<int64_t>(),
+            num_of_segments, grad_weight_per_segment.data_ptr<partial_weight_t>(),
+            partials_per_segment_offset.data_ptr<int64_t>(),
+            num_of_partial_segments, 
+            padding_idx, 
+            stride_warped);
       THCudaCheck(cudaGetLastError());
   });
   return grad_weight;

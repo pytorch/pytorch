@@ -2,11 +2,17 @@ from collections import namedtuple
 import warnings
 
 import torch
+from .. import _VF
+from ..._jit_internal import Optional
 
 
 PackedSequence_ = namedtuple('PackedSequence',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 
+# type annotation for PackedSequence_ to make it compatible with TorchScript
+PackedSequence_.__annotations__ = {'data': torch.Tensor, 'batch_sizes': torch.Tensor,
+                                   'sorted_indices': Optional[torch.Tensor],
+                                   'unsorted_indices': Optional[torch.Tensor]}
 
 def bind(optional, fn):
     if optional is None:
@@ -70,6 +76,13 @@ class PackedSequence(PackedSequence_):
 
         # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
         if batch_sizes is not None:
+            if batch_sizes.device.type != 'cpu':
+                raise ValueError(
+                    "batch_sizes should always be on CPU. "
+                    "Instances of PackedSequence should never be created manually. "
+                    "They should be instantiated by functions like pack_sequence "
+                    "and pack_padded_sequences in nn.utils.rnn. "
+                    "https://pytorch.org/docs/stable/nn.html#torch.nn.utils.rnn.pack_sequence")
             return super(PackedSequence, cls).__new__(
                 cls, data, batch_sizes, sorted_indices, unsorted_indices)
 
@@ -87,95 +100,49 @@ class PackedSequence(PackedSequence_):
                           bind(self.unsorted_indices, lambda t: t.pin_memory()))
 
     def cuda(self, *args, **kwargs):
-        """Returns a GPU copy if `self.data` not already on the GPU"""
-        if self.is_cuda:
-            return self
-        else:
-            # Why not convert `batch_sizes`?
-            # See NOTE [ device and dtype of a PackedSequence ]
-            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes,
-                              bind(self.sorted_indices, lambda t: t.cuda(*args, **kwargs)),
-                              bind(self.unsorted_indices, lambda t: t.cuda(*args, **kwargs)))
+        # Tests to see if 'cuda' should be added to kwargs
+        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
+        if ex.is_cuda:
+            return self.to(*args, **kwargs)
+        return self.to(*args, device='cuda', **kwargs)
 
-    def cpu(self):
-        """Returns a CPU copy if `self.data` not already on the CPU"""
-        if self.is_cuda:
-            # Why not convert `batch_sizes`?
-            # See NOTE [ device and dtype of a PackedSequence ]
-            return type(self)(self.data.cpu(), self.batch_sizes,
-                              bind(self.sorted_indices, lambda t: t.cpu()),
-                              bind(self.unsorted_indices, lambda t: t.cpu()))
-        else:
-            return self
+    def cpu(self, *args, **kwargs):
+
+        ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
+        if ex.device.type == 'cpu':
+            return self.to(*args, **kwargs)
+        return self.to(*args, device='cpu', **kwargs)
 
     def double(self):
-        r"""Returns copy with `self.data` cast to double type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.double(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.double)
 
     def float(self):
-        r"""Returns copy with `self.data` cast to float type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.float(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.float)
 
     def half(self):
-        r"""Returns copy with `self.data` cast to half type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.half(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.half)
 
     def long(self):
-        r"""Returns copy with `self.data` cast to long type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.long(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.long)
 
     def int(self):
-        r"""Returns copy with `self.data` cast to int type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.int(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.int)
 
     def short(self):
-        r"""Returns copy with `self.data` cast to short type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.short(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.short)
 
     def char(self):
-        r"""Returns copy with `self.data` cast to char type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.char(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.int8)
 
     def byte(self):
-        r"""Returns copy with `self.data` cast to byte type"""
-
-        # Why not convert `batch_sizes`?
-        # See NOTE [ device and dtype of a PackedSequence ]
-        return type(self)(self.data.byte(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return self.to(dtype=torch.uint8)
 
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`.
 
-        It has similar signature as :meth:`torch.Tensor.to`.
+        It has similar signature as :meth:`torch.Tensor.to`, except optional
+        arguments like `non_blocking` and `copy` should be passed as kwargs,
+        not args, or they will not apply to the index tensors.
 
         .. note::
 
@@ -187,17 +154,14 @@ class PackedSequence(PackedSequence_):
         # Why not convert `batch_sizes`?
         # See NOTE [ device and dtype of a PackedSequence ]
         data = self.data.to(*args, **kwargs)
-        sorted_indices = self.sorted_indices
-        unsorted_indices = self.unsorted_indices
-        device_kw = 'device'
-        if device_kw in kwargs:
-            sorted_indices = bind(sorted_indices, lambda t: t.to(kwargs[device_kw]))
-            unsorted_indices = bind(unsorted_indices, lambda t: t.to(kwargs[device_kw]))
         if data is self.data:
             return self
         else:
-            return type(self)(data, self.batch_sizes,
-                              sorted_indices, unsorted_indices)
+            # Does not forward device or dtype arg/kwargs, device is set from data.device
+            kwargs = {k : v for k, v in filter(lambda t: t[0] != 'device' and t[0] != 'dtype', kwargs.items())}
+            sorted_indices = bind(self.sorted_indices, lambda t: t.to(data.device, **kwargs))
+            unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(data.device, **kwargs))
+            return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
     @property
     def is_cuda(self):
@@ -219,6 +183,7 @@ def invert_permutation(permutation):
 
 
 def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True):
+    # type: (Tensor, Tensor, bool, bool) -> PackedSequence
     r"""Packs a Tensor containing padded sequences of variable length.
 
     :attr:`input` can be of size ``T x B x *`` where `T` is the length of the
@@ -254,7 +219,7 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
                       'sequence lengths. The tracer cannot track the data flow of Python '
                       'values, and it will treat them as constants, likely rendering '
                       'the trace incorrect for any other combination of lengths.',
-                      category=torch.jit.TracerWarning, stacklevel=2)
+                      stacklevel=2)
     lengths = torch.as_tensor(lengths, dtype=torch.int64)
     if enforce_sorted:
         sorted_indices = None
@@ -265,11 +230,12 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
         input = input.index_select(batch_dim, sorted_indices)
 
     data, batch_sizes = \
-        torch._C._VariableFunctions._pack_padded_sequence(input, lengths, batch_first)
-    return PackedSequence(data, batch_sizes, sorted_indices)
+        _VF._pack_padded_sequence(input, lengths, batch_first)
+    return PackedSequence(data, batch_sizes, sorted_indices, None)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
+    # type: (PackedSequence, bool, float, Optional[int]) -> Tuple[Tensor, Tensor]
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -310,12 +276,12 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
                              "total_length={} and max sequence length being {}"
                              .format(total_length, max_seq_length))
         max_seq_length = total_length
-    padded_output, lengths = torch._C._VariableFunctions._pad_packed_sequence(
+    padded_output, lengths = _VF._pad_packed_sequence(
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
-    if sequence.unsorted_indices is not None:
+    unsorted_indices = sequence.unsorted_indices
+    if unsorted_indices is not None:
         batch_dim = 0 if batch_first else 1
-        return padded_output.index_select(batch_dim, sequence.unsorted_indices), \
-            lengths[sequence.unsorted_indices]
+        return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices]
     return padded_output, lengths
 
 
@@ -379,6 +345,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 
 
 def pack_sequence(sequences, enforce_sorted=True):
+    # type: (List[Tensor], bool) -> PackedSequence
     r"""Packs a list of variable length Tensors
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
@@ -410,7 +377,3 @@ def pack_sequence(sequences, enforce_sorted=True):
     """
     lengths = [v.size(0) for v in sequences]
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
-
-
-def get_packed_sequence(data, batch_sizes, sorted_indices, unsorted_indices):
-    return PackedSequence(data, batch_sizes, sorted_indices, unsorted_indices)

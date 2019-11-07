@@ -70,7 +70,7 @@ using device_list = std::vector<int>;
 static std::unordered_map<device_list, NcclCommList, torch::hash<device_list>>
     _communicators;
 
-ArrayRef<ncclComm_t> _get_communicators(TensorList inputs) {
+ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   static auto get_device = [](const at::Tensor& t) -> int {
     return t.get_device();
   };
@@ -81,7 +81,7 @@ ArrayRef<ncclComm_t> _get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-ncclDataType_t _get_data_type(const Tensor& t) {
+ncclDataType_t get_data_type(const Tensor& t) {
   if (t.type().backend() != Backend::CUDA) {
     throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -105,7 +105,7 @@ ncclDataType_t _get_data_type(const Tensor& t) {
   }
 }
 
-void _check_inputs(
+void check_inputs(
     TensorList inputs,
     TensorList outputs,
     int input_multiplier,
@@ -232,17 +232,15 @@ void broadcast(
     const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  _check_inputs(tensors, tensors, 1, 1);
-  ncclDataType_t data_type = _get_data_type(tensors[0]);
+  check_inputs(tensors, tensors, 1, 1);
+  ncclDataType_t data_type = get_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
 
-  std::lock_guard<std::mutex> free_mutex(
-      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-  const auto comms = user_comms.empty() ? _get_communicators(tensors)
+  const auto comms = user_comms.empty() ? get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
-  at::cuda::OptionalCUDAGuard device_guard;
   AutoNcclGroup nccl_group_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     int device = tensors[i].get_device();
     device_guard.set_index(device);
@@ -278,18 +276,17 @@ void reduce(
   TORCH_CHECK(
       root >= 0 && static_cast<size_t>(root) < inputs.size(), "invalid root");
 
-  _check_inputs(inputs, outputs, 1, 1);
+  check_inputs(inputs, outputs, 1, 1);
   const auto len = inputs.size();
 
-  ncclDataType_t data_type = _get_data_type(inputs[0]);
+  ncclDataType_t data_type = get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel();
-  std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-  auto comms_ref = user_comms.empty() ? _get_communicators(inputs)
+  auto comms_ref = user_comms.empty() ? get_communicators(inputs)
                                       : ArrayRef<ncclComm_t>(user_comms);
 
-  at::cuda::OptionalCUDAGuard device_guard;
   AutoNcclGroup nccl_group_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);

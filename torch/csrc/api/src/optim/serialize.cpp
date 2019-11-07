@@ -14,6 +14,22 @@ namespace optim {
 void serialize(
     serialize::OutputArchive& archive,
     const std::string& key,
+    const int64_t& value) {
+  archive.write(key, IValue(value));
+}
+
+void serialize(
+    serialize::InputArchive& archive,
+    const std::string& key,
+    int64_t& value) {
+  IValue ivalue;
+  archive.read(key, ivalue);
+  value = ivalue.toInt();
+}
+
+void serialize(
+    serialize::OutputArchive& archive,
+    const std::string& key,
     const std::vector<int64_t>& steps) {
   std::vector<torch::Tensor> tensors;
   tensors.reserve(steps.size());

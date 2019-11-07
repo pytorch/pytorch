@@ -89,6 +89,16 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
   return THPUtils_unpackLong(obj);
 }
 
+inline bool THPUtils_unpackBool(PyObject* obj) {
+  if (obj == Py_True) {
+    return true;
+  } else if (obj == Py_False) {
+    return false;
+  } else {
+    throw std::runtime_error("couldn't convert python object to boolean");
+  }
+}
+
 inline bool THPUtils_checkDouble(PyObject* obj) {
   bool is_numpy_scalar;
 #ifdef USE_NUMPY
@@ -100,6 +110,20 @@ inline bool THPUtils_checkDouble(PyObject* obj) {
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || is_numpy_scalar;
 #else
   return PyFloat_Check(obj) || PyLong_Check(obj) || is_numpy_scalar;
+#endif
+}
+
+inline bool THPUtils_checkScalar(PyObject* obj) {
+  bool is_numpy_scalar;
+#ifdef USE_NUMPY
+  is_numpy_scalar = torch::utils::is_numpy_scalar(obj);
+#else
+  is_numpy_scalar = false;
+#endif
+#if PY_MAJOR_VERSION == 2
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || PyComplex_Check(obj) || is_numpy_scalar;
+#else
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) || is_numpy_scalar;
 #endif
 }
 

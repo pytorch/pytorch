@@ -1,12 +1,6 @@
 torch.utils.tensorboard
 ===================================
 
-.. warning::
-
-    This code is EXPERIMENTAL and might change in the future. It also
-    currently does not support all model types for ``add_graph``, which
-    we are actively working on.
-
 Before going further, more details on TensorBoard can be found at
 https://www.tensorflow.org/tensorboard/
 
@@ -45,7 +39,7 @@ and visualization by TensorBoard. For example:
 This can then be visualized with TensorBoard, which should be installable
 and runnable with::
 
-    pip install tb-nightly  # Until 1.14 moves to the release channel
+    pip install tensorboard
     tensorboard --logdir=runs
 
 
@@ -86,7 +80,6 @@ Expected result:
    .. automethod:: add_scalar
    .. automethod:: add_scalars
    .. automethod:: add_histogram
-   .. automethod:: add_histogram_raw
    .. automethod:: add_image
    .. automethod:: add_images
    .. automethod:: add_figure
@@ -98,3 +91,6 @@ Expected result:
    .. automethod:: add_pr_curve
    .. automethod:: add_custom_scalars
    .. automethod:: add_mesh
+   .. automethod:: add_hparams
+   .. automethod:: flush
+   .. automethod:: close

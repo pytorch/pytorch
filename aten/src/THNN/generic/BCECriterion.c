@@ -22,7 +22,7 @@ void THNN_(BCECriterion_updateOutput)(
   THNN_CHECK_NELEMENT(input, target);
   THNN_CHECK_NELEMENT(input, weights);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
         scalar_t x = *input_data;
@@ -63,7 +63,7 @@ void THNN_(BCECriterion_updateOutput)(
   }
 
 
-  if (reduction == Reduction::Mean)
+  if (reduction == at::Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
   THTensor_(set0d)(output, sum);
@@ -82,7 +82,7 @@ void THNN_(BCECriterion_updateGradInput)(
   THNN_CHECK_NELEMENT(input, weights);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THNN_CHECK_NELEMENT(gradOutput, input);
     TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
       scalar_t x = *input_data;
@@ -101,7 +101,7 @@ void THNN_(BCECriterion_updateGradInput)(
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  scalar_t norm = (reduction == Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
+  scalar_t norm = (reduction == at::Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
 
   TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     scalar_t x = *input_data;

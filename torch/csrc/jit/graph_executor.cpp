@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/graph_executor_impl.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/pass_manager.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -20,10 +21,13 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -48,6 +52,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+} // namespace
+
 // for debugging it is helpful to be able to force autodiff subgraphs
 // to be created, to check their correctness, even when the
 // size of the of the subgraph is too small to be profitable.
@@ -64,7 +76,6 @@ thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
 }
-
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
@@ -111,7 +122,7 @@ struct CaptureList {
 
   void unpack(
       Stack& stack,
-      const std::shared_ptr<autograd::Function>& saved_for) {
+      const std::shared_ptr<autograd::Node>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
@@ -189,7 +200,13 @@ struct UnpackInstructions {
   std::vector<size_t> sizes_;
 };
 
-struct DifferentiableGraphBackward : public autograd::Function {
+// unpack values packed by `packReturnValuesIntoTuple`
+static void unpackReturnTuple(Stack &stack) {
+  auto tuple = pop(stack).toTuple();
+  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
+}
+
+struct DifferentiableGraphBackward : public autograd::Node {
   DifferentiableGraphBackward(
       GraphExecutor executor,
       size_t input_size,
@@ -204,7 +221,9 @@ struct DifferentiableGraphBackward : public autograd::Function {
 
     input_instructions_.unpack(std::move(inputs), stack);
     captures_.unpack(stack, shared_from_this());
+    GRAPH_DEBUG("Running DifferentiableGraphBackward for ", &executor);
     executor.run(stack);
+    unpackReturnTuple(stack);
 
     // NB: stack.size() == num_outputs() is not always true
     // after we added TensorList support.
@@ -213,7 +232,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     // Here stack.size()[=1] with a TensorList IValue of
     // backward graph output.
     // num_outputs()[=2], however, is the number of outputs of
-    // grad_fn (an autograd::Function). grad_fn's outputs are
+    // grad_fn (an autograd::Node). grad_fn's outputs are
     // grads with regard to Tensor/Variables `x`, but not
     // graph input TensorList [x, x]. These two grads will
     // be accumulated to x.grad later using autograd::InputBuffer.
@@ -262,7 +281,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
-      add_input_metadata(autograd::Function::undefined_input{});
+      add_input_metadata(autograd::Node::undefined_input{});
     }
   }
 
@@ -429,10 +448,12 @@ Gradient getGradient(const Node* n) {
 }
 } // anonymous namespace
 
-RegisterOperators reg_graph_executor_ops(
-    {Operator(prim::DifferentiableGraph, [](const Node* n) -> Operation {
+RegisterOperators reg_graph_executor_ops({Operator(
+    prim::DifferentiableGraph,
+    [](const Node* n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
-    })});
+    },
+    aliasAnalysisInternalSpecialCase())});
 
 namespace detail {
 
@@ -456,10 +477,6 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  if (tracer::isTracing()) {
-    return runTraced(stack);
-  }
-
   ExecutionPlan plan = getPlanFor(stack);
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
@@ -471,14 +488,15 @@ void GraphExecutorImplBase::run(Stack& stack) {
 // situation. GraphExecutor is completely unaware of tracing or module
 // parameters to keep the tracing concerns separated.
 struct GraphExecutorImpl : public GraphExecutorImplBase {
-  GraphExecutorImpl(const std::shared_ptr<Graph>& graph, bool optimize)
-      : GraphExecutorImplBase(graph, optimize), arg_spec_creator_(*graph) {
+  GraphExecutorImpl(const std::shared_ptr<Graph>& graph)
+      : GraphExecutorImplBase(graph), arg_spec_creator_(*graph) {
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
   ExecutionPlan getPlanFor(Stack& stack) override {
-    return optimize ? getOrCompile(stack) : getOrCompileFallback();
+    return getGraphExecutorOptimize() ? getOrCompile(stack)
+                                      : getOrCompileFallback();
   }
 
   GraphExecutorState getDebugState() override {
@@ -529,7 +547,16 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
+    SOURCE_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
+
+    // Phase 0. Inline functions, then clean up any artifacts that the inliner
+    //          left in that may inhibit optimization
+    Inline(*opt_graph);
+    LowerGradOf(*opt_graph);
+    specializeAutogradZero(*opt_graph);
+    LowerSimpleTuples(opt_graph);
+    ConstantPooling(opt_graph);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -594,13 +621,12 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
+GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
     : pImpl(
-          getProfilingMode()
-              ? dynamic_cast<GraphExecutorImplBase*>(
-                    new ProfilingGraphExecutorImpl(graph, optimize))
-              : dynamic_cast<GraphExecutorImplBase*>(
-                    new GraphExecutorImpl(graph, optimize))) {}
+          getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(
+                                  new ProfilingGraphExecutorImpl(graph))
+                            : dynamic_cast<GraphExecutorImplBase*>(
+                                  new GraphExecutorImpl(graph))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
@@ -619,8 +645,6 @@ GraphExecutorState GraphExecutor::getDebugState() {
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
-  specializeAutogradZero(*g);
-  LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes
   // we remove the implicitly created ones, and have shape analysis
@@ -658,29 +682,58 @@ static bool mayIntroduceGradient(const Block* b) {
 }
 
 bool needsGradient(const std::shared_ptr<const Graph>& graph) {
-  if (!autograd::GradMode::is_enabled())
+  if (!autograd::GradMode::is_enabled()) {
     return false;
-  if (mayIntroduceGradient(graph->block()))
-    return true;
-  for (const Value* input : graph->inputs()) {
-    if (input->type()->requires_grad())
-      return true;
   }
+
+  if (mayIntroduceGradient(graph->block())) {
+    return true;
+  }
+
+  if (getProfilingMode()) {
+    for (const Value* input : graph->inputs()) {
+      for (const auto& use : input->uses()) {
+        if (use.user->kind() == prim::BailOut) {
+          auto ptt = use.user->output()->type()->expect<TensorType>();
+          if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+            return true;
+          }
+        }
+      }
+    }
+  } else {
+    for (const Value* input : graph->inputs()) {
+      if (input->type()->requires_grad()) {
+        return true;
+      }
+    }
+  }
+
   return false;
 }
 
 void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
-  // run custom passes that different backends can register
-  for (const auto& pass : getCustomPasses()) {
-    pass(graph);
-  }
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
   DecomposeOps(graph);
+
+  // TupleConstruct / TupleUnpack pairs can still be present at this point
+  // and must be removed for fusion.
+  LowerSimpleTuples(graph);
+
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
+  // Fuse the dequant - op - quant patterns into quantized ops
+  QuantFusion(graph);
+
   FuseGraph(graph);
+
+  // Run custom passes that different backends can register.
+  // This is done last to give internal optimization passes priority.
+  for (const auto& pass : getCustomPasses()) {
+    pass(graph);
+  }
 }
 
 void runOptimization(std::shared_ptr<Graph>& graph) {

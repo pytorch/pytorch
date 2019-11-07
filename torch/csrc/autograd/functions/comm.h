@@ -14,8 +14,7 @@
 namespace torch {
 namespace autograd {
 
-//TODO: change it to TORCH_API when we merge the libs
-struct AT_CUDA_API Scatter : public Function {
+struct TORCH_CUDA_API Scatter : public Node {
   explicit Scatter(
       std::vector<at::Device> devices,
       const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
@@ -34,7 +33,7 @@ struct AT_CUDA_API Scatter : public Function {
   bool unsqueeze_scalars_;
 };
 
-struct AT_CUDA_API Gather : public Function {
+struct TORCH_CUDA_API Gather : public Node {
   explicit Gather(const at::Device& destination_device, int64_t dim = 0);
   ~Gather() override;
 

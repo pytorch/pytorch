@@ -3,10 +3,8 @@ import functools
 import itertools
 
 import torch
-from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
-
 
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
@@ -69,8 +67,12 @@ class Module(object):
     _version = 1
 
     def __init__(self):
+        """
+        Initializes internal Module state, shared by both nn.Module and ScriptModule.
+        """
         torch._C._log_api_usage_once("python.nn_module")
-        self._backend = thnn_backend
+
+        self.training = True
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
@@ -79,7 +81,6 @@ class Module(object):
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
-        self.training = True
 
     def forward(self, *input):
         r"""Defines the computation performed at every call.
@@ -200,8 +201,8 @@ class Module(object):
             module._apply(fn)
 
         def compute_should_use_set_data(tensor, tensor_applied):
-            if torch._has_same_tensorimpl_type(tensor, tensor_applied):
-                # If the new tensor has the same TensorImpl type as the existing tensor,
+            if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
+                # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
                 # changing the current behavior is a BC-breaking change, and we want it
@@ -247,7 +248,7 @@ class Module(object):
     def apply(self, fn):
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
-        (see also :ref:`torch-nn-init`).
+        (see also :ref:`nn-init-doc`).
 
         Args:
             fn (:class:`Module` -> None): function to be applied to each submodule
@@ -498,32 +499,24 @@ class Module(object):
         self._forward_hooks[handle.id] = hook
         return handle
 
-    def _tracing_name(self, tracing_state):
-        if not tracing_state._traced_module_stack:
-            return None
-        module = tracing_state._traced_module_stack[-1]
-        for name, child in module.named_children():
-            if child is self:
-                return name
-        return None
 
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
-        if not tracing_state:
+        if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        if not hasattr(tracing_state, '_traced_module_stack'):
-            tracing_state._traced_module_stack = []
-        name = self._tracing_name(tracing_state)
-        if name:
-            tracing_state.push_scope('%s[%s]' % (self._get_name(), name))
-        else:
-            tracing_state.push_scope(self._get_name())
-        tracing_state._traced_module_stack.append(self)
+        recording_scopes = torch.jit._trace_module_map is not None
+        if recording_scopes:
+            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            if name:
+                cur_scope_name = tracing_state.current_scope()
+                tracing_state.push_scope(name)
+            else:
+                recording_scopes = False
         try:
             result = self.forward(*input, **kwargs)
         finally:
-            tracing_state.pop_scope()
-            tracing_state._traced_module_stack.pop()
+            if recording_scopes:
+                tracing_state.pop_scope()
         return result
 
     def __call__(self, *input, **kwargs):
@@ -1157,3 +1150,11 @@ class Module(object):
         keys = [key for key in keys if not key[0].isdigit()]
 
         return sorted(keys)
+
+    def _replicate_for_data_parallel(self):
+        replica = self.__new__(type(self))
+        replica.__dict__ = self.__dict__.copy()
+        replica._parameters = replica._parameters.copy()
+        replica._buffers = replica._buffers.copy()
+        replica._modules = replica._modules.copy()
+        return replica

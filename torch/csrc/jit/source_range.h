@@ -8,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-struct SourceRangeUnpickler;
+class SourceRangeUnpickler;
 struct SourceRange;
 
 // Source represents a code segment. It keeps track of:
@@ -82,11 +82,11 @@ struct Source {
 
  private:
   void calc_line_start_offsets() {
+    line_starting_offsets_.push_back(0);
     size_t pos = 0;
-    do {
-      line_starting_offsets_.push_back(pos);
-      pos++;
-    } while ((pos = text_.find('\n', pos)) != std::string::npos);
+    while ((pos = text_.find('\n', pos)) != std::string::npos) {
+      line_starting_offsets_.push_back(++pos);
+    }
   }
   std::string text_;
   c10::optional<std::string> filename_;
@@ -104,10 +104,7 @@ struct Source {
 struct CAFFE2_API SourceRange {
   SourceRange(std::shared_ptr<Source> source_, size_t start_, size_t end_)
       : source_(std::move(source_)), start_(start_), end_(end_) {}
-  explicit SourceRange(std::string string_range)
-      : source_(std::make_shared<Source>(std::move(string_range))),
-        start_(0),
-        end_(source_->text().size()) {}
+  SourceRange() : source_(nullptr), start_(0), end_(0) {}
 
   const std::string text() const {
     return source_->text().substr(start(), end() - start());
@@ -115,7 +112,7 @@ struct CAFFE2_API SourceRange {
   size_t size() const {
     return end() - start();
   }
-  static const size_t CONTEXT = 10;
+  static const size_t CONTEXT = 3;
   void highlight(std::ostream& out) const;
   const std::shared_ptr<Source>& source() const {
     return source_;
@@ -154,7 +151,7 @@ struct CAFFE2_API SourceRange {
   bool operator!=(const SourceRange& rhs) const {
     return !(*this == rhs);
   }
-  
+
   c10::optional<SourceRange> findSourceRangeThatGenerated() const {
     if (!source_) {
       return c10::nullopt;

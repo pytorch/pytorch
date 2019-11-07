@@ -90,10 +90,8 @@ namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
-
-// Writer-specific constants
-constexpr uint64_t kFileFormatVersion = 0x2L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x2L;
+constexpr uint64_t kProducedFileFormatVersion = 0x1L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;
@@ -107,30 +105,38 @@ class CAFFE2_API PyTorchStreamReader final {
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
   size_t getRecordOffset(const std::string& name);
-  bool hasFile(const std::string& name);
+  bool hasRecord(const std::string& name);
 
   ~PyTorchStreamReader();
-
+  uint64_t version() const {
+    return version_;
+  }
  private:
   void init();
   size_t read(uint64_t pos, char* buf, size_t n);
-  void valid(const char* what);
-  size_t getFileID(const std::string& name);
+  void valid(const char* what, const char* info = "");
+  size_t getRecordID(const std::string& name);
 
   friend size_t
   istream_read_func(void* pOpaque, uint64_t file_ofs, void* pBuf, size_t n);
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
+  std::string archive_name_plus_slash_;
   std::unique_ptr<ReadAdapterInterface> in_;
+  int64_t version_;
 };
 
 class CAFFE2_API PyTorchStreamWriter final {
  public:
-  PyTorchStreamWriter(std::string archive_name, std::ostream* out=nullptr);
-  PyTorchStreamWriter(std::ostream* out)
-  : PyTorchStreamWriter("archive", out) {}
+  explicit PyTorchStreamWriter(std::string archive_name);
+  explicit PyTorchStreamWriter(
+      const std::function<size_t(const void*, size_t)>& writer_func);
 
-  void writeRecord(const std::string& name, const void* data, size_t size);
+  void writeRecord(
+      const std::string& name,
+      const void* data,
+      size_t size,
+      bool compress = false);
   void writeEndOfFile();
 
   bool finalized() const {
@@ -144,14 +150,21 @@ class CAFFE2_API PyTorchStreamWriter final {
   ~PyTorchStreamWriter();
 
  private:
-   void valid(const char* what);
-   size_t current_pos_ = 0;
-   std::unique_ptr<mz_zip_archive> ar_;
-   std::string archive_name_;
-   std::ostream* out_;
-   std::ofstream file_stream_;
-   bool finalized_ = false;
-   friend size_t ostream_write_func(void *pOpaque, uint64_t file_ofs, const void *pBuf, size_t n);
+  void setup(const string& file_name);
+  void valid(const char* what, const char* info = "");
+  size_t current_pos_ = 0;
+  std::unique_ptr<mz_zip_archive> ar_;
+  std::string archive_name_;
+  std::string archive_name_plus_slash_;
+  std::ofstream file_stream_;
+  std::function<size_t(const void*, size_t)> writer_func_;
+  bool finalized_ = false;
+  bool err_seen_ = false;
+  friend size_t ostream_write_func(
+      void* pOpaque,
+      uint64_t file_ofs,
+      const void* pBuf,
+      size_t n);
 };
 
 } // namespace serialize

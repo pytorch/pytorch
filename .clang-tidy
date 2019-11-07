@@ -1,33 +1,32 @@
 ---
-# NOTE there must be no spaces before the '-', so put the comma first.
-Checks: '
-  -*
-  ,bugprone-*
-  ,-bugprone-forward-declaration-namespace
-  ,-bugprone-macro-parentheses
-  ,cppcoreguidelines-*
-  ,-cppcoreguidelines-interfaces-global-init
-  ,-cppcoreguidelines-owning-memory
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
-  ,-cppcoreguidelines-pro-type-cstyle-cast
-  ,-cppcoreguidelines-pro-type-reinterpret-cast
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-type-union-access
-  ,-cppcoreguidelines-pro-type-vararg
-  ,-cppcoreguidelines-special-member-functions
-  ,hicpp-exception-baseclass
-  ,hicpp-avoid-goto
-  ,modernize-*
-  ,-modernize-return-braced-init-list
-  ,-modernize-use-auto
-  ,-modernize-use-default-member-init
-  ,-modernize-use-using
-  ,performance-*
-  ,-performance-noexcept-move-constructor
+# NOTE there must be no spaces before the '-', so put the comma last.
+Checks: '-*,
+bugprone-*,
+-bugprone-forward-declaration-namespace,
+-bugprone-macro-parentheses,
+-bugprone-lambda-function-name,
+cppcoreguidelines-*,
+-cppcoreguidelines-interfaces-global-init,
+-cppcoreguidelines-owning-memory,
+-cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+-cppcoreguidelines-pro-bounds-constant-array-index,
+-cppcoreguidelines-pro-bounds-pointer-arithmetic,
+-cppcoreguidelines-pro-type-cstyle-cast,
+-cppcoreguidelines-pro-type-reinterpret-cast,
+-cppcoreguidelines-pro-type-static-cast-downcast,
+-cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-pro-type-vararg,
+-cppcoreguidelines-special-member-functions,
+hicpp-exception-baseclass,
+hicpp-avoid-goto,
+modernize-*,
+-modernize-return-braced-init-list,
+-modernize-use-auto,
+-modernize-use-default-member-init,
+-modernize-use-using,
+performance-*,
+-performance-noexcept-move-constructor,
   '
-WarningsAsErrors: '*'
 HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:

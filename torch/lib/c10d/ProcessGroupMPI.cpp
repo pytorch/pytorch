@@ -355,6 +355,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
   return enqueue(std::move(entry));
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
+  throw std::runtime_error(
+      "allreduce_coalesced is currently not supported with MPI");
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
@@ -425,6 +432,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
   return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllgatherOptions& /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupMPI does not support allgather_coalesced");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(

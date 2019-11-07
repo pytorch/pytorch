@@ -2,32 +2,23 @@ import torch
 import torch.nn.functional as F
 from torch._six import inf
 from itertools import product
-import warnings
 
 __all__ = [
+    'align_tensors',  # BUILD_NAMEDTENSOR only
     'broadcast_tensors',
-    'btrifact',
-    'btrifact_with_info',
-    'btrisolve',
-    'btriunpack',
     'cartesian_prod',
+    'cdist',
     'chain_matmul',
     'einsum',
-    'gesv',
     'isfinite',
     'isinf',
     'lu',
     'lu_unpack',
     'norm',
     'meshgrid',
-    'pstrf',
-    'potrf',
-    'potri',
-    'potrs',
     'split',
     'stft',
     'tensordot',
-    'trtrs',
     'unique',
     'unique_consecutive',
 ]
@@ -98,7 +89,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         unpack_data (bool): flag indicating if the data should be unpacked
         unpack_pivots (bool): flag indicating if the pivots should be unpacked
 
-    Example::
+    Examples::
 
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = A.lu()
@@ -106,13 +97,53 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         >>>
         >>> # can recover A from factorization
         >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+
+        >>> # LU factorization of a rectangular matrix:
+        >>> A = torch.randn(2, 3, 2)
+        >>> A_LU, pivots = A.lu()
+        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
+        >>> P
+        tensor([[[1., 0., 0.],
+                 [0., 1., 0.],
+                 [0., 0., 1.]],
+
+                [[0., 0., 1.],
+                 [0., 1., 0.],
+                 [1., 0., 0.]]])
+        >>> A_L
+        tensor([[[ 1.0000,  0.0000],
+                 [ 0.4763,  1.0000],
+                 [ 0.3683,  0.1135]],
+
+                [[ 1.0000,  0.0000],
+                 [ 0.2957,  1.0000],
+                 [-0.9668, -0.3335]]])
+        >>> A_U
+        tensor([[[ 2.1962,  1.0881],
+                 [ 0.0000, -0.8681]],
+
+                [[-1.0947,  0.3736],
+                 [ 0.0000,  0.5718]]])
+        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+        >>> torch.norm(A_ - A)
+        tensor(2.9802e-08)
     """
-
-    sz = LU_data.size(-1)
-
+    shape = LU_data.shape
+    # In generalized LU factorization, the following shape relations hold:
+    #   A.shape[-2:] == (m, n)
+    #   P.shape[-2:] == (m, m)
+    #   L.shape[-2:] == (m, k)
+    #   U.shape[-2:] == (k, n)
+    # where k = min(m, n)
+    m, n = shape[-2:]
+    k = min(m, n)
     if unpack_data:
         U = LU_data.triu()
+        if m != k:
+            U = U.narrow(-2, 0, k)
         L = LU_data.tril()
+        if k != n:
+            L = L.narrow(-1, 0, k)
         L.diagonal(dim1=-2, dim2=-1).fill_(1)
     else:
         L = U = None
@@ -120,15 +151,15 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     if unpack_pivots:
         LU_pivots_zero_idx = LU_pivots - 1
         if LU_data.dim() > 2:
-            P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype).expand_as(LU_data).clone()
-            for idx in product(*map(lambda x: list(range(x)), LU_data.shape[:-2])):
-                final_order = list(range(sz))
+            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype).expand(shape[:-1] + (m,)).clone(memory_format=torch.contiguous_format)
+            for idx in product(*map(lambda x: list(range(x)), shape[:-2])):
+                final_order = list(range(m))
                 for k, j in enumerate(LU_pivots_zero_idx[idx]):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
                 P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
         else:
-            P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(sz))
+            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
+            final_order = list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
@@ -156,7 +187,7 @@ Args:
            If an index appears several times for the same operand, a diagonal is taken.
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
-    operands (list of Tensors): The operands to compute the Einstein sum of.
+    operands (Tensor): The operands to compute the Einstein sum of.
 
 Examples::
 
@@ -218,12 +249,12 @@ def isfinite(tensor):
         tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of finite elements and 0 otherwise
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
 
     Example::
 
         >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
+        tensor([True,  False,  True,  False,  False])
     """
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
@@ -233,7 +264,7 @@ def isfinite(tensor):
     # have a similar concept. It's safe to assume any created LongTensor doesn't
     # overflow and it's finite.
     if not tensor.is_floating_point():
-        return torch.ones_like(tensor, dtype=torch.uint8)
+        return torch.ones_like(tensor, dtype=torch.bool)
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
@@ -244,17 +275,17 @@ def isinf(tensor):
         tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `+/-INF` elements and 0 otherwise
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
 
     Example::
 
         >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
+        tensor([False,  True,  False,  True,  False])
     """
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
     if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
-        return torch.zeros_like(tensor, dtype=torch.uint8)
+        return torch.zeros_like(tensor, dtype=torch.bool)
     return tensor.abs() == inf
 
 
@@ -614,6 +645,56 @@ def cartesian_prod(*tensors):
     """
     return torch._C._VariableFunctions.cartesian_prod(tensors)
 
+def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
+    r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
+
+    Args:
+        x1 (Tensor): input tensor of shape :math:`B \times P \times M`.
+        x2 (Tensor): input tensor of shape :math:`B \times R \times M`.
+        p: p value for the p-norm distance to calculate between each vector pair
+            :math:`\in [0, \infty]`.
+        compute_mode:
+            'use_mm_for_euclid_dist_if_necessary' - will use matrix multiplication approach to calculate
+            euclidean distance (p = 2) if P > 25 or R > 25
+            'use_mm_for_euclid_dist' - will always use matrix multiplication approach to calculate
+            euclidean distance (p = 2)
+            'donot_use_mm_for_euclid_dist' - will never use matrix multiplication approach to calculate
+            euclidean distance (p = 2)
+            Default: use_mm_for_euclid_dist_if_necessary.
+
+    If x1 has shape :math:`B \times P \times M` and x2 has shape :math:`B \times R \times M` then the
+    output will have shape :math:`B \times P \times R`.
+
+    This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)`
+    if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to
+    `scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
+    scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
+
+    Example:
+
+        >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
+        >>> a
+        tensor([[ 0.9041,  0.0196],
+                [-0.3108, -2.4423],
+                [-0.4821,  1.0590]])
+        >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
+        >>> b
+        tensor([[-2.1763, -0.4713],
+                [-0.6986,  1.3702]])
+        >>> torch.cdist(a, b, p=2)
+        tensor([[3.1193, 2.0959],
+                [2.7138, 3.8322],
+                [2.2830, 0.3791]])
+    """
+    if compute_mode == 'use_mm_for_euclid_dist_if_necessary':
+        return torch._C._VariableFunctions.cdist(x1, x2, p, None)
+    elif compute_mode == 'use_mm_for_euclid_dist':
+        return torch._C._VariableFunctions.cdist(x1, x2, p, 1)
+    elif compute_mode == 'donot_use_mm_for_euclid_dist':
+        return torch._C._VariableFunctions.cdist(x1, x2, p, 2)
+    else:
+        raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
+
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     r"""Returns the matrix norm or vector norm of a given tensor.
@@ -744,203 +825,11 @@ def chain_matmul(*matrices):
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
 
-def pstrf(a, upper=True, out=None):
-    r"""Computes the pivoted Cholesky decomposition of a symmetric positive-definite
-    matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
-
-    If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
-    such that :math:`a = p^T u^T u p`, with `p` the permutation given by `pivot`.
-
-    If :attr:`upper` is ``False``, `u` is lower triangular such that
-    :math:`a = p^T u u^T p`.
-
-    .. warning::
-        :func:`torch.pstrf` is deprecated in favour of :func:`torch.cholesky` and will
-        be removed in the next release.
-
-    Args:
-        a (Tensor): the input 2-D tensor
-        upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-        out (tuple, optional): namedtuple of `u` and `pivot` tensors
-
-    Example::
-
-        >>> a = torch.randn(3, 3)
-        >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-        >>> a
-        tensor([[ 3.5405, -0.4577,  0.8342],
-                [-0.4577,  1.8244, -0.1996],
-                [ 0.8342, -0.1996,  3.7493]])
-        >>> u,piv = torch.pstrf(a)
-        >>> u
-        tensor([[ 1.9363,  0.4308, -0.1031],
-                [ 0.0000,  1.8316, -0.2256],
-                [ 0.0000,  0.0000,  1.3277]])
-        >>> piv
-        tensor([ 2,  0,  1], dtype=torch.int32)
-        >>> p = torch.eye(3).index_select(0,piv.long()).index_select(0,piv.long()).t() # make pivot permutation
-        >>> torch.mm(torch.mm(p.t(),torch.mm(u.t(),u)),p) # reconstruct
-        tensor([[ 3.5405, -0.4577,  0.8342],
-                [-0.4577,  1.8244, -0.1996],
-                [ 0.8342, -0.1996,  3.7493]])
-    """
-    warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
-                  "in the next release.", stacklevel=2)
-    return torch._C._VariableFunctions.pstrf(a, upper=upper, out=out)
-
-
-def potrf(a, upper=True, out=None):
-    r"""Computes the Cholesky decomposition of a symmetric positive-definite
-    matrix :math:`A`.
-
-    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
-
-    .. warning::
-        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
-        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
-        argument in :func:`torch.cholesky` defaults to ``False``.
-    """
-    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
-                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
-                  " torch.cholesky defaults to ``False``.", stacklevel=2)
-    return torch.cholesky(a, upper=upper, out=out)
-
-
-def potri(a, upper=True, out=None):
-    r"""Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
-    Cholesky factor.
-
-    For more information regarding :func:`torch.potri`, please check :func:`torch.cholesky_inverse`.
-
-    .. warning::
-        :func:`torch.potri` is deprecated in favour of :func:`torch.cholesky_inverse` and will be removed
-        in the next release. Please use :func:`torch.cholesky_inverse` instead and note that the :attr:`upper`
-        argument in :func:`torch.cholesky_inverse` defaults to ``False``.
-    """
-    warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be removed in "
-                  "the next release. Please use torch.cholesky_inverse instead and note that the :attr:`upper` "
-                  "argument in torch.cholesky_inverse defaults to ``False``.", stacklevel=2)
-    return torch.cholesky_inverse(a, upper=upper, out=out)
-
-
-def potrs(b, u, upper=True, out=None):
-    r"""Solves a linear system of equations with a positive semidefinite
-    matrix to be inverted given its Cholesky factor matrix :attr:`u`.
-
-    For more information regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
-
-    .. warning::
-        :func:`torch.potrs` is deprecated in favour of :func:`torch.cholesky_solve` and will be
-        removed in the next release. Please use :func:`torch.cholesky_solve` instead and note that
-        the :attr:`upper` argument in :func:`torch.cholesky_solve` defaults to ``False``.
-    """
-    warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed "
-                  "in the next release. Please use torch.cholesky instead and note that the "
-                  ":attr:`upper` argument in torch.cholesky_solve defaults to ``False``.", stacklevel=2)
-    return torch.cholesky_solve(b, u, upper=upper, out=out)
-
-
-def gesv(b, A, out=None):
-    r"""This function returns the solution to the system of linear equations represented
-    by :math:`AX = B` and the LU factorization of A, in order as a tuple `X, LU`.
-
-    For more information regarding :func:`torch.gesv`, please check :func:`torch.solve`.
-
-    .. warning::
-        :func:`torch.gesv` is deprecated in favour of :func:`torch.solve` and will be removed in the
-        next release. Please use :func:`torch.solve` instead.
-    """
-    warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
-                  "next release. Please use torch.solve instead.", stacklevel=2)
-    return torch.solve(b, A, out=out)
-
-
-def trtrs(b, A, upper=True, transpose=False, unitriangular=False, out=None):
-    r"""Solves a system of equations with a triangular coefficient matrix :math:`A`
-    and multiple right-hand sides :attr:`b`.
-
-    In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
-    with the default keyword arguments.
-
-    For more information regarding :func:`torch.trtrs`, please check :func:`torch.triangular_solve`.
-
-    .. warning::
-        :func:`torch.trtrs` is deprecated in favour of :func:`torch.triangular_solve` and will be
-        removed in the next release. Please use :func:`torch.triangular_solve` instead.
-    """
-    warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
-                  "removed in the next release. Please use torch.triangular_solve instead.", stacklevel=2)
-    return torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular, out=out)
-
-
-def btrifact(A, pivot=True, out=None):
-    r"""Returns a tuple containing the LU factorization and pivots of :attr:`A`.
-    Pivoting is done if :attr:`pivot` is set.
-
-    For more information regarding :func:`torch.btrifact`, please check :func:`torch.lu`.
-
-    .. warning::
-        :func:`torch.btrifact` is deprecated in favour of :func:`torch.lu` and will be
-        removed in the next release. Please use :func:`torch.lu` instead.
-    """
-    warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be "
-                  "removed in the next release. Please use torch.lu instead.", stacklevel=2)
-    return lu(A, pivot=pivot, get_infos=False, out=out)
-
-
-def btrifact_with_info(A, pivot=True, out=None):
-    r"""Performs LU factorization and returns additional status information along with the LU
-    factorization and pivots.
-
-    For more information regarding :func:`torch.btrifact_with_info`, please check :func:`torch.lu`.
-
-    .. warning::
-        :func:`torch.btrifact_with_info` is deprecated in favour of :func:`torch.lu` and will
-        be removed in the next release. Please use :func:`torch.lu` with the :attr:`get_infos`
-        argument set to ``True`` instead.
-    """
-    warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu and will be "
-                  "removed in the next release. Please use torch.lu with the get_infos argument "
-                  "set to True instead.",
-                  stacklevel=2)
-    return lu(A, pivot=pivot, get_infos=True, out=out)
-
-
-def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    r"""Unpacks the data and pivots from a LU factorization of a tensor.
-
-    For more information regarding :func:`torch.btriunpack`, please check :func:`torch.lu_unpack`.
-
-    .. warning::
-        :func:`torch.btriunpack` is deprecated in favour of :func:`torch.lu_unpack` and will be
-        removed in the next release. Please use :func:`torch.lu_unpack` instead.
-    """
-    warnings.warn("torch.btriunpack is deprecated in favour of torch.lu_unpack and will be "
-                  "removed in the next release. Please use torch.lu_unpack instead.", stacklevel=2)
-    return lu_unpack(LU_data=LU_data, LU_pivots=LU_pivots,
-                     unpack_data=unpack_data, unpack_pivots=unpack_pivots)
-
-
-def btrisolve(b, LU_data, LU_pivots, out=None):
-    r"""Solves the system of equations :math:`Ax = b` using the partially pivoted LU
-    factorization of :math:`A` given by :attr:`LU_data` and :attr:`LU_pivots`.
-
-    For more information regarding :func:`torch.btrisolve`, please check
-    :func:`torch.lu_solve`.
-
-    .. warning::
-        :func:`torch.btrisolve` is deprecated in favour of :func:`torch.lu_solve` and will be
-        removed in the next release. Please use :func:`torch.lu_solve` instead.
-    """
-    warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
-                  "removed in the next release. Please use torch.lu_solve instead.", stacklevel=2)
-    return torch.lu_solve(b, LU_data=LU_data, LU_pivots=LU_pivots, out=out)
-
-
 def lu(A, pivot=True, get_infos=False, out=None):
-    r"""Computes the LU factorization of a square matrix or batches of square matrices
-    :attr:`A`. Returns a tuple containing the LU factorization and pivots of :attr:`A`.
-    Pivoting is done if :attr:`pivot` is set to ``True``.
+    r"""Computes the LU factorization of a matrix or batches of matrices
+    :attr:`A`. Returns a tuple containing the LU factorization and
+    pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
+    ``True``.
 
     .. note::
         The pivots returned by the function are 1-indexed. If :attr:`pivot` is ``False``,
@@ -956,8 +845,14 @@ def lu(A, pivot=True, get_infos=False, out=None):
         :attr:`get_infos` is ``True`` since the status of the factorization is present in the
         third element of the return tuple.
 
+    .. note::
+        In the case of batches of square matrices with size less or
+        equal to 32 on a CUDA device, the LU factorization is repeated
+        for singular matrices due to the bug in the MAGMA library (see
+        magma issue 13).
+
     Arguments:
-        A (Tensor): the tensor to factor of size :math:`(*, m, m)`
+        A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
         get_infos (bool, optional): if set to ``True``, returns an info IntTensor.
                                     Default: ``False``
@@ -969,7 +864,7 @@ def lu(A, pivot=True, get_infos=False, out=None):
     Returns:
         (Tensor, IntTensor, IntTensor (optional)): A tuple of tensors containing
 
-            - **factorization** (*Tensor*): the factorization of size :math:`(*, m, m)`
+            - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
             - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
 
@@ -1011,3 +906,7 @@ def lu(A, pivot=True, get_infos=False, out=None):
         return result  # A_LU, pivots, infos
     else:
         return result[0], result[1]  # A_LU, pivots
+
+
+def align_tensors(*tensors):
+    raise RuntimeError('`align_tensors` not yet implemented.')

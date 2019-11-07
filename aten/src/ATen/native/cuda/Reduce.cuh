@@ -241,8 +241,9 @@ __device__ void strided_iterate(func_t f, index_t begin, index_t end, index_t st
 
 template <typename out_scalar_t, typename func_t>
 struct func_wrapper_t {
-  using arg_t = typename binary_function_traits<func_t>::arg2_t;
-  func_t reduce;
+  using arg_t = typename binary_function_traits<func_t>::arg1_t;
+  using scalar_t = typename binary_function_traits<func_t>::arg2_t;
+
   func_t combine;
   static inline __device__ out_scalar_t project(arg_t arg) {
     return (out_scalar_t) arg;
@@ -251,20 +252,24 @@ struct func_wrapper_t {
     return WARP_SHFL_DOWN(arg, offset);
   }
 
-  func_wrapper_t(const func_t& op) : reduce(op), combine(op) {
+  func_wrapper_t(const func_t& op) : combine(op) {
+  }
+
+  // wrap a normal reduction that ignores the index
+  __device__ arg_t reduce(arg_t acc, scalar_t val, int64_t idx) const {
+    return combine(acc, val);
   }
 };
 
 template <typename scalar_t, typename func_t>
 func_wrapper_t<scalar_t, func_t> func_wrapper(const func_t& op) {
-  using arg_t = typename binary_function_traits<func_t>::arg2_t;
   return func_wrapper_t<scalar_t, func_t> { op };
 }
 
 template <typename scalar_t, typename ops_t, typename index_t, typename out_scalar_t=scalar_t, int vt0=4>
 struct ReduceOp {
-  using traits = binary_function_traits<decltype(&ops_t::reduce)>;
-  using arg_t = typename std::remove_const<typename std::remove_reference<typename traits::arg1_t>::type>::type;
+  using traits = function_traits<decltype(&ops_t::reduce)>;
+  using arg_t = typename std::decay<typename traits::template arg<0>::type>::type;
 
   using InputCalculator = OffsetCalculator<1, index_t>;
   using OutputCalculator = OffsetCalculator<2, index_t>;
@@ -321,8 +326,8 @@ struct ReduceOp {
       auto input_slice = (const char*)src + base_offsets[1];
       value = thread_reduce((const scalar_t*)input_slice);
     }
-    bool should_block_y_reduce = config.should_block_y_reduce();
-    if (should_block_y_reduce) {
+
+    if (config.should_block_y_reduce()) {
       value = block_y_reduce(value, shared_memory);
     }
     if (config.should_block_x_reduce()) {
@@ -391,7 +396,7 @@ struct ReduceOp {
       }
       // compute
       strided_iterate<vt0, index_t>([&](index_t i, index_t idx) {
-        value_list[i] = ops.reduce(value_list[i], values[i]);
+        value_list[i] = ops.reduce(value_list[i], values[i], idx);
       }, idx, config.num_inputs, config.step_input);
       // step offset
       idx += config.step_input * vt0;
@@ -640,8 +645,8 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
                               AccumulationBuffer* acc_buf_ptr=nullptr) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
-  using traits = binary_function_traits<decltype(&ops_t::reduce)>;
-  using arg_t = typename traits::arg1_t;
+  using traits = function_traits<decltype(&ops_t::reduce)>;
+  using arg_t = typename traits::template arg<0>::type;
   static constexpr bool can_accumulate_in_output =
     std::is_convertible<arg_t, out_scalar_t>::value;
 
@@ -696,21 +701,42 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   int64_t dim0;
   int64_t dim1;
-  // adjust block size to fit width to fast changing dimension
-  if (iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
+
+  // Adjust block size to map block width to fastest changing dimension of input
+  // tensor. This grants the best possible memory accessing pattern, given that
+  // for non-contiguous tensor with space in between, we cannot have perfect
+  // memory coalescing.
+  bool reduction_on_fastest_striding_dimension =
+      (iter.num_reduce_dims() == iter.ndim()) ||
+      (iter.strides(/*arg=*/input_index)[0] <
+       iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()]);
+  // Notice that dim0 & dim1 does NOT guarantee any launch configuration here!
+  // dim0 & dim1 are more like the upper bound of the block dimension. The
+  // actual launch config and reduction scheme is determined by setting values
+  // to `config.input_mult` and `config.output_mult`.
+  // We try to max out dim1 so that we have enough threads per CTA to deliver
+  // performance for larger problem size.
+  if (reduction_on_fastest_striding_dimension) {
+    // Map block.x to the fastest reducing dimension. It implies:
+    //   1. block_x_reduce is required.
+    //   2. block.y now max out to num_outputs.
     dim0 = iter.shape()[0];
     dim1 = num_outputs;
   } else {
+    // Map block.x to the fastest non reducing dimension. It implies:
+    //   1. block_x_reduce is turned off.
+    //   2. block.y now max out to inputs_per_output.
     dim0 = iter.shape()[iter.num_reduce_dims()];
     dim1 = inputs_per_output;
   }
 
+  // Adjust block_width and block_height
   config.set_block_dimension(dim0, dim1);
 
   int block_width = config.block_width;
   int block_height = config.block_height;
 
-  if (iter.ndim() == 0 || iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
+  if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
     // shuffle instructions and shared memory (if block_width > warpSize).

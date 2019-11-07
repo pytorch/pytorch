@@ -31,7 +31,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
 
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(
-              scalar_to_tensor(s), nullptr, c10::nullopt, it->scope());
+              scalar_to_tensor(s), c10::nullopt, it->scope());
           it->output()->replaceAllUsesWith(r);
           it.destroyCurrent();
         }
@@ -47,9 +47,9 @@ static void EraseNumberTypesOnBlock(Block* block) {
       default: {
         for (auto o : it->outputs()) {
           if (o->type()->isSubtypeOf(NumberType::get())) {
-            o->setType(CompleteTensorType::fromNumberType(o->type()));
+            o->setType(TensorType::fromNumberType(o->type()));
           } else if (o->type()->isSubtypeOf(BoolType::get())) {
-            o->setType(CompleteTensorType::fromBoolType());
+            o->setType(TensorType::fromBoolType());
           }
         }
       } break;

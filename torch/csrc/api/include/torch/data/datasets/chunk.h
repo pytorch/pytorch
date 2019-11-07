@@ -111,7 +111,7 @@ class BatchDataBuffer {
       auto batch_example_indices = this->example_sampler_.next(example_count);
       AT_ASSERT(
           batch_example_indices &&
-          batch_example_indices.value().size() == example_count)
+          batch_example_indices.value().size() == example_count);
       BatchRequestType& indices = batch_example_indices.value();
       for (size_t i : indices) {
         TORCH_CHECK(i < data_size, "Index out of range");
@@ -320,11 +320,14 @@ class ChunkDataset final
       ChunkReader chunk_reader,
       ChunkSampler chunk_sampler,
       ExampleSampler example_sampler,
-      ChunkDatasetOptions options)
+      ChunkDatasetOptions options,
+      std::function<void(UnwrappedBatchType&)> preprocessing_policy =
+          std::function<void(UnwrappedBatchType&)>())
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
         options_(std::move(options)),
+        preprocessing_policy_(preprocessing_policy),
         quit_worker_(false),
         running_preloaders_(0),
         load_checkpoint_(false) {}
@@ -347,16 +350,16 @@ class ChunkDataset final
       "Dataset needs to call reset() before calling get_batch().");
 
     TORCH_CHECK(
-      batch_size == options_.batch_size_,
+      batch_size == options_.batch_size(),
       "The requested batch size does not match with the initialized batch size.\n"
       " The requested batch size is ", batch_size,
-      ", while the dataset is created with batch size equal to ", options_.batch_size_);
+      ", while the dataset is created with batch size equal to ", options_.batch_size());
     return batch_buffer_->get_batch();
   }
 
   /// Helper method around get_batch as `batch_size` is not strictly necessary
   BatchType get_batch() {
-    return get_batch(options_.batch_size_);
+    return get_batch(options_.batch_size());
   }
 
   /// This will clear any internal state and starts the internal prefetching
@@ -380,16 +383,16 @@ class ChunkDataset final
     // chunk buffer.
     batch_buffer_ = torch::make_unique<
         detail::BatchDataBuffer<UnwrappedBatchType, ExampleSamplerType>>(
-        options_.batch_size_,
+        options_.batch_size(),
         example_sampler_,
-        options_.cache_size_);
+        options_.cache_size());
 
     // create new workers for this new epoch.
     quit_worker_ = false;
 
     AT_ASSERT(running_preloaders_ == 0);
-    running_preloaders_ = options_.preloader_count_;
-    for (size_t i = 0; i < options_.preloader_count_; ++i) {
+    running_preloaders_ = options_.preloader_count();
+    for (size_t i = 0; i < options_.preloader_count(); ++i) {
       preload_threads_.emplace_back([this, i]() { this->preloader(i); });
     }
   }
@@ -424,7 +427,7 @@ class ChunkDataset final
         std::vector<size_t> chunk_idx;
         {
           std::lock_guard<std::mutex> lock(chunk_index_guard_);
-          if (auto chunk_sampler_result = chunk_sampler_.next(this->options_.cross_chunk_shuffle_count_)) {
+          if (auto chunk_sampler_result = chunk_sampler_.next(this->options_.cross_chunk_shuffle_count())) {
             chunk_idx = chunk_sampler_result.value();
           } else {
             break;
@@ -435,6 +438,9 @@ class ChunkDataset final
           auto chunk_data = chunk_reader_.read_chunk(chunk_idx[i]);
           std::move(
               chunk_data.begin(), chunk_data.end(), std::back_inserter(data));
+        }
+        if (preprocessing_policy_) {
+          preprocessing_policy_(data);
         }
         if (!data.empty()) { // skip empty chunks.
           batch_buffer_->add_chunk_data(std::move(data));
@@ -482,6 +488,18 @@ class ChunkDataset final
 
   /// The options the Dataset was configured with.
   const ChunkDatasetOptions options_;
+
+  // function pointer wrapper to apply custom processing over chunk data. This is
+  // considered an advanced parameter for developers who want to apply a
+  // pre-process to the chunk data before sampling into minibatch.
+  // Different than the collate function, this policy is applied on the chunk
+  // level, instead of minibatch level. When a chunk of data is loaded (multiple
+  // chunks if cross_chunk_shuffle_count_ is greater than 1), this policy is
+  // applied to the full loaded data. It is useful if developers want to
+  // perform pre-processing (like bucketing) to the chunk data before
+  // example sampler samples the data. By default it's an empty pointer and no
+  // action will be taken.
+  std::function<void(UnwrappedBatchType&)> preprocessing_policy_;
 
   // indicate whether the worker thread can be teared down
   std::atomic<bool> quit_worker_;

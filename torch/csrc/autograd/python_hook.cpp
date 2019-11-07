@@ -160,33 +160,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
   auto& original = ((THPVariable*)_original)->cdata;
   auto& result = ((THPVariable*)_result)->cdata;
 
-  if (original.type() != result.type()) {
-    std::stringstream ss;
-    auto name = hook_name(hook);
-    ss << "hook '" << name << "' has changed the type of value (";
-    ss << "was " << original.toString() << " got ";
-    ss << result.toString() << ")";
-    throw std::runtime_error(ss.str());
-  }
-
-  if (original.is_cuda() != result.is_cuda()) {
-    std::stringstream ss;
-    auto name = hook_name(hook);
-    ss << "hook '" << name << "' has changed the type of value";
-    if (original.is_cuda()) {
-      ss << " (was CUDA tensor got CPU tensor)";
-    } else {
-      ss << " (was CPU tensor got CUDA tensor)";
-    }
-    throw std::runtime_error(ss.str());
-  }
-
-  if (original.sizes().vec() != result.sizes().vec()) {
-    std::stringstream ss;
-    auto name = hook_name(hook);
-    ss << "hook '" << name << "' has changed the size of value";
-    throw std::runtime_error(ss.str());
-  }
+  torch::autograd::check_variable_result(original, result, hook_name(hook));
 }
 
 static std::string hook_name(PyObject* hook) {

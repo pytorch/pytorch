@@ -3,11 +3,31 @@
 
 namespace torch { namespace autograd {
 
-std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &inputs,
+VariableInfo::VariableInfo(const Variable& var)
+  : layout(var.layout())
+  , device(var.device())
+  , scalar_type(var.scalar_type())
+  , size(var.sizes().vec())
+  , requires_grad(var.requires_grad()) {
+}
+
+Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
+  return at::zeros(size,
+    at::TensorOptions(scalar_type).device(device).layout(layout).is_variable(true));
+}
+
+variable_list _wrap_outputs(const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
   const at::ArrayRef<Variable> raw_outputs,
-  const std::shared_ptr<Function> &cdata) {
+  const std::shared_ptr<Node> &cdata) {
+
+  std::unordered_set<at::TensorImpl*> inputs;
+  inputs.reserve(input_vars.size());
+  for (auto& var : input_vars) {
+    inputs.emplace(var.unsafeGetTensorImpl());
+  }
+
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
@@ -78,7 +98,88 @@ std::vector<Variable> _wrap_outputs(const std::unordered_set<at::TensorImpl*> &i
   return outputs;
 }
 
+void check_variable_result(const Variable& original, const Variable& result, std::string hook_name) {
+  if (original.type() != result.type()) {
+    std::stringstream ss;
+    ss << "hook '" << hook_name << "' has changed the type of value (";
+    ss << "was " << original.toString() << " got ";
+    ss << result.toString() << ")";
+    throw std::runtime_error(ss.str());
+  }
 
+  if (original.is_cuda() != result.is_cuda()) {
+    std::stringstream ss;
+    ss << "hook '" << hook_name << "' has changed the type of value";
+    if (original.is_cuda()) {
+      ss << " (was CUDA tensor got CPU tensor)";
+    } else {
+      ss << " (was CPU tensor got CUDA tensor)";
+    }
+    throw std::runtime_error(ss.str());
+  }
 
+  if (original.sizes().vec() != result.sizes().vec()) {
+    std::stringstream ss;
+    ss << "hook '" << hook_name << "' has changed the size of value";
+    throw std::runtime_error(ss.str());
+  }
+}
 
+void AutogradContext::save_for_backward(variable_list to_save) {
+  to_save_ = std::move(to_save);
+}
+
+// The logic for handling saved variables here is the same as python_function.cpp
+// See _save_variables() and unpack_saved_variables()
+void AutogradContext::save_variables() {
+  saved_variables_.clear();
+  auto ptr = grad_fn_.lock();
+
+  for (const auto& var : to_save_) {
+    // Allow empty variables to be saved
+    if (var.defined()) {
+      bool is_output = var.grad_fn().get() == ptr.get();
+      saved_variables_.emplace_back(var, is_output);
+    } else {
+      saved_variables_.emplace_back();
+    }
+  }
+  to_save_.clear();
+}
+
+variable_list AutogradContext::get_saved_variables() const {
+  TORCH_CHECK(!has_freed_buffers_, ERR_BACKWARD_TWICE);
+  variable_list saved;
+  saved.reserve(saved_variables_.size());
+  auto ptr = grad_fn_.lock();
+  TORCH_INTERNAL_ASSERT(ptr);
+  for (auto& var : saved_variables_) {
+    saved.push_back(var.unpack(ptr));
+  }
+  return saved;
+}
+
+void AutogradContext::mark_dirty(const variable_list &inputs) {
+  dirty_inputs_.clear();
+  dirty_inputs_.reserve(inputs.size());
+  for(auto& var : inputs) {
+    dirty_inputs_.insert(var.unsafeGetTensorImpl());
+  }
+}
+
+void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
+  non_differentiable_.clear();
+  non_differentiable_.reserve(outputs.size());
+  for(auto& var : outputs) {
+    non_differentiable_.insert(var.unsafeGetTensorImpl());
+  }
+}
+
+const std::unordered_set<at::TensorImpl*>& AutogradContext::get_dirty() const {
+  return dirty_inputs_;
+}
+
+const std::unordered_set<at::TensorImpl*>& AutogradContext::get_non_differentiable() const {
+  return non_differentiable_;
+}
 }} // namespace torch::autograd

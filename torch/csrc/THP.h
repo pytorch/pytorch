@@ -28,20 +28,18 @@
 #define THWTensor THTensor
 #define THWTensor_(NAME) THTensor_(NAME)
 
-#include <torch/csrc/PtrWrapper.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
-#include <torch/csrc/Storage.h>
-#include <torch/csrc/Size.h>
 #include <torch/csrc/Module.h>
+#include <torch/csrc/PtrWrapper.h>
+#include <torch/csrc/Size.h>
+#include <torch/csrc/Storage.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/utils.h> // This requires defined Storage and Tensor types
-#include <torch/csrc/byte_order.h>
+#include <torch/csrc/utils/byte_order.h>
 
-#ifdef _THP_CORE
 #include <torch/csrc/serialization.h>
 
-#include <torch/csrc/autograd/autograd.h>
-#endif
+#include <torch/csrc/autograd/python_autograd.h>
 
 #endif

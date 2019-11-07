@@ -4,7 +4,8 @@ repository, run:
 
 python -m tools.autograd.gen_autograd \
        build/aten/src/ATen/Declarations.yaml \
-       $OUTPUT_DIR
+       $OUTPUT_DIR \
+       tools/autograd
 
 Where $OUTPUT_DIR is where you would like the files to be
 generated.  In the full build system, OUTPUT_DIR is
@@ -15,7 +16,7 @@ torch/csrc/autograd/generated/
 #
 # It delegates to the following scripts:
 #
-#  gen_autograd_functions.py: generates subclasses of torch::autograd::Functions
+#  gen_autograd_functions.py: generates subclasses of torch::autograd::Node
 #  gen_variable_type.py: generates VariableType.h which contains all tensor methods
 #  gen_python_functions.py: generates Python bindings to THPVariable
 #
@@ -180,7 +181,7 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
     return declarations
 
 
-def gen_autograd(aten_path, out, autograd_dir):
+def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
     aten_decls = load_aten_declarations(aten_path)
 
     # Parse and load derivatives.yaml
@@ -191,21 +192,19 @@ def gen_autograd(aten_path, out, autograd_dir):
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate VariableType.h/cpp
-    from .gen_variable_type import gen_variable_type
-    gen_variable_type(out, aten_decls, template_path)
+    if not disable_autograd:
+        from .gen_variable_type import gen_variable_type
+        gen_variable_type(out, aten_decls, template_path)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
     gen_autograd_functions_lib(
         out, autograd_functions, template_path)
 
-    # Load deprecated signatures
-    deprecated = load_deprecated_signatures(
-        aten_decls, os.path.join(autograd_dir, 'deprecated.yaml'))
-
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(out, aten_decls, template_path)
+    gen_variable_factories(
+        out, aten_decls, template_path, disable_autograd=disable_autograd)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):

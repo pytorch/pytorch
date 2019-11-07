@@ -36,10 +36,10 @@ class TestSparseNormalize(hu.HypothesisTestCase):
         param[param == 0.0] += 0.02
 
         # Create an indexing array containing values that are lists of indices,
-        # which index into grad
+        # which index into param
         indices = data_strategy.draw(
             hu.tensor(dtype=np.int64, min_dim=1, max_dim=1,
-                      elements=st.sampled_from(np.arange(grad.shape[0]))),
+                      elements=st.sampled_from(np.arange(param.shape[0]))),
         )
         hypothesis.note('indices.shape: %s' % str(indices.shape))
 
@@ -47,10 +47,18 @@ class TestSparseNormalize(hu.HypothesisTestCase):
         hypothesis.assume(np.array_equal(np.unique(indices.flatten()),
                                          np.sort(indices.flatten())))
 
+        op1 = core.CreateOperator(
+            "SparseNormalize",
+            ["param", "indices"],
+            ["param"],
+            use_max_norm=use_max_norm,
+            norm=norm,
+        )
+
         # Sparsify grad
         grad = grad[indices]
 
-        op = core.CreateOperator(
+        op2 = core.CreateOperator(
             "SparseNormalize",
             ["param", "indices", "grad"],
             ["param"],
@@ -58,7 +66,7 @@ class TestSparseNormalize(hu.HypothesisTestCase):
             norm=norm,
         )
 
-        def ref_sparse_normalize(param, indices, grad):
+        def ref_sparse_normalize(param, indices, grad=None):
             param_out = np.copy(param)
             for _, index in enumerate(indices):
                 param_out[index] = self.ref_normalize(
@@ -68,8 +76,13 @@ class TestSparseNormalize(hu.HypothesisTestCase):
                 )
             return (param_out,)
 
-        # self.assertDeviceChecks(dc, op, [param, indices, grad], [0])
+        # self.assertDeviceChecks(dc, op, [param, indices], [0])
         self.assertReferenceChecks(
-            gc, op, [param, indices, grad],
+            gc, op1, [param, indices],
+            ref_sparse_normalize
+        )
+
+        self.assertReferenceChecks(
+            gc, op2, [param, indices, grad],
             ref_sparse_normalize
         )

@@ -2,6 +2,9 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMasked.cu"
 #else
 
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
+
 
 void THCTensor_(maskedFill)(THCState* state,
                             THCTensor *tensor, THCudaByteTensor *mask, scalar_t value)
@@ -188,6 +191,9 @@ void THCTensor_(maskedCopyByte)(THCState* state,
 
 void THCTensor_(maskedSelect)(THCState* state,
                               THCTensor* tensor, THCTensor* src, THCudaByteTensor* mask) {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   THArgCheck(THCudaByteTensor_nElement(state, mask) ==
              THCTensor_(nElement)(state, src),
@@ -249,6 +255,9 @@ void THCTensor_(maskedSelect)(THCState* state,
 
 void THCTensor_(maskedSelectBool)(THCState* state,
                                    THCTensor* tensor, THCTensor* src, THCudaBoolTensor* mask) {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   THArgCheck(THCudaBoolTensor_nElement(state, mask) ==
              THCTensor_(nElement)(state, src),

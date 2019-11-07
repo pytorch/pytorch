@@ -14,6 +14,8 @@ static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(threshold_stub);
+DEFINE_DISPATCH(hardshrink_cpu_stub);
+DEFINE_DISPATCH(hardshrink_backward_cpu_stub);
 
 Tensor relu(const Tensor & self) {
   return at::threshold(self, 0, 0);
@@ -42,11 +44,11 @@ Tensor & celu_(Tensor & self, Scalar alpha) {
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise(self, at::empty_like(self), lower, upper, training, generator);
+  return at::rrelu_with_noise(self, at::empty_like(self, at::MemoryFormat::Contiguous), lower, upper, training, generator);
 }
 
 Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise_(self, at::empty_like(self), lower, upper, training, generator);
+  return at::rrelu_with_noise_(self, at::empty_like(self, at::MemoryFormat::Contiguous), lower, upper, training, generator);
 }
 
 // computes `result = self <= threshold ? value : other`
@@ -59,8 +61,8 @@ static Tensor threshold_out(
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
   auto iter = TensorIterator::binary_op(result, self, other);
-  threshold_stub(iter->device_type(), *iter, threshold, value);
-  return iter->output();
+  threshold_stub(iter.device_type(), iter, threshold, value);
+  return iter.output();
 }
 
 Tensor threshold(const Tensor& self, Scalar threshold, Scalar value) {
@@ -91,9 +93,9 @@ void inline prelu_cpu_kernel_share_weights(
   const Tensor& weight) {
 
   int64_t input_numel = input.numel();
-  auto result_data = result.data<scalar_t>();
-  auto input_data = input.data<scalar_t>();
-  auto weight_val = weight.data<scalar_t>()[0];
+  auto result_data = result.data_ptr<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto weight_val = weight.data_ptr<scalar_t>()[0];
 
   at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
@@ -115,10 +117,9 @@ void inline prelu_cpu_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t input_numel = input.numel();
-  scalar_t* result_data = result.data<scalar_t>();
-  scalar_t* input_data = input.data<scalar_t>();
-  scalar_t* weight_data = weight.data<scalar_t>();
+  scalar_t* result_data = result.data_ptr<scalar_t>();
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* weight_data = weight.data_ptr<scalar_t>();
 
   auto loop = [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; ++i) {
@@ -151,7 +152,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
-  Tensor result = at::empty_like(input);
+  Tensor result = at::empty_like(input, at::MemoryFormat::Contiguous);
   auto strides = input.strides();
 
   // case1: shared weight for all channels
@@ -203,11 +204,11 @@ void inline prelu_cpu_backward_kernel_share_weights(
   Tensor& weight_grad) {
 
   int64_t input_numel = input.numel();
-  auto input_data = input.data<scalar_t>();
-  auto weight_val = weight.data<scalar_t>()[0];
-  auto grad_out_data = grad_out.data<scalar_t>();
-  auto input_grad_data = input_grad.data<scalar_t>();
-  auto weight_grad_data = weight_grad.data<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto weight_val = weight.data_ptr<scalar_t>()[0];
+  auto grad_out_data = grad_out.data_ptr<scalar_t>();
+  auto input_grad_data = input_grad.data_ptr<scalar_t>();
+  auto weight_grad_data = weight_grad.data_ptr<scalar_t>();
 
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
@@ -239,12 +240,11 @@ void inline prelu_cpu_backward_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t input_numel = input.numel();
-  auto input_data = input.data<scalar_t>();
-  auto weight_data = weight.data<scalar_t>();
-  auto grad_out_data = grad_out.data<scalar_t>();
-  auto input_grad_data = input_grad.data<scalar_t>();
-  auto weight_grad_collector_data = weight_grad_collector.data<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto weight_data = weight.data_ptr<scalar_t>();
+  auto grad_out_data = grad_out.data_ptr<scalar_t>();
+  auto input_grad_data = input_grad.data_ptr<scalar_t>();
+  auto weight_grad_collector_data = weight_grad_collector.data_ptr<scalar_t>();
 
   auto loop = [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
@@ -284,9 +284,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   auto strides = input.strides();
   auto dims = input.dim();
 
-  Tensor input_grad = at::empty_like(input);
-  Tensor weight_grad = at::empty_like(weight);
-  Tensor weight_grad_collector = at::empty_like(input);
+  Tensor input_grad = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor weight_grad = at::empty_like(weight, at::MemoryFormat::Contiguous);
+  Tensor weight_grad_collector = at::empty_like(input, at::MemoryFormat::Contiguous);
 
   // case1: shared parameter for all channels
   if (weight_num == 1) {
@@ -338,63 +338,31 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // hardshrink
 // -----------------------------------
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_cpu", [&] {
-    auto lambd_val = lambd.to<scalar_t>();
-    at::CPU_tensor_apply2<scalar_t, scalar_t>(
-      self,
-      out_tensor,
-      [&](
-        scalar_t& self_val,
-        scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : self_val;
-    });
-  });
+  auto out_tensor = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto iter = TensorIterator::unary_op(out_tensor, self);
+  hardshrink_cpu_stub(kCPU, iter, lambd);
   return out_tensor;
 }
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_backward_cpu", [&] {
-    auto lambd_val = lambd.to<scalar_t>();
-    at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-      self,
-      grad,
-      out_tensor,
-      [&](
-        scalar_t& self_val,
-        scalar_t& grad_val,
-        scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
-    });
-  });
+  auto out_tensor = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto iter = TensorIterator::binary_op(out_tensor, grad, self);
+  hardshrink_backward_cpu_stub(kCPU, iter, lambd);
   return out_tensor;
 }
 
 
 Tensor gelu_cpu(const Tensor& self) {
-  const auto X = self.contiguous();
-  Tensor Y = at::native::empty_like(X);
-  GeluKernel(kCPU, X, &Y);
-  return Y;
-}
-
-Tensor gelu_cuda(const Tensor& self) {
-  Tensor Y = at::native::empty_like(self);
-  GeluKernel(kCUDA, self, &Y);
+  Tensor Y = at::native::empty_like(self, at::MemoryFormat::Contiguous);
+  auto it = TensorIterator::unary_op(Y, self);
+  GeluKernel(kCPU, it);
   return Y;
 }
 
 Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
-  const auto X = self.contiguous();
-  Tensor dX = at::native::empty_like(X);
-  GeluBackwardKernel(kCPU, grad.contiguous(), X, &dX);
-  return dX;
-}
-
-Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(self);
-  GeluBackwardKernel(kCUDA, grad, self, &dX);
+  Tensor dX = at::native::empty_like(self, at::MemoryFormat::Contiguous);
+  auto it = TensorIterator::binary_op(dX, grad, self);
+  GeluBackwardKernel(kCPU, it);
   return dX;
 }
 

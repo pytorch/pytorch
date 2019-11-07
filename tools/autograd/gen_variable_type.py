@@ -26,11 +26,11 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
-from .env import BUILD_NAMEDTENSOR
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
+    'set_data', 'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -48,8 +48,41 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'zero': 'zeros_like',
-    'fill': 'full_like',
+    'zero': 'zeros_like',  # replacing aten::zero_ with aten::zeros_like
+    'fill': 'full_like',  # replacing aten::fill_ with aten::full_like
+}
+
+# `torch.jit.trace` have undocumented keyword argument `_force_outplace`,
+# which force jit to replace functions with outplace variants (for
+# example `aten::add_` becomes `aten::add`).
+#
+# This replacement implemented in-place with minimum modifications of
+# arguments stack (as it assumes that outplace call has the same arguments
+# as inplace version).
+#
+# However there are no such substitutions available for `aten::fill_`
+# and `aten::zero_` operators, as we never implemented `aten::fill`
+# and `aten::zero`. So jit tracing hack replacing `aten::zero_` with
+# `aten::zeros_like` and replacing `aten::fill_` with `aten::full_like`.
+#
+# But as they potentially can have different arguments, we also have
+# to hack into the stack and add missing ones.
+#
+# A possible alternative would be:
+#
+#  - Add `aten::fill` and `aten::zero`
+#
+#  - Or keep `aten::zeros_like` arguments aligned with `aten::zero_`
+# arguments (inside of the `native_functions.yaml`)
+RENAME_TRACE_ADD_ARGS = {
+    'fill': '''\
+    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
+    'zero': '''\
+    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
 }
 
 # (declaration name, argument name) -> attribute name
@@ -79,6 +112,8 @@ DONT_REQUIRE_DERIVATIVE = {
     '_sobol_engine_initialize_state_',
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
+    # Quantize functions should not record gradients
+    'quantize_per_tensor', 'quantize_per_channel'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
@@ -100,7 +135,7 @@ if (${tensor_name}_storage_saved.has_value())
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (Tensor tensor : ${tensorlist_name})
+for (const Tensor& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
     tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
 """)
@@ -142,17 +177,27 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals}) ;
+${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)
 
+UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.registerVariableOp<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -172,7 +217,7 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
-grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
+grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
@@ -216,10 +261,11 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 """)
 
 SELECT = CodeTemplate("""\
+
 if (${cond}) {
   ${true}
 } else {
@@ -280,11 +326,6 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
-    if BUILD_NAMEDTENSOR:
-        # Short-term plan: Don't support tracing Dimname.
-        # Long-term plan: Add Dimname as a first-class type to the JIT.
-        if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
-            return False
     # Operations involving Storage or Type are not traceable at the moment
     if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False
@@ -401,7 +442,21 @@ def format_prerecord_trace(declaration):
     is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
 
     local['set_op_name'] = format_trace_op_name(declaration)
-    local['add_trace_inputs'] = format_trace_inputs(declaration)
+
+    is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
+    add_args = ''
+    if is_inplace:
+        api_name = uninplace_api_name(declaration['api_name'])
+        add_args = RENAME_TRACE_ADD_ARGS.get(api_name, '')
+    if add_args:
+        select_params = {}
+        select_params['cond'] = 'tracer_state->force_outplace'
+        select_params['true'] = add_args
+        select_params['false'] = ''
+        additional_inputs = SELECT.substitute(select_params)
+    else:
+        additional_inputs = ''
+    local['add_trace_inputs'] = format_trace_inputs(declaration) + additional_inputs
 
     local['inplace_guard'] = ''
     if is_inplace:
@@ -463,8 +518,13 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-            declaration, formal_types=formal_types))
+        if declaration['use_c10_dispatcher'] == 'full':
+            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        else:
+            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
@@ -487,7 +547,7 @@ def emit_body(declaration):
     inplace = declaration['inplace']
     is_out_fn = name.endswith('_out')
     modifies_arguments = inplace or is_out_fn
-    returns_void = len(returns) == 1 and returns[0]['type'] == 'void'
+    returns_void = len(returns) == 0
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
@@ -609,7 +669,7 @@ def emit_body(declaration):
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
             body = []
-            body.append(DECLARE_GRAD_FN.substitute(op='Function'))
+            body.append(DECLARE_GRAD_FN.substitute(op='Node'))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
                 args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
@@ -660,7 +720,10 @@ def emit_body(declaration):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
+                    is_inplace_view = "as_variable_ref({}).is_view()".format(var)
+                    expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
+                else:
+                    expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
@@ -739,7 +802,7 @@ def emit_body(declaration):
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable({})'.format(call), []
+            return 'as_variable(std::move({}))'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -9,10 +9,12 @@
 
 #include <c10/util/Optional.h>
 
-#include <memory>
 #include <iostream>
+#include <memory>
 #include <type_traits>
+#include <array>
 
+struct ClassType;
 namespace torch {
 namespace jit {
 struct Function;
@@ -28,27 +30,26 @@ struct FunctionSchema;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
-_(TensorType) \
-_(DimensionedTensorType) \
-_(CompleteTensorType) \
-_(AutogradZeroTensorType) \
-_(TupleType) \
-_(ListType) \
-_(DictType) \
-_(NumberType) \
-_(FloatType) \
-_(FutureType) \
-_(IntType) \
-_(NoneType) \
-_(StringType) \
-_(GeneratorType) \
-_(BoolType) \
-_(OptionalType) \
-_(VarType) \
-_(ProfiledTensorType) \
-_(DeviceObjType) \
-_(FunctionType) \
-_(ClassType) \
+  _(AnyType)                \
+  _(TensorType)             \
+  _(TupleType)              \
+  _(ListType)               \
+  _(DictType)               \
+  _(NumberType)             \
+  _(FloatType)              \
+  _(FutureType)             \
+  _(IntType)                \
+  _(NoneType)               \
+  _(StringType)             \
+  _(GeneratorType)          \
+  _(BoolType)               \
+  _(OptionalType)           \
+  _(VarType)                \
+  _(DeviceObjType)          \
+  _(FunctionType)           \
+  _(ClassType)              \
+  _(CapsuleType)            \
+  _(InterfaceType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -56,49 +57,41 @@ enum class TypeKind {
 #undef DEFINE_TYPE
 };
 
-CAFFE2_API const char * typeKindToString(TypeKind kind);
-
-#define DEFINE_IS_SUBCLASS(_kind) \
-  bool isSubclass(const TypeKind kind) const override { \
-    return kind == TypeKind::_kind; \
-  }
+CAFFE2_API const char* typeKindToString(TypeKind kind);
 
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
 struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
-private:
+ private:
   TypeKind kind_;
-  template<typename T>
-  static std::shared_ptr<T> sliceType(std::shared_ptr<const T> ptr) {
-    auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
-    // XXX: the line above will correctly slice the struct, and make its runtype
-    // type exactly equal to T. However, kind_ is a field of Type, so it will simply
-    // be copied, and we need to fix it in here to match the dynamic type.
-    result->kind_ = T::Kind;
-    return result;
-  }
 
-protected:
-  Type(TypeKind kind)
-    : kind_(kind) {}
+ protected:
+  Type(TypeKind kind) : kind_(kind) {}
 
-public:
+ public:
   virtual bool operator==(const Type& rhs) const = 0;
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
-  virtual bool isSubtypeOf(const TypePtr rhs) const;
 
-  // If this class can be cast to the kind passed in
-  // This removes the need for RTTI
-  virtual bool isSubclass(const TypeKind kind) const = 0;
+  // if this returns false and the why_not stream is non-null, it contains
+  // additional details that describe why this is not a subtype of 'rhs'.
+  // This additional information should only contain details that are not obvious
+  // from the python_str() that describes the type. For instance it is clear that `int <: str` is false
+  // but not clear why `Foo <: InterfaceBar` might be false.
+  virtual bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const;
+  virtual bool is_module() const;
+  bool isSubtypeOf(const TypePtr rhs) const {
+    return isSubtypeOfExt(rhs, nullptr);
+  }
 
   // How this type will appear in FunctionSchema declarations
   virtual std::string str() const = 0;
 
   // How this type will appear as if it were a type annotation in Python
-  // which is sometimes different than how it appears in declarations (e.g. int[] vs List[int])
+  // which is sometimes different than how it appears in declarations (e.g.
+  // int[] vs List[int])
   virtual std::string python_str() const {
     return str();
   }
@@ -108,7 +101,7 @@ public:
   }
 
   virtual bool requires_grad() const {
-    for(const auto& ct : containedTypes()) {
+    for (const auto& ct : containedTypes()) {
       if (ct->requires_grad()) {
         return true;
       }
@@ -118,41 +111,27 @@ public:
 
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.
-  // NOTE: if the cast succeeds, but the casted kind is not the
-  // run-time kind of the type, we also slice the structure, so
-  // that assignments of those types to values don't accidentally
-  // inherit more detailed information from subclasses.
-  template<typename T>
+  template <typename T>
   std::shared_ptr<T> cast() {
-    std::shared_ptr<T> r = nullptr;
-    if (isSubclass(T::Kind)) {
-      r = std::static_pointer_cast<T>(shared_from_this());
+    if (T::Kind == kind()) {
+      return std::static_pointer_cast<T>(shared_from_this());
     }
-    if (!r || T::Kind == kind()) {
-      return r;
-    } else {
-      return sliceType<T>(r);
-    }
+    return nullptr;
   }
-  template<typename T>
+  template <typename T>
   std::shared_ptr<const T> cast() const {
-    std::shared_ptr<const T> r = nullptr;
-    if (isSubclass(T::Kind)) {
-      r = std::static_pointer_cast<const T>(shared_from_this());
+    if (T::Kind == kind()) {
+      return std::static_pointer_cast<const T>(shared_from_this());
     }
-    if (!r || T::Kind == kind()) {
-      return r;
-    } else {
-      return sliceType<T>(r);
-    }
+    return nullptr;
   }
-  template<typename T>
+  template <typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
     AT_ASSERT(r);
     return r;
   }
-  template<typename T>
+  template <typename T>
   std::shared_ptr<const T> expect() const {
     auto r = cast<const T>();
     AT_ASSERT(r);
@@ -162,8 +141,8 @@ public:
   virtual bool hasFreeVariables() const {
     return false;
   }
-  // list of types this type contains, e.g. for a List then element type of a list
-  // for a tuple, the types of the tuple elements
+  // list of types this type contains, e.g. for a List then element type of a
+  // list for a tuple, the types of the tuple elements
   virtual at::ArrayRef<TypePtr> containedTypes() const {
     return {};
   }
@@ -172,29 +151,55 @@ public:
   TypePtr withContained(std::vector<TypePtr> contained_types) {
     auto current_contained = containedTypes();
     AT_ASSERT(current_contained.size() == contained_types.size());
-    if(current_contained.equals(contained_types)) {
+    if (current_contained.equals(contained_types)) {
       return shared_from_this();
     }
     return createWithContained(std::move(contained_types));
   }
-  // per-type constructor, you only need to override this if the containedTypes()
-  // is not empty
-  virtual TypePtr createWithContained(std::vector<TypePtr> contained_types) const {
-    AT_ERROR("type with contained types did not overload createWithContained: ", str());
+  // per-type constructor, you only need to override this if the
+  // containedTypes() is not empty
+  virtual TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const {
+    AT_ERROR(
+        "type with contained types did not overload createWithContained: ",
+        str());
   }
+};
+
+struct AnyType;
+using AnyTypePtr = std::shared_ptr<AnyType>;
+// Any is the top of the type hierarchy, all other types are subtypes
+// T <: Any, forall T
+struct CAFFE2_API AnyType : public Type {
+  static AnyTypePtr create() {
+    return AnyTypePtr(
+        new AnyType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Any";
+  }
+  static const TypeKind Kind = TypeKind::AnyType;
+  // global singleton
+  static AnyTypePtr get();
+
+ private:
+  AnyType() : Type(TypeKind::AnyType) {}
 };
 
 inline std::string toString(TypePtr typePtr) {
   return typePtr->str();
 }
 
-inline bool operator!=(const Type & lhs, const Type & rhs) {
+inline bool operator!=(const Type& lhs, const Type& rhs) {
   return !(lhs == rhs);
 }
 
 // common base for all types that have a single sub element
 // e.g. Future[T], Option[T], List[T]
-template<TypeKind K, typename T>
+template <TypeKind K, typename T>
 struct SingleElementType : public Type {
   static const TypeKind Kind = K;
 
@@ -211,7 +216,7 @@ struct SingleElementType : public Type {
   }
 
   bool operator==(const Type& rhs) const override {
-    if(auto rhs_ = rhs.cast<T>()) {
+    if (auto rhs_ = rhs.cast<T>()) {
       return *getElementType() == *rhs_->getElementType();
     }
     return false;
@@ -224,28 +229,25 @@ struct SingleElementType : public Type {
   TypePtr elem;
 };
 
-
 struct OptionalType;
 using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // This type represents an optional type, for each element type.
 // Optional[T] can accept both T and None(nullopt in C++)
 // Subtype hierarchy for Optional:
-// 1. Optional[T] isSubtypeOf Optional[R] iff T isSubtypeOf R
-// 2. T isSubtypeOf Optional[R] if T isSubtypeOf R
-// Note: NoneType is NOT a subtype of any optional.
-// instead NoneType is convertable in schema matching to any Optional[T]
-// it is handled this way because it is not possible to match None to Optional[T]
-// and extract T. Intead, we always create a None constant instruction
-// with a particular type: v: Optional[int] = None()
-struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType, OptionalType> {
+// 1. Optional[T] <: Optional[R] iff T <: R
+// 2. T <: Optional[R] if T <: R
+// 3. None <: Optional[T] for all T
+struct CAFFE2_API OptionalType
+    : public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
-    // Optional is a union of [None, T], so Optional[[Optional[T]]] -> Optional[T]
+    // Optional is a union of [None, T], so Optional[[Optional[T]]] ->
+    // Optional[T]
     if (auto opt_ptr = element->cast<OptionalType>()) {
       return opt_ptr;
     }
-    return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
+    return OptionalTypePtr(
+        new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(OptionalType);
 
   std::string str() const override {
     std::stringstream ss;
@@ -258,166 +260,33 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return ss.str();
   }
 
-  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
     AT_ASSERT(contained_types.size() == 1);
     return create(contained_types[0]);
   }
 
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if (Type::isSubtypeOf(rhs)) {
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOf(rhs_->getElementType());
+    if (auto rhs_ = rhs->cast<OptionalType>()) {
+      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
     }
     return false;
   }
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
-private:
+
+ private:
   OptionalType(TypePtr elem) : SingleElementType(elem) {}
 };
 
-struct TensorType;
-using TensorTypePtr = std::shared_ptr<TensorType>;
-// This type represents a single Tensor, with an unknown shape.
-// Subtype hierarchy for Tensor Types (TensorType as the base type):
-// CompleteTensorType <: DimensionedTensorType <: TensorType
-// AutogradZeroTensorType <: TensorType
-struct CAFFE2_API TensorType : public Type {
-  static TensorTypePtr create() {
-    return TensorTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
-  }
-  DEFINE_IS_SUBCLASS(TensorType);
-
-  bool requires_grad() const override { return true; }
-
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  std::string str() const override {
-    return "Tensor";
-  }
-  static const TypeKind Kind = TypeKind::TensorType;
-  // global singleton
-  static TensorTypePtr get();
-protected:
-  TensorType(TypeKind kind=TypeKind::TensorType)
-  : Type(kind) {}
-};
-
-struct AutogradZeroTensorType;
-using AutogradZeroTensorTypePtr = std::shared_ptr<AutogradZeroTensorType>;
-// This type represents an undefined tensor.
-struct CAFFE2_API AutogradZeroTensorType : public TensorType {
-  static AutogradZeroTensorTypePtr create() {
-    return AutogradZeroTensorTypePtr(new AutogradZeroTensorType()); // NOLINT(modernize-make-shared)
-  }
-
-  DEFINE_IS_SUBCLASS(AutogradZeroTensorType);
-
-  bool requires_grad() const override { return false; }
-
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::TensorType ||
-           rhs->kind() == TypeKind::AutogradZeroTensorType ||
-           TensorType::isSubtypeOf(rhs);
-  }
-  std::string str() const override {
-    return "AutogradZeroTensor";
-  }
-
-  static const TypeKind Kind = TypeKind::AutogradZeroTensorType;
-  // global singleton
-  static AutogradZeroTensorTypePtr get();
-protected:
-  AutogradZeroTensorType(): TensorType(TypeKind::AutogradZeroTensorType) {}
-};
-
-struct DimensionedTensorType;
-using DimensionedTensorTypePtr = std::shared_ptr<DimensionedTensorType>;
-// This type represents a single Tensor with a specific size
-struct CAFFE2_API DimensionedTensorType : public TensorType {
-  template<typename ... T>
-  static DimensionedTensorTypePtr create( T&& ... all ) {
-    return DimensionedTensorTypePtr(new DimensionedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
-  }
-
-  at::ScalarType scalarType() const { return scalar_type_; }
-  at::Device device() const { return device_; }
-  int64_t dim() const { return dim_; }
-  bool requires_grad() const override { return requires_grad_; }
-
-  DimensionedTensorTypePtr toScalarType(at::ScalarType type){
-    auto t = DimensionedTensorType::create(*this);
-    t->scalar_type_ = type;
-    return t;
-  }
-  DimensionedTensorTypePtr withDim(size_t new_dim) {
-    auto t = DimensionedTensorType::create(*this);
-    t->dim_ = new_dim;
-    return t;
-  }
-  DimensionedTensorTypePtr withRequiresGrad(bool req) {
-    auto t = DimensionedTensorType::create(*this);
-    t->requires_grad_ = req;
-    return t;
-  }
-
-  bool operator==(const Type& rhs) const override {
-    if (rhs.kind() != TypeKind::DimensionedTensorType)
-      return false;
-    auto rt = rhs.expect<DimensionedTensorType>();
-    return scalarType() == rt->scalarType() &&
-           device() == rt->device() &&
-           dim() == rt->dim();
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::TensorType ||
-          (rhs->kind() == TypeKind::DimensionedTensorType && Type::isSubtypeOf(rhs)) ||
-          TensorType::isSubtypeOf(rhs);
-  }
-  bool isSubclass(const TypeKind kind) const override {
-    return kind == TypeKind::TensorType ||
-        kind == TypeKind::DimensionedTensorType;
-  }
-  std::string str() const override {
-    // str is used for user-facing error messages, where we
-    // don't want to reveal underlying size information.
-    return "Tensor";
-  }
-
-  static const TypeKind Kind = TypeKind::DimensionedTensorType;
-
-protected:
-  DimensionedTensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::DimensionedTensorType)
-    : DimensionedTensorType(tensor.scalar_type(),
-                 tensor.device(),
-                 tensor.dim(),
-                 tensor.is_variable() && tensor.requires_grad(),
-                 kind) {}
-  DimensionedTensorType(at::ScalarType scalar_type, at::Device device, int64_t dim, bool requires_grad=true, TypeKind kind=TypeKind::DimensionedTensorType)
-    : TensorType(kind)
-    , scalar_type_(scalar_type)
-    , requires_grad_(at::isFloatingType(scalar_type) && requires_grad)
-    , device_(device)
-    , dim_(dim) {}
-
-  at::ScalarType scalar_type_;
-  bool requires_grad_;
-  at::Device device_;
-  int64_t dim_;
-};
-
-
 template <typename T>
-inline c10::optional<T> merge_primitive (const c10::optional<T>& a, const c10::optional<T>& b)
-{
-  if (a.has_value() && b.has_value() &&
-      a.value() == b.value()) {
+inline c10::optional<T> merge_primitive(
+    const c10::optional<T>& a,
+    const c10::optional<T>& b) {
+  if (a.has_value() && b.has_value() && a.value() == b.value()) {
     return a;
   }
   return c10::optional<T>{};
@@ -428,135 +297,185 @@ inline c10::optional<T> merge_primitive (const c10::optional<T>& a, const c10::o
 // an empty c10::optional in `sizes_`. If a rank is dynamic, the entire
 // `sizes_` becomes the empty optional.
 struct CAFFE2_API VaryingShape {
-
-  VaryingShape(const IntArrayRef& ref)
-  : size_(ref.size())
-  , dims_(ref.begin(), ref.end())
-  {
-  }
-
+  using ListOfOptionalInts = std::vector<c10::optional<int64_t>>;
   VaryingShape(const std::vector<int64_t>& vec)
-  : size_(vec.size())
-  , dims_(vec.begin(), vec.end())
-  {
+      : VaryingShape(ListOfOptionalInts(vec.begin(), vec.end())) {}
+
+  VaryingShape(c10::ArrayRef<int64_t> vec)
+      : VaryingShape(ListOfOptionalInts(vec.begin(), vec.end())){}
+
+  VaryingShape(c10::optional<size_t> size = c10::nullopt) : dims_(c10::nullopt) {
+    if (size) {
+      dims_ = ListOfOptionalInts(*size);
+    }
   }
 
-  VaryingShape(c10::optional<size_t> size)
-  : size_(size)
-  , dims_(size ? size.value() : 0)
-  {
+  VaryingShape(ListOfOptionalInts dims)
+  : dims_(std::move(dims)) {}
+
+  VaryingShape(size_t size) : VaryingShape(c10::optional<size_t>(size)) {}
+
+  bool operator==(const VaryingShape& other) const {
+    return dims_ == other.dims_;
   }
 
-  bool operator ==(const VaryingShape &other) const
-  {
-    return size_ == other.size_ && dims_ == dims_;
+  const c10::optional<int64_t>& operator[](int i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
   }
 
-  const c10::optional<int64_t>& operator [] (int i) const
-  {
-      if (!size_)
-      {
-        throw std::runtime_error("Rank isn't fixed");
-      }
-      return dims_[i];
+  c10::optional<size_t> size() const {
+    if (!dims_) {
+      return c10::nullopt;
+    }
+    const auto& dims = dims_.value();
+    return dims.size();
   }
 
-  c10::optional<size_t> size() const
-  {
-    AT_ASSERT(size_ == dims_.size());
-    return size_;
+  const c10::optional<ListOfOptionalInts>& sizes() const {
+    return dims_;
   }
 
   VaryingShape merge(const VaryingShape& other) const;
 
-  c10::optional<std::vector<int64_t>> concrete_sizes() const
-  {
-    c10::optional<std::vector<int64_t>> empty{};
-    std::vector<int64_t> sizes;
-    if (!size_)
-    {
-      return empty;
+  c10::optional<std::vector<int64_t>> concrete_sizes() const {
+    if (!dims_) {
+      return c10::nullopt;
     }
-    for (auto d : dims_)
-    {
-      if (!d)
-      {
-        return empty;
+    std::vector<int64_t> sizes;
+    for (auto d : *dims_) {
+      if (!d) {
+        return c10::nullopt;
       }
       sizes.push_back(d.value());
     }
-
     return sizes;
   }
 
-private:
-  c10::optional<size_t> size_;
-  std::vector<c10::optional<int64_t>> dims_;
+  bool isComplete() const {
+    if (!dims_) {
+      return false;
+    }
+    for (auto d : *dims_) {
+      if(!d) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+ private:
+  c10::optional<ListOfOptionalInts> dims_;
 };
 
 using VaryingStrides = VaryingShape;
 
-struct ProfiledTensorType;
-using ProfiledTensorTypePtr = std::shared_ptr<ProfiledTensorType>;
+struct TensorType;
+using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
-struct CAFFE2_API ProfiledTensorType : public TensorType {
-
-  static ProfiledTensorTypePtr create(const at::Tensor& t) {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(t));
+struct CAFFE2_API TensorType : public Type {
+  static TensorTypePtr create(const at::Tensor& t) {
+    return TensorTypePtr(new TensorType(t));
   }
 
-  static ProfiledTensorTypePtr create(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
-  {
-      return ProfiledTensorTypePtr(new ProfiledTensorType(scalar_type, device, sizes, strides, requires_grad));
+  static TensorTypePtr create(c10::optional<at::ScalarType> scalar_type,
+                              c10::optional<Device> device,
+                              const VaryingShape &sizes,
+                              const VaryingStrides &strides,
+                              c10::optional<bool> requires_grad,
+                              c10::optional<bool> undefined = false) {
+    return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides,
+                                        requires_grad, undefined));
   }
 
-  static ProfiledTensorTypePtr create(ProfiledTensorTypePtr pttp) {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(
-        pttp->scalarType(),
-        pttp->device(),
-        pttp->sizes(),
-        pttp->strides(),
-        pttp->requiresGrad()));
+  static TensorTypePtr create(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      c10::optional<size_t> dim,
+      c10::optional<bool> requires_grad) {
+    return TensorType::create(
+        scalar_type,
+        device,
+        VaryingShape(dim),
+        VaryingShape(dim),
+        requires_grad);
   }
 
-  const VaryingShape& sizes() const { return sizes_; }
-  const VaryingStrides& strides() const { return strides_; }
-  c10::optional<at::Device> device() const { return device_; }
-  c10::optional<at::ScalarType> scalarType() const { return scalar_type_; }
-  c10::optional<bool> requiresGrad() const { return requires_grad_; }
+  // overloaded create variadic template argument as it could not distinguish
+  // initializer list
+  static TensorTypePtr createContiguous(
+      at::ScalarType scalar_type,
+      at::Device device,
+      at::IntArrayRef sizes) {
+    return create(
+        scalar_type,
+        device,
+        VaryingShape(sizes),
+        VaryingShape(contiguousStridesOf(sizes)),
+        c10::nullopt);
+  }
+  static TensorTypePtr create(
+      at::ScalarType scalar_type,
+      at::Device device,
+      at::IntArrayRef sizes,
+      at::IntArrayRef strides) {
+    return create(
+        scalar_type,
+        device,
+        VaryingShape(sizes),
+        c10::VaryingShape(strides),
+        c10::nullopt);
+  }
+  static TypePtr fromNumberType(TypePtr typ);
+  static TypePtr fromBoolType();
+
+  c10::optional<size_t> dim() const {
+    return sizes().size();
+  }
+
+  const VaryingShape& sizes() const {
+    return sizes_;
+  }
+  const VaryingStrides& strides() const {
+    return strides_;
+  }
+  c10::optional<at::Device> device() const {
+    return device_;
+  }
+  c10::optional<at::ScalarType> scalarType() const {
+    return scalar_type_;
+  }
+  c10::optional<bool> requiresGrad() const {
+    return requires_grad_;
+  }
+  bool requires_grad() const override {
+    return requires_grad_ ? *requires_grad_ : true;
+  }
+
 
   bool operator==(const Type& rhs) const override {
-    if(rhs.kind() != kind())
-    {
+    if (rhs.kind() != kind()) {
       return false;
     }
 
-    auto rt = rhs.expect<ProfiledTensorType>();
-    return scalar_type_ == rt->scalarType() &&
-           sizes() == rt->sizes() &&
-           strides() == rt->strides() &&
-           device() == rt->device();
+    auto rt = rhs.expect<TensorType>();
+    return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
+           strides() == rt->strides() && device() == rt->device() &&
+           requiresGrad() == rt->requiresGrad() &&
+           undefined() == rt->undefined();
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if (rhs->kind() == TypeKind::ProfiledTensorType)
-      return *expect<ProfiledTensorType>() == *rhs;
-    return rhs->kind() == TypeKind::TensorType ||
-           TensorType::isSubtypeOf(rhs);
-  }
-  bool isSubclass(const TypeKind kind) const override {
-    return kind == TypeKind::TensorType ||
-           kind == TypeKind::ProfiledTensorType;
-  }
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
   std::string str() const override;
 
-  c10::optional<size_t> numel() const
-  {
+  c10::optional<size_t> numel() const {
     size_t prod = 1;
     const auto& shape = sizes();
 
-    for(size_t i = 0; i < shape.size(); i++) {
-      if (!shape[i])
-      {
+    for (size_t i = 0; i < shape.size(); i++) {
+      if (!shape[i]) {
         return c10::optional<size_t>{};
       }
       prod *= shape[i].value();
@@ -564,153 +483,160 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
     return prod;
   }
 
-  ProfiledTensorTypePtr merge(ProfiledTensorTypePtr other)
-  {
-    auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-    auto dev = merge_primitive(device(), other->device());
-    auto sz = sizes().merge(other->sizes());
-    auto srs = strides().merge(other->strides());
-    auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-    return ProfiledTensorType::create(scalar_type, dev, sz, srs, gr);
+  TensorTypePtr withRequiresGrad(c10::optional<bool> s) {
+    auto copy = clone();
+    copy->requires_grad_ = s;
+    return copy;
   }
 
-  static const TypeKind Kind = TypeKind::ProfiledTensorType;
+  TensorTypePtr withScalarType(c10::optional<ScalarType> st) {
+    auto copy = clone();
+    copy->scalar_type_ = st;
+    return copy;
+  }
 
-private:
-  ProfiledTensorType(const at::Tensor& tensor)
-    : TensorType()
-    , scalar_type_(tensor.scalar_type())
-    , device_(tensor.device())
-    , sizes_(tensor.sizes().vec())
-    , strides_(tensor.strides().vec())
-    , requires_grad_(tensor.requires_grad()) {}
-    ProfiledTensorType(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
-    : TensorType()
-    , scalar_type_(scalar_type)
-    , device_(device)
-    , sizes_(sizes)
-    , strides_(strides)
-    , requires_grad_(requires_grad)
-    {}
+
+  TensorTypePtr withDim(c10::optional<size_t> d) {
+    auto copy = clone();
+    copy->sizes_ = VaryingShape(d);
+    copy->strides_ = VaryingShape(d);
+    return copy;
+  }
+
+  TensorTypePtr withSizesStrides(
+      at::IntArrayRef sizes,
+      at::IntArrayRef strides) const {
+    auto cloned = clone();
+    cloned->sizes_ = VaryingShape(sizes);
+    cloned->strides_ = VaryingStrides(strides);
+    return cloned;
+  }
+
+  TensorTypePtr withSizes(at::IntArrayRef sizes) const {
+    return withSizesStrides(
+        sizes, contiguousStridesOf(sizes));
+  }
+
+  TensorTypePtr dimensionedOnly() const {
+    auto copy = clone();
+    copy->sizes_ = VaryingShape(sizes().size());
+    copy->strides_ = VaryingShape(sizes().size());
+    return copy;
+  }
+
+  TensorTypePtr contiguous() const {
+    auto cloned = clone();
+    if (auto concrete_sizes = sizes().concrete_sizes()) {
+      cloned->strides_ = VaryingShape(contiguousStridesOf(*concrete_sizes));
+    } else  {
+      cloned->strides_ = VaryingShape(sizes().size());
+    }
+    return cloned;
+  }
+
+  TensorTypePtr merge(TensorTypePtr other) const;
+
+  // is all information about the type specified except for autograd?
+  // This replaces the notion of a 'CompleteTensorType' that used to exist
+  // in the type-hierarchy. Excluding require_grad and undefined allows
+  // this to match the old behavior.
+  bool isComplete() const {
+    return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
+  }
+
+  // this property is used by GuardElimination
+  // please see `checkInputs` for more details
+  bool isSummarized() const {
+    return !(isComplete() && requiresGrad().has_value() &&
+             undefined().has_value());
+  }
+
+  TensorTypePtr withUndefined() {
+    auto r = clone();
+    r->undefined_ = true;
+    return r;
+  }
+
+  TensorTypePtr withPossiblyUndefined() {
+    auto r = clone();
+    r->undefined_ = c10::nullopt;
+    return r;
+  }
+
+  c10::optional<bool> undefined() const { return undefined_; }
+
+  static TensorTypePtr get();
+
+  static const TypeKind Kind = TypeKind::TensorType;
+
+ private:
+  TensorType(const at::Tensor& tensor)
+      : Type(TypeKind::TensorType),
+        scalar_type_(tensor.scalar_type()),
+        device_(tensor.device()),
+        sizes_(tensor.sizes().size()),
+        strides_(tensor.sizes().size()),
+        requires_grad_(tensor.requires_grad()),
+        undefined_(!tensor.defined()) {
+    if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
+      sizes_ = tensor.sizes().vec();
+      strides_ = tensor.strides().vec();
+    }
+  }
+  TensorType(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape& sizes,
+      const VaryingStrides& strides,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined = false)
+      : Type(TypeKind::TensorType),
+        scalar_type_(scalar_type),
+        device_(device),
+        sizes_(sizes),
+        strides_(strides),
+        requires_grad_(requires_grad),
+        undefined_(undefined) {}
+
+  TensorTypePtr clone() const {
+    return TensorTypePtr(new TensorType(
+        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
+  }
+
+  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
+    std::vector<int64_t> strides(sizes.size());
+    if (sizes.empty()) // zero-dim case
+      return strides;
+    strides.back() = 1;
+    for (size_t i = strides.size() - 1; i > 0; i--) {
+      strides[i - 1] = strides[i] * sizes[i];
+    }
+    return strides;
+  }
 
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
   VaryingShape sizes_;
   VaryingStrides strides_;
   c10::optional<bool> requires_grad_;
-};
-
-struct CompleteTensorType;
-using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
-// This type represents a single Tensor with a specific size
-struct CAFFE2_API CompleteTensorType : public DimensionedTensorType {
-  template<typename ... T>
-  static CompleteTensorTypePtr create( T&& ... all ) {
-    return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
-  }
-
-  // overloaded create variadic template argument as it could not distinguish initializer list
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes) {
-    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes)); // NOLINT(modernize-make-shared)
-  }
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides) {
-    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides)); // NOLINT(modernize-make-shared)
-  }
-
-  const std::vector<int64_t>& sizes() const { return sizes_; }
-  const std::vector<int64_t>& strides() const { return strides_; }
-
-  TypePtr withSizesStrides(at::IntArrayRef sizes, at::IntArrayRef strides) const {
-    return CompleteTensorType::create(scalar_type_, device_, sizes, strides);
-  }
-
-  TypePtr withSizes(at::IntArrayRef sizes) const {
-    return withSizesStrides(sizes, CompleteTensorType::contiguousStridesOf(sizes));
-  }
-
-  CompleteTensorTypePtr contiguous() const {
-    auto t = CompleteTensorType::create(*this);
-    t->strides_ = CompleteTensorType::contiguousStridesOf(sizes_);
-    return t;
-  }
-
-  CompleteTensorTypePtr toScalarType(at::ScalarType type){
-    auto t = CompleteTensorType::create(*this);
-    t->scalar_type_ = type;
-    return t;
-  }
-
-  bool operator==(const Type& rhs) const override {
-    if(rhs.kind() != kind())
-    {
-      return false;
-    }
-
-    auto rt = rhs.expect<CompleteTensorType>();
-    return scalarType() == rt->scalarType() &&
-           sizes() == rt->sizes() &&
-           strides() == rt->strides() &&
-           device() == rt->device();
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if (rhs->kind() == TypeKind::DimensionedTensorType)
-      return *expect<DimensionedTensorType>() ==  *rhs;
-    return rhs->kind() == TypeKind::TensorType ||
-           TensorType::isSubtypeOf(rhs);
-  }
-  bool isSubclass(const TypeKind kind) const override {
-    return kind == TypeKind::TensorType ||
-           kind == TypeKind::DimensionedTensorType ||
-           kind == TypeKind::CompleteTensorType;
-  }
-  std::string str() const override {
-    // str is used for user-facing error messages, where we
-    // don't want to reveal underlying size information.
-    return "Tensor";
-  }
-  size_t numel() const {
-    size_t prod = 1;
-    for(auto s : sizes()) {
-      prod *= s;
-    }
-    return prod;
-  }
-
-  static const TypeKind Kind = TypeKind::CompleteTensorType;
-
-  static TypePtr fromNumberType(TypePtr typ);
-  static TypePtr fromBoolType();
-
-private:
-  CompleteTensorType(const at::Tensor& tensor)
-    : DimensionedTensorType(tensor, TypeKind::CompleteTensorType)
-    , sizes_(tensor.sizes().vec())
-    , strides_(tensor.strides().vec()) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, bool requires_grad=true)
-    : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides, bool requires_grad=true)
-    : DimensionedTensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
-    , sizes_(sizes.vec())
-    , strides_(strides.vec()) {}
-
-  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
-    std::vector<int64_t> strides(sizes.size());
-    if(sizes.empty()) // zero-dim case
-      return strides;
-    strides.back() = 1;
-    for(size_t i = strides.size() - 1; i > 0; i--) {
-      strides[i-1] = strides[i] * sizes[i];
-    }
-    return strides;
-  }
-
-  std::vector<int64_t> sizes_;
-  std::vector<int64_t> strides_;
+  // we exploit the fact certain tensors must be zero in the autograd to
+  // optimize gradient computation. Such zero tensors are currently implemented
+  // with `UndefinedTensorImpl.` They can be handled only by special operators
+  // (e.g. `AutogradAdd`) and their `Tensor::defined()` property returns false.
+  // Normally, `undefined_` is set to false, unless a type was created
+  // with `withUndefined`
+  // This will also mean that `undefined` tensors will fail
+  // `subtypeOf(TensorType::get())` check
+  // undefined_ may become `c10::nullopt` if the tensor was observed to be both
+  // defined and undefined. However, no tensor type starts out with
+  // `undefined_` set to `c10::nullopt`
+  c10::optional<bool> undefined_;
 };
 
 struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
-struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListType> {
+struct CAFFE2_API ListType
+    : public SingleElementType<TypeKind::ListType, ListType> {
   // It's not exactly a singleton, but there should be exactly one instance of
   // List[T] for every T
   friend struct Type;
@@ -719,7 +645,7 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
     return ListTypePtr(
         new ListType(std::forward<T>(all)...)); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(ListType);
+
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
@@ -730,7 +656,8 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
     ss << "List[" << getElementType()->python_str() << "]";
     return ss.str();
   }
-  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
   }
   // common cast List[Tensor]
@@ -738,8 +665,9 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofBools();
-private:
- ListType(TypePtr elem) : SingleElementType(elem) {}
+
+ private:
+  ListType(TypePtr elem) : SingleElementType(elem) {}
 };
 
 struct DictType;
@@ -750,20 +678,26 @@ struct CAFFE2_API DictType : public Type {
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
     switch (key->kind()) {
+      case TypeKind::AnyType:
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
+      case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
       default:
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, and string keys are supported");
+            "', only int, float, Tensor and string keys are supported");
     }
   }
 
+  // aligned with the format in FunctionSchema
   std::string str() const override {
-    return python_str();
+    std::stringstream ss;
+    ss << "Dict(" << getKeyType()->str() << ", " << getValueType()->str()
+       << ")";
+    return ss.str();
   }
 
   std::string python_str() const override {
@@ -788,8 +722,6 @@ struct CAFFE2_API DictType : public Type {
   TypePtr getValueType() const {
     return types.at(1);
   }
-
-  DEFINE_IS_SUBCLASS(DictType);
 
   bool hasFreeVariables() const override {
     return has_free_variables;
@@ -820,14 +752,14 @@ struct CAFFE2_API DictType : public Type {
 struct FutureType;
 using FutureTypePtr = std::shared_ptr<FutureType>;
 
-struct CAFFE2_API FutureType : public SingleElementType<TypeKind::FutureType, FutureType> {
+struct CAFFE2_API FutureType
+    : public SingleElementType<TypeKind::FutureType, FutureType> {
   friend struct Type;
-  template<typename ... T>
+  template <typename... T>
   static FutureTypePtr create(TypePtr elem) {
-    return FutureTypePtr(new FutureType(std::move(elem))); // NOLINT(modernize-make-shared)
+    return FutureTypePtr(
+        new FutureType(std::move(elem))); // NOLINT(modernize-make-shared)
   }
-
-  DEFINE_IS_SUBCLASS(FutureType);
 
   std::string str() const override {
     std::stringstream ss;
@@ -839,10 +771,12 @@ struct CAFFE2_API FutureType : public SingleElementType<TypeKind::FutureType, Fu
     ss << "Future[" << getElementType()->python_str() << "]";
     return ss.str();
   }
-  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
   }
-private:
+
+ private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
 
@@ -851,50 +785,53 @@ struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 
 struct CAFFE2_API NamedType : public Type {
-  NamedType(TypeKind tk, c10::optional<c10::QualifiedName> qualifiedName)
-    : Type(tk)
-    , name_(std::move(qualifiedName)) {}
+  NamedType(TypeKind tk, c10::optional<QualifiedName> name)
+      : Type(tk), name_(std::move(name)) {}
 
-  std::string python_str() const;
-  std::string qualname() const;
-  std::string qualifier() const;
-  std::string basename() const;
-
-  const c10::optional<QualifiedName>& qualified_name_obj() const {
+  // Fully qualified name of type
+  // Looks like: "foo.bar.Baz".
+  const c10::optional<QualifiedName>& name() const {
     return name_;
   }
-
- protected:
-  // Fully qualified name of type (note that this has to be globally unique).
-  // Looks like: "foo.bar.Baz".
+private:
   c10::optional<QualifiedName> name_;
 };
+
+// Any should never appear in a named type like a class, namedtuple or
+// interface. If it does, then dynamic type information will be lost in the
+// Pickler, leading to hard-to-track-down bugs that will only occur
+// after saving or loading a model. This is because we rely on the
+// static types in named types to reconstruct type tags of loaded
+// values. Lifting this restriction requires solving the serialization
+// problem first.
+CAFFE2_API void checkNoAny(
+    const Type& base,
+    const char* what,
+    const std::string& attrname,
+    const TypePtr& attrtype);
 
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public NamedType {
-  static std::shared_ptr<FunctionSchema> namedTupleSchemaFromNamesAndTypes(
-      c10::QualifiedName,
-      std::vector<std::string>,
-      std::vector<TypePtr>);
-
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& types);
   static TupleTypePtr create(
-      std::vector<TypePtr> types,
-      c10::optional<c10::QualifiedName> name = c10::nullopt,
-      std::shared_ptr<FunctionSchema> schema = nullptr) {
+      std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
         std::move(types),
-        std::move(name),
-        std::move(schema))); // NOLINT(modernize-make-shared)
+        c10::nullopt,
+        nullptr)); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(TupleType);
+
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
+
   bool operator==(const Type& rhs) const override;
-  bool isSubtypeOf(const TypePtr rhs_) const override;
+  bool isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const override;
 
   std::string str() const override;
   std::string python_str() const override;
@@ -904,29 +841,36 @@ struct CAFFE2_API TupleType : public NamedType {
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elements_;
   }
-  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
-    return create(std::move(contained_types));
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    return std::shared_ptr<TupleType>(
+        new TupleType(std::move(contained_types), name(), schema()));
   }
-  const std::shared_ptr<FunctionSchema> &schema() const {
+  const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
   }
 
   static const TypeKind Kind = TypeKind::TupleType;
-private:
-  TupleType(std::vector<TypePtr> elements_, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema);
 
-  bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
-    if(rhs.kind() != kind())
-    {
+ private:
+  TupleType(
+      std::vector<TypePtr> elements_,
+      c10::optional<c10::QualifiedName> name,
+      std::shared_ptr<FunctionSchema> schema);
+
+  bool compare(
+      const Type& rhs,
+      std::function<bool(const TypePtr, const TypePtr)> fn) const {
+    if (rhs.kind() != kind()) {
       return false;
     }
 
-    const auto & l_elements = elements();
-    const auto & r_elements = rhs.cast<TupleType>()->elements();
-    if(l_elements.size() != r_elements.size())
+    const auto& l_elements = elements();
+    const auto& r_elements = rhs.cast<TupleType>()->elements();
+    if (l_elements.size() != r_elements.size())
       return false;
-    for(size_t i = 0; i < l_elements.size(); ++i) {
-      if(!fn(l_elements[i], r_elements[i]))
+    for (size_t i = 0; i < l_elements.size(); ++i) {
+      if (!fn(l_elements[i], r_elements[i]))
         return false;
     }
     return true;
@@ -947,7 +891,6 @@ struct CAFFE2_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(NumberType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -962,9 +905,9 @@ struct CAFFE2_API NumberType : public Type {
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
   static NumberTypePtr get();
-protected:
-  NumberType(TypeKind kind=TypeKind::NumberType)
-  : Type(kind) {}
+
+ protected:
+  NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
 };
 
 struct FloatType;
@@ -974,7 +917,6 @@ struct CAFFE2_API FloatType : public NumberType {
   static FloatTypePtr create() {
     return FloatTypePtr(new FloatType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(FloatType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -984,16 +926,15 @@ struct CAFFE2_API FloatType : public NumberType {
   std::string python_str() const override {
     return "float";
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::NumberType ||
-           NumberType::isSubtypeOf(rhs);
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
   static FloatTypePtr get();
-private:
-  FloatType()
-  : NumberType(TypeKind::FloatType) {}
+
+ private:
+  FloatType() : NumberType(TypeKind::FloatType) {}
 };
 
 struct IntType;
@@ -1003,7 +944,6 @@ struct CAFFE2_API IntType : public NumberType {
   static IntTypePtr create() {
     return IntTypePtr(new IntType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(IntType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -1013,26 +953,24 @@ struct CAFFE2_API IntType : public NumberType {
   std::string python_str() const override {
     return "int";
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::NumberType ||
-           NumberType::isSubtypeOf(rhs);
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
   static IntTypePtr get();
-private:
-  IntType()
-  : NumberType(TypeKind::IntType) {}
+
+ private:
+  IntType() : NumberType(TypeKind::IntType) {}
 };
 
 struct BoolType;
 using BoolTypePtr = std::shared_ptr<BoolType>;
 // This node represents a Python bool value
 struct CAFFE2_API BoolType : public Type {
-  static BoolTypePtr create( ) {
+  static BoolTypePtr create() {
     return BoolTypePtr(new BoolType());
   }
-  DEFINE_IS_SUBCLASS(BoolType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -1042,9 +980,9 @@ struct CAFFE2_API BoolType : public Type {
   static const TypeKind Kind = TypeKind::BoolType;
   // global singleton
   static BoolTypePtr get();
-private:
-  BoolType()
-  : Type(TypeKind::BoolType) {}
+
+ private:
+  BoolType() : Type(TypeKind::BoolType) {}
 };
 
 struct StringType;
@@ -1054,12 +992,12 @@ struct CAFFE2_API StringType : public Type {
   static StringTypePtr create() {
     return StringTypePtr(new StringType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(StringType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "string";
+    // we only use "str" (not "string") in both FunctionSchema and script
+    return python_str();
   }
   std::string python_str() const override {
     return "str";
@@ -1067,20 +1005,19 @@ struct CAFFE2_API StringType : public Type {
   static const TypeKind Kind = TypeKind::StringType;
   // global singleton
   static StringTypePtr get();
-private:
-  StringType()
-  : Type(TypeKind::StringType) {}
+
+ private:
+  StringType() : Type(TypeKind::StringType) {}
 };
 
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
 using ::torch::jit::Function;
-struct CAFFE2_API FunctionType : public Type {
+struct CAFFE2_API FunctionType : public NamedType {
   static FunctionTypePtr create(Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(FunctionType);
   bool operator==(const Type& rhs) const override {
     if (auto func_type = rhs.cast<FunctionType>()) {
       return func_type->function_ == function_;
@@ -1100,9 +1037,7 @@ struct CAFFE2_API FunctionType : public Type {
   static const TypeKind Kind = TypeKind::FunctionType;
 
  private:
-  FunctionType(Function* function)
-      : Type(TypeKind::FunctionType), function_(function) {}
-
+  FunctionType(Function* function);
   Function* function_;
 };
 
@@ -1113,22 +1048,24 @@ struct CAFFE2_API NoneType : public Type {
   static NoneTypePtr create() {
     return NoneTypePtr(new NoneType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(NoneType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::NoneType;
   }
   std::string str() const override {
     return "None";
   }
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream *why_not) const override {
+    if (rhs->kind() == OptionalType::Kind) {
+      return true;
+    }
+    return Type::isSubtypeOfExt(rhs, why_not);
+  }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
   static NoneTypePtr get();
-private:
-  NoneType()
-  : Type(TypeKind::NoneType) {}
+
+ private:
+  NoneType() : Type(TypeKind::NoneType) {}
 };
 
 struct GeneratorType;
@@ -1136,9 +1073,9 @@ using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
 // This type represents a Generator
 struct CAFFE2_API GeneratorType : public Type {
   static GeneratorTypePtr create() {
-    return GeneratorTypePtr(new GeneratorType()); // NOLINT(modernize-make-shared)
+    return GeneratorTypePtr(
+        new GeneratorType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(GeneratorType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -1148,9 +1085,9 @@ struct CAFFE2_API GeneratorType : public Type {
   static const TypeKind Kind = TypeKind::GeneratorType;
   // global singleton
   static GeneratorTypePtr get();
-private:
-  GeneratorType()
-  : Type(TypeKind::GeneratorType) {}
+
+ private:
+  GeneratorType() : Type(TypeKind::GeneratorType) {}
 };
 
 struct DeviceObjType;
@@ -1158,9 +1095,9 @@ using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
 // This type represents a Generator
 struct CAFFE2_API DeviceObjType : public Type {
   static DeviceObjTypePtr create() {
-    return DeviceObjTypePtr(new DeviceObjType()); // NOLINT(modernize-make-shared)
+    return DeviceObjTypePtr(
+        new DeviceObjType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(DeviceObjType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -1170,11 +1107,10 @@ struct CAFFE2_API DeviceObjType : public Type {
   static const TypeKind Kind = TypeKind::DeviceObjType;
   // global singleton
   static DeviceObjTypePtr get();
-private:
-  DeviceObjType()
-  : Type(TypeKind::DeviceObjType) {}
-};
 
+ private:
+  DeviceObjType() : Type(TypeKind::DeviceObjType) {}
+};
 
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
@@ -1183,7 +1119,6 @@ struct VarType : public Type {
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));
   }
-  DEFINE_IS_SUBCLASS(VarType);
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -1197,41 +1132,61 @@ struct VarType : public Type {
     return true;
   }
   static const TypeKind Kind = TypeKind::VarType;
-private:
+
+ private:
   VarType(std::string name_)
-  : Type(TypeKind::VarType), name_(std::move(name_)) {}
+      : Type(TypeKind::VarType), name_(std::move(name_)) {}
   std::string name_;
 };
 
-CAFFE2_API std::ostream& operator<<(std::ostream & out, const Type & t);
-CAFFE2_API std::ostream& operator<<(std::ostream & out, const VaryingShape & t);
+struct CapsuleType;
+using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
+// This type represents a Python Capsule
+struct CAFFE2_API CapsuleType : public Type {
+  static CapsuleTypePtr create() {
+    return CapsuleTypePtr(new CapsuleType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Capsule";
+  }
+  static const TypeKind Kind = TypeKind::CapsuleType;
+  // global singleton
+  static CapsuleTypePtr get();
+private:
+  CapsuleType()
+  : Type(TypeKind::CapsuleType) {}
+};
+
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const VaryingShape& t);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if (type->kind() == TypeKind::DimensionedTensorType ||
-      type->kind() == TypeKind::CompleteTensorType) {
+  if (type->isSubtypeOf(TensorType::get())) {
     return TensorType::get();
   }
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
-inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
+inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   if (typ->isSubtypeOf(IntType::get())) {
-    return CompleteTensorType::create(at::kLong, at::kCPU, {});
+    return TensorType::createContiguous(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
-    return CompleteTensorType::create(at::kFloat, at::kCPU, {});
+    return TensorType::createContiguous(at::kFloat, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
-    return CompleteTensorType::create(at::kLong, at::kCPU, {});
+    return TensorType::createContiguous(at::kLong, at::kCPU, {});
   }
-  AT_ERROR("unknown number type", typ->str());
+  TORCH_CHECK(false, "Unknown number type: ", typ->str());
+}
+inline TypePtr TensorType::fromBoolType() {
+  return TensorType::createContiguous(at::kLong, at::kCPU, {});
 }
 
-inline TypePtr CompleteTensorType::fromBoolType() {
-  return CompleteTensorType::create(at::kLong, at::kCPU, {});
-}
-
-inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::ScalarType::Double;
   } else if (type == IntType::get()) {
@@ -1239,10 +1194,16 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == BoolType::get()) {
     return at::ScalarType::Bool;
   }
+  return c10::nullopt;
+}
+
+inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+  auto result = tryScalarTypeFromJitType(type);
   AT_ASSERTM(
-      0,
+      result,
       "Add new condition, expected Float, Int, or Bool but got",
       type->str());
+  return *result;
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
@@ -1255,30 +1216,64 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
+CAFFE2_API c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements);
+
 namespace detail {
-template <typename T> struct getTypePtr_ final {
-  static_assert(guts::false_t<T>::value, "Type could not be converted to any of the known types.");
+template <typename T>
+struct getTypePtr_ final {
+  static TypePtr call() {
+    if (!isCustomClassRegistered<T>()) {
+      throw c10::Error("Type could not be converted to any of the known types.", "");
+    }
+    auto res = getCustomClassType<T>();
+    return std::dynamic_pointer_cast<Type>(res.type_);
+  }
 };
 
-template<> struct getTypePtr_<at::Tensor> final {
-  static TypePtr call() { return TensorType::get(); }
+template <>
+struct getTypePtr_<at::Tensor> final {
+  static TypePtr call() {
+    return TensorType::get();
+  }
 };
-template<> struct getTypePtr_<double> final {
-  static TypePtr call() { return FloatType::get(); }
+template <>
+struct getTypePtr_<double> final {
+  static TypePtr call() {
+    return FloatType::get();
+  }
 };
-template<> struct getTypePtr_<int64_t> final {
-  static TypePtr call() { return IntType::get(); }
+template <>
+struct getTypePtr_<int64_t> final {
+  static TypePtr call() {
+    return IntType::get();
+  }
 };
-template<> struct getTypePtr_<bool> final {
-  static TypePtr call() { return BoolType::get(); }
+template <>
+struct getTypePtr_<bool> final {
+  static TypePtr call() {
+    return BoolType::get();
+  }
 };
-template<> struct getTypePtr_<at::Scalar> final {
-  static TypePtr call() { return NumberType::get(); }
+template <>
+struct getTypePtr_<at::Scalar> final {
+  static TypePtr call() {
+    return NumberType::get();
+  }
 };
-template<> struct getTypePtr_<std::string> final {
-  static TypePtr call() { return StringType::get(); }
+template <>
+struct getTypePtr_<at::Generator*> final {
+  static TypePtr call() {
+    return OptionalType::create(GeneratorType::get());
+  }
 };
-template<class T> struct getTypePtr_<std::vector<T>> final {
+template <>
+struct getTypePtr_<std::string> final {
+  static TypePtr call() {
+    return StringType::get();
+  }
+};
+template <class T>
+struct getTypePtr_<std::vector<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
@@ -1293,6 +1288,13 @@ struct getTypePtr_<c10::ArrayRef<T>> final {
 };
 template <class T>
 struct getTypePtr_<c10::List<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <class T, size_t N>
+struct getTypePtr_<std::array<T, N>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
@@ -1321,30 +1323,46 @@ struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
-}
-template<class T> inline TypePtr getTypePtr() {
+} // namespace detail
+template <class T>
+inline TypePtr getTypePtr() {
   // TODO: static_assert that a templated function exists, and throw a friendy
   // error message if not
   return detail::getTypePtr_<T>::call();
 }
 
-CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
-CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
-CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
-
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
-  MatchTypeReturn(TypePtr type) : type(type) {}
-  MatchTypeReturn(std::string errMsg) : errMsg(std::move(errMsg)) {}
+  MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}
+  static MatchTypeReturn Success() {
+    return MatchTypeReturn();
+  }
+  bool success() const {
+    return !reason_.has_value();
+  }
+  const std::string& reason() const {
+    return reason_.value();
+  }
 
-  c10::optional<TypePtr> type; // nullopt if there is no match
-  std::string errMsg; // is there is no match, this contains the reason
+ private:
+  MatchTypeReturn()
+  : reason_(c10::nullopt) {}
+  c10::optional<std::string> reason_; // is there is no match, this contains the reason
 };
 
+// attempt to match the type variables in formal to actual, adding them to type_env.
+// If no match is possible this returns a MatchTypeReturn with r.success() == false
+// and a r.reason() that describes why it could not match.
+// note: It is possible to successfully match a formal, but for type variables
+// in the formal to still not be defined. In particular, None matches Optional[T]
+// but does not define the value of T.
 CAFFE2_API MatchTypeReturn
 matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
-CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
+// replace type variables appearing in `type` with the values in
+// `type_env`. Returns nullptr if a variable used in `type`
+// does not appear in `type_env`
+CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 
 /**
@@ -1360,22 +1378,27 @@ struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
-      std::shared_ptr<CompilationUnit> cu, bool is_module = false);
+      std::weak_ptr<CompilationUnit> cu,
+      bool is_module = false);
 
-  DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return qualname() == user_rhs->qualname();
+      const auto& lhs_name = name().value();
+      const auto& rhs_name = user_rhs->name().value();
+
+      return lhs_name == rhs_name;
     }
     return false;
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + basename() + ">";
+    const auto& n = name().value();
+    return std::string("ClassType<") + n.name() + ">";
   }
 
   std::string python_str() const override {
-    return qualname();
+    const auto& n = name().value();
+    return n.qualifiedName();
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1407,7 +1430,8 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   Function* getMethod(const std::string& name) const;
-  std::vector<Function*> methods() const;
+  const std::vector<Function*>& methods() const;
+  void addMethod(Function* method);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
@@ -1435,7 +1459,12 @@ struct CAFFE2_API ClassType : public NamedType {
     if (auto r = findAttributeSlot(name)) {
       return *r;
     }
-    TORCH_CHECK(false, python_str(), " does not have a field with the name '", name, "'");
+    TORCH_CHECK(
+        false,
+        python_str(),
+        " does not have a field with the name '",
+        name,
+        "'");
   }
 
   bool hasAttribute(const std::string& name) const {
@@ -1446,7 +1475,47 @@ struct CAFFE2_API ClassType : public NamedType {
         attributeNames_.cend();
   }
 
-  size_t addAttribute(const std::string& name, TypePtr type, bool is_parameter=false);
+  size_t addAttribute(
+      const std::string& name,
+      TypePtr type,
+      bool is_parameter = false);
+
+  // [Internal Only] Remove attribute from the ClassType,
+  // caller is responsible to make sure the modification is safe:
+  // it is unsafe to having existing allocations
+  // of this object around anymore, and any code that works on
+  // the attribute is now invalid. Only newly created code is
+  // valid again.
+  void unsafeRemoveAttribute(const std::string& name);
+
+  // Add attribute \p NAME if it doesn't exist or verify that it has a
+  // compatible type otherwise.
+  size_t addOrCheckAttribute(
+      const std::string& name,
+      TypePtr ty,
+      bool is_parameter = false) {
+    auto slot_idx = findAttributeSlot(name);
+    if (!slot_idx) {
+      return addAttribute(name, ty, is_parameter);
+    }
+
+    TORCH_CHECK(
+        is_parameter == this->is_parameter(*slot_idx),
+        "Parameter field mismatch for the field '",
+        name,
+        "'");
+    TypePtr atype = getAttribute(*slot_idx);
+    TORCH_CHECK(
+      ty->isSubtypeOf(atype),
+      ty->python_str(),
+      " is not compatible with the type ",
+      atype->python_str(),
+      " for the field '",
+      name,
+      "'");
+    return *slot_idx;
+  }
+
 
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
@@ -1464,17 +1533,37 @@ struct CAFFE2_API ClassType : public NamedType {
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
-  bool is_module() const {
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    auto ptr = ClassType::create(name(), compilation_unit_);
+    AT_ASSERT(numAttributes() == contained_types.size());
+    for(size_t i = 0; i < attributeNames_.size(); ++i) {
+      AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
+      ptr->addAttribute(attributeNames_[i], contained_types[i]);
+    }
+    // Copy methods over
+    for (const auto& method : methods()) {
+      ptr->addMethod(method);
+    }
+    return ptr;
+  }
+
+  bool is_module() const override {
     return bool(parameterSlots_);
   }
   bool is_parameter(size_t slot) const {
-    TORCH_INTERNAL_ASSERT(is_module(), "asking for parameterSlots of non-Module");
+    TORCH_INTERNAL_ASSERT(
+        is_module(), "asking for parameterSlots of non-Module");
     return parameterSlots_->at(slot);
   }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(c10::optional<QualifiedName> name, std::shared_ptr<CompilationUnit> cu, bool is_module);
+  ClassType(
+      c10::optional<QualifiedName> name,
+      std::weak_ptr<CompilationUnit> cu,
+      bool is_module);
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
@@ -1485,11 +1574,71 @@ struct CAFFE2_API ClassType : public NamedType {
   std::vector<std::string> attributeNames_;
   std::vector<TypePtr> attributeTypes_;
   // Holds method attributes
-  std::shared_ptr<CompilationUnit> compilation_unit_;
-
+  std::weak_ptr<CompilationUnit> compilation_unit_;
 
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
   std::shared_ptr<std::vector<bool>> parameterSlots_;
+
+  // List of methods associated with this class.
+  std::vector<Function*> methods_;
+
 };
+
+struct InterfaceType;
+using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
+using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::Function;
+
+// Interfaces are a list of abstract methods that a class might meet.
+// If a class provides those methods, it implicitly meets the interface.
+
+// Subtype relations for Interface with ClassType:
+// lhs (ClassType or InterfaceType) is a subtype of rhs if:
+// 1. lhs methods are a superset of rhs methods
+// 2. if rhs is module interface, the lhs must be module interface or module itself
+struct CAFFE2_API InterfaceType : public NamedType {
+  static InterfaceTypePtr create(
+      QualifiedName qualifiedName, bool is_module=false);
+
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<InterfaceType>()) {
+      return name() == user_rhs->name();
+    }
+    return false;
+  }
+
+  std::string str() const override {
+    return std::string("InterfaceType<") + name()->name() + ">";
+  }
+
+  std::string python_str() const override {
+    return name()->qualifiedName();
+  }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
+  // try to find a method of this interface,
+  // returns nullptr if not found.
+  const FunctionSchema* getMethod(const std::string& name) const;
+  void addMethod(FunctionSchema schema);
+  const std::vector<FunctionSchema>& methods() {
+    return *methods_;
+  }
+
+  bool is_module() const override{
+    return is_module_;
+  }
+  static const TypeKind Kind = TypeKind::InterfaceType;
+  ~InterfaceType() override;
+ private:
+  InterfaceType(QualifiedName name, bool is_module);
+
+  // shared_ptr so that this header does not have to depend on
+  // FunctionSchema.h
+  std::shared_ptr<std::vector<FunctionSchema>> methods_;
+  // flag to distinguish if it's an interface type from a module or not
+  bool is_module_;
+};
+
 } // namespace c10

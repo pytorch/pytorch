@@ -4,14 +4,6 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# TODO: Migrate all centos jobs to use proper devtoolset
-if [[ "$BUILD_ENVIRONMENT" == *py2-cuda9.0-cudnn7-centos7* ]]; then
-  # There is a bug in pango packge on Centos7 that causes undefined
-  # symbols, upgrading glib2 to >=2.56.1 solves the issue. See
-  # https://bugs.centos.org/view.php?id=15495
-  sudo yum install -y -q glib2-2.56.1
-fi
-
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with
 # setup.py, so we build a list of foo=bars and then either convert it to
 # -Dfoo=bars or export them before running setup.py
@@ -156,7 +148,9 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("TORCH_CUDA_ARCH_LIST=Maxwell")
 
   # Explicitly set path to NVCC such that the symlink to ccache or sccache is used
-  build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+  if [ -n "${CACHE_WRAPPER_DIR}" ]; then
+    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+  fi
 
   # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.
   # Setting PATH to resolve to the right nvcc alone isn't enough.
@@ -167,7 +161,6 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
-  build_args+=("USE_ROCM=ON")
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
@@ -255,7 +248,7 @@ else
 
   # sccache will be stuck if  all cores are used for compiling
   # see https://github.com/pytorch/pytorch/pull/7361
-  if [[ -n "${SCCACHE}" ]]; then
+  if [[ -n "${SCCACHE}" && $BUILD_ENVIRONMENT != *rocm* ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
@@ -270,5 +263,10 @@ fi
 
 # Install ONNX into a local directory
 pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+  bash tools/amd_build/unwrap_clang.sh
+fi
 
 report_compile_cache_stats

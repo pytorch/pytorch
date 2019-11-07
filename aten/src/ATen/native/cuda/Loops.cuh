@@ -35,6 +35,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/TypeCast.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
@@ -102,20 +103,32 @@ static void launch_kernel(int64_t N, const func_t& f) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <typename traits, typename index_t, std::size_t... I>
-C10_HOST_DEVICE typename traits::ArgsTuple
-dereference_impl(char* const C10_RESTRICT data[], const index_t strides[], int i,
-                 c10::guts::index_sequence<I...>) {
-  return std::make_tuple(
-      *(typename traits::template arg<I>::type*)
-        (data[I] + i * strides[I])...);
+template <typename traits, typename func_t, typename index_t, size_t... INDEX>
+C10_HOST_DEVICE typename traits::result_type
+invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
+            c10::guts::index_sequence<INDEX...>) {
+  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
 }
 
-template <typename traits, typename index_t>
-C10_HOST_DEVICE typename traits::ArgsTuple
-dereference(char* const C10_RESTRICT data[], const index_t strides[], int i) {
+template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
+C10_HOST_DEVICE typename traits::result_type
+invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
   using Indices = c10::guts::make_index_sequence<traits::arity>;
-  return dereference_impl<traits>(data, strides, i, Indices{});
+  return invoke_impl<traits>(f, data, strides, i, Indices{});
+}
+
+template <typename traits, typename func_t, typename index_t, size_t... I>
+C10_HOST_DEVICE typename traits::result_type
+invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
+            c10::guts::index_sequence<I...>) {
+  return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
+}
+
+template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
+C10_HOST_DEVICE typename traits::result_type
+invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
+  using Indices = c10::guts::make_index_sequence<traits::arity>;
+  return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
 template <typename func_t>
@@ -132,6 +145,11 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     data[i] = (char*)iter.data_ptr(i);
   }
 
+  at::detail::Array<ScalarType, ntensors> dtypes;
+  for (int i = 0; i < ntensors; i++) {
+    dtypes[i] = iter.tensor(i).scalar_type();
+  }
+
   int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
     auto inner_strides = iter.get_inner_strides();
@@ -139,23 +157,35 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     for (int i = 0; i < ntensors; i++) {
       strides[i] = inner_strides[i];
     }
-    launch_kernel<launch_size_1d, 1>(numel, [=]__device__(int idx) {
-      arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
-      *out = c10::guts::apply(f, dereference<traits>(
-          &data.data[1],
-          &strides.data[1],
-          idx));
-    });
+
+    if (iter.needs_dynamic_casting()) {
+      launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+        void* out = data[0] + strides[0] * idx;
+        arg0_t result = invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+      });
+    } else {
+      launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+        arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
+        *out = invoke(f, &data.data[1], &strides.data[1], idx);
+      });
+    }
   } else {
     auto offset_calc = make_offset_calculator<traits::arity + 1>(iter);
-    launch_kernel<launch_size_nd, launch_bound2>(numel, [=]__device__(int idx) {
-      auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-      *out = c10::guts::apply(f, dereference<traits>(
-          &data.data[1],
-          &offsets.data[1],
-          1));
-    });
+    if (iter.needs_dynamic_casting()) {
+      launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+        auto offsets = offset_calc.get(idx);
+        void* out = data[0] + offsets[0];
+        arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+      });
+    } else {
+      launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+        auto offsets = offset_calc.get(idx);
+        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+        *out = invoke(f, &data.data[1], &offsets.data[1], 1);
+      });
+    }
   }
 }
 

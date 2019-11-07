@@ -92,6 +92,9 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
 #include <TH/generic/THTensorFastGetSet.hpp>
 #include <TH/THGenerateAllTypes.h>
 
+#include <TH/generic/THTensorFastGetSet.hpp>
+#include <TH/THGenerateBFloat16Type.h>
+
 inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
   if (self->dim() == 0) {
     return {1};

@@ -104,13 +104,6 @@ void TCPStoreDaemon::run() {
         continue;
       }
 
-      if (fds[fdIdx].revents ^ POLLIN) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent: " + std::to_string(fds[fdIdx].revents) +
-                " on socket: " + std::to_string(fds[fdIdx].fd));
-      }
       // Now query the socket that has the event
       try {
         query(fds[fdIdx].fd);
@@ -279,8 +272,10 @@ TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
     int numWorkers,
-    bool isServer)
-    : isServer_(isServer),
+    bool isServer,
+    const std::chrono::milliseconds& timeout)
+    : Store(timeout),
+      isServer_(isServer),
       tcpStoreAddr_(masterAddr),
       tcpStorePort_(masterPort),
       numWorkers_(numWorkers),
@@ -294,7 +289,8 @@ TCPStore::TCPStore(
         new TCPStoreDaemon(masterListenSocket_));
   }
   // Connect to the daemon
-  storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_);
+  storeSocket_ = tcputil::connect(
+      tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
 
   waitForWorkers_();
 }

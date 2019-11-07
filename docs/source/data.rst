@@ -172,9 +172,10 @@ better to not use automatic batching (where :attr:`collate_fn` is used to
 collate the samples), but let the data loader directly return each member of
 the :attr:`dataset` object.
 
-When both :attr:`batch_size` and :attr:`batch_sampler` are ``None``, automatic
-batching is disabled. Each sample obtained from the :attr:`dataset` is
-processed with the function passed as the :attr:`collate_fn` argument.
+When both :attr:`batch_size` and :attr:`batch_sampler` are ``None`` (default
+value for :attr:`batch_sampler` is already ``None``), automatic batching is
+disabled. Each sample obtained from the :attr:`dataset` is processed with the
+function passed as the :attr:`collate_fn` argument.
 
 **When automatic batching is disabled**, the default :attr:`collate_fn` simply
 converts NumPy arrays into PyTorch Tensors, and keeps everything else untouched.

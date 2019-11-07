@@ -185,7 +185,7 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
-## Writing documentation
+## Writing Documentation
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
@@ -204,7 +204,89 @@ We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
 commands. To run this check locally, run `./check-doxygen.sh` from inside
 `docs/cpp`.
 
-## Managing multiple build trees
+### Building Documentation
+
+To build the documentation:
+
+1. Build and install PyTorch
+
+2. Install the prequesities
+
+```bash
+cd docs
+pip install -r requirements.txt
+# `katex` must also be available in your PATH.
+# You can either install katex globally if you have properly configured npm:
+# npm install -g katex
+# Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
+# npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
+```
+
+3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
+
+```bash
+cd docs
+make html
+```
+
+4. To view HTML files, you must start an HTTP server. For example
+
+```bash
+# Start a server from the current directory (Python 3 only)
+cd docs/build/html
+python -m http.server
+```
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine on your local machine. To map
+remote port 8086 to local port 8086, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8086:my_machine:8086
+
+# For Eternal Terminal
+et my_machine -t="8086:8086"
+```
+
+Then navigate to `localhost:8086` in your web browser.
+
+#### Tips
+
+The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
+files pull in docstrings from PyTorch Python code (for example, via
+the `autofunction` or `autoclass` directives). To vastly shorten doc build times,
+it is helpful to remove the files you are not working on, only keeping the base
+`index.rst` file and the files you are editing. The Sphinx build will produce
+missing file warnings but will still complete. For example, to work on `jit.rst`:
+
+```bash
+cd docs/source
+ls | grep rst | grep -v index | grep -v jit | xargs rm
+
+# Make your changes, build the docs, etc.
+
+# Don't commit the deletions!
+git add index.rst jit.rst 
+...
+```
+
+
+### Adding Documentation Tests
+
+It is easy for code snippets in docstrings and `.rst` files to get out of date. The docs
+build includes the [Sphinx Doctest Extension](https://www.sphinx-doc.org/en/master/usage/extensions/doctest.html),
+which can run code in documentation as a unit test. To use the extension, use
+the `.. testcode::` directive in your `.rst` and docstrings.
+
+To manually run these tests, follow steps 1 and 2 above, then run:
+
+```bash
+cd docs
+make doctest
+```
+
+## Managing Multiple Build Trees
 
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
@@ -243,18 +325,27 @@ only interested in a specific component.
   Caffe2 operators.
 
 On the initial build, you can also speed things up with the environment
-variables `DEBUG` and `USE_CUDA`.
+variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
 - `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
+- `USE_DISTRIBUTED=0` will disable distributed (c10d, gloo, mpi, etc.) build.
+- `USE_MKLDNN=0` will disable using MKL-DNN.
 - `USE_CUDA=0` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
+- `BUILD_TEST=0` will disable building C++ test binaries.
+- `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
+- `USE_NNPACK=0` will disable compiling with NNPACK.
+- `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
 
 For example:
 ```bash
-USE_CUDA=0 DEBUG=1 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 python setup.py develop
 ```
 
-Make sure you continue to pass these flags on subsequent builds.
+For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
+options passed for the first time will persist; please run `ccmake build/`, run
+`cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
+options.
 
 ### Code completion and IDE support
 
@@ -349,12 +440,44 @@ ccache -F 0
 # deploy (and add to ~/.bashrc for later)
 export PATH="/usr/lib/ccache:$PATH"
 ```
+
+It is also possible to install `ccache` via `conda` by installing it from the
+community-maintained `conda-forge` channel. Here is how to set up `ccache` this
+way:
+
+```bash
+# install ccache
+conda install -c conda-forge ccache
+
+# set up ccache compiler symlinks
+mkdir ~/ccache
+mkdir ~/ccache/lib
+mkdir ~/ccache/cuda
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/cc
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/c++
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/gcc
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/g++
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/cuda/nvcc
+
+# update PATH to reflect symlink locations, consider
+# adding this to your .bashrc
+export PATH=~/ccache/lib:$PATH
+export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
+
+# increase ccache cache size to 25 GiB
+ccache -M 25Gi
+```
+
+To check this is working, do two clean builds of pytorch in a row. The second
+build should be substantially and noticeably faster than the first build.
+
+
 #### Use a faster linker
-If you are editing a single file and rebuilding in a tight loop, the time spent 
-linking will dominate. The system linker available in most Linux distributions 
+If you are editing a single file and rebuilding in a tight loop, the time spent
+linking will dominate. The system linker available in most Linux distributions
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
 
-The easiest way to use `lld` this is download the 
+The easiest way to use `lld` this is download the
 [latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
 ```
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
@@ -515,6 +638,11 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   This causes preprocessor tokens inside the literal like an`#endif`  to be incorrectly
   treated as preprocessor directives. See https://godbolt.org/z/eVTIJq as an example.
 
+* Either MSVC or the Windows headers have a PURE macro defined and will replace
+  any occurrences of the PURE token in code with an empty string. This is why
+  we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
+  The same is likely true for other identifiers that we just didn't try to use yet.
+
 ### Running Clang-Tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
@@ -560,6 +688,100 @@ performing these checks, before a commit is created:
 You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
+
+### Building PyTorch with ASAN
+
+[ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
+useful for debugging memory errors in C++. We run it in CI, but here's how to
+get the same thing to run on your local machine.
+
+First, install LLVM 8. The easiest way is to get [prebuilt
+binaries](http://releases.llvm.org/download.html#8.0.0) and extract them to
+folder (later called `$LLVM_ROOT`).
+
+Then set up the appropriate scripts. You can put this in your `.bashrc`:
+
+```
+LLVM_ROOT=<wherever your llvm install is>
+PYTORCH_ROOT=<wherever your pytorch checkout is>
+
+LIBASAN_RT="$LLVM_ROOT/lib/clang/8.0.0/lib/linux/libclang_rt.asan-x86_64.so"
+build_with_asan()
+{
+  LD_PRELOAD=${LIBASAN_RT} \
+  CC="$LLVM_ROOT/bin/clang" \
+  CXX="$LLVM_ROOT/bin/clang++" \
+  LDSHARED="clang --shared" \
+  LDFLAGS="-stdlib=libstdc++" \
+  CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
+  CXX_FLAGS="-pthread" \
+  NO_CUDA=1 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 NO_DISTRIBUTED=1 DEBUG=1 \
+  python setup.py develop
+}
+
+run_with_asan()
+{
+  LD_PRELOAD=${LIBASAN_RT} $@
+}
+
+# you can look at build-asan.sh to find the latest options the CI uses
+export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PYTORCH_ROOT/ubsan.supp
+export ASAN_SYMBOLIZER_PATH=$LLVM_ROOT/bin/llvm-symbolizer
+```
+
+Then you can use the scripts like:
+
+```
+suo-devfair ~/pytorch ❯ build_with_asan
+suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
+```
+
+#### Getting `ccache` to work
+
+The scripts above specify the `clang` and `clang++` binaries directly, which
+bypasses `ccache`. Here's how to get `ccache` to work:
+
+1. Make sure the ccache symlinks for `clang` and `clang++` are set up (see
+   CONTRIBUTING.md)
+2. Make sure `$LLVM_ROOT/bin` is available on your `$PATH`.
+3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
+   directly to `clang` and `clang++`.
+
+#### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
+
+The “standard” workflow for ASAN assumes you have a standalone binary:
+
+1. Recompile your binary with `-fsanitize=address`.
+2. Run the binary, and ASAN will report whatever errors it find.
+
+Unfortunately, PyTorch is a distributed as a shared library that is loaded by
+a third-party executable (Python). It’s too much of a hassle to recompile all
+of Python every time we want to use ASAN. Luckily, the ASAN folks have a
+workaround for cases like this:
+
+1. Recompile your library with `-fsanitize=address -shared-libasan`. The
+   extra `-shared-libasan` tells the compiler to ask for the shared ASAN
+   runtime library.
+2. Use `LD_PRELOAD` to tell the dynamic linker to load the ASAN runtime
+   library before anything else.
+
+More information can be found
+[here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
+
+#### Why LD_PRELOAD in the build function?
+
+We need `LD_PRELOAD` because there is a cmake check that ensures that a
+simple program builds and runs. If we are building with ASAN as a shared
+library, we need to `LD_PRELOAD` the runtime library, otherwise there will
+dynamic linker errors and the check will fail.
+
+We don’t actually need either of these if we fix the cmake checks.
+
+#### Why no Leak detection?
+
+Python leaks a lot of memory. Possibly we could configure a suppression file,
+but we haven’t gotten around to it.
 
 ## Caffe2 notes
 

@@ -52,10 +52,7 @@ void LambdaRankNdcgOp<float, CPUContext>::ResizeInvLogITensor(int size) {
     new_size <<= 1;
   }
   if (new_size != old_size) {
-    ReinitializeTensor(
-        &inv_log_i_,
-        {new_size},
-        at::dtype<float>().device(CPU));
+    ReinitializeTensor(&inv_log_i_, {new_size}, at::dtype<float>().device(CPU));
     auto* data = inv_log_i_.template mutable_data<float>();
     EigenVectorArrayMap<float> vec(data, inv_log_i_.numel());
     const float log2f_ = std::log(2.f);
@@ -67,8 +64,7 @@ void LambdaRankNdcgOp<float, CPUContext>::ResizeInvLogITensor(int size) {
 
 template <>
 void LambdaRankNdcgOp<float, CPUContext>::ComputeDiscounts(int* idx, int N) {
-  ReinitializeTensor(
-      &discount_, {N}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&discount_, {N}, at::dtype<float>().device(CPU));
   auto* discount_data = discount_.template mutable_data<float>();
   auto* inv_log_i_data = inv_log_i_.template mutable_data<float>();
   for (int i = 0; i < N; i++) {
@@ -98,10 +94,8 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
     return 0;
   }
 
-  ReinitializeTensor(
-      &ideal_idx_, {N}, at::dtype<int>().device(CPU));
-  ReinitializeTensor(
-      &rank_idx_, {N}, at::dtype<int>().device(CPU));
+  ReinitializeTensor(&ideal_idx_, {N}, at::dtype<int>().device(CPU));
+  ReinitializeTensor(&rank_idx_, {N}, at::dtype<int>().device(CPU));
   auto* rank_idx_data = rank_idx_.template mutable_data<int>();
   auto* ideal_idx_data = ideal_idx_.template mutable_data<int>();
 
@@ -120,8 +114,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   }
 
   const double log2f_ = std::log(2.f);
-  ReinitializeTensor(
-      &gain_, {N}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&gain_, {N}, at::dtype<float>().device(CPU));
   auto* gain_data = gain_.template mutable_data<float>();
   EigenVectorArrayMap<float> gain_vec(gain_data, gain_.numel());
 
@@ -138,9 +131,6 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
       ideal_discount_data, discount_.numel());
   // ideal dcg = \sum gain_i * ideal_discount_i
   double idcg = (gain_vec * ideal_discount_vec).sum();
-  if (idcg < 1e-5) {
-    idcg = 1e-5;
-  }
 
   ComputeDiscounts(rank_idx_data, N);
   auto* discount_data = discount_.template mutable_data<float>();
@@ -148,8 +138,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   // similar to ideal but replace with actual discounts
   double dcg = (gain_vec * discount_vec).sum();
 
-  ReinitializeTensor(
-      &lambda_, {N * N}, at::dtype<float>().device(CPU));
+  ReinitializeTensor(&lambda_, {N * N}, at::dtype<float>().device(CPU));
   auto* lambda_data = lambda_.template mutable_data<float>();
   EigenArrayMap<float> lambda_mat(lambda_data, N, N);
   // computes lambda weight (i, j) = abs(gain_dff * discount_diff)
@@ -164,17 +153,25 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
         CWISE_SIGM(
             -CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N)))
            .rowwise()
-           .sum() /
-      idcg;
+           .sum();
   if (use_ndcg_as_loss_) {
-    loss = 1 - dcg / idcg;
+    // DCG loss function
+    loss = (idcg - dcg);
   } else {
     loss = -(lambda_mat *
              CWISE_LOG_SIGM(
                  CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N),
                  100))
-                .sum() /
-        idcg;
+                .sum();
+  }
+
+  // if use_idcg_normalization_ is true, the loss function is normalized by idcg
+  // (e.g. NDCG), else un-normalized loss function (e.g. DCG)
+  // Note that normalization is mathematically correct if idcg is guaranteed to
+  // be positive!
+  if (use_idcg_normalization_) {
+    dy_vec /= std::max(idcg, 1e-5);
+    loss /= std::max(idcg, 1e-5);
   }
   return loss;
 }

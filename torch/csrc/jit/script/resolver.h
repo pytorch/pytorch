@@ -34,10 +34,14 @@ struct Resolver {
   virtual std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const = 0;
+      const SourceRange& loc) {
+    return nullptr;
+  }
 
   // Resolve `name` to a TypePtr.
-  virtual TypePtr resolveType(const std::string& name, const SourceRange& loc) const = 0;
+  virtual TypePtr resolveType(const std::string& name, const SourceRange& loc) {
+    return nullptr;
+  }
 };
 
 // A resolver that only understands "torch.foo()" lookups.
@@ -45,14 +49,15 @@ struct NativeResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const override {
+      const SourceRange& loc) override {
     if (name == "torch") {
       return std::make_shared<BuiltinModule>("aten");
     }
     return nullptr;
   }
 
-  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc)
+      override {
     return nullptr;
   }
 };

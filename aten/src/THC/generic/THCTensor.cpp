@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 
 /**** access methods ****/
 THCStorage *THCTensor_(storage)(THCState *state, const THCTensor *self)
@@ -65,25 +66,14 @@ THCTensor *THCTensor_(new)(THCState *state)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId()
+    at::TensorTypeId::CUDATensorId
   ).release();
 }
 
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId()
-  ).release();
-  THCTensor_(setStorageNd)(state,
-                           self,
-                           THTensor_getStoragePtr(tensor),
-                           tensor->storage_offset(),
-                           tensor->dim(),
-                           THTensor_getSizePtr(tensor),
-                           THTensor_getStridePtr(tensor));
-  return self;
+  return at::native::alias(THTensor_wrap(tensor)).unsafeReleaseTensorImpl();
 }
 
 /* Storage init */
@@ -93,7 +83,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   }
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId()
+    at::TensorTypeId::CUDATensorId
   ).release();
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -160,8 +150,11 @@ THCTensor *THCTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t siz
 
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
 {
+  // already available in Aten as at::clone()
   THCTensor *tensor = THCTensor_(new)(state);
-  THCTensor_(resizeAs)(state, tensor, self);
+  at::Tensor tensor_wrap = THTensor_wrap(tensor);
+  at::Tensor self_wrap = THTensor_wrap(self);
+  tensor_wrap.resize_as_(self_wrap);
   THCTensor_(copy)(state, tensor, self);
   return tensor;
 }
@@ -197,34 +190,6 @@ THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dime
   return self;
 }
 
-THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayRef size)
-{
-  ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
-  auto inferred_size = at::infer_size(size, numel);
-  auto stride = THTensor_compute_stride(tensor->sizes(),
-                                        tensor->strides(),
-                                        inferred_size);
-  THArgCheck(stride.has_value(), 2, "view size is "
-    "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Use .reshape(...) instead.");
-  auto stride_value = *stride;
-
-  // NOTE: This path of constructing the Tensor directly with the viewed Storage is necessary
-  // to allow `view` not to have a device_guard.  Taking the common TH path of allocating a storage
-  // on the current device [via THCTensor_(new)] and then swapping out the storage later can change
-  // the device out from under the tensor.  Having the device be consistent through a Tensor's lifetime
-  // is an invariant we wish to keep to support caching, simplicity, etc.
-  auto storage = tensor->storage();
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    std::move(storage),
-    at::CUDATensorId()
-  ).release();
-
-  THCTensor_setStorage(state, self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
-
-  return self;
-}
-
 // Collapses the first two dimensions of a tensor.
 // Assumes the input tensor is contiguous.
 THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
@@ -237,7 +202,7 @@ THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
   for (int i = 2; i < in_dims; i++) {
     new_size[i - 1] = THCTensor_(size)(state, input, i);
   }
-  THCTensor *output = THCTensor_(newView)(state, input, new_size);
+  THCTensor *output = at::native::view(THTensor_wrap(input), new_size).unsafeReleaseTensorImpl();
   return output;
 }
 
@@ -249,6 +214,7 @@ void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntArrayRef size, 
 
 void THCTensor_(resizeAs)(THCState *state, THCTensor *self, THCTensor *src)
 {
+  // already available in Aten as at::resize_as_()
   THCTensor_resizeAs(state, self, src);
 }
 
@@ -409,65 +375,6 @@ void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int
   self->set_size(dimension2, z);
 }
 
-void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int dimension, int64_t size, int64_t step)
-{
-  int d;
-
-  if(!src)
-    src = self;
-
-  THArgCheck(dimension < THTensor_nDimensionLegacyNoScalars(src), 2, "out of range");
-  THArgCheck(size <= THTensor_sizeLegacyNoScalars(src, dimension), 3, "out of range");
-  THArgCheck(step > 0, 4, "invalid step");
-
-  THCTensor_(set)(state, self, src);
-
-  std::vector<int64_t> newSize(self->dim() + 1);
-  std::vector<int64_t> newStride(self->dim() + 1);
-
-  newSize[self->dim()] = size;
-  newStride[self->dim()] = THTensor_strideLegacyNoScalars(self, dimension);
-  for(d = 0; d < self->dim(); d++)
-  {
-    auto self_size = THTensor_sizeLegacyNoScalars(self, d);
-    auto self_stride = THTensor_strideLegacyNoScalars(self, d);
-    if(d == dimension)
-    {
-      newSize[d] = (self_size - size) / step + 1;
-      newStride[d] = step*self_stride;
-    }
-    else
-    {
-      newSize[d] = self_size;
-      newStride[d] = self_stride;
-    }
-  }
-
-  self->set_sizes_and_strides(newSize, newStride);
-}
-
-/* we have to handle the case where the result is a number */
-void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
-{
-  if(!src)
-    src = self;
-
-  THCTensor_(set)(state, self, src);
-
-  std::vector<int64_t> newSize;
-  std::vector<int64_t> newStride;
-  for(int d = 0; d < src->dim(); ++d)
-  {
-    if(src->size(d) != 1)
-    {
-      newSize.push_back(src->size(d));
-      newStride.push_back(src->stride(d));
-    }
-  }
-
-  self->set_sizes_and_strides(newSize, newStride);
-}
-
 void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {
   THCTensor_squeeze1d(state, self, src, dimension);
@@ -481,23 +388,6 @@ void THCTensor_(unsqueeze1d)(THCState *state, THCTensor *self, THCTensor *src, i
 int THCTensor_(isContiguous)(THCState *state, const THCTensor *self)
 {
   return self->is_contiguous();
-}
-
-int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor *src)
-{
-  if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
-      self->storage_offset() == src->storage_offset() &&
-      self->dim() == src->dim())
-  {
-    int d;
-    for (d = 0; d < self->dim(); ++d)
-    {
-      if (self->size(d) != src->size(d) || self->stride(d) != src->stride(d))
-        return 0;
-    }
-    return 1;
-  }
-  return 0;
 }
 
 int THCTensor_(isSameSizeAs)(THCState *state, const THCTensor *self, const THCTensor* src)

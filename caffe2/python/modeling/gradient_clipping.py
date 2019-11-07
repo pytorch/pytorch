@@ -136,7 +136,7 @@ class GradientClipping(NetModifier):
                             net.Div(
                                 [grad_norm, param_norm],
                                 [net.NextScopedBlob(
-                                    prefix=str(param) + '_norm_ratio')]
+                                    prefix=str(param) + "_norm_ratio")]
                             )
 
                     net.ClipTensorByScaling(

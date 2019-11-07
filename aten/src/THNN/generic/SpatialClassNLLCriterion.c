@@ -62,7 +62,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   THTensor_(resize1d)(output, 1);
   THTensor_(resize1d)(total_weight, 1);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     int64_t batch_size = THTensor_(size)(input, 0);
     int64_t H = THTensor_(size)(input, 2);
     int64_t W = THTensor_(size)(input, 3);
@@ -118,7 +118,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   *total_weight_data = total_weight_acc;
   *output_data = output_acc;
 
-  if (reduction == Reduction::Mean && *total_weight_data)
+  if (reduction == at::Reduction::Mean && *total_weight_data)
     *output_data /= *total_weight_data;
 
   c10::raw::intrusive_ptr::decref(input);
@@ -145,7 +145,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
               "gradInput must be contiguous");
   THNN_CHECK_SHAPE(input, gradInput);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     GRADOUTPUT_SHAPE_CHECK;
 
     int64_t batch_size = THTensor_(size)(input, 0);
@@ -188,7 +188,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   int64_t map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
   int64_t sample_size = map_size * n_classes;
 
-  scalar_t normalize = (reduction == Reduction::Mean) ? *total_weight_data : 1.0f;
+  scalar_t normalize = (reduction == at::Reduction::Mean) ? *total_weight_data : 1.0f;
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     for (int64_t b = start; b < end; b++) {

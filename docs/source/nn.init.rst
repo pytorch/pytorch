@@ -1,6 +1,8 @@
 .. role:: hidden
     :class: hidden-section
 
+.. _nn-init-doc:
+
 torch.nn.init
 =============
 
@@ -9,6 +11,8 @@ torch.nn.init
 .. autofunction:: uniform_
 .. autofunction:: normal_
 .. autofunction:: constant_
+.. autofunction:: ones_
+.. autofunction:: zeros_
 .. autofunction:: eye_
 .. autofunction:: dirac_
 .. autofunction:: xavier_uniform_

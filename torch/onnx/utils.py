@@ -26,22 +26,12 @@ __IN_ONNX_EXPORT = False
 
 
 def is_in_onnx_export():
-    r"""
-    Check whether it's in the middle of the ONNX export.
-    This function returns True in the middle of torch.onnx.export().
-    torch.onnx.export should be executed with single thread.
-    """
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
 
 
 @contextlib.contextmanager
 def set_training(model, mode):
-    r"""
-    A context manager to temporarily set the training mode of 'model'
-    to 'mode', resetting it when we exit the with-block.  A no-op if
-    mode is None.
-    """
     if mode is None:
         yield
         return
@@ -58,103 +48,8 @@ def set_training(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True, dynamic_axes=None):
-    r"""
-    Export a model into ONNX format.  This exporter runs your model
-    once in order to get a trace of its execution to be exported;
-    at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
-
-    See also: :ref:`onnx-export`
-
-    Arguments:
-        model (torch.nn.Module): the model to be exported.
-        args (tuple of arguments): the inputs to
-            the model, e.g., such that ``model(*args)`` is a valid
-            invocation of the model.  Any non-Tensor arguments will
-            be hard-coded into the exported model; any Tensor arguments
-            will become inputs of the exported model, in the order they
-            occur in args.  If args is a Tensor, this is equivalent
-            to having called it with a 1-ary tuple of that Tensor.
-            (Note: passing keyword arguments to the model is not currently
-            supported.  Give us a shout if you need it.)
-        f: a file-like object (has to implement fileno that returns a file descriptor)
-            or a string containing a file name.  A binary Protobuf will be written
-            to this file.
-        export_params (bool, default True): if specified, all parameters will
-            be exported.  Set this to False if you want to export an untrained model.
-            In this case, the exported model will first take all of its parameters
-            as arguments, the ordering as specified by ``model.state_dict().values()``
-        verbose (bool, default False): if specified, we will print out a debug
-            description of the trace being exported.
-        training (bool, default False): export the model in training mode.  At
-            the moment, ONNX is oriented towards exporting models for inference
-            only, so you will generally not need to set this to True.
-        input_names(list of strings, default empty list): names to assign to the
-            input nodes of the graph, in order
-        output_names(list of strings, default empty list): names to assign to the
-            output nodes of the graph, in order
-        aten (bool, default False): [DEPRECATED. use operator_export_type] export the
-            model in aten mode. If using aten mode, all the ops original exported
-            by the functions in symbolic_opset<version>.py are exported as ATen ops.
-        export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
-            export the internal IR directly instead of converting it to ONNX ops.
-        operator_export_type (enum, default OperatorExportTypes.ONNX):
-            OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
-            OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing,
-                                                    fall back on ATen op.
-            OperatorExportTypes.RAW: export raw ir.
-        opset_version (int, default is 9): by default we export the model to the
-            opset version of the onnx submodule. Since ONNX's latest opset may
-            evolve before next stable release, by default we export to one stable
-            opset version. Right now, supported stable opset version is 9.
-            The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
-            which are defined in torch/onnx/symbolic_helper.py
-        do_constant_folding (bool, default False): If True, the constant-folding
-            optimization is applied to the model during export. Constant-folding
-            optimization will replace some of the ops that have all constant
-            inputs, with pre-computed constant nodes.
-        example_outputs (tuple of Tensors, default None): example_outputs must be provided
-            when exporting a ScriptModule or TorchScript Function.
-        strip_doc_string (bool, default True): if True, strips the field
-            "doc_string" from the exported model, which information about the stack
-            trace.
-        example_outputs: example outputs of the model that is being exported.
-        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
-            a dictionary to specify dynamic axes of input/output, such that:
-            - KEY:  input and/or output names
-            - VALUE: index of dynamic axes for given key and potentially the name to be used for
-            exported dynamic axes. In general the value is defined according to one of the following
-            ways or a combination of both:
-
-            (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
-            automated names will be generated and applied to dynamic axes of provided input/output
-            during export.
-
-            OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in
-            corresponding input/output TO the name that is desired to be applied on such axis of
-            such input/output during export.
-
-            Example. if we have the following shape for inputs and outputs:
-                shape(input_1) = ('b', 3, 'w', 'h')
-                and shape(input_2) = ('b', 4)
-                and shape(output)  = ('b', 'd', 5)
-
-            Then dynamic axes can be defined either as:
-            (a). ONLY INDICES:
-                 dynamic_axes = {'input_1':[0, 2, 3], 'input_2':[0], 'output':[0, 1]}
-                 where automatic names will be generated for exported dynamic axes
-
-            OR (b). INDICES WITH CORRESPONDING NAMES:
-                dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'},
-                                 'input_2':{0:'batch'},
-                                 'output':{0:'batch', 1:'detections'}
-                 where provided names will be applied to exported dynamic axes
-
-            OR (c). MIXED MODE OF (a) and (b)
-                 dynamic_axes = {'input_1':[0, 2, 3], 'input_2':{0:'batch'}, 'output':[0,1]}
-
-    """
+           do_constant_folding=False, example_outputs=None, strip_doc_string=True,
+           dynamic_axes=None, keep_initializers_as_inputs=None):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -167,7 +62,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
-            example_outputs=example_outputs, strip_doc_string=strip_doc_string, dynamic_axes=dynamic_axes)
+            example_outputs=example_outputs, strip_doc_string=strip_doc_string,
+            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -189,7 +85,10 @@ def _split_tensor_list_constants(g, block):
                 node.output().replaceAllUsesWith(lc)
 
 
-def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False):
+def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False):
+    # Inline everyting
+    torch._C._jit_pass_inline(graph)
+
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_dce(graph)
@@ -215,12 +114,13 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
-        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
-        torch._C._jit_pass_prepare_division_for_onnx(graph)
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lower_all_tuples(graph)
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lint(graph)
+
+        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
+        torch._C._jit_pass_prepare_division_for_onnx(graph)
 
         torch._C._jit_pass_onnx_remove_print(graph)
 
@@ -231,7 +131,12 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
-        torch._C._jit_pass_onnx_peephole(graph)
+
+        torch._C._jit_pass_onnx_scalar_type_analysis(graph)
+        torch._C._jit_pass_lint(graph)
+
+        from torch.onnx.symbolic_helper import _export_onnx_opset_version
+        torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)
 
     # graph is not a valid jit graph anymore because types have been replaced
@@ -248,16 +153,69 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     return graph
 
 
+# We accept dictionnaries and strings as ONNX inputs,
+# but they should be only for configuration use.
+# we detect here if these inputs are modified, and if so
+# we warn the user that the changes won't take effect in the
+# traced ONNX graph
+def warn_on_static_input_change(input_states):
+    for input, traced_input in zip(input_states[0], input_states[1]):
+        if isinstance(input, dict):
+            if list(input.keys()) != list(traced_input.keys()):
+                warning = "We detected that you are modifying a dictionnary that is an input to your " \
+                          "model. " \
+                          "Note that dictionaries are allowed as inputs in ONNX but they should be " \
+                          "handled with care. " \
+                          "Usages of dictionaries is not recommended, and should not be used except " \
+                          "for configuration use. " \
+                          "Also note that the order and values of the keys must remain the same. "
+                warnings.warn(warning)
+        elif isinstance(input, str):
+            if input != traced_input:
+                warning = "The model seems to have string inputs/outputs. " \
+                          "Note that strings will not appear as inputs/outputs of the ONNX graph. "
+                warnings.warn(warning)
+
+def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type,
+                               opset_version):
+    # This method encapsulates the logic to decide whether the initializers in the graph
+    # should be listed as ONNX graph inputs (i.e., whether to choose ONNX IR v3 or v4).
+    # If keep_initializers_as_inputs is not specified (None), then we decide whether to keep
+    # intializers as graph inputs (val_keep_init_as_ip) based on export type. If export type
+    # is ONNX, then do not keep initializers as input (val_keep_init_as_ip=False). For all other 
+    # export types keep initializers as input (val_keep_init_as_ip=True).
+    # If keep_initializers_as_inputs is specified, then respect it. Unless opset version <= 8,
+    # in which case it must be ignored because for opset version <= 8, all initializers MUST be
+    # part of graph input (only ONNX IR v3 is allowed), i.e. val_keep_init_as_ip=True.
+
+    # Special handling is needed for opset version 8 or lower, because irrespective
+    # of user input for keep_initializers_as_inputs, the graph must follow ONNX IR v3
+    # semantics, i.e. all intializers must be listed as ONNX graph input.
+    if opset_version < 9:
+        if keep_initializers_as_inputs is False:
+            warnings.warn("Setting 'keep_initializers_as_inputs=False' for opset version"
+                          "8 or lower would lead to an invalid ONNX graph. Therefore, "
+                          "'keep_initializers_as_inputs=False' is ignored during export."
+                          "Exported model will have initialiers as graph inputs (compliant "
+                          " to ONNX IR v3).")
+        return True  # i.e. True == initializers are part of graph input (ONNX IR v3)
+    val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
+    if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
+        val_keep_init_as_ip = False
+    return val_keep_init_as_ip
+
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
 
-    trace, torch_out = torch.jit.get_trace_graph(func, args, _force_outplace=True)
-    trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
+    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(func, args, _force_outplace=True, _return_inputs_states=True)
+    warn_on_static_input_change(inputs_states)
+
+    trace_graph = _optimize_graph(trace_graph, operator_export_type)
     if return_outs:
-        return trace, torch_out
-    return trace
+        return trace_graph, torch_out
+    return trace_graph
 
 
 def _trace_and_get_graph_from_model(model, args, training):
@@ -272,13 +230,14 @@ def _trace_and_get_graph_from_model(model, args, training):
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace, torch_out = torch.jit.get_trace_graph(model, args, _force_outplace=True)
+        trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(model, args, _force_outplace=True, _return_inputs_states=True)
+        warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    return trace.graph(), torch_out
+    return trace_graph, torch_out
 
 
 def _model_to_graph(model, args, verbose=False, training=False,
@@ -286,7 +245,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
                     _retain_param_name=False, do_constant_folding=False,
-                    _disable_torch_constant_prop=False):
+                    _disable_torch_constant_prop=False, fixed_batch_size=False):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -300,14 +259,14 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            method_graph, params = model.forward._lowered_graph()
+            method_graph, params = torch._C._jit_pass_lower_graph(model.forward.graph, model._c)
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
-    elif isinstance(model, torch.jit.Function):
-        assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript Function"
+    elif isinstance(model, torch.jit.ScriptFunction):
+        assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript ScriptFunction"
         method = model
         params = ()
         in_vars, in_desc = torch.jit._flatten(tuple(args))
@@ -326,9 +285,10 @@ def _model_to_graph(model, args, verbose=False, training=False,
                     inp.setDebugName(param_names[i - user_input_num])
 
     graph = _optimize_graph(graph, operator_export_type,
-                            _disable_torch_constant_prop=_disable_torch_constant_prop)
+                            _disable_torch_constant_prop=_disable_torch_constant_prop,
+                            fixed_batch_size=fixed_batch_size)
 
-    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.Function):
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         out_vars, _ = torch.jit._flatten(tuple(example_outputs))
         graph = _assign_output_shapes(graph, out_vars)
 
@@ -349,9 +309,15 @@ def _model_to_graph(model, args, verbose=False, training=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
-    if do_constant_folding and _export_onnx_opset_version == 9:
-        params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
+    if do_constant_folding and _export_onnx_opset_version in [9, 10, 11]:
+        params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
+                                                            _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+
+    # For ONNX opset < 9, constants only have three data types: float16, float, double.
+    # In this pass transform constants of other data types to float/double + cast operator.
+    if _export_onnx_opset_version < 9:
+        torch._C._jit_pass_onnx_cast_all_constant_to_floating(graph)
 
     if verbose:
         print(graph)
@@ -363,7 +329,8 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
-                            opset_version=None, _retain_param_name=True):
+                            opset_version=None, _retain_param_name=True,
+                            keep_initializers_as_inputs=None):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -373,27 +340,33 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
-                                    opset_version, _retain_param_name)
+                                    opset_version, _retain_param_name,
+                                    keep_initializers_as_inputs=keep_initializers_as_inputs)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
-                             do_constant_folding=False):
+                             do_constant_folding=False, keep_initializers_as_inputs=None, fixed_batch_size=False):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
+    val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
+                                                     operator_export_type,
+                                                     opset_version)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
                                                     example_outputs, propagate, _retain_param_name,
-                                                    do_constant_folding)
+                                                    do_constant_folding, fixed_batch_size=fixed_batch_size)
 
-    return graph._pretty_print_onnx(params_dict, opset_version, False, operator_export_type, google_printer)
+    return graph._pretty_print_onnx(params_dict, opset_version, False,
+                                    operator_export_type, google_printer,
+                                    val_keep_init_as_ip)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -401,10 +374,15 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
 def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
+            input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
-            strip_doc_string=True, dynamic_axes=None):
+            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None, fixed_batch_size=False):
+    if isinstance(model, torch.nn.DataParallel):
+        raise ValueError('torch.nn.DataParallel is not supported by ONNX '
+                         'exporter, please use \'attribute\' module to '
+                         'unwrap model from torch.nn.DataParallel. Try '
+                         'torch.onnx.export(model.module, ...)')
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
@@ -413,13 +391,22 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         from torch.onnx.symbolic_helper import _set_operator_export_type
         if opset_version is None:
             opset_version = _default_onnx_opset_version
+        if not operator_export_type:
+            if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
+                operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
+            else:
+                operator_export_type = OperatorExportTypes.ONNX
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
+        val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
+                                                         operator_export_type,
+                                                         opset_version)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, propagate,
-                                                        _retain_param_name, do_constant_folding)
+                                                        _retain_param_name, do_constant_folding,
+                                                        fixed_batch_size=fixed_batch_size)
 
         # TODO: Don't allocate a in-memory string for the protobuf
         defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
@@ -430,14 +417,17 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
         if export_params:
             proto, export_map = graph._export_onnx(
-                params_dict, opset_version, dynamic_axes, defer_weight_export, operator_export_type, strip_doc_string)
+                params_dict, opset_version, dynamic_axes, defer_weight_export,
+                operator_export_type, strip_doc_string, val_keep_init_as_ip)
         else:
             proto, export_map = graph._export_onnx(
-                {}, opset_version, dynamic_axes, False, operator_export_type, strip_doc_string)
+                {}, opset_version, dynamic_axes, False, operator_export_type,
+                strip_doc_string, val_keep_init_as_ip)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
-            torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+            with torch.serialization._open_file_like(f, 'wb') as opened_file:
+                opened_file.write(proto)
         elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
             import zipfile
             compression = zipfile.ZIP_DEFLATED \
@@ -455,13 +445,13 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 os.makedirs(f)
 
             model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
-            torch.serialization._with_file_like(
-                model_proto_file, "wb", lambda f: f.write(proto))
+            with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
+                opened_file.write(proto)
 
             for k, v in export_map.items():
                 weight_proto_file = os.path.join(f, k)
-                torch.serialization._with_file_like(
-                    weight_proto_file, "wb", lambda f: f.write(v))
+                with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
+                    opened_file.write(v)
         else:
             raise RuntimeError('Unknown export type')
     finally:
@@ -660,6 +650,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             if op_name == "Constant" and not n.mustBeNone():
                 if n.kindOf("value") == "t":
                     return g.op("Constant", value_t=n["value"])
+                if n.kindOf("value") == "s":
+                    return g.op("Constant", value_s=n["value"])
                 elif n.kindOf("value") == "is":
                     value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
                     return g.op("Constant", value_t=value)
@@ -796,11 +788,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if (output_names is None) or len(output_names) == 0:
             output_names = [y.debugName() for y in model.graph.outputs()]
 
-    valid_names = set()
-    if input_names is not None:
-        valid_names.add(x for x in input_names)
-    if output_names is not None:
-        valid_names.add(x for x in output_names)
+    valid_names = set((input_names or []) + (output_names or []))
 
     # If dynamic axes are provided as a list rather than dictionary, they should
     # first get converted to a dictionary in expected format. If desired axes names

@@ -156,7 +156,7 @@ static void col2im_out_cpu_template(
           output_n = output.select(0, elt);
 
           col2im<scalar_t>(
-              input_n.data<scalar_t>(),
+              input_n.data_ptr<scalar_t>(),
               n_output_plane,
               output_height,
               output_width,
@@ -170,7 +170,7 @@ static void col2im_out_cpu_template(
               stride_width,
               dilation_height,
               dilation_width,
-              output_n.data<scalar_t>());
+              output_n.data_ptr<scalar_t>());
         }
 
         if (!batched_input) {
@@ -213,7 +213,7 @@ Tensor col2im_cpu(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor output = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
 
   col2im_out_cpu_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
@@ -238,7 +238,7 @@ Tensor col2im_backward_cpu(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output);
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
 
   col2im_backward_out_cpu_template(
       grad_input, grad_output, kernel_size, dilation, padding, stride);

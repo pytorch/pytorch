@@ -69,6 +69,8 @@ FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
 FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
 FILE(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 FILE(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
+FILE(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
+FILE(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
 
 FILE(GLOB native_hip_hip "native/hip/*.hip")
 FILE(GLOB native_hip_cpp "native/hip/*.cpp")
@@ -76,9 +78,11 @@ FILE(GLOB native_miopen_cpp "native/miopen/*.cpp")
 FILE(GLOB native_cudnn_hip_cpp "native/cudnn/hip/*.cpp")
 FILE(GLOB native_sparse_hip_hip "native/sparse/hip/*.hip")
 FILE(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
+FILE(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
+FILE(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 
 add_subdirectory(quantized)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -92,8 +96,8 @@ endif()
 
 IF(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
-  set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu})
-  set(all_cuda_cpp ${native_sparse_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
+  set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu} ${native_quantized_cuda_cu})
+  set(all_cuda_cpp ${native_sparse_cuda_cpp} ${native_quantized_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
   IF(CUDNN_FOUND)
     SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
@@ -102,14 +106,15 @@ endif()
 
 IF(USE_ROCM)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
-  set(ATen_HIP_SRCS ${ATen_HIP_SRCS} ${hip_hip} ${native_hip_hip} ${native_sparse_hip_hip})
+  set(ATen_HIP_SRCS ${ATen_HIP_SRCS} ${hip_hip} ${native_hip_hip} ${native_sparse_hip_hip} ${native_quantized_hip_hip})
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_cpp/hip_generated_cpp)
-  set(all_hip_cpp ${native_sparse_hip_cpp} ${hip_cpp} ${native_hip_cpp} ${cuda_generated_cpp} ${ATen_HIP_SRCS})
+  set(all_hip_cpp ${native_sparse_hip_cpp} ${native_quantized_hip_cpp} ${hip_cpp} ${native_hip_cpp} ${cuda_generated_cpp} ${ATen_HIP_SRCS})
   set(all_hip_cpp ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
 filter_list(cuda_generated_h cuda_generated_cpp "\\.h$")
+filter_list(core_generated_h core_generated_cpp "\\.h$")
 # TODO: When we have hip_generated_cpp
 #filter_list(hip_generated_h hip_generated_cpp "\\.h$")
 
@@ -206,7 +211,7 @@ endif()
 
 if(AT_NNPACK_ENABLED)
   include_directories(${NNPACK_INCLUDE_DIRS})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack pthreadpool) # cpuinfo is added below
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack) # cpuinfo is added below
 endif()
 
 if(MKLDNN_FOUND)
@@ -239,7 +244,20 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
   set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
   set(BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
+  set(OLD_CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE})
+  if("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU" AND
+      CMAKE_C_COMPILER_VERSION VERSION_GREATER 6.9 AND CMAKE_C_COMPILER_VERSION VERSION_LESS 8)
+    set(GCC_7 True)
+  else()
+    set(GCC_7 False)
+  endif()
+  if(GCC_7)
+    set(CMAKE_BUILD_TYPE Release)  # Always build Sleef as a Release build to work around a gcc-7 bug
+  endif()
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/sleef" ${CMAKE_BINARY_DIR}/sleef)
+  if(GCC_7)
+    set(CMAKE_BUILD_TYPE ${OLD_CMAKE_BUILD_TYPE})
+  endif()
   set_property(TARGET sleef PROPERTY FOLDER "dependencies")
   list(APPEND ATen_THIRD_PARTY_INCLUDE ${CMAKE_BINARY_DIR}/include)
   link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
@@ -423,17 +441,32 @@ CONFIGURE_FILE(ATenConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/AT
 INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
+if(INTERN_BUILD_MOBILE)
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
+else()
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+endif()
+
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-FOREACH(HEADER ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
-  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
+FOREACH(HEADER  ${INSTALL_HEADERS})
+  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
+  string(REPLACE "${Caffe2_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
-  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
+  INSTALL(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 ENDFOREACH()
+
 # TODO: Install hip_generated_h when we have it
 FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   # NB: Assumed to be flat
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
 ENDFOREACH()
+
+message("AT_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR}/ATen/core")
+FOREACH(HEADER ${core_generated_h})
+  message("core header install: ${HEADER}")
+  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/core)
+ENDFOREACH()
+
 INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
 

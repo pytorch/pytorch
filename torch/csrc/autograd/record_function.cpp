@@ -1,10 +1,12 @@
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/function.h>
-
+#include <torch/csrc/utils/memory.h>
 #include <cstdlib>
 #include <random>
 
-namespace torch { namespace autograd { namespace profiler {
+namespace torch {
+namespace autograd {
+namespace profiler {
 
 namespace {
 
@@ -26,8 +28,7 @@ class CallbackManager {
 
   bool shouldRunSampledCallbacks() {
     return (num_sampled_callbacks > 0) &&
-        (!sampling_prop_set ||
-        (sample_zero_one() < sampling_prob));
+        (!sampling_prop_set || (sample_zero_one() < sampling_prob));
   }
 
   void pushCallback(
@@ -82,12 +83,14 @@ class CallbackManager {
   double sampling_prob = 1.0;
 
   static double sample_zero_one() {
-    static thread_local auto gen = std::mt19937(std::random_device()());
+    static thread_local auto gen =
+        torch::make_unique<std::mt19937>(std::random_device()());
     std::uniform_real_distribution<double> dist(0.0, 1.0);
-    return dist(gen);
+    return dist(*gen);
   }
 };
 
+// thread_local_func_ points to the currently active RecordFunction.
 thread_local RecordFunction* thread_local_func_ = nullptr;
 
 CallbackManager& manager() {
@@ -115,10 +118,7 @@ void pushCallback(
     bool needs_inputs,
     bool sampled) {
   manager().pushCallback(
-      std::move(start),
-      std::move(end),
-      needs_inputs,
-      sampled);
+      std::move(start), std::move(end), needs_inputs, sampled);
 }
 
 void popCallback() {
@@ -136,7 +136,6 @@ bool needsInputs() {
 bool hasNonSampledCallbacks() {
   return manager().hasNonSampledCallbacks();
 }
-
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!hasCallbacks()) {
@@ -162,7 +161,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   processCallbacks();
 }
 
-void RecordFunction::before(Function* fn, int64_t sequence_nr) {
+void RecordFunction::before(Node* fn, int64_t sequence_nr) {
   if (!hasCallbacks()) {
     return;
   }
@@ -187,14 +186,27 @@ void RecordFunction::processCallbacks() {
 }
 
 RecordFunction::~RecordFunction() {
+  end();
+}
+
+void RecordFunction::end() {
   if (initialized_) {
     for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
       if (!manager().is_callback_sampled[idx] || run_sampled_) {
         manager().end_callbacks[idx](*this);
       }
     }
+
+    AT_ASSERT(thread_local_func_ == this, name_, ": must be top of stack");
     thread_local_func_ = parent_;
+    initialized_ = false;
   }
 }
 
-}}}
+RecordFunction* RecordFunction::current() {
+  return thread_local_func_;
+}
+
+} // namespace profiler
+} // namespace autograd
+} // namespace torch

@@ -59,7 +59,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, TensorTypeId::CUDATensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -78,40 +78,57 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOpti
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
-  TORCH_CHECK(at::scalar_tensor(n, result.options()).defined(),
-  "n is too large for result tensor type: '", result.type().toString(), "'");
+  check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
 
-  if (result.scalar_type() == at::ScalarType::Half) {
-    auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
-    result.copy_(randperm_out_cuda(result_float, n, generator));
-  } else {
-    if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-      auto result_cpu = at::empty({n}, result.options().device(kCPU));
-      randperm_out(result_cpu, n, generator);
-      result.copy_(result_cpu);
-    } else {
-      // Generate random values for the keys array
-      AT_DISPATCH_ALL_TYPES(
-        result.scalar_type(), "randperm_out_cuda", [&] {
-          auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-
-          auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
-          auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
-
-          auto state = globalContext().getTHCState();
-          THCThrustAllocator thrustAlloc(state);
-          auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
-
-          thrust::sequence(policy, result_data, result_data + n);
-
-          // Use the sorted order of keys to rearrange the result array
-          thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
-        }
-      );
-    }
+  if (n < 30000) {  // For small inputs, we offload it to CPU instead.
+    auto result_cpu = at::empty({n}, result.options().device(kCPU));
+    randperm_out(result_cpu, n, generator);
+    return result.copy_(result_cpu);
   }
+
+#if 0
+  // This if condition should never be true because if n >= 30000 and the tensor has a Half type,
+  // check_supported_max_int_with_precision should have reported an error. This snippet is commented out but left here
+  // for the sake of clarity, because Half in thrust is spotty, and we do not want future change unaware of this.
+  if (result.scalar_type() == at::ScalarType::Half) {  // Half in thrust is spotty. Avoid.
+    auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
+    return result.copy_(randperm_out_cuda(result_float, n, generator));
+  }
+#endif
+
+  // Generate random values for the keys array
+  AT_DISPATCH_ALL_TYPES(
+    result.scalar_type(), "randperm_out_cuda", [&] {
+      auto keys = at::empty(result.sizes(), result.options()).random_(generator);
+      auto keys_data = thrust::device_ptr<scalar_t>(keys.data_ptr<scalar_t>());
+
+      // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
+      // points to a new tensor.
+      Tensor shuffled;
+      thrust::device_ptr<scalar_t> shuffled_data;
+      if (result.is_contiguous()) {
+        shuffled_data = thrust::device_ptr<scalar_t>(result.data_ptr<scalar_t>());
+      } else {
+        shuffled = at::empty(n, result.options());
+        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data_ptr<scalar_t>());
+      }
+
+      auto state = globalContext().getTHCState();
+      THCThrustAllocator thrustAlloc(state);
+      auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
+
+      thrust::sequence(policy, shuffled_data, shuffled_data + n);
+
+      // Use the sorted order of keys to rearrange the result array
+      thrust::sort_by_key(policy, keys_data, keys_data + n, shuffled_data);
+
+      if (!result.is_contiguous()) {
+        result.copy_(shuffled);
+      }
+    }
+  );
 
   return result;
 }
@@ -332,7 +349,7 @@ Tensor tril_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         trapezoid_row_offset,
         m_first_row,
         col,
@@ -408,7 +425,7 @@ Tensor triu_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
         col,

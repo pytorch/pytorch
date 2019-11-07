@@ -15,7 +15,10 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 
   std::ostringstream oss;
   // write records through writers
-  PyTorchStreamWriter writer(&oss);
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
   std::array<char, 127> data1;
 
   for (int i = 0; i < data1.size(); ++i) {
@@ -39,9 +42,9 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
-  ASSERT_TRUE(reader.hasFile("key1"));
-  ASSERT_TRUE(reader.hasFile("key2"));
-  ASSERT_FALSE(reader.hasFile("key2000"));
+  ASSERT_TRUE(reader.hasRecord("key1"));
+  ASSERT_TRUE(reader.hasRecord("key2"));
+  ASSERT_FALSE(reader.hasRecord("key2000"));
   at::DataPtr data_ptr;
   int64_t size;
   std::tie(data_ptr, size) = reader.getRecord("key1");

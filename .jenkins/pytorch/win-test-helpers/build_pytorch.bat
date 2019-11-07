@@ -6,6 +6,12 @@ if "%DEBUG%" == "1" (
 
 set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;%PATH%
 
+:: This inflates our log size slightly, but it is REALLY useful to be
+:: able to see what our cl.exe commands are (since you can actually
+:: just copy-paste them into a local Windows setup to just rebuild a
+:: single file.)
+set CMAKE_VERBOSE_MAKEFILE=1
+
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 

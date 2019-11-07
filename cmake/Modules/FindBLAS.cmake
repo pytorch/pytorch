@@ -211,6 +211,20 @@ if((NOT BLAS_LIBRARIES)
   endif (BLAS_LIBRARIES)
 endif()
 
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "FLAME")))
+  # FLAME's blis library (https://github.com/flame/blis)
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "blis")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "FLAME")
+  endif (BLAS_LIBRARIES)
+endif()
+
 # BLAS in ATLAS library? (http://math-atlas.sourceforge.net/)
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "atlas")))

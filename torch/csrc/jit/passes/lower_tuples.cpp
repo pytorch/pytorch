@@ -101,7 +101,8 @@ static void VisitNode(Node* n, Node* insert_point) {
     if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
       TORCH_CHECK(
           white_list.count(n->kind()) > 0,
-          "tuple appears in op that does not forward tuples");
+          "tuple appears in op that does not forward tuples, ",
+          "unsupported kind: ", n->kind().toQualString());
       TORCH_CHECK(
           input->node()->kind() == prim::TupleConstruct,
           "tuple use not matched to tuple construct");
@@ -130,7 +131,8 @@ static void VisitNode(Node* n, Node* insert_point) {
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
       TORCH_CHECK(
           white_list.count(n->kind()) > 0,
-          "tuple appears in op that does not forward tuples");
+          "tuple appears in op that does not forward tuples, ",
+          "unsupported kind: ", n->kind().toQualString());
       for (size_t j = 0; j < tt->elements().size(); j++) {
         n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
       }
@@ -180,7 +182,7 @@ static void EnsureNoTuples(Block* block) {
   }
 }
 
-void LowerAllTuples(std::shared_ptr<Graph>& graph) {
+void LowerAllTuples(const std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
   EliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());
@@ -195,7 +197,7 @@ void LowerSimpleTuples(Block* block) {
   }
 }
 
-void LowerSimpleTuples(std::shared_ptr<Graph>& graph) {
+void LowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
   LowerSimpleTuples(graph->block());
   EliminateDeadCode(graph);
 }

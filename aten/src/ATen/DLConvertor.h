@@ -13,5 +13,7 @@ namespace at {
 CAFFE2_API ScalarType toScalarType(const DLDataType& dtype);
 CAFFE2_API DLManagedTensor* toDLPack(const Tensor& src);
 CAFFE2_API Tensor fromDLPack(const DLManagedTensor* src);
+CAFFE2_API DLDataType getDLDataType(const Tensor& t);
+CAFFE2_API DLContext getDLContext(const Tensor& tensor, const int64_t& device_id);
 
 } //namespace at

@@ -217,9 +217,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       rocblas_datatype_f32_r,
       rocblas_gemm_algo_standard,
       0,
-      0,
-      NULL,
-      NULL));
+      0));
 #else
 
 # if CUDA_VERSION >= 9000
@@ -315,7 +313,7 @@ void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
       incy == 1,
       "at::cuda::blas::gemv<Half>: support for incy != 1 not implemented");
   gemm<at::Half>(
-      stream, trans, CUBLAS_OP_N, m, 1, n, alpha, a, n, x, n, beta, y, m);
+      stream, trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
 }
 
 } // namespace blas

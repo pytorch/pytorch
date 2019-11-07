@@ -106,7 +106,7 @@ static void im2col_out_cuda_template(
 
       im2col<scalar_t>(
           at::cuda::getCurrentCUDAStream(),
-          input_n.data<scalar_t>(),
+          input_n.data_ptr<scalar_t>(),
           n_input_plane,
           input_height,
           input_width,
@@ -120,7 +120,7 @@ static void im2col_out_cuda_template(
           stride_width,
           dilation_height,
           dilation_width,
-          output_n.data<scalar_t>());
+          output_n.data_ptr<scalar_t>());
     }
 
     if (!batched_input) {
@@ -172,7 +172,7 @@ Tensor im2col_cuda(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor output = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
   im2col_out_cuda_template(
       output, input, kernel_size, dilation, padding, stride);
   return output;
@@ -204,7 +204,7 @@ Tensor im2col_backward_cuda(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output);
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
   im2col_backward_out_cuda_template(
       grad_input,
       grad_output,

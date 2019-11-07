@@ -1,5 +1,6 @@
 #pragma once
 
+namespace at {
 namespace Reduction {
 
 // NB: Keep this in sync with Reduction class in torch/nn/_reduction.py
@@ -11,4 +12,5 @@ enum Reduction {
   Sum,              // Sum losses
   END
 };
-}
+} // namespace Reduction
+} // namespace at
