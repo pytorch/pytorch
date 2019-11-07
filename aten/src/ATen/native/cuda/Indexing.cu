@@ -193,8 +193,8 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
       linearIndex = linearIndex.view(-1);
-      auto sorted_indices = at::empty_like(linearIndex);
-      auto orig_indices = at::empty_like(linearIndex);
+      auto sorted_indices = at::empty_like(linearIndex, at::MemoryFormat::Contiguous);
+      auto orig_indices = at::empty_like(linearIndex, at::MemoryFormat::Contiguous);
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -484,7 +484,7 @@ Tensor& index_add__cuda(Tensor & self, int64_t dim, const Tensor & index, const 
   if (cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(source) &&
       cuda::detail::canUse32BitIndexMath(index)) {
-    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
       int selfAddDim = selfInfo.collapseDims(dim);
@@ -534,7 +534,7 @@ Tensor& index_add__cuda(Tensor & self, int64_t dim, const Tensor & index, const 
       }
     });
   } else {
-    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
         cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
       int selfAddDim = selfInfo.collapseDims(dim);
