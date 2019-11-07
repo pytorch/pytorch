@@ -1,30 +1,26 @@
 package org.pytorch;
 
-import org.junit.Before;
-import org.junit.Test;
-
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import org.junit.Before;
+import org.junit.Test;
+
 public abstract class PytorchTestBase {
   private static final String TEST_MODULE_ASSET_NAME = "test.pt";
 
   @Before
-  public void setUp() {
-    System.loadLibrary("pytorch");
-  }
+  public void setUp() {}
 
   @Test
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
-    final IValue input =
-        IValue.from(Tensor.fromBlob(Tensor.allocateByteBuffer(1), new long[] {1}));
+    final IValue input = IValue.from(Tensor.fromBlob(Tensor.allocateByteBuffer(1), new long[] {1}));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
     assertTrue(output.isNull());
@@ -61,17 +57,17 @@ public abstract class PytorchTestBase {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     double[] values =
         new double[] {
-            -Double.MAX_VALUE,
-            Double.MAX_VALUE,
-            -Double.MIN_VALUE,
-            Double.MIN_VALUE,
-            -Math.exp(1.d),
-            -Math.sqrt(2.d),
-            -3.1415f,
-            3.1415f,
-            -1,
-            0,
-            1,
+          -Double.MAX_VALUE,
+          Double.MAX_VALUE,
+          -Double.MIN_VALUE,
+          Double.MIN_VALUE,
+          -Math.exp(1.d),
+          -Math.sqrt(2.d),
+          -3.1415f,
+          3.1415f,
+          -1,
+          0,
+          1,
         };
     for (double value : values) {
       final IValue input = IValue.from(value);
@@ -246,15 +242,14 @@ public abstract class PytorchTestBase {
     tensorFloats.getDataAsByteArray();
   }
 
-
   @Test
   public void testEqString() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     String[] values =
         new String[] {
-            "smoketest",
-            "проверка не латинских символов", // not latin symbols check
-            "#@$!@#)($*!@#$)(!@*#$"
+          "smoketest",
+          "проверка не латинских символов", // not latin symbols check
+          "#@$!@#)($*!@#$)(!@*#$"
         };
     for (String value : values) {
       final IValue input = IValue.from(value);
@@ -271,9 +266,9 @@ public abstract class PytorchTestBase {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     String[] values =
         new String[] {
-            "smoketest",
-            "проверка не латинских символов", // not latin symbols check
-            "#@$!@#)($*!@#$)(!@*#$"
+          "smoketest",
+          "проверка не латинских символов", // not latin symbols check
+          "#@$!@#)($*!@#$)(!@*#$"
         };
     for (String value : values) {
       final IValue input = IValue.from(value);
@@ -281,7 +276,8 @@ public abstract class PytorchTestBase {
       assertTrue(value.equals(input.toStr()));
       final IValue output = module.runMethod("str3Concat", input);
       assertTrue(output.isString());
-      String expectedOutput = new StringBuilder().append(value).append(value).append(value).toString();
+      String expectedOutput =
+          new StringBuilder().append(value).append(value).append(value).toString();
       assertTrue(expectedOutput.equals(output.toStr()));
     }
   }

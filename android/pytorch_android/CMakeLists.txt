@@ -62,16 +62,11 @@ if (ANDROID_ABI)
     # Link most things statically on Android.
   target_link_libraries(pytorch
       fbjni
-      -Wl,--gc-sections
-      -Wl,--whole-archive
+      -Wl,-dead_strip
+      -Wl,-all_load
       libtorch
-      -Wl,--no-whole-archive
       libc10
-      libnnpack
-      libpytorch_qnnpack
       libeigen_blas
-      libcpuinfo
-      libclog
   )
 
 else()
@@ -79,15 +74,10 @@ else()
   # Prefer dynamic linking on the host
   target_link_libraries(pytorch
       fbjni
-      -Wl,--gc-sections
-      -Wl,--whole-archive
+      -Wl,-dead_strip
+      -Wl,-all_load
       torch
-      -Wl,--no-whole-archive
       c10
-      nnpack
-      pytorch_qnnpack
-      cpuinfo
-      clog
   )
 
 endif()

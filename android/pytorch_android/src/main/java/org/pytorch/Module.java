@@ -3,10 +3,10 @@
 package org.pytorch;
 
 import com.facebook.jni.HybridData;
+import com.facebook.soloader.nativeloader.NativeLoader;
+import com.facebook.soloader.nativeloader.SystemDelegate;
 
-/**
- * Java wrapper for torch::jit::script::Module.
- */
+/** Java wrapper for torch::jit::script::Module. */
 public class Module {
 
   private NativePeer mNativePeer;
@@ -22,6 +22,9 @@ public class Module {
   }
 
   private Module(final String moduleAbsolutePath) {
+    if (!NativeLoader.isInitialized()) {
+      NativeLoader.init(new SystemDelegate());
+    }
     this.mNativePeer = new NativePeer(moduleAbsolutePath);
   }
 
@@ -39,7 +42,7 @@ public class Module {
    * Runs the specified method of this module with the specified arguments.
    *
    * @param methodName name of the TorchScript method to run.
-   * @param inputs     arguments that will be passed to TorchScript method.
+   * @param inputs arguments that will be passed to TorchScript method.
    * @return return value from the method.
    */
   public IValue runMethod(String methodName, IValue... inputs) {
@@ -47,11 +50,10 @@ public class Module {
   }
 
   /**
-   * Explicitly destroys the native torch::jit::script::Module.
-   * Calling this method is not required, as the native object will be destroyed
-   * when this object is garbage-collected.  However, the timing of garbage collection
-   * is not guaranteed, so proactively calling {@code destroy} can free memory more quickly.
-   * See {@link com.facebook.jni.HybridData#resetNative}.
+   * Explicitly destroys the native torch::jit::script::Module. Calling this method is not required,
+   * as the native object will be destroyed when this object is garbage-collected. However, the
+   * timing of garbage collection is not guaranteed, so proactively calling {@code destroy} can free
+   * memory more quickly. See {@link com.facebook.jni.HybridData#resetNative}.
    */
   public void destroy() {
     mNativePeer.mHybridData.resetNative();
@@ -59,7 +61,7 @@ public class Module {
 
   private static class NativePeer {
     static {
-      System.loadLibrary("pytorch");
+      NativeLoader.loadLibrary("pytorch");
     }
 
     private final HybridData mHybridData;
