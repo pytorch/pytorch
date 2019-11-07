@@ -293,7 +293,7 @@ static void gatherParametersAndBuffers(
   state->setValue(self.module_object(), self_value);
 
   auto self_ty = self.type();
-  for (const script::NameValue& s : self.get_slots()) {
+  for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
     auto qualname = prefix + "." + s.name;
     Value* trace_get_attr = g.insertNode(g.create(prim::TracedAttr))
                                 ->s_(attr::scope, qualname)
