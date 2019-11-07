@@ -510,7 +510,8 @@ class Tensor(torch._C._TensorBase):
             strides = None
         else:
             strides = tuple(s * itemsize for s in self.stride())
-        data = (self.data_ptr(), False)  # read-only is false
+        data_ptr = self.data_ptr() if self.numel() > 0 else 0
+        data = (data_ptr, False)  # read-only is false
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=2)
 
