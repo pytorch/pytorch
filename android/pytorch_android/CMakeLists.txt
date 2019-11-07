@@ -63,7 +63,6 @@ if (ANDROID_ABI)
   target_link_libraries(pytorch
       fbjni
       -Wl,-dead_strip
-      -Wl,-all_load
       libtorch
       libc10
       libeigen_blas
@@ -75,7 +74,6 @@ else()
   target_link_libraries(pytorch
       fbjni
       -Wl,-dead_strip
-      -Wl,-all_load
       torch
       c10
   )
