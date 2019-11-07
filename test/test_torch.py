@@ -424,6 +424,10 @@ class _TestTorchMixin(object):
         with self.assertRaisesRegex(RuntimeError, "Condition for computing multivariate log-gamma not met"):
             run_test(3)
 
+    def test_msnpu_error(self):
+        with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
+            torch.zeros(1, device=torch.device('msnpu'))
+
     def _digamma_input(self, test_poles=True):
         input = []
         input.append((torch.randn(10).abs() + 1e-4).tolist())
