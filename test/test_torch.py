@@ -3629,7 +3629,7 @@ class _TestTorchMixin(object):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
-        inputValuesFP32 = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype= torch.float)
+        inputValuesFP32 = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
         inputValuesBF16 = inputValuesFP32.bfloat16()
         precision_3dps = 0.004
         for p in [0, 1, 2, 3, 4, inf, -inf]:
