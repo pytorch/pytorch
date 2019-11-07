@@ -2869,7 +2869,8 @@ class _TestTorchMixin(object):
                     src = torch.randn(num_copy - 1)
                     with self.assertRaises(RuntimeError):
                         dest.masked_scatter_(mask, src)
-        self.assertEqual(len(w), 25)
+        # Only 16 (not 25) here as the warnings in the assertRaises are not caught on the python side
+        self.assertEqual(len(w), 16)
 
         warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
         for wi in w:
@@ -2901,7 +2902,8 @@ class _TestTorchMixin(object):
                     dst.masked_fill_((dst > 0).to(dtype), val)
                     dst2.masked_fill_((dst2 > 0).to(dtype), val)
                     self.assertEqual(dst, dst2, 0)
-            self.assertEqual(len(w), 28)
+            # Only 27 (not 28) here as the warning in the assertRaises are not caught on the python side
+            self.assertEqual(len(w), 27)
 
             warn = 'masked_fill_ received a mask with dtype torch.uint8,'
             for wi in w:
@@ -10538,6 +10540,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
     def test_masked_select(self, device):
+        warn = 'masked_select received a mask with dtype torch.uint8,'
         for dt in torch.testing.get_all_dtypes():
             with warnings.catch_warnings(record=True) as w:
                 for maskType in [torch.uint8, torch.bool]:
@@ -10564,10 +10567,9 @@ class TestTorchDeviceType(TestCase):
                     dst3 = torch.empty_like(src, device=device)
                     torch.masked_select(src, mask, out=dst3)
                     self.assertEqual(dst3, torch.Tensor(dst2), 0)
-        self.assertEqual(len(w), 1)
-
-        warn = 'masked_select received a mask with dtype torch.uint8,'
-        self.assertEqual(str(w[0].message)[0:53], str(warn))
+                    if maskType is torch.uint8:
+                        self.assertEqual(len(w), 1)
+                        self.assertEqual(str(w[0].message)[0:53], str(warn))
 
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
