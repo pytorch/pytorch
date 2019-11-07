@@ -32,6 +32,8 @@ default_set = set([
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
     'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
+    # Caffe2 CentOS
+    'caffe2-py3.6-devtoolset7-cuda9.0-cudnn7-centos7',
 
     # Binaries
     'manywheel 2.7mu cpu devtoolset7',
