@@ -539,6 +539,9 @@ at::Tensor _convolution(
 
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
+  if (!input_is_mkldnn) {
+    input = input.contiguous();
+  }
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
@@ -580,15 +583,15 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
-            input.contiguous(input.suggest_memory_format()), weight, bias,
+            input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
 
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
-            input.contiguous(), weight, bias,
+            input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
-          output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
       }
   } else if (params.use_cudnn(input)) {
     TORCH_CHECK(input.type() == weight.type(),
@@ -600,11 +603,11 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input, weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::cudnn_convolution(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
@@ -617,11 +620,11 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::miopen_convolution_transpose(
-          input.contiguous(), weight, bias,
+          input, weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::miopen_convolution(
-          input.contiguous(), weight, bias,
+          input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input)) {
@@ -633,7 +636,7 @@ at::Tensor _convolution(
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
     if (!input_is_mkldnn) {
-      output = at::mkldnn_convolution(input.contiguous(), weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
+      output = at::mkldnn_convolution(input, weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
                                       params.padding, params.stride, params.dilation, params.groups);
     } else {
       // do not call contiguous on mkldnn tensor
@@ -647,10 +650,9 @@ at::Tensor _convolution(
         input.device().type(), input, weight, bias, params.padding, params.stride, params.groups);
     } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
-          input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+          input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {
       std::vector<Tensor> outputs(params.groups);
-      input = input.contiguous();
       for (int g = 0; g < params.groups; ++g) {
         auto input_g = subtensor(input, 1, params.groups, g);
         auto weight_g = subtensor(weight, 0, params.groups, g);
@@ -746,8 +748,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(input),
-          at::empty_like(weight),
+          at::empty_like(input, at::MemoryFormat::Contiguous),
+          at::empty_like(weight, at::MemoryFormat::Contiguous),
           at::empty({}));
 }
 
@@ -802,7 +804,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    ggO = at::zeros_like(gO);
+    ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
   }
 
   if (ggb.defined()) {
@@ -893,7 +895,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gW = at::zeros_like(weight);
+    gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
   }
 
   // Compute gI = convT(ggW, gO.t()) if !transposed
@@ -982,12 +984,12 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gI = at::zeros_like(input);
+    gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
   }
 
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
-  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input);
-  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight);
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
+  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }

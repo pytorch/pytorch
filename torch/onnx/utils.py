@@ -182,7 +182,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
     if isinstance(args, torch.Tensor):
         args = (args, )
 
-    trace_graph, torch_out, inputs_states = torch.jit.get_trace_graph(func, args, _force_outplace=True, _return_inputs_states=True)
+    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(func, args, _force_outplace=True, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
 
     trace_graph = _optimize_graph(trace_graph, operator_export_type)
@@ -203,7 +203,7 @@ def _trace_and_get_graph_from_model(model, args, training):
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace_graph, torch_out, inputs_states = torch.jit.get_trace_graph(model, args, _force_outplace=True, _return_inputs_states=True)
+        trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(model, args, _force_outplace=True, _return_inputs_states=True)
         warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
@@ -282,7 +282,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
-    if do_constant_folding and _export_onnx_opset_version in [9, 10]:
+    if do_constant_folding and _export_onnx_opset_version in [9, 10, 11]:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
@@ -399,7 +399,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
-            torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+            with torch.serialization._open_file_like(f, 'wb') as opened_file:
+                opened_file.write(proto)
         elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
             import zipfile
             compression = zipfile.ZIP_DEFLATED \
@@ -417,13 +418,13 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 os.makedirs(f)
 
             model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
-            torch.serialization._with_file_like(
-                model_proto_file, "wb", lambda f: f.write(proto))
+            with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
+                opened_file.write(proto)
 
             for k, v in export_map.items():
                 weight_proto_file = os.path.join(f, k)
-                torch.serialization._with_file_like(
-                    weight_proto_file, "wb", lambda f: f.write(v))
+                with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
+                    opened_file.write(v)
         else:
             raise RuntimeError('Unknown export type')
     finally:
