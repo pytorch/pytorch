@@ -37,8 +37,6 @@ struct CAFFE2_API Dimname {
 
 using DimnameList = c10::ArrayRef<Dimname>;
 
-extern Symbol kWildcard;
-
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
 inline bool operator==(const Dimname& lhs, const Dimname& rhs) {

@@ -6,7 +6,7 @@
 #ifdef BUILD_NAMEDTENSOR
 namespace at {
 
-Symbol kWildcard = Symbol::dimname("*");
+static Symbol kWildcard = Symbol::dimname("*");
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   if (dimname.type() == NameType::WILDCARD) {
