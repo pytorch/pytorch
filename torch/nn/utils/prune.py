@@ -370,7 +370,7 @@ class PruningContainer(BasePruningMethod):
         return mask
 
 
-class IdentityPruningMethod(BasePruningMethod):
+class Identity(BasePruningMethod):
     r"""Utility pruning method that does not prune any units but generates the
     pruning parametrization with a mask of ones.
     """
@@ -392,10 +392,10 @@ class IdentityPruningMethod(BasePruningMethod):
             name (str): parameter name within ``module`` on which pruning
                 will act.
         """
-        return super(IdentityPruningMethod, cls).apply(module, name)
+        return super(Identity, cls).apply(module, name)
 
 
-class RandomPruningMethod(BasePruningMethod):
+class RandomUnstructured(BasePruningMethod):
     r"""Prune (currently unpruned) units in a tensor at random.
 
     Args:
@@ -449,12 +449,12 @@ class RandomPruningMethod(BasePruningMethod):
                 fraction of parameters to prune. If ``int``, it represents the 
                 absolute number of parameters to prune.
         """
-        return super(RandomPruningMethod, cls).apply(
+        return super(RandomUnstructured, cls).apply(
             module, name, amount=amount
         )
 
 
-class L1PruningMethod(BasePruningMethod):
+class L1Unstructured(BasePruningMethod):
     r"""Prune (currently unpruned) units in a tensor by zeroing out the ones 
     with the lowest L1-norm.
 
@@ -511,10 +511,10 @@ class L1PruningMethod(BasePruningMethod):
                 fraction of parameters to prune. If ``int``, it represents the 
                 absolute number of parameters to prune.
         """
-        return super(L1PruningMethod, cls).apply(module, name, amount=amount)
+        return super(L1Unstructured, cls).apply(module, name, amount=amount)
 
 
-class RandomStructuredPruningMethod(BasePruningMethod):
+class RandomStructured(BasePruningMethod):
     r"""Prune entire (currently unpruned) channels in a tensor at random.
 
     Args:
@@ -614,12 +614,12 @@ class RandomStructuredPruningMethod(BasePruningMethod):
             dim (int, optional): index of the dim along which we define
                 channels to prune. Default: -1.
         """
-        return super(RandomStructuredPruningMethod, cls).apply(
+        return super(RandomStructured, cls).apply(
             module, name, amount=amount, dim=dim
         )
 
 
-class LnStructuredPruningMethod(BasePruningMethod):
+class LnStructured(BasePruningMethod):
     r"""Prune entire (currently unpruned) channels in a tensor based on their
     Ln-norm.
 
@@ -735,12 +735,12 @@ class LnStructuredPruningMethod(BasePruningMethod):
             dim (int): index of the dim along which we define channels to
                 prune.
         """
-        return super(LnStructuredPruningMethod, cls).apply(
+        return super(LnStructured, cls).apply(
             module, name, amount=amount, n=n, dim=dim
         )
 
 
-class CustomFromMaskPruningMethod(BasePruningMethod):
+class CustomFromMask(BasePruningMethod):
 
     PRUNING_TYPE = "global"
 
@@ -763,7 +763,7 @@ class CustomFromMaskPruningMethod(BasePruningMethod):
             name (str): parameter name within ``module`` on which pruning
                 will act.
         """
-        return super(CustomFromMaskPruningMethod, cls).apply(
+        return super(CustomFromMask, cls).apply(
             module, name, mask
         )
 
@@ -795,7 +795,7 @@ def identity(module, name):
         >>> print(m.bias_mask)
         tensor([1., 1., 1.])
     """
-    IdentityPruningMethod.apply(module, name)
+    Identity.apply(module, name)
     return module
 
 
@@ -828,7 +828,7 @@ def random_unstructured(module, name, amount):
         tensor(1)
 
     """
-    RandomPruningMethod.apply(module, name, amount)
+    RandomUnstructured.apply(module, name, amount)
     return module
 
 
@@ -861,7 +861,7 @@ def l1_unstructured(module, name, amount):
         >>> m.state_dict().keys()
         odict_keys(['bias', 'weight_orig', 'weight_mask'])
     """
-    L1PruningMethod.apply(module, name, amount)
+    L1Unstructured.apply(module, name, amount)
     return module
 
 
@@ -898,7 +898,7 @@ def random_structured(module, name, amount, dim):
         >>> print(columns_pruned)
         3
     """
-    RandomStructuredPruningMethod.apply(module, name, amount, dim)
+    RandomStructured.apply(module, name, amount, dim)
     return module
 
 
@@ -934,7 +934,7 @@ def ln_structured(module, name, amount, n, dim):
                nn.Conv2d(5, 3, 2), 'weight', amount=0.3, dim=1, n=float('-inf')
             )
     """
-    LnStructuredPruningMethod.apply(module, name, amount, n, dim)
+    LnStructured.apply(module, name, amount, n, dim)
     return module
 
 
@@ -983,7 +983,7 @@ def global_unstructured(parameters, pruning_method, **kwargs):
             )
         >>> prune.global_unstructured(
                 parameters_to_prune,
-                pruning_method=prune.L1PruningMethod,
+                pruning_method=prune.L1Unstructured,
                 amount=10,
             )
         >>> print(sum(torch.nn.utils.parameters_to_vector(net.buffers()) == 0))
@@ -1071,7 +1071,7 @@ def custom_from_mask(module, name, mask):
         tensor([0., 1., 0.])
 
     """
-    CustomFromMaskPruningMethod.apply(module, name, mask)
+    CustomFromMask.apply(module, name, mask)
     return module
 
 

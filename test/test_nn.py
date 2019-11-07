@@ -2129,7 +2129,7 @@ class TestNN(NNTestCase):
 
         # force the mask to be made of all 1s
         with mock.patch(
-            "torch.nn.utils.prune.RandomPruningMethod.compute_mask"
+            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
         ) as compute_mask:
             compute_mask.return_value = torch.ones_like(m.weight)
             prune.random_unstructured(m, name='weight', amount=0.9)  # amount won't count
@@ -2159,7 +2159,7 @@ class TestNN(NNTestCase):
 
         # check grad is zero for masked weights
         with mock.patch(
-            "torch.nn.utils.prune.RandomPruningMethod.compute_mask"
+            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
         ) as compute_mask:
             compute_mask.return_value = mask
             prune.random_unstructured(m, name='weight', amount=0.9)
@@ -2192,7 +2192,7 @@ class TestNN(NNTestCase):
         mask[0, 3] = 1
 
         with mock.patch(
-            "torch.nn.utils.prune.RandomPruningMethod.compute_mask"
+            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
         ) as compute_mask:
             compute_mask.return_value = mask
             prune.random_unstructured(m, name='weight', amount=0.9)
@@ -2215,7 +2215,7 @@ class TestNN(NNTestCase):
 
         # check grad is zero for masked weights
         with mock.patch(
-            "torch.nn.utils.prune.RandomPruningMethod.compute_mask"
+            "torch.nn.utils.prune.RandomUnstructured.compute_mask"
         ) as compute_mask:
             compute_mask.return_value = mask
             prune.random_unstructured(m, name='weight', amount=0.9)
@@ -2276,8 +2276,8 @@ class TestNN(NNTestCase):
 
         # check that the entries of the pruning container are of the expected 
         # type and in the expected order
-        self.assertIsInstance(hook[0], torch.nn.utils.prune.L1PruningMethod)
-        self.assertIsInstance(hook[1], torch.nn.utils.prune.LnStructuredPruningMethod)
+        self.assertIsInstance(hook[0], torch.nn.utils.prune.L1Unstructured)
+        self.assertIsInstance(hook[1], torch.nn.utils.prune.LnStructured)
 
         # check that all entries that are 0 in the 1st mask are 0 in the 
         # 2nd mask too
@@ -2296,14 +2296,14 @@ class TestNN(NNTestCase):
         container._tensor_name = 'test'
         self.assertEqual(len(container), 0)
 
-        p = prune.L1PruningMethod(amount=2)
+        p = prune.L1Unstructured(amount=2)
         p._tensor_name = 'test'
 
         # test adding a pruning method to a container
         container.add_pruning_method(p)
 
         # test error raised if tensor name is different
-        q = prune.L1PruningMethod(amount=2)
+        q = prune.L1Unstructured(amount=2)
         q._tensor_name = 'another_test'
         with self.assertRaises(ValueError):
             container.add_pruning_method(q)
@@ -2326,7 +2326,7 @@ class TestNN(NNTestCase):
 
         # 1) test unstructured pruning
         # create a new pruning method
-        p = prune.L1PruningMethod(amount=2)
+        p = prune.L1Unstructured(amount=2)
         p._tensor_name = 'test'
         # add the pruning method to the container
         container.add_pruning_method(p)
@@ -2342,7 +2342,7 @@ class TestNN(NNTestCase):
         self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning
-        q = prune.LnStructuredPruningMethod(amount=1, n=2, dim=0)
+        q = prune.LnStructured(amount=1, n=2, dim=0)
         q._tensor_name = 'test'
         container.add_pruning_method(q)
         # since we are pruning the lowest magnitude one of the two rows, the 
@@ -2352,7 +2352,7 @@ class TestNN(NNTestCase):
         self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning, along another axis
-        r = prune.LnStructuredPruningMethod(amount=1, n=2, dim=1)
+        r = prune.LnStructured(amount=1, n=2, dim=1)
         r._tensor_name = 'test'
         container.add_pruning_method(r)
         # since we are pruning the lowest magnitude of the four columns, the 
@@ -2391,7 +2391,7 @@ class TestNN(NNTestCase):
         which would instead kill off *all* units with magnitude = threshold.
         """
         AMOUNT = 0.2
-        p = prune.L1PruningMethod(amount=AMOUNT)
+        p = prune.L1Unstructured(amount=AMOUNT)
         # create a random tensors with entries in {-2, 0, 2}
         t = 2 * torch.randint(low=-1, high=2, size=(10, 7))
         nparams_toprune = prune._compute_nparams_toprune(AMOUNT, t.nelement())
@@ -2404,7 +2404,7 @@ class TestNN(NNTestCase):
 
         AMOUNT = 0.6
         AXIS = 2
-        p = prune.RandomStructuredPruningMethod(amount=AMOUNT, dim=AXIS)
+        p = prune.RandomStructured(amount=AMOUNT, dim=AXIS)
         t = 2 * torch.randint(low=-1, high=2, size=(5, 4, 2)).to(
             dtype=torch.float32
         )
@@ -2510,7 +2510,7 @@ class TestNN(NNTestCase):
         # prune the 4 smallest weights globally by L1 magnitude
         prune.global_unstructured(
             params_to_prune,
-            pruning_method=prune.L1PruningMethod,
+            pruning_method=prune.L1Unstructured,
             amount=4
         )
 
@@ -2522,7 +2522,7 @@ class TestNN(NNTestCase):
 
 
     def test_custom_from_mask_pruning(self):
-        r"""Test that the CustomFromMaskPruningMethod is capable of receiving
+        r"""Test that the CustomFromMask is capable of receiving
         as input at instantiation time a custom mask, and combining it with
         the previous default mask to generate the correct final mask.
         """
@@ -2534,7 +2534,7 @@ class TestNN(NNTestCase):
         # some tensor (not actually used)
         t = torch.rand_like(mask.to(dtype=torch.float32))
 
-        p = prune.CustomFromMaskPruningMethod(mask=mask)
+        p = prune.CustomFromMask(mask=mask)
 
         computed_mask = p.compute_mask(t, default_mask)
         expected_mask = torch.tensor([[0, 0, 0, 0], [0, 0, 1, 1]]).to(
@@ -2558,7 +2558,7 @@ class TestNN(NNTestCase):
                 with self.subTest(m=m, name=name):
 
                     with mock.patch(
-                        "torch.nn.utils.prune.L1PruningMethod.compute_mask"
+                        "torch.nn.utils.prune.L1Unstructured.compute_mask"
                     ) as compute_mask:
                         compute_mask.side_effect = Exception('HA!')
                         with self.assertRaises(Exception): 
