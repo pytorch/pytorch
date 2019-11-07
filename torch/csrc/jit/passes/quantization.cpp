@@ -32,7 +32,7 @@ void fillQConfigMap(
   }
   map[module.module_object()] = qconfig;
 
-  for (const script::NameModule& s : module.get_modules()) {
+  for (const script::NameModule& s : module.named_children()) {
     std::string child_key;
     if (key == "") {
       child_key = s.name;
@@ -40,11 +40,14 @@ void fillQConfigMap(
       child_key = key + "." + s.name;
     }
     fillQConfigMap(
-        s.module.module_object(), qconfig_dict, map, child_key, qconfig);
+        s.value.module_object(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
-std::string getFuncName(const c10::QualifiedName& qname) {
+std::string getFuncName(Value* func_value) {
+  auto func_node = func_value->node();
+  auto func = func_node->output()->type()->expect<FunctionType>()->function();
+  const auto& qname = func->qualname();
   const auto& name = qname.qualifiedName();
   auto rdot_idx = name.rfind('.');
   if (rdot_idx != std::string::npos) {
@@ -71,9 +74,7 @@ bool nodeQuantizable(Node* n) {
       std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
   if (n->kind() == prim::CallFunction) {
-    auto func_node = n->inputs()[0]->node();
-    auto func = func_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
         std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
         call_funcs.end();
@@ -172,7 +173,7 @@ Node* InsertObserversHelper::insertObserverFor(
   }
   script::Module observer = observer_module.clone();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
-  while (module.find_module(observer_name)) {
+  while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
@@ -340,11 +341,7 @@ void InsertObserversHelper::insertObservers(
         script::Module callee_module;
         if (module_instance->node()->kind() == prim::GetAttr) {
           auto child_module_name = module_instance->node()->s(attr::name);
-          auto child_module = module.find_module(child_module_name);
-          TORCH_INTERNAL_ASSERT(
-              child_module,
-              "Child module " + child_module_name + " does not exist");
-          callee_module = child_module.value();
+          callee_module = module.attr(child_module_name).toModule();
         } else {
           TORCH_INTERNAL_ASSERT(
               module_instance == graph->inputs()[0],
@@ -513,17 +510,11 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto observer_module = module_.find_module(observer_name.value());
-  TORCH_INTERNAL_ASSERT(
-      observer_module,
-      "getQParams expects the corresponding observer for ",
-      v->debugName(),
-      " exists.");
-  auto om = observer_module.value();
+  auto om = module_.attr(observer_name.value()).toModule();
   auto calculate_qparams = om.get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
   checkCalculateQParamsResult(qparams);
-  auto scalar_type = om.get_attribute("dtype");
+  auto scalar_type = om.attr("dtype");
   return std::make_tuple(qparams, scalar_type);
 }
 
@@ -552,12 +543,7 @@ c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
       "Child instance should come from GetAttr.");
   auto child_module_name = child_instance->node()->s(attr::name);
   if (child_module_name.find("_observer_") == std::string::npos) {
-    auto child_module = module_.find_module(child_module_name);
-    TORCH_INTERNAL_ASSERT(
-        child_module,
-        "InsertQuantDeQuant - Child module " + child_module_name +
-            " does not exist");
-    return child_module;
+    return module_.attr(child_module_name).toModule();
   }
   return c10::nullopt;
 }
@@ -646,10 +632,8 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
-    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
-    auto func =
-        linear_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto linear_value = match_vmap.at(vmap.at("linear"));
+    auto func_name = getFuncName(linear_value);
     if (func_name == "linear") {
       return true;
     }
@@ -767,31 +751,31 @@ static std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
   return std::make_tuple(new_w, new_b);
 }
 
+static bool hastensor(script::Module& m, const char* name) {
+  return m.hasattr(name) && m.attr(name).isTensor();
+}
+
 static bool tryExtractingConvBNParameters(
     script::Module& conv,
     script::Module& bn,
     ConvBNParameters& r) {
-  if (!conv.find_parameter("weight") || !bn.find_parameter("weight") ||
-      !bn.find_parameter("bias")) {
-    return false;
-  }
-  if (!bn.find_attribute("running_mean") || !bn.find_attribute("running_var") ||
-      !bn.get_attribute("running_mean").isTensor() ||
-      !bn.get_attribute("running_var").isTensor()) {
+  if (!hastensor(conv, "weight") || !hastensor(bn, "weight") ||
+      !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
+      !hastensor(bn, "running_var")) {
     return false;
   }
 
-  r.bn_rm = bn.get_attribute("running_mean").toTensor();
-  r.bn_rv = bn.get_attribute("running_var").toTensor();
+  r.bn_rm = bn.attr("running_mean").toTensor();
+  r.bn_rv = bn.attr("running_var").toTensor();
   r.bn_eps = 1e-5; // TODO: allow access to the actual value. NOLINT
                    // Now we cannot do it because we inline all fields that are
                    // in __constants__ and lose all tracks of them.
-  r.bn_w = bn.get_parameter("weight");
-  r.bn_b = bn.get_parameter("bias");
+  r.bn_w = bn.attr("weight").toTensor();
+  r.bn_b = bn.attr("bias").toTensor();
 
-  r.conv_w = conv.get_parameter("weight");
-  if (conv.find_parameter("bias")) {
-    r.conv_b = conv.get_parameter("bias");
+  r.conv_w = conv.attr("weight").toTensor();
+  if (conv.hasattr("bias")) {
+    r.conv_b = conv.attr("bias").toTensor();
   } else {
     r.conv_b = at::zeros_like(r.bn_rm);
   }
@@ -826,8 +810,8 @@ graph(%self, %x):
     worklist.pop();
 
     // Queue submodules for processing
-    for (const script::NameModule& submodule : current.get_modules()) {
-      worklist.push(submodule.module);
+    for (const script::Module& submodule : current.children()) {
+      worklist.push(submodule);
     }
 
     // Process forward method of the current module
@@ -854,9 +838,11 @@ graph(%self, %x):
       TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
 
       script::Module conv_submodule =
-          current.get_module(matched_conv_submodule->s(Symbol::attr("name")));
+          current.attr(matched_conv_submodule->s(Symbol::attr("name")))
+              .toModule();
       script::Module bn_submodule =
-          current.get_module(matched_bn_submodule->s(Symbol::attr("name")));
+          current.attr(matched_bn_submodule->s(Symbol::attr("name")))
+              .toModule();
 
       ConvBNParameters params;
       if (!tryExtractingConvBNParameters(
@@ -883,9 +869,9 @@ graph(%self, %x):
       GRAPH_UPDATE("Deleting ", *matched_bn);
 
       auto new_w_b = computeUpdatedConvWeightAndBias(params);
-      conv_submodule.set_parameter("weight", std::get<0>(new_w_b));
-      if (conv_submodule.find_parameter("bias")) {
-        conv_submodule.set_parameter("bias", std::get<1>(new_w_b));
+      conv_submodule.setattr("weight", std::get<0>(new_w_b));
+      if (conv_submodule.hasattr("bias")) {
+        conv_submodule.setattr("bias", std::get<1>(new_w_b));
       } else {
         conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
       }
@@ -936,7 +922,7 @@ graph(%self, %scale, %zero_point, %dtype):
       continue;
     }
     auto match_vmap = match.values_map;
-    auto float_weight = module.get_parameter("weight").variable_data();
+    auto float_weight = module.attr("weight").toTensor().data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
         toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
@@ -965,8 +951,8 @@ void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     InsertPrepackUnpack(graph);
-    for (script::NameModule m : module.get_modules()) {
-      InsertPrepackUnpack(m.module);
+    for (script::Module m : module.children()) {
+      InsertPrepackUnpack(m);
     }
   }
 }
@@ -1012,11 +998,11 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
           toIValue(match_vmap.at(vmap.at("w_zero_point"))).value().toInt();
       auto w_dtype =
           toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
-      auto w = module.get_parameter("weight").variable_data();
+      auto w = module.attr("weight").toTensor().data();
       auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
       c10::optional<at::Tensor> b = c10::nullopt;
-      if (module.find_parameter("bias")) {
-        b = module.get_parameter("bias").variable_data();
+      if (hastensor(module, "bias")) {
+        b = module.attr("bias").toTensor().data();
       }
       script::Module wrapper_module = packed_params_module.clone();
       auto set_weight_bias = wrapper_module.get_method("set_weight_bias");
@@ -1045,7 +1031,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       // unique name for the module based on %w_quant
       int uid = 0;
       auto module_name = module_name_prefix + c10::to_string(uid++);
-      while (module.find_module(module_name)) {
+      while (module.hasattr(module_name)) {
         module_name_prefix + c10::to_string(uid++);
       }
       module.register_module(module_name, wrapper_module);
@@ -1084,9 +1070,9 @@ void FoldPrepackedWeightIntoModule(
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
         module, method.name(), linear_params_module, conv_params_module);
-    for (script::NameModule m : module.get_modules()) {
+    for (script::Module m : module.children()) {
       FoldPrepackedWeightIntoModule(
-          m.module, linear_params_module, conv_params_module);
+          m, linear_params_module, conv_params_module);
     }
   }
 }
