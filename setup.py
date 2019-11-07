@@ -792,6 +792,8 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
                 'include/ATen/detail/*.h',
+                'include/ATen/native/quantized/*.h',
+                'include/ATen/native/quantized/cpu/*.h',
                 'include/caffe2/utils/*.h',
                 'include/caffe2/utils/**/*.h',
                 'include/c10/*.h',
