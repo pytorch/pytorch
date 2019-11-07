@@ -33,7 +33,13 @@
                         </constraints>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
                     </view>
-                    <navigationItem key="navigationItem" title="speed_benchmark_torch" id="zRt-2x-Qpi"/>
+                    <navigationItem key="navigationItem" title="speed_benchmark_torch" id="zRt-2x-Qpi">
+                        <barButtonItem key="rightBarButtonItem" style="plain" systemItem="redo" id="J2L-mS-Fgq">
+                            <connections>
+                                <action selector="reRun:" destination="BYZ-38-t0r" id="OSo-SJ-K7N"/>
+                            </connections>
+                        </barButtonItem>
+                    </navigationItem>
                     <connections>
                         <outlet property="textView" destination="3QV-4Z-f2v" id="Z1X-Bu-UDB"/>
                     </connections>

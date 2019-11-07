@@ -1309,7 +1309,7 @@ const std::vector<std::string> functions = {
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
       )",
-      R"(
+    R"(
         def AD_sizes_if_not_equal_multi_1(t1, t2, res):
             return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
 

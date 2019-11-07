@@ -77,7 +77,6 @@ static int iter = 10;
   if (print_output) {
     std::cout << module.forward(inputs) << std::endl;
   }
-  UI_LOG(@"Start benchmarking...", nil);
   UI_LOG(@"Running warmup runs", nil);
   CAFFE_ENFORCE(warmup >= 0, "Number of warm up runs should be non negative, provided ", warmup,
                 ".");

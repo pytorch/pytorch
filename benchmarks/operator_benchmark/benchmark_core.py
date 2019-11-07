@@ -68,13 +68,13 @@ class BenchmarkRunner(object):
         self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.predefined_minimum_secs = 4
+        self.predefined_minimum_secs = 2
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
-        # 100 is the default warmup iterations 
-        if self.args.warmup_iterations == -1: 
+        # 100 is the default warmup iterations
+        if self.args.warmup_iterations == -1:
             self.args.warmup_iterations = 100
         if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
@@ -83,9 +83,6 @@ class BenchmarkRunner(object):
         # to match the tag anymore
         if self.args.test_name is not None:
             self.args.tag_filter = None
-
-        if self.args.ai_pep_format:
-            self.print_per_iter = True
 
 
     def _print_header(self):
@@ -199,10 +196,19 @@ class BenchmarkRunner(object):
 
             report_run_time = 1e6 * run_time_sec / iters
             time_trace.append(report_run_time)
+            # Print out the time spent in each epoch in ms
+            if self.args.ai_pep_format:
+                mode = "JIT" if self.use_jit else "Eager"
+                test_name = '_'.join([test_case.framework, test_case.test_config.test_name, mode])
+                print("PyTorchObserver " + json.dumps(
+                    {
+                        "type": test_name,
+                        "metric": "latency",
+                        "unit": "ms",
+                        "value": str(report_run_time / 1e3),
+                    }
+                ))
             if results_are_significant:
-                # Print out the last 50 values when running with AI PEP
-                if self.args.ai_pep_format:
-                    test_case._print_per_iter()
                 break
 
             # Re-estimate the hopefully-sufficient
@@ -235,7 +241,8 @@ class BenchmarkRunner(object):
             self._check_keep(op_test_config.tag, self.args.tag_filter) and
             self._check_keep_list(test_case.op_bench.module_name(), operators) and
             self._check_keep_list(test_case.framework, frameworks) and
-                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only)):
+                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only) and
+                (self.args.device == 'None' or self.args.device in op_test_config.test_name)):
             return True
 
         return False

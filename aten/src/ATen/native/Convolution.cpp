@@ -31,7 +31,7 @@ struct ConvParams {
   bool is_output_padding_neg() const;
   bool is_output_padding_big() const;
   bool is_padding_neg() const;
-  bool is_stride_neg() const;
+  bool is_stride_nonpos() const;
   void view1d_as_2d();
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input) const;
@@ -105,14 +105,13 @@ auto ConvParams::is_padding_neg() const -> bool {
   return is_non_neg;
 }
 
-auto ConvParams::is_stride_neg() const -> bool {
-  bool is_non_neg = false;
+auto ConvParams::is_stride_nonpos() const -> bool {
+  bool is_nonpos = false;
   for (int s : stride) {
-    is_non_neg |= (s < 0);
+    is_nonpos |= (s <= 0);
   }
-  return is_non_neg;
+  return is_nonpos;
 }
-
 
 auto ConvParams::view1d_as_2d() -> void {
   if (stride.size() == 1) {
@@ -381,7 +380,7 @@ static void check_shape_forward(const at::Tensor& input,
 
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
-  TORCH_CHECK(!params.is_stride_neg(), "negative stride is not supported");
+  TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -749,8 +748,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(input),
-          at::empty_like(weight),
+          at::empty_like(input, at::MemoryFormat::Contiguous),
+          at::empty_like(weight, at::MemoryFormat::Contiguous),
           at::empty({}));
 }
 
@@ -805,7 +804,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    ggO = at::zeros_like(gO);
+    ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
   }
 
   if (ggb.defined()) {
@@ -896,7 +895,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gW = at::zeros_like(weight);
+    gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
   }
 
   // Compute gI = convT(ggW, gO.t()) if !transposed
@@ -985,12 +984,12 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gI = at::zeros_like(input);
+    gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
   }
 
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
-  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input);
-  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight);
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
+  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }
