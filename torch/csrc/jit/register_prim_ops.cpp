@@ -2399,7 +2399,8 @@ RegisterOperators reg2({
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          char c = string.at(index);
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
           return 0;
         },
