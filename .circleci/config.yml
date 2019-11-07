@@ -484,11 +484,9 @@ jobs:
       - run:
           name: Test
           no_output_timeout: "30m"
-          shell: cmd.exe
           command: |
             choco install -y 7zip curl
-            call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
-            bash .jenkins/pytorch/win-test.sh
+            .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
