@@ -74,26 +74,5 @@ void testLiteInterpreterConv() {
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
-
-void testLiteInterpreterInline() {
-  script::Module m("m");
-  m.define(R"(
-def foo1(x):
-    print("one")
-    return x
-
-def foo2(x):
-    print("two")
-    return foo1(x)
-
-def foo3(x):
-    print("three")
-    return foo2(x)
-  )");
-
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-}
 } // namespace torch
 } // namespace jit
