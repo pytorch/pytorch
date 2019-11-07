@@ -116,4 +116,3 @@ inline Tensor grid_sample(
 } // namespace functional
 } // namespace nn
 } // namespace torch
-

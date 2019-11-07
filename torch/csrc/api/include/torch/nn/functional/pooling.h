@@ -556,4 +556,3 @@ inline Tensor lp_pool2d(const Tensor& input, const LPPool2dOptions& options) {
 } // namespace functional
 } // namespace nn
 } // namespace torch
-
