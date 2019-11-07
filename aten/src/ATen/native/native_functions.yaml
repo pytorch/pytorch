@@ -185,15 +185,9 @@
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   supports_named_tensor: True
-  dispatch:
-    CPU: _abs__cpu
-    CUDA: _abs__cuda
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _abs_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: angle(Tensor self) -> Tensor
   variants: function, method
@@ -205,7 +199,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _angle_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: real(Tensor self) -> Tensor
   variants: function, method
@@ -217,7 +210,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _real_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: imag(Tensor self) -> Tensor
   variants: function, method
@@ -229,7 +221,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _imag_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: conj(Tensor self) -> Tensor
   variants: function, method
@@ -241,7 +232,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _conj_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: acos(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -470,9 +460,9 @@
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
 
-- func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
+- func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, int)
 
-- func: _batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)
+- func: _batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
 
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
@@ -771,12 +761,12 @@
   dispatch:
     CUDA: cudnn_affine_grid_generator_backward
 
-- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)
+- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: cudnn_batch_norm
 
 # NB: You can only use this if you used cudnn_batch_norm training=True
-- func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon, Tensor reserveSpace) -> (Tensor, Tensor, Tensor)
+- func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: cudnn_batch_norm_backward
 

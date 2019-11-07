@@ -3358,29 +3358,6 @@ bool meaningfulName(const std::string& name) {
   return false;
 }
 
-void lambdaLiftFork(Node* fork_node) {
-  // Fork a new graph from its orignal owning graph
-  auto forked_graph = std::make_shared<Graph>();
-  auto body_block = fork_node->blocks()[0];
-
-  // Make sure we capture everything in the new graph.
-  // The uncaptured values will be added to the fork signature.
-  std::unordered_map<Value*, Value*> uncaptures_map;
-  auto env = [&](Value* v) -> Value* {
-    if (!uncaptures_map.count(v)) {
-      // Capture values for both graphs
-      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-      fork_node->addInput(v);
-    }
-    return uncaptures_map[v];
-  };
-  forked_graph->block()->cloneFrom(body_block, env);
-
-  // Separate the subgraph and clean up the orignal one
-  fork_node->g_(attr::Subgraph, forked_graph);
-  fork_node->eraseBlock(0);
-}
-
 void CompilationUnit::define_interface(
     const c10::QualifiedName& qualifiedName,
     const ClassDef& classDef,

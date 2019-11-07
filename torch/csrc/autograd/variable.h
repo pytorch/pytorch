@@ -33,11 +33,6 @@ struct Node;
 /// `Variable` called its `grad` (gradient). If the variable is a leaf, its
 /// gradient will be accumulated into this variable.
 ///
-/// Every Tensor is a Variable, but sometimes we colloquially refer to Variables
-/// that don't require gradients as Tensors (since none of the autograd
-/// machinery for Variables applies).  Historically, Variables and Tensors
-/// were separate concepts, but we've merged them together.
-///
 ///                              Gradient Edges
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// Furthermore, `Variable`s have the notion of a `gradient_edge`, which is the
@@ -79,10 +74,12 @@ struct Node;
 /// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
 /// `Variable` and `Tensor` actually convert implicitly between each other. You
 /// can thus call functions defined on `Tensor`s also with `Variable`s. For
-/// this, the `Variable` class allows implicit construction from `Tensor`.
-///
-/// Our intention is to eliminate the Variable class in the near future, or make
-/// it so that only internal code uses it to do internal operations.
+/// this, the `Variable` class allows implicit construction from `Tensor`. It is
+/// the responsibility of calling code to ensure that this constructor is
+/// invoked only when the `Tensor` contains autograd metadata. Most notably, it
+/// is *not* correct to construct a brand new `Variable` from a `Tensor` using
+/// this constructor. To do so, you must use the `make_variable` free function
+/// instead. To create a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct AutogradMeta;
@@ -96,12 +93,19 @@ struct TORCH_API Variable : public at::Tensor {
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  // "Downcasts" a `Tensor` into a `Variable`.
+  // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
+  // know are Variables.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
+    TORCH_CHECK(
+        is_variable() || !defined(),
+        "Tensor that was converted to Variable was not actually a Variable");
   }
 
   /*implicit*/ Variable(at::Tensor&& rhs)
       : at::Tensor(std::move(rhs)) {
+    TORCH_CHECK(
+        is_variable() || !defined(),
+        "Tensor that was converted to Variable was not actually a Variable");
   }
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
@@ -318,8 +322,6 @@ public:
 
 /// Each `Variable` has one unique `AutogradMeta` struct, which stores autograd
 /// metadata fields that are necessary for tracking the Variable's autograd history.
-/// As an optimization, a Variable may store a nullptr, in lieu of a default
-/// constructed AutogradMeta.
 
 struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
@@ -518,14 +520,13 @@ inline Variable make_variable_view(
 /// set only for leaves, and determines whether the `Variable` will accumulate
 /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
 /// type *must* be `Tensor`.
-///
-/// TODO: Eliminate this function as much as possible, as it can be expressed
-/// more clearly as detach() or a no-op in most call sites (especially when
-/// there is only one use of the variable).
 inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
+  TORCH_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.getIntrusivePtr();
@@ -560,6 +561,9 @@ inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
+  TORCH_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
@@ -574,13 +578,22 @@ inline Variable make_variable(
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// In the old days, these casts were checked, but now that every Tensor
-// is a Variable this cast is always valid
+/// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
+/// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
+/// throws a `std::invalid_argument` exception.
 inline Variable& as_variable_ref(at::Tensor& tensor) {
+  TORCH_CHECK(
+      tensor.is_variable(),
+      "Attempted to cast a Tensor to a Variable, but "
+      "the dynamic type of the value is not Variable.");
   return static_cast<Variable&>(tensor);
 }
 
 inline const Variable& as_variable_ref(const at::Tensor& tensor) {
+  TORCH_CHECK(
+      tensor.is_variable(),
+      "Attempted to cast a Tensor to a Variable, but "
+      "the dynamic type of the value is not Variable.");
   return static_cast<const Variable&>(tensor);
 }
 
