@@ -91,11 +91,20 @@
 #define C10_API C10_IMPORT
 #endif
 
-// This one is being used by libcaffe2.so
+// This one is being used by libtorch.so
+// TODO: rename this to TORCH_API
 #ifdef CAFFE2_BUILD_MAIN_LIB
 #define CAFFE2_API C10_EXPORT
 #else
 #define CAFFE2_API C10_IMPORT
+#endif
+
+// This one will eventually be used by libtorch_cuda.so, but for
+// now it has the same function as CAFFE2_API
+#ifdef CAFFE2_BUILD_MAIN_LIB
+#define TORCH_CUDA_API C10_EXPORT
+#else
+#define TORCH_CUDA_API C10_IMPORT
 #endif
 
 #endif // C10_MACROS_MACROS_H_

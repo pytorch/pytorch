@@ -4117,9 +4117,18 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.size(), load_x.size())
                 self.assertEqual(x.stride(), load_x.stride())
 
+
+    def test_serialization_save_warnings(self):
+        with warnings.catch_warnings(record=True) as warns:
+            with tempfile.NamedTemporaryFile() as checkpoint:
+                x = torch.save(torch.nn.Linear(2, 3), checkpoint)
+                self.assertEquals(len(warns), 0)
+
+
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
     def _test_serialization_container(self, unique_key, filecontext_lambda):
+
         tmpmodule_name = 'tmpmodule{}'.format(unique_key)
 
         def import_module(name, filename):
@@ -5550,6 +5559,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         do_test(torch.tensor([[1, 2]]).data)
         do_test(torch.tensor([[1, 2]]).detach())
 
+    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
@@ -5666,6 +5676,54 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
+
+    def test_batch_norm_cpu_inference(self):
+        # input nchw in (2,1,1,1), (2,2,2,2) 
+        inputs = [
+            torch.tensor([[[[-0.5000]]], [[[0.5000]]]]),
+            torch.tensor([
+                [
+                    [[-0.5000, 0.5000], [-1.0000, 1.0000]],
+                    [[-0.2500, -0.5000], [0.2500, 0.5000]]
+                ],
+                [
+                    [[0.1000, 1.0000], [1.0000, 0.1000]],
+                    [[1.0000, 0.5000], [1.5000, -1.5000]]
+                ]])]
+        # output nchw in (2,1,1,1), (2,2,2,2) 
+        outputs = [
+            torch.tensor([
+                [[[-0.499997496604919433593750000]]],
+                [[[0.499997496604919433593750000]]]]),
+            torch.tensor([
+                [[[-0.499997496604919433593750000, 0.499997496604919433593750000],
+                  [-0.999994993209838867187500000, 0.999994993209838867187500000]],
+                 [[-0.249998748302459716796875000, -0.499997496604919433593750000],
+                  [0.249998748302459716796875000, 0.499997496604919433593750000]]],
+                [[[0.099999502301216125488281250, 0.999994993209838867187500000],
+                  [0.999994993209838867187500000, 0.099999502301216125488281250]],
+                 [[0.999994993209838867187500000, 0.499997496604919433593750000],
+                  [1.499992489814758300781250000, -1.499992489814758300781250000]]]])]
+
+        for i in range(len(inputs)):
+            m = torch.nn.BatchNorm2d(inputs[i].size()[1], 1e-05, 0.1, affine=False)
+            m.eval()
+            # contiguous case
+            input1 = inputs[i].contiguous()
+            output1 = m(input1)
+            # non-contiguous case
+            input2 = input1.permute(0, 1, 3, 2)
+            output2 = m(input2).permute(0, 1, 3, 2)
+            # channels last case
+            input3 = input1.contiguous(memory_format=torch.channels_last)
+            for name, param in m.named_parameters():    
+                if param.requires_grad:    
+                    if param.data.dim() == 4:    
+                        param.data = param.data.contiguous(memory_format=torch.channels_last)
+            output3 = m(input3)
+            self.assertEqual(output3, outputs[i])
+            self.assertEqual(output3, output1)
+            self.assertEqual(output3, output2)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -10993,7 +11051,7 @@ class TestTorchDeviceType(TestCase):
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         unary_mem_overlap_cases = [
             ("abs", doubles, True, True, 'cpu'),
-            ("abs", doubles, False, True, 'cuda'),
+            ("abs", doubles, True, True, 'cuda'),
             ("acos", doubles, True, True, 'cpu'),
             ("acos", doubles, False, True, 'cuda'),
             ("asin", doubles, True, True, 'cpu'),
@@ -11409,7 +11467,7 @@ class TestTorchDeviceType(TestCase):
                                                   [2., 1.]]],
                                                 dtype=dtype,
                                                 device=device)
-            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]], 
+            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]],
                                                       [[False, True], [True, True]]],
                                                      dtype=torch.bool,
                                                      device=device)
@@ -11471,7 +11529,7 @@ class TestTorchDeviceType(TestCase):
                 x,
                 return_inverse=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
             else:
@@ -11483,7 +11541,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=False,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
             else:
@@ -11495,7 +11553,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=True,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
@@ -11589,7 +11647,7 @@ class TestTorchDeviceType(TestCase):
             expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], dtype=dtype, device=device)
             expected_y_counts_bool = torch.tensor([3, 3, 2, 2], dtype=dtype, device=device)
             y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_y_inverse_bool, y_inverse)
                 self.assertEqual(expected_y_counts_bool, y_counts)
             else:
@@ -12102,30 +12160,56 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_lu(self, device):
-        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common_utils import random_matrix
 
         def run_test(device, pivot):
-            def run_subtest(matrix_size, batches, device, pivot):
-                a = fullrank(matrix_size, *batches).to(device)
+            def run_subtest(matrix_size, batches, device, pivot, singular=False, a=None):
+                if isinstance(matrix_size, int):
+                    rows = columns = matrix_size
+                else:
+                    rows, columns = matrix_size
+                if a is None:
+                    a = random_matrix(rows, columns, *batches, **dict(singular=singular)).to(device)
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
-                self.assertEqual(a_LU_info.size(), torch.Size(batches + (matrix_size, matrix_size)))
-                self.assertEqual(pivots_info.size(), torch.Size(batches + (matrix_size,)))
+                self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
+                self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
                 self.assertEqual(info_.size(), torch.Size(batches))
-                self.assertEqual(info_.abs().sum(), 0)
+                # If a randomly generated input matrix is singular,
+                # then info_ contains indices i such that U[i, i] ==
+                # 0. This however conveys that the factorization was
+                # successful albeit with a singular input. Therefore,
+                # we require info.min() >= 0
+                self.assertGreaterEqual(info_.min(), 0)
                 a_LU, pivots = a.lu(pivot=pivot)
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
-                if self.device_type == 'cuda':
-                    a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
-                    self.assertEqual(nopiv, torch.arange(1, 1 + a.size(-1), device=device, dtype=torch.int32).expand(a.shape[:-1]))
-                    self.assertEqual(info_, info_nopiv)
-
                 P, L, U = torch.lu_unpack(a_LU, pivots)
                 self.assertEqual(P.matmul(L.matmul(U)), a)
 
-            for ms, batch in product([3, 5, 7], [(), (2,), (3,), (3, 5)]):
+                if self.device_type == 'cuda':
+                    # lu without pivoting is implemented only for cuda device
+                    a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
+                    P_nopiv, L_nopiv, U_nopiv = torch.lu_unpack(a_LU_info_nopiv, nopiv)
+                    self.assertEqual(P_nopiv.matmul(L_nopiv.matmul(U_nopiv)), a)
+                    k = min(rows, columns)
+                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
+                    if not singular:
+                        # It is not guaranteed that LU factorization
+                        # without pivoting is able to determine if a
+                        # matrix is singular while LU factorization
+                        # with pivoting is. Therefore, we require the
+                        # equality of info-s only for non-singular
+                        # matrices.
+                        self.assertEqual(info_, info_nopiv)
+
+            for ms, batch in product([3, 5, 7, (4, 2), (3, 4)], [(), (2,), (3,), (3, 5)]):
                 run_subtest(ms, batch, device, pivot)
+                run_subtest(ms, batch, device, pivot, singular=True)
+
+                # Reproducer of a magma bug, see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+                a = torch.ones(batch + (ms if isinstance(ms, tuple) else (ms, ms)), dtype=torch.double, device=device)
+                run_subtest(ms, batch, device, pivot, singular=True, a=a)
 
             # Info should be positive for rank deficient matrices
             a = torch.ones(5, 3, 3, device=device)

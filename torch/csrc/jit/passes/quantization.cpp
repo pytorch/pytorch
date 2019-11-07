@@ -142,6 +142,36 @@ class InsertObserversHelper {
   int uid_ = 0;
 };
 
+bool isBiasOfConvOrLinear(Value* v) {
+  for (const Use& u : v->uses()) {
+    if (u.user->kind() == Symbol::aten("conv2d")) {
+      if (v == u.user->inputs().at(2)) {
+        return true;
+      }
+    } else if (u.user->kind() == prim::CallFunction) {
+      auto func_name = getFuncName(u.user->inputs()[0]);
+      if (func_name == "linear" && v == u.user->inputs().at(3)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isWeightOfConvOrLinear(Value* v) {
+  for (const Use& u : v->uses()) {
+    if (u.user->kind() == Symbol::aten("conv2d") &&
+        v == u.user->inputs().at(1)) {
+      return true;
+    } else if (u.user->kind() == prim::CallFunction &&
+               getFuncName(u.user->inputs()[0]) == "linear" &&
+               v == u.user->inputs().at(2)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
 Node* InsertObserversHelper::insertObserverFor(
@@ -149,29 +179,15 @@ Node* InsertObserversHelper::insertObserverFor(
     Graph* g,
     script::Module& module,
     const QConfig& qconfig) {
-  for (const Use& u : v->uses()) {
-    if (u.user->kind() == Symbol::aten("conv2d")) {
-      if (v == u.user->inputs().at(2)) {
-        return nullptr;
-      }
-    } else if (u.user->kind() == prim::CallFunction) {
-      auto func_name = getFuncName(u.user->inputs()[0]);
-      if (func_name == "linear" && v == u.user->inputs().at(3)) {
-        return nullptr;
-      }
-    }
+  if (isBiasOfConvOrLinear(v)) {
+    return nullptr;
   }
 
-  script::Module observer_module = std::get<0>(qconfig);
-  for (const Use& u : v->uses()) {
-    if (u.user->kind() == Symbol::aten("conv2d") &&
-        v == u.user->inputs().at(1)) {
-      observer_module = std::get<1>(qconfig);
-    } else if (u.user->kind() == prim::CallFunction &&
-               getFuncName(u.user->inputs()[0]) == "linear" &&
-               v == u.user->inputs().at(2)) {
-      observer_module = std::get<1>(qconfig);
-    }
+  script::Module observer_module;
+  if (isWeightOfConvOrLinear(v)) {
+    observer_module = std::get<1>(qconfig);
+  } else {
+    observer_module = std::get<0>(qconfig);
   }
 
   script::Module observer = observer_module.clone();

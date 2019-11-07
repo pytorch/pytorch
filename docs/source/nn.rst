@@ -496,6 +496,12 @@ Normalization layers
 Recurrent layers
 ----------------------------------
 
+:hidden:`RNNBase`
+~~~~~~~~~~~~~
+
+.. autoclass:: RNNBase
+    :members:
+
 :hidden:`RNN`
 ~~~~~~~~~~~~~
 
