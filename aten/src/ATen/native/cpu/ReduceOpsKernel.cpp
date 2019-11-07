@@ -17,8 +17,18 @@ namespace at { namespace native { namespace {
 using namespace vec256;
 
 static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::BFloat16, ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
+  if (iter.dtype() == kBFloat16) {
+    using scalar_t = at::BFloat16;
+    using acc_t = acc_type<scalar_t, false>;
+    return binary_kernel_reduce(
+        iter,
+        func_wrapper<scalar_t, acc_t>(
+          [=](acc_t a, scalar_t b, int64_t /*idx*/) -> acc_t { return a + b; },
+          [=](acc_t a, acc_t b) -> acc_t { return a + b; }),
+        acc_t(0));
+  }
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
+      ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
         binary_kernel_reduce_vec(
             iter, [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
             [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
@@ -37,7 +47,7 @@ static void mean_kernel_impl(TensorIterator& iter) {
 }
 
 static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_sqrt) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "std_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
       iter,
       WelfordOps<scalar_t, double, int64_t, double, std::tuple<scalar_t, scalar_t>> { unbiased, take_sqrt },
@@ -70,7 +80,7 @@ static void norm_kernel_tensor_iterator_impl(
 
 
   if (val == 0) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::BFloat16, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormZeroOps<acc_type<scalar_t, false>, scalar_t, scalar_t>(),
@@ -78,7 +88,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::BFloat16, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormOneOps<acc_type<scalar_t, false>, scalar_t, scalar_t>(),
@@ -86,7 +96,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::BFloat16, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         AbsMaxOps<scalar_t>(),
@@ -94,7 +104,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == -INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::BFloat16, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         AbsMinOps<scalar_t>(),
@@ -102,7 +112,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::BFloat16, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormOps<acc_type<scalar_t, false>, scalar_t, scalar_t> { acc_type<scalar_t, false>(val) },

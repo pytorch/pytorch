@@ -3629,6 +3629,12 @@ class _TestTorchMixin(object):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
+        inputValuesFP32 = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        inputValuesBF16 = inputValuesFP32.bfloat16()
+        precision_3dps = 0.004
+        for p in [0, 1, 2, 3, 4, inf, -inf]:
+            self.assertEqual(torch.norm(inputValuesFP32, p, dim=0), torch.norm(inputValuesBF16, p, dim=0), precision_3dps)
+
     @staticmethod
     def _test_bernoulli(self, t_dtype, p_dtype, device):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
@@ -8451,6 +8457,32 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    def test_std_var(self, device, dtype):
+        fns_to_test = [
+            ('var', torch.var, nan),
+            ('std', torch.std, nan)
+        ]
+
+        device = 'cpu'
+        shape = (2, 0, 4)
+        x = torch.randn(shape, device=device).bfloat16()
+        for item in fns_to_test:
+            name, fn, identity = item
+            self.assertEqual(torch.empty((2, 0), device=device, dtype=torch.bfloat16), fn(x, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device, dtype=torch.bfloat16), fn(x, dim=2, keepdim=True))
+            # assertEqual doesn't work with inf, -inf, nan and two tensors.
+            check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else
+                        self.assertEqual)
+            check(torch.full((2, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1))
+            check(torch.full((2, 1, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1, keepdim=True))
+            try:
+                check(torch.full((), identity, device=device, dtype=torch.bfloat16), fn(x))
+            except TypeError as err:
+                # ignore if there is no allreduce.
+                self.assertTrue('dim' in str(err))
+
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
         x = torch.tensor(23500, dtype=torch.int64, device=device)
@@ -12579,6 +12611,21 @@ class TestTorchDeviceType(TestCase):
             check_sum_all(torch.randn(2000, 2, dtype=dtype, device=device)[:, 0])
         else:
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
+
+    @onlyCPU
+    def test_sum_bfloat16(self, device):
+        x1 = torch.rand(100, 100)
+        res1 = torch.sum(x1, 1)
+        x2 = x1.bfloat16()
+        res2 = torch.sum(x2, 1)
+        self.assertEqual(res1, res2, 2e-1)
+
+        x1 = torch.rand(100, 100, 100)
+        res1 = x1.sum(2).sum(1)
+        x2 = x1.bfloat16()
+        res2 = x2.sum(2).sum(1)
+        max_err = torch.abs((res1 - res2.float()) / res1).max()
+        self.assertLessEqual(max_err, 1e-2)
 
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, compare_data=True, default_is_preserve=False):
         nhwc = input_generator_fn(device)

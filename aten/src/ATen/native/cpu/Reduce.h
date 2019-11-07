@@ -275,4 +275,20 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
   });
 }
 
+template <typename scalar_t, typename acc_t, typename func_t1, typename func_t2>
+struct func_wrapper_t {
+  func_wrapper_t(const func_t1& op1, const func_t2& op2) : reduce(op1), combine(op2) {}
+  func_t1 reduce;
+  func_t2 combine;
+  inline scalar_t project(acc_t a) {
+    return (scalar_t)a;
+  }
+};
+
+template <typename scalar_t, typename acc_t, typename func_t1, typename func_t2>
+func_wrapper_t<scalar_t, acc_t, func_t1, func_t2>
+func_wrapper(const func_t1& op1, const func_t2& op2) {
+  return func_wrapper_t<scalar_t, acc_t, func_t1, func_t2> { op1, op2 };
+}
+
 }}}  // namespace at::native::<anonymous>
