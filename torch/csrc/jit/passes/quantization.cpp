@@ -179,6 +179,7 @@ Node* InsertObserversHelper::insertObserverFor(
     Graph* g,
     script::Module& module,
     const QConfig& qconfig) {
+  // skip observing bias
   if (isBiasOfConvOrLinear(v)) {
     return nullptr;
   }
