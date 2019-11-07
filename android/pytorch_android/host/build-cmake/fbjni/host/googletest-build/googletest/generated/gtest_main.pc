@@ -1,0 +1,10 @@
+libdir=/usr/local/lib
+includedir=/usr/local/include
+
+Name: gtest_main
+Description: GoogleTest (with main() function)
+Version: 1.10.0
+URL: https://github.com/google/googletest
+Requires: gtest
+Libs: -L${libdir} -lgtest_main 
+Cflags: -I${includedir} -DGTEST_HAS_PTHREAD=1 

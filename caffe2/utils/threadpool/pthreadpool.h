@@ -5,7 +5,6 @@
 
 #include "ThreadPoolCommon.h"
 
-
 #include <stddef.h> // for size_t
 
 typedef struct pthreadpool* pthreadpool_t;

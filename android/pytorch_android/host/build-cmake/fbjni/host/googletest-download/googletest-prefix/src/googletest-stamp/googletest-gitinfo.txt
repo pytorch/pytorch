@@ -1,0 +1,3 @@
+repository='https://github.com/google/googletest.git'
+module=''
+tag='origin'

@@ -1,0 +1,3 @@
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/rebuild_cache.dir
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/edit_cache.dir
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/googletest.dir

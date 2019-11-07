@@ -1,0 +1,2 @@
+/Library/Developer/CommandLineTools/usr/bin/ar qc ../../../../lib/libgtest.a  CMakeFiles/gtest.dir/src/gtest-all.cc.o
+/Library/Developer/CommandLineTools/usr/bin/ranlib ../../../../lib/libgtest.a

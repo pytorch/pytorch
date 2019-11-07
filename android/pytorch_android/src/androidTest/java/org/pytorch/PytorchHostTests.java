@@ -1,7 +1,5 @@
 package org.pytorch;
 
-import com.facebook.soloader.nativeloader.NativeLoader;
-import com.facebook.soloader.nativeloader.SystemDelegate;
 import org.junit.BeforeClass;
 
 import java.io.IOException;
@@ -13,11 +11,7 @@ import java.util.Objects;
 
 public class PytorchHostTests extends PytorchTestBase {
   @BeforeClass
-  public static void setUpClass() {
-    if (!NativeLoader.isInitialized()) {
-      NativeLoader.init(new SystemDelegate());
-    }
-  }
+  public static void setUpClass() {}
 
   @Override
   protected String assetFilePath(String assetName) throws IOException {

@@ -16,9 +16,7 @@ public abstract class PytorchTestBase {
   private static final String TEST_MODULE_ASSET_NAME = "test.pt";
 
   @Before
-  public void setUp() {
-    System.loadLibrary("pytorch");
-  }
+  public void setUp() {}
 
   @Test
   public void testForwardNull() throws IOException {

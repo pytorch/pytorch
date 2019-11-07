@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/googletest"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/googletest.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/googletest-complete.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-install.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-mkdir.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-download.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-update.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-patch.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-configure.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-build.rule"
+		},
+		{
+			"file" : "/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-test.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"googletest"
+		],
+		"name" : "googletest"
+	}
+}

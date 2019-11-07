@@ -1,0 +1,16 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/Users/xcheng16/pytorch/android/libs/fbjni/test/jni/no_rtti.cpp
+no_rtti.h
+/Users/xcheng16/pytorch/android/libs/fbjni/test/jni/no_rtti.h
+stdexcept
+-
+
+/Users/xcheng16/pytorch/android/libs/fbjni/test/jni/no_rtti.h
+

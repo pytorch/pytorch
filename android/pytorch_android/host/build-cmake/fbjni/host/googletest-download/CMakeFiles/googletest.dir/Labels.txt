@@ -1,0 +1,14 @@
+# Target labels
+ googletest
+# Source files and their labels
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/googletest
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/googletest.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/CMakeFiles/googletest-complete.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-install.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-mkdir.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-download.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-update.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-patch.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-configure.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-build.rule
+/Users/xcheng16/pytorch/android/pytorch_android/host/build-cmake/fbjni/host/googletest-download/googletest-prefix/src/googletest-stamp/googletest-test.rule
