@@ -308,13 +308,14 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
               c10::guts::make_unique<std::string>(serialize(message));
           const char* data = payload->data();
           size_t len = payload->length();
+          std::string* delete_when_done = payload.release();
           enqueueRecv(RecvWork(
               getWorkerInfo(pg_->getRank()),
               message.type(),
               torch::from_blob(
                   (void*)data,
                   len,
-                  [payload = payload.release()](void*) { delete payload; },
+                  [delete_when_done](void*) { delete delete_when_done; },
                   {torch::kChar})));
         },
         std::move(message)));
