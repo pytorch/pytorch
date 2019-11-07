@@ -39,7 +39,7 @@ class ProcessGroupAgent : public RpcAgent {
       std::string workerName,
       std::shared_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,
-      std::chrono::milliseconds rpcTimeout);
+      std::chrono::milliseconds globalProcessTimeouts);
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
@@ -50,9 +50,6 @@ class ProcessGroupAgent : public RpcAgent {
   void sync() override;
 
   void start() override;
-
-  // retrieves the timeout for all RPCs
-  const std::chrono::milliseconds& getRpcTimeout() const;
 
  protected:
   // This method wraps the destination information and the message into a
@@ -148,7 +145,6 @@ class ProcessGroupAgent : public RpcAgent {
   std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
-  std::chrono::milliseconds rpcTimeout_;
 };
 
 } // namespace rpc
