@@ -15,19 +15,6 @@
         - THTensor* self
         - THTensor* source
     - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - CONSTANT NULL, 0, {0}, {}
-    - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - THStorage* source
-        - CONSTANT 0
-        - CONSTANT {static_cast<int64_t>(source.size())}
-        - CONSTANT {}
-    - cname: setStorage
       arguments:
         - THTensor* self
         - THStorage* source
@@ -665,32 +652,6 @@
     - bool sorted
 ]]
 [[
-  name: _th_abs
-  cname: abs
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sigmoid
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: sigmoid
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:
@@ -735,48 +696,6 @@
 [[
   name: _th_cosh
   cname: cosh
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sin
-  cname: sin
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_asin
-  cname: asin
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sinh
-  cname: sinh
   types:
     - floating_point
   backends:
@@ -1029,19 +948,6 @@
     - long bins
     - real min
     - real max
-]]
-[[
-  name: _th_zero_
-  cname: zero
-  return: self
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  arguments:
-    - THTensor* self
 ]]
 [[
   name: _th_cumsum
