@@ -846,45 +846,45 @@ Utilities
     :inherited-members:
     :members:
 
-:hidden:`IdentityPruningMethod`
+:hidden:`Identity`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass :: torch.nn.utils.prune.IdentityPruningMethod
+.. autoclass :: torch.nn.utils.prune.Identity
     :inherited-members:
     :members:
 
-:hidden:`RandomPruningMethod`
+:hidden:`RandomUnstructured`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass :: torch.nn.utils.prune.RandomPruningMethod
+.. autoclass :: torch.nn.utils.prune.RandomUnstructured
     :inherited-members:
     :members:
 
-:hidden:`L1PruningMethod`
+:hidden:`L1Unstructured`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass :: torch.nn.utils.prune.L1PruningMethod
+.. autoclass :: torch.nn.utils.prune.L1Unstructured
     :inherited-members:
     :members:
 
-:hidden:`RandomStructuredPruningMethod`
+:hidden:`RandomStructured`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass :: torch.nn.utils.prune.RandomStructuredPruningMethod
+.. autoclass :: torch.nn.utils.prune.RandomStructured
     :inherited-members:
     :members:
 
-:hidden:`LnStructuredPruningMethod`
+:hidden:`LnStructured`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass :: torch.nn.utils.prune.LnStructuredPruningMethod
+.. autoclass :: torch.nn.utils.prune.LnStructured
     :inherited-members:
     :members:
 
-:hidden:`CustomFromMaskPruningMethod`
+:hidden:`CustomFromMask`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass :: torch.nn.utils.prune.CustomFromMaskPruningMethod
+.. autoclass :: torch.nn.utils.prune.CustomFromMask
     :inherited-members:
     :members:
 
