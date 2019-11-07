@@ -120,6 +120,7 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
@@ -645,6 +646,13 @@ add_subdirectory(modules)
 # built in the previous Modules section above).
 if (BUILD_BINARY)
   add_subdirectory(binaries)
+endif()
+
+# ---[ JNI
+if (BUILD_JNI)
+  set(BUILD_LIBTORCH_WITH_JNI 1)
+  set(FBJNI_SKIP_TESTS 1)
+  add_subdirectory(android/pytorch_android)
 endif()
 
 include(cmake/Summary.cmake)
