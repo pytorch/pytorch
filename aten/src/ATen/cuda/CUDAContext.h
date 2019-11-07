@@ -52,17 +52,17 @@ inline bool is_available() {
     return c10::cuda::device_count() > 0;
 }
 
-CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();
+TORCH_CUDA_API cudaDeviceProp* getCurrentDeviceProperties();
 
-CAFFE2_API int warp_size();
+TORCH_CUDA_API int warp_size();
 
-CAFFE2_API cudaDeviceProp* getDeviceProperties(int64_t device);
+TORCH_CUDA_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
-CAFFE2_API Allocator* getCUDADeviceAllocator();
+TORCH_CUDA_API Allocator* getCUDADeviceAllocator();
 
 /* Handles */
-CAFFE2_API cusparseHandle_t getCurrentCUDASparseHandle();
-CAFFE2_API cublasHandle_t getCurrentCUDABlasHandle();
+TORCH_CUDA_API cusparseHandle_t getCurrentCUDASparseHandle();
+TORCH_CUDA_API cublasHandle_t getCurrentCUDABlasHandle();
 
 
 } // namespace cuda
