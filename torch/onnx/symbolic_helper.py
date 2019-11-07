@@ -332,7 +332,7 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
             try:
                 if scalar.type().scalarType() != 'Long':
                     return False
-            except:
+            except Exception:
                 pass
         return True
 
