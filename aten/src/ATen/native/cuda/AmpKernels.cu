@@ -43,7 +43,7 @@ Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t val) -> scalar_t {
+      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t val) -> scalar_t {
           auto fval = static_cast<float>(val);
           if (!isfinite(fval)) {
             *found_inf_ptr = 1.f;
