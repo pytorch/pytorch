@@ -608,7 +608,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor log_beta = at::empty_like(log_alpha, at::MemoryFormat::Contiguous);
   log_beta.fill_(neginf);
 
-  Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))
+  Tensor grad = at::full_like(log_probs, neginf, at::MemoryFormat::Contiguous); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.
   constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double

@@ -175,7 +175,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   int64_t max_input_length = log_probs.size(0);
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  Tensor grad = at::full_like(log_probs, neginf); // at this point, this is log of empty sum
+  Tensor grad = at::full_like(log_probs, neginf, at::MemoryFormat::Contiguous); // at this point, this is log of empty sum
 
   // The admin bits. We don't do much checking and assume that the forward did.
   int64_t tg_target_stride;

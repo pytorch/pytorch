@@ -496,7 +496,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   }
 
   if (THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    // `THTensor_compute_stride` returns the proper strides to use if this 
+    // `THTensor_compute_stride` returns the proper strides to use if this
     // `reshape` can be just a view.
     //
     // NB: Even though we have viewable geometry and the target strides here,
@@ -794,7 +794,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto row1 = indices.select(0, dim1);
 
     // swap row0 and row1
-    auto tmp = at::zeros_like(row0);
+    auto tmp = at::zeros_like(row0, at::MemoryFormat::Contiguous);
     tmp.copy_(row0);
     row0.copy_(row1);
     row1.copy_(tmp);
