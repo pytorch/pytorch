@@ -9398,6 +9398,28 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
+    def test_script_copy(self):
+        class M(torch.nn.Module):
+            __annotations__ = {
+                "val": Optional[torch.Tensor]
+            }
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.val = None
+
+            def some_method(self):
+                return 3
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                self.val = x + self.some_method()
+                return x
+
+        m = torch.jit.script(M())
+        # test copy
+        m_c = m.copy()
+
     @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
