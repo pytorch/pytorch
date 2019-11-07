@@ -147,10 +147,7 @@ struct python_error : public std::exception {
   std::string message;
 };
 
-#ifdef _THP_CORE
-
 bool THPException_init(PyObject *module);
-#endif
 
 namespace torch {
 

@@ -49,7 +49,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
 
     // Compute the root edges and generate the appropriate gradients.
     rootEdges.push_back(root.gradient_edge());
-    grads.push_back(at::ones_like(root));
+    grads.push_back(at::ones_like(root, at::MemoryFormat::Contiguous));
   }
 
   // Validate rootEdges and grads.
