@@ -1902,29 +1902,27 @@ t1.start()
 t2.start()
 """])
 
-
-class TestHandlesThreadSafety(TestCase):
-    # These tests could not be put into TestCuda because TestCuda has
-    # _do_cuda_non_default_stream = True
-    # which makes them fails
-
     @skipIfRocm
     def test_cublas_multiple_threads_same_device(self):
-        size = 16
+        size = 1024
         weight = torch.ones((size, size), device='cuda')
 
         results = {}
 
-        num_threads = 100
-        trials = 10
-        test_iters = 100
+        num_threads = 2
+        trials = 3
+        test_iters = 1000
         barrier = threading.Barrier(num_threads)
 
-        def _worker(t, input_):
+        def _worker(t):
             my_stream = torch.cuda.Stream()
-            results[t] = input_
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
             with torch.cuda.stream(my_stream):
-                barrier.wait()
                 for i in range(test_iters):
                     # If all threads are sharing the same cublas handle,
                     # the following sequence may occur:
@@ -1936,14 +1934,14 @@ class TestHandlesThreadSafety(TestCase):
                     #          but actually now races with its gemm.
                     results[t] = torch.mm(results[t], weight)
                     results[t].div_(float(size))
-            torch.cuda.current_stream().wait_stream(my_stream)
+            torch.cuda.synchronize()
 
         for _ in range(trials):
             for t in range(num_threads):
                 results[t] = torch.ones((size, size), device='cuda')
 
             threads = [threading.Thread(target=_worker,
-                                        args=(t, results[t])) for t in range(num_threads)]
+                                        args=(t,)) for t in range(num_threads)]
 
             for thread in threads:
                 thread.start()
@@ -1964,16 +1962,20 @@ class TestHandlesThreadSafety(TestCase):
         results = {}
 
         num_threads = 2
-        trials = 2
-        test_iters = 100
+        trials = 3
+        test_iters = 1000
         barrier = threading.Barrier(num_threads)
 
         with torch.backends.cudnn.flags(enabled=True):
-            def _worker(t, input):
+            def _worker(t):
                 my_stream = torch.cuda.Stream()
-                results[t] = input
+                # Hard sync so we don't need to worry about creating and using tensors
+                # across streams or the fact that default streams are thread-local.
+                # Those issues are not the target of this test.
+                torch.cuda.synchronize()
+                # Line up threads to increase likelihood of race conditions.
+                barrier.wait()
                 with torch.cuda.stream(my_stream):
-                    barrier.wait()
                     for _ in range(test_iters):
                         # If all threads are sharing the same cudnn handle,
                         # the following sequence may occur:
@@ -1985,14 +1987,14 @@ class TestHandlesThreadSafety(TestCase):
                         #          but now races with its convolution.
                         results[t] = torch.nn.functional.conv2d(results[t], weight, padding=0)
                         results[t].div_(4.0)
-                torch.cuda.current_stream().wait_stream(my_stream)
+                torch.cuda.synchronize()
 
             for _ in range(trials):
                 for t in range(num_threads):
                     results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
 
                 threads = [threading.Thread(target=_worker,
-                                            args=(t, results[t])) for t in range(num_threads)]
+                                            args=(t,)) for t in range(num_threads)]
 
                 for thread in threads:
                     thread.start()
