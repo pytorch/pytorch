@@ -51,8 +51,10 @@ Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
       //     const auto inv_scale = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
       //     return static_cast<scalar_t>(inv_scale == 1.f ? fval : fval*inv_scale);
       //   });
-      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t val) -> scalar_t {
+      float capturable = 4.0;
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t val) -> scalar_t {
           auto fval = static_cast<float>(val);
+          fval = fval*capturable;
           return static_cast<scalar_t>(fval);
         });
     });
