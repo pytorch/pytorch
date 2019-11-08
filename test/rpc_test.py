@@ -265,10 +265,13 @@ class RpcTest(object):
     @dist_init(setup_model_parallel=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
-            rpc.init_model_parallel(
-                self_name="duplicate_name",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="duplicate_name",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
             )
@@ -310,10 +313,13 @@ class RpcTest(object):
     @dist_init(setup_model_parallel=False)
     def test_invalid_names(self):
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(
-                self_name="abc*",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="abc*",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
@@ -322,11 +328,15 @@ class RpcTest(object):
         base_file_name = self.file_name
         # Use a different file path for FileStore to avoid rendezvous mismatch.
         self.file_name = base_file_name + "1"
+
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(
-                self_name=" ",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name=" ",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
@@ -335,10 +345,13 @@ class RpcTest(object):
         # Use a different file path for FileStore to avoid rendezvous mismatch.
         self.file_name = base_file_name + "2"
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            rpc.init_model_parallel(
-                self_name="",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
@@ -349,10 +362,13 @@ class RpcTest(object):
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            rpc.init_model_parallel(
-                self_name="".join(["a" for _ in range(500)]),
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="".join(["a" for i in range(500)]),
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
