@@ -287,6 +287,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     if (rrefForks.empty()) {
       auto ownerIter = owners_.find(rrefId);
       if (ownerIter != owners_.end()) {
+        std::cout << "===== deleting owner " << rrefId << " when dropping fork " << forkId << std::endl << std::flush;
         deletedRRef = ownerIter->second;
         owners_.erase(ownerIter);
       }

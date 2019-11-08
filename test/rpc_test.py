@@ -128,7 +128,10 @@ def no_result():
 
 
 def nested_rpc(dst):
-    return rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
+    print("=== dst is ", dst)
+    ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
+    print("=== dst is ", dst, ", done with rpc-sync")
+    return ret
 
 
 def multi_layer_nested_async_rpc(dst, world_size, ttl):
@@ -642,12 +645,15 @@ class RpcTest(object):
     def test_nested_rpc(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
+        print(self.rank, "=== before master rpc_suync")
         ret = rpc.rpc_sync(
             "worker{}".format(dst_rank),
             nested_rpc,
             args=("worker{}".format(self.rank),),
         )
+        print(self.rank, "=== done with master rpc_suync")
         self.assertEqual(ret, torch.ones(2, 2) + 1)
+        print(self.rank, "=== done with assert")
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
         import time
