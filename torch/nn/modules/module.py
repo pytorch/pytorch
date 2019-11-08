@@ -287,13 +287,6 @@ class Module(object):
         fn(self)
         return self
 
-    def channels_last(self):
-        return self._apply(
-            lambda t: t.contiguous(memory_format=torch.channels_last)
-            if t.dim() == 4
-            else t
-        )
-
     def cuda(self, device=None):
         r"""Moves all model parameters and buffers to the GPU.
 
@@ -364,6 +357,8 @@ class Module(object):
 
         .. function:: to(tensor, non_blocking=False)
 
+        .. function:: to(memory_format=torch.channels_last)
+
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point desired :attr:`dtype` s. In addition, this method will
         only cast the floating point parameters and buffers to :attr:`dtype`
@@ -385,6 +380,9 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
+            memory_format (:class:`torch.memory_format`): the desired memory
+                format  for all parametes and buffers in this module (keyword
+                only argument)
 
         Returns:
             Module: self
@@ -426,8 +424,13 @@ class Module(object):
                 raise TypeError('nn.Module.to only accepts floating point '
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
+        convert_to_format = kwargs.get('memory_format', None)
+
         def convert(t):
-            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+            result = t
+            if convert_to_format is not None and t.dim() == 4:
+                result = t.contiguous(memory_format=convert_to_format)
+            return result.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
 
