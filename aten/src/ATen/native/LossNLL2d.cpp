@@ -116,12 +116,11 @@ static void nll_loss2d_forward_out_frame(
               continue;
             }
 
-            // check target index
-            TORCH_CHECK(
+            TORCH_CHECK_INDEX(
                 cur_target >= 0 && cur_target < n_classes,
                 "Target ",
                 cur_target,
-                " out of bounds.");
+                " is out of bounds.");
 
             // load optional weight value
             const scalar_t cur_weight = weight_data != nullptr
@@ -154,11 +153,17 @@ static void nll_loss2d_forward_out_frame(
   for (int64_t b = 0; b < batch_size; b++) {
     for (int64_t elem = 0; elem < map_size; elem++) {
       const int64_t cur_target = target_data[b * map_size + elem];
+      
       if (cur_target == ignore_index) {
         continue;
       }
 
-      TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
+      TORCH_CHECK_INDEX(
+          cur_target >= 0 && cur_target < n_classes,
+          "Target ",
+          cur_target,
+          " is out of bounds.");
+
       const scalar_t weight_val =
           weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
       total_weight_val += weight_val;
@@ -279,11 +284,16 @@ static void nll_loss2d_backward_out_frame(
     for (int64_t b = start; b < end; b++) {
       for (int64_t elem = 0; elem < map_size; elem++) {
         const int64_t cur_target = target_data[b * map_size + elem];
+        
         if (cur_target == ignore_index) {
           continue;
         }
 
-        TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
+        TORCH_CHECK_INDEX(
+            cur_target >= 0 && cur_target < n_classes,
+            "Target ",
+            cur_target,
+            " is out of bounds.");
 
         const int64_t index = b * sample_size + cur_target * map_size + elem;
         const scalar_t w = weight_data != nullptr ? weight_data[cur_target]
