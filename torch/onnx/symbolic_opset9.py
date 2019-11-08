@@ -883,9 +883,6 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if len(input_sizes) == 2:
-        # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
-        input = g.op("Unsqueeze", input, axes_i=[2])
 
     if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
@@ -897,6 +894,11 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
+
+    if len(input_sizes) == 2:
+        # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
+        input = g.op("Unsqueeze", input, axes_i=[2])
+
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
