@@ -602,7 +602,7 @@ class TestONNXRuntime(unittest.TestCase):
             @torch.jit.script_method
             def forward(self, x, y):
                 x = torch.add(x, x)
-                out1 = torch.nn.functional.interpolate(x, mode="nearest", size=(16,16))
+                out1 = torch.nn.functional.interpolate(x, mode="bilinear", size=(16, 16), align_corners=False)
                 out2 = torch.nn.functional.interpolate(x, mode="nearest", size=(int(y.size(0)), int(y.size(1))))
                 return out1, out2
 

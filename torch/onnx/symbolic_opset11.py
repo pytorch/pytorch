@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
+import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_helper import _black_list_in_opset
@@ -100,8 +101,8 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
         # and if not assume that it is not a scalar.
         try:
             is_scalar = not sym_help._is_packed_list(size) and ((sym_help._maybe_get_const(size, 't').dim() == 0))
-        except:
-            sym_help.warning("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
+        except AttributeError:
+            warnings.warn("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
             is_scalar = not sym_help._is_packed_list(size)
 
         if is_scalar:
