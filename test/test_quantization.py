@@ -14,6 +14,8 @@ from torch.quantization import \
     RecordingObserver, MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver, \
     QuantWrapper, default_eval_fn
 
+from torch.quantization import QConfig
+from torch.quantization import default_histogram_observer
 from torch.quantization._quantize_script import quantize_script
 
 from common_utils import run_tests
@@ -698,7 +700,7 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
 )
 class GraphModePostTrainingQuantTest(QuantizationTestCase):
     @_tmp_donotuse_dont_inline_everything
-    def test_single_liner(self):
+    def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode
         """
@@ -714,6 +716,37 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
 
         qconfig_dict = {
             '': default_qconfig
+        }
+        model_script = quantize_script(
+            torch.jit.script(linear_model),
+            qconfig_dict,
+            test_only_eval_fn,
+            [self.calib_data],
+            inplace=False)
+        result_eager = model_eager(self.calib_data[0][0])
+        result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
+        self.assertEqual(result_eager, result_script)
+
+    def test_observer_with_ignored_function(self):
+        r"""Test observers with ignored fucntion and make sure it works in
+        graph mode
+        """
+        # eager mode
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+        qconfig = QConfig(
+            activation=default_histogram_observer,
+            weight=default_weight_observer)
+        annotated_linear_model.qconfig = qconfig
+        linear_model = SingleLayerLinearModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+        model_eager = quantize(annotated_linear_model, test_only_eval_fn,
+                               self.calib_data)
+
+        qconfig_dict = {
+            '': qconfig
         }
         model_script = quantize_script(
             torch.jit.script(linear_model),
@@ -797,7 +830,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         script_model.sub2.fc2.bias = torch.nn.Parameter(eager_model.sub2.fc2.bias.detach())
         script_model.fc3.weight = torch.nn.Parameter(eager_model.fc3.module.weight.detach())
         script_model.fc3.bias = torch.nn.Parameter(eager_model.fc3.module.bias.detach())
-        print(eager_model(self.calib_data[0][0]))
         # Quantize eager module
         quantized_eager_model = quantize(eager_model, test_only_eval_fn, self.calib_data)
 
@@ -813,9 +845,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             inplace=False)
 
         eager_result = quantized_eager_model(self.calib_data[0][0])
-        print(get_forward(quantized_script_model._c._get_module('fc3')).graph)
         script_result = get_forward(quantized_script_model._c)(self.calib_data[0][0])
-        print(eager_result, script_result)
         self.assertEqual(eager_result, script_result)
 
 
