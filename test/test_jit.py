@@ -4039,7 +4039,6 @@ def foo(x):
             # type: (List[int]) -> int
             return fn(x)
 
-    @unittest.skip('Currently borken https://github.com/pytorch/pytorch/issues/29367')
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -13954,8 +13953,8 @@ a")
 
     def test_string_index(self):
         def fn(x):
-            # type: (str) -> str
-            return x[2]
+            # type: (str)
+            return x[2], x[-1]
 
         self.checkScript(fn, ("abcde",))
 
