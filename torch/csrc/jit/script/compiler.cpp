@@ -439,6 +439,7 @@ struct Environment {
                "__str__",
                std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", SpecialFormValue::create(prim::GetAttr)},
+          {"hasattr", SpecialFormValue::create(prim::HasAttr)},
           {"isinstance", SpecialFormValue::create(prim::isinstance)},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
@@ -1050,10 +1051,15 @@ struct to_ir {
         if (expr.kind() == TK_APPLY) {
           auto apply = Apply(expr);
           auto callee = Apply(expr).callee();
-          if (callee.kind() == TK_VAR &&
-              Var(callee).name().name() == "isinstance") {
-            checkApplyNumInputs(apply, 2);
-            return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+          if (callee.kind() == TK_VAR) {
+            if (Var(callee).name().name() == "isinstance") {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+            if (Var(callee).name().name() == "hasattr") {
+              checkApplyNumInputs(apply, 2);
+              return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+            }
           }
         }
         return CondValue(
@@ -1401,7 +1407,26 @@ struct to_ir {
     }
   }
 
-  CondValue emitIsInstance(Expr obj, Expr classinfo) {
+  CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
+    auto obj = emitExpr(objExpr);
+    const auto& type = obj->type();
+    if (attrExpr.kind() != TK_STRINGLITERAL) {
+      throw ErrorReport(attrExpr)
+          << "hasattr's second argument must be a string literal";
+    }
+    auto cls = type->cast<ClassType>();
+    if (!cls) {
+      throw ErrorReport(objExpr)
+          << "hasattr's first argument must be an object, got "
+          << type->python_str() << " instead";
+    }
+
+    const std::string& name = StringLiteral(attrExpr).text();
+    const bool hasAttr = cls->hasAttribute(name);
+    return CondValue(*graph, objExpr.range(), hasAttr, {});
+  }
+
+  CondValue emitIsInstance(const Expr& obj, const Expr& classinfo) {
     // turn (float, (int, tuple)) into a flat list of types and type kind
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
@@ -2401,6 +2426,11 @@ struct to_ir {
         auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
       }
+      case prim::HasAttr: {
+        checkApplyNumInputs(apply, 2);
+        const auto result = emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+        return std::make_shared<SimpleValue>(result.value());
+      } break;
       // This represents the "__new__" method on classes
       // because it takes a ClassValue as input.
       // So if we see:
