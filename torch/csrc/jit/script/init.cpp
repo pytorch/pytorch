@@ -757,6 +757,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
+            HANDLE_TH_ERRORS
             // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
@@ -764,6 +765,7 @@ void initJitScriptBindings(PyObject* module) {
             py::object result = invokeScriptFunctionFromPython(
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             return result;
+            END_HANDLE_TH_ERRORS_PYBIND
           })
       .def(
           "save",
