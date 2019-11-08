@@ -1,13 +1,17 @@
 import os
 import sys
+import unittest
+from collections import namedtuple
+from textwrap import dedent
 from typing import List
 
 import torch
+from torch._six import PY2
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
+from jit_utils import JitTestCase, execWrapper
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -175,6 +179,12 @@ class TestBuiltins(JitTestCase):
         x = torch.arange(4., requires_grad=True)
         self.checkScript(func, [x], optimize=True, capture_output=True)
 
+        @torch.jit.script
+        def bad_func():
+            print("{0}".format("hello"))
+        with self.assertRaisesRegex(RuntimeError, "not supported"):
+            bad_func()
+
     def test_type_cast(self):
         template = dedent('''
         def func(v):
@@ -204,3 +214,116 @@ class TestBuiltins(JitTestCase):
                 print(x, flush=True)
                 return x
             ''')
+
+    def test_isinstance_metacompile(self):
+        @torch.jit.script
+        def test_primitive_type(x):
+            # type: (int) -> int
+            if isinstance(x, int):
+                return x + 1
+            else:
+                return x - 1
+
+        self.assertEqual(test_primitive_type(1), 2)
+        with self.assertRaisesRegex(Exception, "Expected a value of type"):
+            test_primitive_type(1.5)
+
+        _MyNamedTuple = namedtuple('_MyNamedTuple', ['value'])
+
+        @torch.jit.script
+        def test_non_primitive_types(x):
+            # type: (_MyNamedTuple) -> Tensor
+            if isinstance(1, _MyNamedTuple):
+                return 10
+
+            if isinstance(x, _MyNamedTuple):
+                return x.value + 1
+            else:
+                return 1
+
+        out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
+        self.assertEqual(out, torch.tensor(6.0))
+
+    def test_isinstance_dynamic(self):
+        @torch.jit.script
+        def foo(a):
+            # type: (Optional[List[int]]) -> int
+            b = 0
+            if isinstance(a, (int, (float,), list, str)):
+                b += 1
+            if isinstance(a, (int, str)):
+                b += 1
+            if isinstance(a, List[int]):
+                b += 1
+            return b
+        self.assertEqual(foo([3, 4]), 2)
+        self.assertEqual(foo(None), 0)
+
+    def test_isinstance_refinement(self):
+        @torch.jit.script
+        def foo(a):
+            # type: (Optional[int]) -> int
+            if isinstance(a, int):
+                return a + 3
+            else:
+                return 4
+        self.assertEqual(foo(4), 7)
+        self.assertEqual(foo(None), 4)
+        @torch.jit.script
+        def foo2(a, b):
+            # type: (Optional[int], Optional[int]) -> int
+            if not isinstance(a, int) or not isinstance(b, int):
+                return 0
+            else:
+                return a + b
+        self.assertEqual(foo2(3, 4), 7)
+        self.assertEqual(foo2(None, 4), 0)
+        self.assertEqual(foo2(4, None), 0)
+
+        @torch.jit.script
+        def any_refinement(a, b):
+            # type: (Any, Any) -> int
+            if isinstance(a, int) and isinstance(b, int):
+                return a + b
+            return 0
+
+        self.assertEqual(any_refinement(3, 4), 7)
+        self.assertEqual(any_refinement(3, "hi"), 0)
+
+    def test_isinstance(self):
+        # test isinstance operator for static type checking
+        template = dedent('''
+        def func(x):
+            # type: ({type_hint}) -> bool
+            return isinstance(x, {typ})
+        ''')
+
+        def test(inp, typ, type_hint):
+            code = template.format(typ=typ, type_hint=type_hint)
+            scope = {}
+            execWrapper(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(
+                cu.func(inp),
+                scope['func'](inp),
+                "Failed with typ: {}"
+                .format(typ)
+            )
+
+        inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,), [1, 2], 1]
+        type_literals = ['bool', 'int', 'float', 'torch.Tensor', 'list', 'tuple',
+                         '(list, tuple)', '(int, float, bool)']
+        type_annotations = ['bool', 'int', 'float', 'Tensor', 'List[int]', 'Tuple[float]',
+                            'List[int]', 'int']
+
+        # do zipping to try different types
+        for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
+            test(inp, typ, type_hint)
+
+        # test optional isinstance check
+        @torch.jit.script
+        def opt_func(x):
+            # type: (Optional[int]) -> bool
+            return isinstance(x, int)
+        self.assertTrue(opt_func(3))
+        self.assertFalse(opt_func(None))

@@ -308,13 +308,13 @@ RegisterOperators reg({
         "aten::format(str self, ...) -> str",
         [](const Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
-          std::regex unsupported_options("\\{(.*?)\\}");
+          // This matches `{}` with anything inside
+          std::regex unsupported_options("\\{[^\\}]+\\}");
           return [num_inputs, unsupported_options](Stack& stack) {
             auto format = peek(stack, 0, num_inputs).toStringRef();
 
-            if (std::regex_search(format, unsupported_options)) {
-              AT_WARN("Format options are not supported.");
-            }
+            const bool found = std::regex_search(format, unsupported_options);
+            TORCH_CHECK(!found, "Format options are not supported.");
 
             auto args = last(stack, num_inputs - 1);
             std::stringstream ss;
@@ -326,7 +326,8 @@ RegisterOperators reg({
               }
               ss << format.substr(begin, loc - begin);
               if (used_args >= args.size()) {
-                AT_ERROR("Too few arguments for format string: ", format);
+                TORCH_CHECK(
+                    false, "Too few arguments for format string: ", format);
               }
               ss << args[used_args];
               begin = loc + 2;
