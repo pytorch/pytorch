@@ -40,6 +40,7 @@ parser.add_argument('--ci', action='store_true',
                     help='Whether this script is executed in CI. When executed inside a CI, this script fails when '
                          'an error is detected. Also, it will not show tqdm progress bar, but directly print the error'
                          'to stdout instead.')
+parser.add_argument('--nohang', action='store_true', help='Treat timeout as success')
 args = parser.parse_args()
 
 # Filters that ignores cublas/cudnn errors
@@ -114,7 +115,7 @@ async def run1(coroutine_id):
         except asyncio.TimeoutError:
             print('Timeout:', test, file=logfile)
             proc.kill()
-            if args.ci:
+            if args.ci and not args.nohang:
                 sys.exit("Hang detected on cuda-memcheck")
         else:
             if proc.returncode == 0:
