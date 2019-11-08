@@ -56,7 +56,7 @@ namespace c10 {
 /// NOTE [ TensorOptions Constructors ]
 ///
 /// TensorOptions is like a dictionary with entries from the set:
-/// {requires_grad, is_variable, device, dtype, layout}, where each entry may be
+/// {requires_grad, device, dtype, layout}, where each entry may be
 /// unspecified (i.e., is optional). It is used to specify the properties of
 /// tensors in many places both in C++ internal and API, e.g., tensor factory
 /// methods like `at::empty({10}, options)`, tensor conversions like
@@ -100,13 +100,11 @@ namespace c10 {
 struct C10_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
-    , is_variable_(false)
     , pinned_memory_(false)
     , has_device_(false)
     , has_dtype_(false)
     , has_layout_(false)
     , has_requires_grad_(false)
-    , has_is_variable_(false)
     , has_pinned_memory_(false)
     {}
 
@@ -207,14 +205,6 @@ struct C10_API TensorOptions {
     return r;
   }
 
-  /// Sets the `is_variable` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions is_variable(c10::optional<bool> is_variable) const noexcept {
-    TensorOptions r = *this;
-    r.set_is_variable(is_variable);
-    return r;
-  }
-
-
   /// Sets the `pinned_memory` property on the `TensorOptions`.
   C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
     TensorOptions r = *this;
@@ -292,17 +282,6 @@ struct C10_API TensorOptions {
                               : c10::nullopt;
   }
 
-  /// Returns the `is_variable` property of the `TensorOptions`.
-  bool is_variable() const noexcept {
-    return has_is_variable_ ? is_variable_ : false;
-  }
-
-  /// Returns whether the `is_variable` is specified.
-  bool has_is_variable() const noexcept {
-    return has_is_variable_;
-  }
-
-
   /// Returns the `pinned_memory` property of the `TensorOptions`.
   bool pinned_memory() const noexcept {
     return has_pinned_memory_ ? pinned_memory_ : false;
@@ -311,13 +290,6 @@ struct C10_API TensorOptions {
   /// Returns whether the `pinned_memory` is specified.
   bool has_pinned_memory() const noexcept {
     return has_pinned_memory_;
-  }
-
-
-  /// Returns the `is_variable` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `is_variable` is not specified.
-  c10::optional<bool> is_variable_opt() const noexcept {
-    return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
   }
 
 
@@ -350,16 +322,13 @@ struct C10_API TensorOptions {
     if (!r.has_layout()) r.set_layout(layout());
     // NB: requires grad is right biased; not a logical AND/OR!
     if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
-    if (!r.has_is_variable()) r.set_is_variable(is_variable());
     if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
     return r;
   }
 
   // Resolves the tensor type set specified by the current construction axes.
   TensorTypeSet type_set() const noexcept {
-    auto r = TensorTypeSet(computeTensorTypeId());
-    if (is_variable()) r = r.add(TensorTypeId::VariableTensorId);
-    return r;
+    return TensorTypeSet(computeTensorTypeId()).add(TensorTypeId::VariableTensorId);
   }
 
   inline TensorTypeId computeTensorTypeId() const {
@@ -483,16 +452,6 @@ struct C10_API TensorOptions {
     }
   }
 
-  /// Mutably set the `is_variable` property of `TensorOptions`.
-  void set_is_variable(c10::optional<bool> is_variable) & noexcept {
-    if (is_variable) {
-      is_variable_ = *is_variable;
-      has_is_variable_ = true;
-    } else {
-      has_is_variable_ = false;
-    }
-  }
-
   /// Mutably set the `pinned_memory` property of `TensorOptions`.
   void set_pinned_memory(c10::optional<bool> pinned_memory) & noexcept {
     if (pinned_memory) {
@@ -517,7 +476,6 @@ struct C10_API TensorOptions {
   // for that matter)
 
   bool requires_grad_     : 1;
-  bool is_variable_       : 1;
   bool pinned_memory_     : 1;
 
 
@@ -525,7 +483,6 @@ struct C10_API TensorOptions {
   bool has_dtype_         : 1;
   bool has_layout_        : 1;
   bool has_requires_grad_ : 1;
-  bool has_is_variable_   : 1;
   bool has_pinned_memory_ : 1;
 };
 

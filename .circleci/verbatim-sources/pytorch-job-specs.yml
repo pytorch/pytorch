@@ -28,7 +28,7 @@ jobs:
             git config --global user.name "CircleCI"
             git config remote.origin.url https://github.com/pytorch/pytorch.git
             git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
             export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
             echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
             export GIT_COMMIT=${CIRCLE_SHA1}
