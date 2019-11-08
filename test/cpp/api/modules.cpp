@@ -1207,6 +1207,106 @@ TEST_F(ModulesTest, BatchNorm1d) {
   ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5})));
 }
 
+TEST_F(ModulesTest, BatchNorm2dStateful) {
+  BatchNorm2d bn(BatchNorm2dOptions(5));
+
+  ASSERT_TRUE(bn->options.track_running_stats());
+
+  ASSERT_TRUE(bn->running_mean.defined());
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
+
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
+
+  ASSERT_TRUE(bn->num_batches_tracked.defined());
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
+
+  ASSERT_TRUE(bn->options.affine());
+
+  ASSERT_TRUE(bn->weight.defined());
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
+
+  ASSERT_TRUE(bn->bias.defined());
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, BatchNorm2dStateless) {
+  BatchNorm2d bn(BatchNorm2dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_var.defined());
+  ASSERT_FALSE(bn->num_batches_tracked.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
+}
+
+TEST_F(ModulesTest, BatchNorm2d) {
+  BatchNorm2d bn(BatchNorm2dOptions(5));
+  bn->eval();
+
+  auto input = torch::randn({2, 5, 4, 4}, torch::requires_grad());
+  auto output = bn->forward(input);
+  auto s = output.sum();
+  s.backward();
+  
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4})));
+}
+
+TEST_F(ModulesTest, BatchNorm3dStateful) {
+  BatchNorm3d bn(BatchNorm3dOptions(5));
+
+  ASSERT_TRUE(bn->options.track_running_stats());
+
+  ASSERT_TRUE(bn->running_mean.defined());
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
+
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
+
+  ASSERT_TRUE(bn->num_batches_tracked.defined());
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
+
+  ASSERT_TRUE(bn->options.affine());
+
+  ASSERT_TRUE(bn->weight.defined());
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
+
+  ASSERT_TRUE(bn->bias.defined());
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, BatchNorm3dStateless) {
+  BatchNorm3d bn(BatchNorm3dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_var.defined());
+  ASSERT_FALSE(bn->num_batches_tracked.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
+}
+
+TEST_F(ModulesTest, BatchNorm3d) {
+  BatchNorm3d bn(BatchNorm3dOptions(5));
+  bn->eval();
+
+  auto input = torch::randn({2, 5, 4, 4, 4}, torch::requires_grad());
+  auto output = bn->forward(input);
+  auto s = output.sum();
+  s.backward();
+  
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4, 4})));
+}
+
 TEST_F(ModulesTest, Linear_CUDA) {
   Linear model(5, 2);
   model->to(torch::kCUDA);
@@ -1331,12 +1431,38 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
+  SmoothL1Loss loss;
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   MultiLabelMarginLoss loss;
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, SmoothL1LossNoReduction) {
+  SmoothL1Loss loss(/*reduction=*/torch::Reduction::None);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -1732,6 +1858,14 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
+TEST_F(ModulesTest, GELU) {
+  GELU model;
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, Sigmoid) {
   Sigmoid model;
   auto x = torch::randn(100) * 10;
@@ -2004,6 +2138,68 @@ TEST_F(ModulesTest, CTCLoss) {
   ASSERT_TRUE(output.ge(0).all().item<bool>());
   ASSERT_TRUE(torch::allclose(
     -log_probs.sum(0).slice(1, 0, 1).view_as(output), output));
+}
+
+TEST_F(ModulesTest, PoissonNLLLoss) {
+  const auto input = torch::tensor({0.5, 1.5, 2.5});
+  const auto target = torch::tensor({1., 2., 3.});
+  const auto component_wise_loss = torch::exp(input) - target * input;
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kNone)};
+    ASSERT_TRUE(torch::allclose(
+      component_wise_loss,
+      loss->forward(input, target)
+    ));
+  }
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kSum)};
+    ASSERT_TRUE(torch::allclose(
+      torch::sum(component_wise_loss),
+      loss->forward(input, target)
+    ));
+  }
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kMean)};
+    ASSERT_TRUE(torch::allclose(
+      torch::mean(component_wise_loss),
+      loss->forward(input, target)
+    ));
+  }
+}
+
+TEST_F(ModulesTest, MarginRankingLoss) {
+  {
+    MarginRankingLoss loss;
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2)).clamp(0).mean()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kSum)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).sum()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kMean)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).mean()
+    ));
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
@@ -2291,6 +2487,55 @@ TEST_F(ModulesTest, ConstantPad3d) {
   }
 }
 
+TEST_F(ModulesTest, CrossMapLRN2d) {
+  /// size 3, default options
+  auto input = torch::arange(9, torch::kFloat32).view({1, 1, 3, 3}).requires_grad_(true);
+  auto expected = torch::tensor({{{{0.00000000, 0.99997497, 1.99980010},
+                                   {2.99932500, 3.99840070, 4.99687700},
+                                   {5.99460600, 6.99143740, 7.98722360}}}}, torch::kFloat32);
+  auto grad_expected = torch::tensor({{{{1.00000000, 0.99992496, 0.99970007},
+                                        {0.99932520, 0.99880093, 0.99812720},
+                                        {0.99730474, 0.99633380, 0.99521490}}}}, torch::kFloat32);
+  auto crossmaplrn2d = CrossMapLRN2d(3);
+  auto output = crossmaplrn2d(input);
+  output.sum().backward();
+  
+  ASSERT_TRUE(input.grad().allclose(grad_expected));
+  ASSERT_TRUE(output.allclose(expected));
+  
+  /// size change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(4).alpha(1e-4).beta(0.75).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99998120, 1.99985000},
+                              {2.99949400, 3.99880050, 4.99765800},
+                              {5.99595300, 6.99357600, 7.99041300}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// alpha change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-3).beta(0.75).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99975010, 1.99800230},
+                              {2.99326750, 3.98407440, 4.96897600},
+                              {5.94656100, 6.91545720, 7.87434340}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// beta change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.95).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99996830, 1.99974680},
+                              {2.99914500, 3.99797440, 4.99604460},
+                              {5.99316840, 6.98915600, 7.98382000}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// k change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.75).k(2));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.59459610, 1.18914770},
+                              {1.78361000, 2.37793870, 2.97208900},
+                              {3.56601700, 4.15967700, 4.75302650}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
@@ -2499,6 +2744,22 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
           BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
       "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
+  ASSERT_EQ(
+      c10::str(BatchNorm2d(
+          BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::BatchNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
+  ASSERT_EQ(
+      c10::str(BatchNorm3d(
+          BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::BatchNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
@@ -2855,4 +3116,26 @@ TEST_F(ModulesTest, PrettyPrintCTCLoss) {
   ASSERT_EQ(c10::str(CTCLoss(
     CTCLossOptions().blank(42).zero_infinity(false)
       .reduction(torch::kSum))), "torch::nn::CTCLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
+  ASSERT_EQ(c10::str(PoissonNLLLoss()), "torch::nn::PoissonNLLLoss()");
+  ASSERT_EQ(c10::str(PoissonNLLLoss(
+    PoissonNLLLossOptions().log_input(false).full(true).eps(0.42)
+    .reduction(torch::kSum))),
+    "torch::nn::PoissonNLLLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
+  ASSERT_EQ(c10::str(MarginRankingLoss()), "torch::nn::MarginRankingLoss()");
+  ASSERT_EQ(c10::str(MarginRankingLoss(
+    MarginRankingLossOptions().margin(0.5).reduction(torch::kSum))),
+    "torch::nn::MarginRankingLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
+  ASSERT_EQ(c10::str(CrossMapLRN2d(4)),
+    "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
+  ASSERT_EQ(c10::str(CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10))),
+    "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
 }

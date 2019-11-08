@@ -6,18 +6,6 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/DistributionsHelper.h>
 
-TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-
 TH_API void THNN_(VolumetricConvolutionMM_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -31,20 +19,6 @@ TH_API void THNN_(VolumetricConvolutionMM_updateOutput)(
           int pT, int pW, int pH);
 
 #if !defined(TH_REAL_IS_LONG)
-
-TH_API void THNN_(AbsCriterion_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *target,            // tensor with target values
-          THTensor *output,            // [OUT] a one-element tensor with loss
-          int64_t reduction);
-TH_API void THNN_(AbsCriterion_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *target,            // tensor with target values
-          THTensor *gradOutput,
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          int64_t reduction);
 
 TH_API void THNN_(BCECriterion_updateOutput)(
           THNNState *state,
@@ -205,49 +179,6 @@ TH_API void THNN_(SoftShrink_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           accreal lambda);
-
-TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-TH_API void THNN_(SpatialConvolutionMM_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,     // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          accreal scale);
-
-TH_API void THNN_(unfolded_acc)(
-          THTensor *finput,
-          THTensor *input,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int nInputPlane,
-          int inputWidth, int inputHeight,
-          int osizeW, int outputHeight);
-TH_API void THNN_(unfolded_copy)(
-          THTensor *finput,
-          THTensor *input,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int nInputPlane,
-          int inputWidth, int inputHeight,
-          int outputWidth, int outputHeight);
 
 TH_API void THNN_(Tanh_updateOutput)(
           THNNState *state,

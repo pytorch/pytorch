@@ -140,7 +140,8 @@ def can_compile_class(cls):
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
         return False
-    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    names = cls.__dict__
+    fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
 
