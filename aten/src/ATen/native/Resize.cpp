@@ -36,15 +36,15 @@ Tensor& resize_as_(
     Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
   if (self.is_sparse() && the_template.is_sparse()) {
     TORCH_CHECK(
-        memory_format == MemoryFormat::Contiguous,
-        "Unsupported memory format for sparse tensor resize_as_ ",
-        memory_format);
+        !optional_memory_format.has_value(),
+        "Unsupported memory format for sparse tensor resize_as_ :",
+        optional_memory_format.value_or(MemoryFormat::Contiguous));
     return native::resize_as_sparse_(self, the_template);
   }
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
   Tensor& result = self.resize_(the_template.sizes());
   if (memory_format == MemoryFormat::Preserve) {
     memory_format = the_template.suggest_memory_format();
