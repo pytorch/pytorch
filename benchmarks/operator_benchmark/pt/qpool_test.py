@@ -8,7 +8,7 @@ import torch
 import operator_benchmark as op_bench
 
 # 2D pooling will have input matrix of rank 3 or 4
-qmaxpool2d_long_configs = op_bench.config_list(
+qpool2d_long_configs = op_bench.config_list(
     attrs=(
        #  C    H    W   k       s       p
        (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
@@ -32,7 +32,7 @@ qmaxpool2d_long_configs = op_bench.config_list(
     tags=('long',)
 )
 
-qmaxpool2d_short_configs = op_bench.config_list(
+qpool2d_short_configs = op_bench.config_list(
     attrs=((1, 3, 3, (3, 3), (1, 1), (0, 0)),),  # dummy  # noqa
     attr_names=('C', 'H', 'W',        # Input layout
                 'k', 's', 'p'),  # Pooling parameters
@@ -84,14 +84,14 @@ class QMaxPool2dBenchmark(_QPool2dBenchmarkBase):
 
 class QAvgPool2dBenchmark(_QPool2dBenchmarkBase):
     def init(self, N, C, H, W, k, s, p, ceil, contig, dtype):
-        self.pool_op = torch.nn.MaxPool2d(kernel_size=k, stride=s, padding=p,
+        self.pool_op = torch.nn.AvgPool2d(kernel_size=k, stride=s, padding=p,
                                           ceil_mode=ceil)
         super(QAvgPool2dBenchmark, self).setup(N, C, H, W, dtype, contig)
 
 
-op_bench.generate_pt_test(qmaxpool2d_short_configs + qmaxpool2d_long_configs,
+op_bench.generate_pt_test(qpool2d_short_configs + qpool2d_long_configs,
                           QAvgPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_short_configs + qmaxpool2d_long_configs,
+op_bench.generate_pt_test(qpool2d_short_configs + qpool2d_long_configs,
                           QMaxPool2dBenchmark)
 
 
