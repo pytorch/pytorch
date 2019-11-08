@@ -430,7 +430,7 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
 
 Tensor inverse(const Tensor &self) {
   if (self.size(-1) == 0) {
-    return at::empty_like(self);
+    return at::empty_like(self, at::MemoryFormat::Contiguous);
   }
   squareCheckInputs(self);
   return at::_inverse_helper(self);
@@ -549,7 +549,7 @@ Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
 
 Tensor cholesky(const Tensor &self, bool upper) {
   if (self.size(-1) == 0) {
-    return at::empty_like(self);
+    return at::empty_like(self, at::MemoryFormat::Contiguous);
   }
   squareCheckInputs(self);
 
@@ -582,13 +582,14 @@ static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
   auto self_matrix_stride = matrixStride(self);
   auto pivots_matrix_stride = pivots.size(-1);
   auto batch_size = batchCount(self);
+  auto m = self.size(-2);
   auto n = self.size(-1);
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
     int* infos_working_ptr = &infos_data[i];
-    lapackLu<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
+    lapackLu<scalar_t>(m, n, self_working_ptr, m, pivots_working_ptr, infos_working_ptr);
   }
 #endif
 }
@@ -598,16 +599,18 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
-  squareCheckInputs(self);
+  auto m = self.size(-2);
+  auto n = self.size(-1);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
+  req_size.back() = std::min(m, n);
   auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 
   Tensor self_working_copy;
   if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self);
+    self_working_copy = at::empty_like(self, at::MemoryFormat::Contiguous);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cpu", [&]{
@@ -616,9 +619,9 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
   }
   if (check_errors) {
     if (self.dim() > 2) {
-      batchCheckErrors(infos_tensor, "lu");
+      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
     } else {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
+      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
     }
   }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
@@ -889,7 +892,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
   auto eigvals = at::empty(self_sizes, self.options());
 
   if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self));
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, at::MemoryFormat::Contiguous));
   }
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
@@ -1088,7 +1091,7 @@ Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Ten
   std::vector<int64_t> infos(batchCount(self), 0);
 
   if (self.numel() == 0 || LU_data.numel() == 0) {
-    return at::zeros_like(self);
+    return at::zeros_like(self, at::MemoryFormat::Contiguous);
   }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);

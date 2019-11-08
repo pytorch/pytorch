@@ -14,6 +14,11 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase
 
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
+
 class TestList(JitTestCase):
     def test_in_check(self):
         def int_in(x):
@@ -1071,7 +1076,7 @@ class TestDict(JitTestCase):
         self.assertEqual(fn(), {'ok': 10})
 
     def test_key_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
+        with self.assertRaisesRegex(RuntimeError, "but instead found type"):
             @torch.jit.script
             def fn(a):
                 # type: (Dict[str, int]) -> int
@@ -1164,9 +1169,3 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Arguments for call are not"):
             torch.jit.script(test_dict_error)
-
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
