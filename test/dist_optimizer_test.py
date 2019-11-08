@@ -8,12 +8,18 @@ from torch.distributed.optim import DistributedOptimizer
 import torch
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
+import threading
 
 
 class MyModule:
+    lock = threading.Lock()
+
     def __init__(self):
-        torch.manual_seed(0)
-        self.w = torch.rand((3, 3), requires_grad=True)
+        # avoid race where 2 modules could be initialized
+        # concurrently thus changing the order random numbers are drawn.
+        with MyModule.lock:
+            torch.manual_seed(0)
+            self.w = torch.rand((3, 3), requires_grad=True)
 
     def forward(self, t1):
         return torch.mm(self.w, t1)
@@ -31,7 +37,7 @@ class FailingOptimizer(optim.Optimizer):
 
 
 def _call_method(method, obj_rref, *args, **kwargs):
-    return method(obj_rref.local_value().wait(), *args, **kwargs)
+    return method(obj_rref.local_value(), *args, **kwargs)
 
 
 def remote_method(method, obj_rref, *args, **kwargs):
@@ -147,6 +153,12 @@ class DistOptimizerTest(object):
         remote_module2 = rpc.remote(owner2, MyModule)
         remote_param1 = remote_method(MyModule.get_w, remote_module1)
         remote_param2 = remote_method(MyModule.get_w, remote_module2)
+
+        old_w1_remote = remote_param1.to_here()
+
+        # sanity check: local and remote initial weights should match
+        self.assertEqual(old_w1, remote_param1.to_here())
+        self.assertEqual(old_w2, remote_param2.to_here())
 
         dist_optim = DistributedOptimizer(
             optim.SGD,

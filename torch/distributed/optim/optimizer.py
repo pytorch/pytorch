@@ -8,7 +8,7 @@ from threading import Lock
 class _LocalOptimizer:
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
         self.optim = optim_cls(
-            [rref.local_value().wait() for rref in local_params_rref],
+            [rref.local_value() for rref in local_params_rref],
             *args,
             **kwargs)
         self.lock = Lock()
@@ -23,7 +23,7 @@ class _LocalOptimizer:
 
 
 def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
-    local_optim = local_optim_rref.local_value().wait()
+    local_optim = local_optim_rref.local_value()
     local_optim.step(autograd_ctx_id)
 
 
