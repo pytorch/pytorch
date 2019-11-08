@@ -126,7 +126,7 @@ void SoftmaxImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor SoftmaxImpl::forward(const Tensor& input) {
-  return F::detail::softmax(input, options.dim());
+  return F::detail::softmax(input, options.dim(), c10::nullopt);
 }
 
 // ============================================================================
@@ -141,7 +141,7 @@ void SoftminImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor SoftminImpl::forward(const Tensor& input) {
-  return F::detail::softmin(input, options.dim());
+  return F::detail::softmin(input, options.dim(), c10::nullopt);
 }
 
 // ============================================================================
@@ -156,7 +156,7 @@ void LogSoftmaxImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor LogSoftmaxImpl::forward(const Tensor& input) {
-  return F::detail::log_softmax(input, options.dim());
+  return F::detail::log_softmax(input, options.dim(), c10::nullopt);
 }
 
 // ============================================================================
@@ -169,7 +169,7 @@ void Softmax2dImpl::pretty_print(std::ostream& stream) const {
 
 Tensor Softmax2dImpl::forward(const Tensor& input) {
   TORCH_CHECK(input.dim() == 4, "Softmax2d requires a 4D tensor as input");
-  return F::detail::softmax(input, /*dim=*/1);
+  return F::detail::softmax(input, /*dim=*/1, c10::nullopt);
 }
 
 // ============================================================================
