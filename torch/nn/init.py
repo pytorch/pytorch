@@ -213,7 +213,6 @@ def _calculate_fan_in_and_fan_out(tensor):
         receptive_field_size = tensor[0][0].numel()
         fan_in = num_input_fmaps * receptive_field_size
         fan_out = num_output_fmaps * receptive_field_size
-
     return fan_in, fan_out
 
 

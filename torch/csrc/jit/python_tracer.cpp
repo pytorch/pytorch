@@ -148,6 +148,11 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def("pop_scope", [](TracingState& s) { s.graph->pop_scope(); })
       .def(
+          "current_scope",
+          [](TracingState& s) {
+            return s.graph->current_scope()->name().toUnqualString();
+          })
+      .def(
           "set_graph",
           [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
       .def("graph", [](TracingState& s) { return s.graph; });
