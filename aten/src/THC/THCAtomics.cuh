@@ -12,20 +12,21 @@ struct AtomicAddIntegerImpl;
 template<typename T>
 struct AtomicAddIntegerImpl<T, 1> {
   inline __device__ void operator()(T *address, T val) {
-    uint32_t * address_as_ui =
-        (uint32_t *) (address - ((size_t)address & 3));
+    size_t offset = (size_t)address & 3;
+    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
     uint32_t old = *address_as_ui;
-    uint32_t shift = (((size_t)address & 3) * 8);
+    uint32_t shift = offset * 8;
     uint32_t sum;
+    uint32_t newval;
     uint32_t assumed;
 
     do {
       assumed = old;
-      T tmp = THCNumerics<T>::add(val, T((old >> shift) & 0xff));
-      // reinterpret raw bytes to avoid miss-interpretation of sign
-      sum = *reinterpret_cast<uint16_t*>(&tmp);
-      old = (old & ~(0x000000ff << shift)) | (sum << shift);
-      old = atomicCAS(address_as_ui, assumed, old);
+      sum = (old >> shift) & 0xff;
+      T tmp = THCNumerics<T>::add(val, sum);
+      sum = *reinterpret_cast<uint8_t*>(&tmp);
+      newval = (old & ~(0x000000ff << shift)) | (sum << shift);
+      old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
 };
@@ -33,8 +34,9 @@ struct AtomicAddIntegerImpl<T, 1> {
 template<typename T>
 struct AtomicAddIntegerImpl<T, 2> {
   inline __device__ void operator()(T *address, T val) {
-    uint32_t * address_as_ui =
-        (uint32_t *) ((char *)address - ((size_t)address & 2));
+    size_t offset = (size_t)address & 2;
+    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
+    bool is_32_align = offset;
     uint32_t old = *address_as_ui;
     uint32_t sum;
     uint32_t newval;
@@ -42,11 +44,10 @@ struct AtomicAddIntegerImpl<T, 2> {
 
     do {
       assumed = old;
-      sum = (size_t)address & 2 ? old >> 16 : old & 0xffff;
-      T tmp = THCNumerics<T>::add(sum, val);
-      // reinterpret raw bytes to avoid miss-interpretation of sign
+      sum = is_32_align ? old >> 16 : old & 0xffff;
+      T tmp = THCNumerics<T>::add(val, sum);
       sum = *reinterpret_cast<uint16_t*>(&tmp);
-      newval = (size_t)address & 2 ? (old & 0xffff) | (sum << 16) : (old & 0xffff0000) | sum;
+      newval = is_32_align ? (old & 0xffff) | (sum << 16) : (old & 0xffff0000) | sum;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
