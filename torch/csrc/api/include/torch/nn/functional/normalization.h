@@ -12,10 +12,10 @@ namespace functional {
 namespace detail {
 inline Tensor normalize(
     const Tensor& input,
-    double p = 2.0,
-    int64_t dim = 1,
-    double eps = 1e-12,
-    c10::optional<Tensor> out = c10::nullopt) {
+    double p,
+    int64_t dim,
+    double eps,
+    c10::optional<Tensor> out) {
     if (out == c10::nullopt) {
       auto denom = input.norm(p, dim, true).clamp_min(eps).expand_as(input);
       return input / denom;
@@ -38,9 +38,9 @@ inline Tensor normalize(
 namespace detail {
 inline Tensor layer_norm(const Tensor& input,
                          std::vector<int64_t> normalized_shape,
-                         const Tensor& weight = Tensor(),
-                         const Tensor& bias = Tensor(),
-                         double eps = 1e-5) {
+                         const Tensor& weight,
+                         const Tensor& bias,
+                         double eps) {
     return torch::layer_norm(input, normalized_shape, weight, bias, eps);
 }
 } // namespace detail
@@ -58,9 +58,9 @@ namespace detail {
 inline Tensor local_response_norm(
     const Tensor& input,
     int64_t size,
-    double alpha = 1e-4,
-    double beta = 0.75,
-    double k = 1.) {
+    double alpha,
+    double beta,
+    double k) {
     auto dim = input.dim();
     TORCH_CHECK(dim >=3, "Expected 3D or higher dimensionality input (got ", dim, " dimensions)");
     auto div = input.mul(input).unsqueeze(1);

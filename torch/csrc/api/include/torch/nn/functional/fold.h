@@ -10,9 +10,9 @@ namespace detail {
 inline Tensor fold(const Tensor& input,
                    ExpandingArray<2> output_size,
                    ExpandingArray<2> kernel_size,
-                   ExpandingArray<2> dilation = 1,
-                   ExpandingArray<2> padding = 0,
-                   ExpandingArray<2> stride = 1) {
+                   ExpandingArray<2> dilation,
+                   ExpandingArray<2> padding,
+                   ExpandingArray<2> stride) {
   if (input.dim() == 3) {
     return torch::col2im(
         input,
@@ -45,9 +45,9 @@ inline Tensor fold(const Tensor& input, FoldFuncOptions options) {
 namespace detail {
 inline Tensor unfold(const Tensor& input,
                      ExpandingArray<2> kernel_size,
-                     ExpandingArray<2> dilation = 1,
-                     ExpandingArray<2> padding = 0,
-                     ExpandingArray<2> stride = 1) {
+                     ExpandingArray<2> dilation,
+                     ExpandingArray<2> padding,
+                     ExpandingArray<2> stride) {
   if (input.dim() == 4) {
     return torch::im2col(
         input,
