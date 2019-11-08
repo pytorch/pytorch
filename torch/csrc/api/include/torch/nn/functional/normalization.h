@@ -36,7 +36,7 @@ inline Tensor normalize(
 
 namespace detail {
 inline Tensor layer_norm(const Tensor& input,
-                         std::vector<int64_t> normalized_shape,
+                         const std::vector<int64_t>& normalized_shape,
                          const Tensor& weight,
                          const Tensor& bias,
                          double eps) {
