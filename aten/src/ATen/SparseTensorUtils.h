@@ -64,11 +64,9 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz, ScalarT
   return at::empty(size, values.options().dtype(dtype));
 }
 
-inline std::tuple<const Tensor, const Tensor> 
-promoted_tensors(const Tensor & first, const Tensor & second, ScalarType commonDtype) {
-  const Tensor& first_promoted = first.scalar_type() != commonDtype? first.to(commonDtype) : first;
-  const Tensor& second_promoted = second.scalar_type() != commonDtype? second.to(commonDtype) : second;
-  return std::tie(first_promoted, second_promoted);
+inline Tensor maybe_promoted_tensor(const Tensor & tensor, ScalarType commonDtype) {
+  const Tensor& promoted = tensor.scalar_type() != commonDtype? tensor.to(commonDtype) : tensor;
+  return promoted;
 }
 
 // NOTE [ Flatten Sparse Indices ]

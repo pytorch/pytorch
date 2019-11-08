@@ -3,7 +3,6 @@ import unittest
 import itertools
 
 from common_utils import TestCase, run_tests, load_tests
-import itertools
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

@@ -245,8 +245,8 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     LongTensor r_indices = at::empty({src.sparse_dim(), max_nnz}, t.indices().options());
     Tensor r_values = new_values_with_size_of(src.values(), max_nnz, commonDtype).zero_();
 
-    Tensor t_values, s_values;
-    std::tie(t_values, s_values) = promoted_tensors(t.values(), src.values(), commonDtype);
+    Tensor t_values = maybe_promoted_tensor(t.values(), commonDtype);
+    Tensor s_values = maybe_promoted_tensor(src.values(), commonDtype);
 
     int64_t blockSize = r_values.stride(0);
     int64_t cmp, d;
@@ -324,8 +324,8 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
 }
 
 SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value, ScalarType commonDtype) {
-    Tensor t_values, s_values;
-    std::tie(t_values, s_values) = promoted_tensors(t.values(), src.values(), commonDtype);
+    Tensor t_values = maybe_promoted_tensor(t.values(), commonDtype);
+    Tensor s_values = maybe_promoted_tensor(src.values(), commonDtype);
 
     // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
     // and we concat the indices and values tensors instead.
@@ -435,8 +435,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
     return r;
   }
 
-  Tensor values_buffer;
-  std::tie(std::ignore, values_buffer) = promoted_tensors(dense, values, commonDtype);
+  Tensor values_buffer = maybe_promoted_tensor(values, commonDtype);
   Tensor result_buffer = r;
   if (r.scalar_type() != commonDtype) {
     result_buffer = dense.to(commonDtype);
@@ -517,8 +516,8 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   auto commonDtype = promoteTypes(t_.scalar_type(), src_.scalar_type());
   TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
 
-  Tensor t_values, s_values;
-  std::tie(t_values, s_values) = promoted_tensors(t.values(), src.values(), commonDtype);
+  Tensor t_values = maybe_promoted_tensor(t.values(), commonDtype);
+  Tensor s_values = maybe_promoted_tensor(src.values(), commonDtype);
 
   Tensor r_values = new_values_with_size_of(t.values(), max_nnz, r.scalar_type()).zero_();
   r.resize_as_(src);
