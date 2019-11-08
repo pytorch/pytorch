@@ -66,8 +66,7 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
 TensorOptions options(c10::TensorTypeId type_id, at::ScalarType scalar_type, const c10::optional<Device>& device=c10::nullopt) {
   auto options = TensorOptions(scalar_type)
       .device(computeDeviceType(type_id))
-      .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
-      .is_variable(true);
+      .layout(layout_from_backend(tensorTypeIdToBackend(type_id)));
   if (device.has_value()) {
     return options.device(device);
   }
@@ -277,13 +276,28 @@ Tensor internal_new_from_data(
 
   auto sizes = compute_sizes(data);
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
-  auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory)), /*requires_grad=*/false);
-  recursive_store(
-      (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-      inferred_scalar_type, tensor.dtype().itemsize(), data);
+  // This exists to prevent us from tracing the call to empty().  The actual
+  // autograd code doesn't really matter, because requires_grad is always false
+  // here.
+  Tensor tensor;
+  {
+    at::AutoNonVariableTypeMode guard;
+    tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
+    recursive_store(
+        (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+        inferred_scalar_type, tensor.dtype().itemsize(), data);
+  }
   auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
+  // However, it is VERY important that we trace the to() call here (even
+  // though the reason this is important is a hack).  Without *some* factory
+  // function call that is traced at construction time, we will consider
+  // a tensor constant as originating from "outside" the trace, and if you
+  // try to return it directly we will fail with the error saying no
+  // "no observable data dependence".  In an ideal world, we wouldn't trace
+  // a to() call but I need to think harder about what exactly we should trace
+  // in this case.
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
 }
 
@@ -596,7 +610,7 @@ Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObje
 #ifdef BUILD_NAMEDTENSOR
     auto names = r.toDimnameListOptional(5);
     if (names) {
-      at::namedinference::propagate_names(new_tensor, std::move(names), /*validate_names=*/true);
+      at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
     }
 #endif
     new_tensor.detach_(); // ensure new_tensor a leaf node
