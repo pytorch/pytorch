@@ -16,7 +16,7 @@ void ReflectionPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 Tensor ReflectionPadImpl<D, Derived>::forward(const Tensor& input) {
-  return F::detail::pad(input, options.padding(), torch::kReflect);
+  return F::detail::pad(input, options.padding(), torch::kReflect, 0);
 }
 
 template <size_t D, typename Derived>
@@ -39,7 +39,7 @@ void ReplicationPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 Tensor ReplicationPadImpl<D, Derived>::forward(const Tensor& input) {
-  return F::detail::pad(input, options.padding(), torch::kReplicate);
+  return F::detail::pad(input, options.padding(), torch::kReplicate, 0);
 }
 
 template <size_t D, typename Derived>
