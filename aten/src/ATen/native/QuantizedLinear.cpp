@@ -230,7 +230,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
 
   q_params.precision = precision;
 
-  auto quantized = at::zeros_like(weight_contig, at::MemoryFormat::Contiguous).to(at::kChar).contiguous();
+  auto quantized = at::zeros_like(weight_contig, LEGACY_CONTIGUOUS_MEMORY_FORMAT).to(at::kChar).contiguous();
   fbgemm::Quantize<int8_t>(
       /*src=*/weight_contig.data_ptr<float>(),
       /*dst=*/quantized.data_ptr<int8_t>(),
@@ -240,7 +240,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Calculate column offsets of the weight and store them away in a tensor.
   // Similarly to quantization, this can be done once and cached.
   auto col_offsets =
-      at::zeros_like(quantized, at::MemoryFormat::Contiguous).sum({1}).to(at::kInt).contiguous();
+      at::zeros_like(quantized, LEGACY_CONTIGUOUS_MEMORY_FORMAT).sum({1}).to(at::kInt).contiguous();
   calc_col_offsets_transpose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),
