@@ -217,6 +217,39 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
+Tensor cummax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_cummax(integer_upcast(self, dtype), dim);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
+}
+
+Tensor& cummax_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
+  TORCH_CHECK(
+      !dtype.has_value() || (result.scalar_type() == dtype.value()),
+      "provided dtype must match dtype of result in cumprod. Got ",
+      toString(result.scalar_type()),
+      " and ",
+      toString(dtype.value()),
+      ".");
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    at::_cummax_out(result, self.toType(result.scalar_type()), dim);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+#endif
+  return result;
+}
 
 // ALL REDUCE #################################################################
 
