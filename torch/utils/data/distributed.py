@@ -78,7 +78,9 @@ class DistributedSampler(Sampler):
 
         # subsample
         indices = indices[self.rank:self.total_size:self.num_replicas]
-        assert len(indices) == self.num_samples
+
+        if self.padding:
+            assert len(indices) == self.num_samples
 
         return iter(indices)
 
