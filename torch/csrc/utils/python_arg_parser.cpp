@@ -511,8 +511,8 @@ void fill_overloaded_args(std::vector<py::handle> &overloaded_args, PyObject* ob
   // entry in overloaded_args for this type with higher precedence than
   // the superclass.
   bool class_not_seen_yet = true;
-  for (int j = 0; j < num_args_with_torch_function; j++) {
-    if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j].ptr())) {
+  for (auto &arg : overloaded_args) {
+    if (Py_TYPE(obj) == Py_TYPE(arg.ptr())) {
       // obj is the same type as another parameter we've seen in a prior
       // iteration of the loop over parameters so we already have an entry
       // with the proper __torch_function__ implementation to call, so skip
@@ -522,8 +522,8 @@ void fill_overloaded_args(std::vector<py::handle> &overloaded_args, PyObject* ob
     }
   }
   if (class_not_seen_yet) {
-    int arg_index = num_args_with_torch_function;
-    for (int j = 0; j < num_args_with_torch_function; j++) {
+    int arg_index = overloaded_args.size()
+    for (int j = 0; j < arg_index; j++) {
       if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
         // obj is a subclass of another object we've seen already so its
         // __torch_function__ should be called first, therefore we
@@ -536,7 +536,6 @@ void fill_overloaded_args(std::vector<py::handle> &overloaded_args, PyObject* ob
     // we've already seen it will be inserted before the superclass,
     // otherwise it will be inserted at the end of the array
     overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
-    num_args_with_torch_function++;
   }
 }
 
