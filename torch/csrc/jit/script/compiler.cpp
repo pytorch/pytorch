@@ -1051,10 +1051,15 @@ struct to_ir {
         if (expr.kind() == TK_APPLY) {
           auto apply = Apply(expr);
           auto callee = Apply(expr).callee();
-          if (callee.kind() == TK_VAR &&
-              Var(callee).name().name() == "isinstance") {
-            checkApplyNumInputs(apply, 2);
-            return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+          if (callee.kind() == TK_VAR) {
+            if (Var(callee).name().name() == "isinstance") {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+            if (Var(callee).name().name() == "hasattr") {
+              checkApplyNumInputs(apply, 2);
+              return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+            }
           }
         }
         return CondValue(
@@ -1400,6 +1405,25 @@ struct to_ir {
       }
       environment_stack->setType(x, *unified);
     }
+  }
+
+  CondValue emitHasAttr(Expr objExpr, Expr attrExpr) {
+    auto obj = emitExpr(objExpr);
+    const auto type = obj->type();
+    if (attrExpr.kind() != TK_STRINGLITERAL) {
+      throw ErrorReport(attrExpr)
+          << "hasattr's second argument must be a string literal";
+    }
+    auto cls = type->cast<ClassType>();
+    if (!cls) {
+      throw ErrorReport(objExpr)
+          << "hasattr's first argument must be an object, got "
+          << type->python_str() << " instead";
+    }
+
+    const std::string& name = StringLiteral(attrExpr).text();
+    const bool hasAttr = cls->hasAttribute(name);
+    return CondValue(*graph, objExpr.range(), hasAttr, {});
   }
 
   CondValue emitIsInstance(Expr obj, Expr classinfo) {
@@ -2380,25 +2404,6 @@ struct to_ir {
         const std::string& name = StringLiteral(selector).text();
         return obj->attr(apply.range(), method, name);
       }
-      case prim::HasAttr: {
-        checkApplyNumInputs(apply, 2);
-        auto obj = emitSugaredExpr(apply.inputs()[0], 1);
-        auto selector = apply.inputs()[1];
-        if (selector.kind() != TK_STRINGLITERAL) {
-          throw ErrorReport(apply)
-              << "hasattr's second argument must be a string literal";
-        }
-        const auto type = obj->asValue(apply.range(), method)->type();
-        if (auto cls = type->cast<ClassType>()) {
-          const std::string& name = StringLiteral(selector).text();
-          const bool hasAttr = cls->hasAttribute(name);
-          return std::make_shared<SimpleValue>(graph->insertConstant(hasAttr));
-        } else {
-          throw ErrorReport(apply)
-              << "hasattr's first argument must be a class type, got "
-              << type->python_str() << " instead";
-        }
-      } break;
       case prim::Uninitialized: {
         checkApplyNumInputs(apply, 1);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -2421,6 +2426,11 @@ struct to_ir {
         auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
       }
+      case prim::HasAttr: {
+        checkApplyNumInputs(apply, 2);
+        const auto result = emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+        return std::make_shared<SimpleValue>(result.value());
+      } break;
       // This represents the "__new__" method on classes
       // because it takes a ClassValue as input.
       // So if we see:
@@ -3376,29 +3386,6 @@ bool meaningfulName(const std::string& name) {
       return true;
   }
   return false;
-}
-
-void lambdaLiftFork(Node* fork_node) {
-  // Fork a new graph from its orignal owning graph
-  auto forked_graph = std::make_shared<Graph>();
-  auto body_block = fork_node->blocks()[0];
-
-  // Make sure we capture everything in the new graph.
-  // The uncaptured values will be added to the fork signature.
-  std::unordered_map<Value*, Value*> uncaptures_map;
-  auto env = [&](Value* v) -> Value* {
-    if (!uncaptures_map.count(v)) {
-      // Capture values for both graphs
-      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-      fork_node->addInput(v);
-    }
-    return uncaptures_map[v];
-  };
-  forked_graph->block()->cloneFrom(body_block, env);
-
-  // Separate the subgraph and clean up the orignal one
-  fork_node->g_(attr::Subgraph, forked_graph);
-  fork_node->eraseBlock(0);
 }
 
 void CompilationUnit::define_interface(
