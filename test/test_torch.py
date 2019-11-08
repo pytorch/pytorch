@@ -3648,11 +3648,11 @@ class _TestTorchMixin(object):
         self.assertTrue(isBinary(p.bernoulli()))
 
         p = torch.rand(5, 5, dtype=p_dtype, device=device)
-        torch.bernoulli(torch.rand_like(p), out=p)
+        torch.bernoulli(torch.rand_like(p, memory_format=torch.contiguous_format), out=p)
         self.assertTrue(isBinary(p))
 
         p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
-        torch.bernoulli(torch.rand_like(p), out=p)
+        torch.bernoulli(torch.rand_like(p, memory_format=torch.contiguous_format), out=p)
         self.assertTrue(isBinary(p))
 
         t = torch.empty(10, 10, dtype=t_dtype, device=device)
@@ -3667,14 +3667,16 @@ class _TestTorchMixin(object):
         self.assertTrue(isBinary(t))
 
         t.fill_(2)
-        torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
+        torch.bernoulli(torch.rand_like(t, dtype=p_dtype, memory_format=torch.contiguous_format), out=t)
         self.assertTrue(isBinary(t))
 
         t.fill_(2)
-        t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
+        t.bernoulli_(torch.rand_like(t, dtype=p_dtype, memory_format=torch.contiguous_format))
         self.assertTrue(isBinary(t))
 
     def test_bernoulli(self):
+        import os
+        input(os.getpid())
         self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
         # test that it works with integral tensors
         self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
@@ -11105,7 +11107,7 @@ class TestTorchDeviceType(TestCase):
             ("sinh", doubles, True, True, 'cpu'),
             ("sinh", doubles, False, True, 'cuda'),
             ("sigmoid", doubles, True, True, 'cpu'),
-            ("sigmoid", doubles, True, True, 'cuda'),
+            ("sigmoid", doubles, False, False, 'cuda'),
             ("sqrt", doubles, True, True, 'cpu'),
             ("sqrt", doubles, False, True, 'cuda'),
             ("tan", doubles, True, True, 'cpu'),
@@ -11950,8 +11952,8 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
 
         like = torch.empty_like(nhwc)
-        self.assertTrue(like.is_contiguous())
-        self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(like.is_contiguous())
+        self.assertTrue(like.is_contiguous(memory_format=torch.channels_last))
 
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):
@@ -12671,7 +12673,7 @@ class TestTorchDeviceType(TestCase):
         else:
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
 
-    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, compare_data=True, default_is_preserve=False):
+    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, compare_data=True, default_is_preserve=True):
         nhwc = input_generator_fn(device)
         # nhwc is not memory dense, but looks like channels last
         nhwc = nhwc[:, :, ::2, ::2]

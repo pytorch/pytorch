@@ -20,6 +20,9 @@ static inline Device ensure_has_index(Device device) {
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+if (!optional_memory_format.has_value()) {
+  TORCH_CHECK(optional_memory_format.has_value(), "Must specify memory_format")
+}
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
 

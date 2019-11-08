@@ -154,10 +154,10 @@ static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType commo
     op.dtype = common_dtype;
     op.original_tensor = op.tensor;
     if (!op.is_output) {
-      op.tensor = op.tensor.to(common_dtype);
+      op.tensor = op.tensor.to(common_dtype, false, false, MemoryFormat::Preserve);
     } else {
       op.tensor =
-          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
+          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype), MemoryFormat::Preserve);
     }
   }
 }

@@ -298,7 +298,7 @@ Tensor internal_new_from_data(
   // "no observable data dependence".  In an ideal world, we wouldn't trace
   // a to() call but I need to think harder about what exactly we should trace
   // in this case.
-  return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+  return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false, MemoryFormat::Contiguous);
 }
 
 Tensor new_from_data_copy(

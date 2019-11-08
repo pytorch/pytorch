@@ -31,6 +31,7 @@ inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
     c10::optional<IntArrayRef> stride) {
+      std::cout << "resize_impl_cpu_ " << size << " "  << "\n";
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }

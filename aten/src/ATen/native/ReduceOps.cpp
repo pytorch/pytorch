@@ -111,7 +111,7 @@ static TensorIterator make_reduction(
   if (self.scalar_type() == in_dtype) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
-  return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
+  return TensorIterator::reduce_op(viewed_result, self.to(in_dtype, false, false, MemoryFormat::Preserve));
 }
 
 static TensorIterator make_reduction(
