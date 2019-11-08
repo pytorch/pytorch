@@ -2179,6 +2179,34 @@ graph(%Ra, %Rb):
             m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
 
+    def test_dropout_requires_grad(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self, M):
+                super(MyModule, self).__init__()
+
+                self.dropout = torch.nn.Dropout(0.5)
+                self.linear = torch.nn.Linear(M, M)
+
+            def forward(self, input):
+                input = self.dropout(input)
+                output = self.linear(input)
+                return output
+
+        def func(input):
+            return F.dropout(input, 0.5, training=True)
+
+        M = 1000
+        scripted_module = torch.jit.script(MyModule(M))
+        scripted_func = torch.jit.script(func)
+
+        X = torch.randn(M, M, requires_grad=True)
+        FileCheck().check("aten::bernoulli_").run(scripted_module.graph_for(X))
+        FileCheck().check("aten::bernoulli_").run(scripted_func.graph_for(X))
+
+        X = torch.randn(M, M, requires_grad=False)
+        FileCheck().check_not("aten::bernoulli_").run(scripted_module.graph_for(X))
+        FileCheck().check_not("aten::bernoulli_").run(scripted_func.graph_for(X))
+
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
