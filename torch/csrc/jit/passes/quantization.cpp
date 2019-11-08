@@ -883,8 +883,12 @@ graph(%self, %x):
       GRAPH_UPDATE("Deleting ", *matched_bn);
 
       auto new_w_b = computeUpdatedConvWeightAndBias(params);
-      params.conv_w.set_data(std::get<0>(new_w_b));
-      params.conv_b.set_data(std::get<1>(new_w_b));
+      conv_submodule.set_parameter("weight", std::get<0>(new_w_b));
+      if (conv_submodule.find_parameter("bias")) {
+        conv_submodule.set_parameter("bias", std::get<1>(new_w_b));
+      } else {
+        conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
+      }
     }
 
     // Perform planned rewritings

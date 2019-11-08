@@ -338,6 +338,18 @@ void GeluBackwardCUDAKernelImpl(
 
 } // namespace
 
+Tensor gelu_cuda(const Tensor& self) {
+  Tensor Y = at::native::empty_like(self);
+  GeluCUDAKernelImpl(self, &Y);
+  return Y;
+}
+
+Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
+  Tensor dX = at::native::empty_like(self);
+  GeluBackwardCUDAKernelImpl(grad, self, &dX);
+  return dX;
+}
+
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluCUDAKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardCUDAKernelImpl);
