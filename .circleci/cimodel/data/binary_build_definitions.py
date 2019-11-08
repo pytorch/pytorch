@@ -61,6 +61,8 @@ class Conf(object):
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
         job_def["requires"] = ["setup"]
         if self.smoke:
+            job_def["requires"].append("update_s3_htmls_for_nightlies")
+            job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
             job_def["filters"] = {"branches": {"only": "nightly"}}
