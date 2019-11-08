@@ -514,8 +514,16 @@ void GraphEncoder::EncodeTensor(
     tensor_proto->add_dims(d);
   }
   tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
+  at::Tensor t;
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  auto t = tensor.contiguous().cpu();
+  // Temporary solution as aten::empty does not work on quantized tensor
+  if (tensor.is_quantized()) {
+    t = tensor.contiguous();
+  }
+  else {
+    t = tensor.contiguous().cpu();
+  }
+  //std::cout << "***Contiguous tensor " << t << std::endl;
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
   // the contiguous data into the protobuf itself

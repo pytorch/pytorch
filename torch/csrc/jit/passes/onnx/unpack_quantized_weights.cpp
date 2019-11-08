@@ -88,7 +88,6 @@ void unpackQuantizedWeightsHelper(
     // Update the input
     auto val = graph->insertConstant(unpacked_weight);
     qlinear_node->insertInput(1, val);
-    std::cout << "Inserted weight " << val->debugName();
     // TODO add to paramsDict?
     // auto tmp = std::get<0>(result);
     // paramsDict[val->debugName()] = std::get<0>(result);
@@ -99,7 +98,6 @@ void unpackQuantizedWeightsHelper(
       original_bias.set_requires_grad(false);
       auto val = graph->insertConstant(original_bias);
       qlinear_node->insertInput(2, val);
-      std::cout << "Inserted bias " << val->debugName();
     }
     auto b = graph->block();
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
