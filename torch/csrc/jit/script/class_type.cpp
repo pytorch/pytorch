@@ -92,6 +92,12 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
+void ClassType::unsafeRemoveAttribute(const std::string& name) {
+  auto slot = getAttributeSlot(name);
+  attributeNames_.erase(attributeNames_.begin() + slot);
+  attributeTypes_.erase(attributeTypes_.begin() + slot);
+}
+
 const std::vector<Function*>& ClassType::methods() const {
   return methods_;
 }

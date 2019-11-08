@@ -474,9 +474,10 @@ QuantizerPtr make_per_channel_affine_quantizer(
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
-  TORCH_CHECK(
-      !self.requires_grad(),
-      "quantized tensors do not support autograd");
+  // TODO: remove this when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(
+      !self.is_variable(),
+      "_internal_get_QTensorImpl: should not be a variable");
   TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
