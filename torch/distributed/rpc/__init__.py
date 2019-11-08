@@ -63,6 +63,14 @@ if is_available():
         )
         store, _, _ = next(rendezvous_iterator)
 
+        # Initialize autograd before RPC since _init_rpc guarantees all
+        # processes sync via the store. If we initialize autograd after RPC,
+        # there could be a race where some nodes might have initialized autograd
+        # and others might not have. As a result, a node calling
+        # torch.distributed.autograd.backward() would run into errors since
+        # other nodes might not have been initialized.
+        torch.distributed.autograd._init(worker_name_to_id[self_name])
+
         # Initialize RPC.
         _init_rpc(
             backend,
@@ -73,6 +81,3 @@ if is_available():
             num_send_recv_threads,
             rpc_timeout,
         )
-
-        # Initialize Autograd.
-        torch.distributed.autograd._init(api._agent.get_worker_info().id)

@@ -6,15 +6,21 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-inline Tensor fold(const Tensor& input, const FoldOptions& options) {
+namespace detail {
+inline Tensor fold(const Tensor& input,
+                   ExpandingArray<2> output_size,
+                   ExpandingArray<2> kernel_size,
+                   ExpandingArray<2> dilation,
+                   ExpandingArray<2> padding,
+                   ExpandingArray<2> stride) {
   if (input.dim() == 3) {
     return torch::col2im(
         input,
-        options.output_size(),
-        options.kernel_size(),
-        options.dilation(),
-        options.padding(),
-        options.stride());
+        output_size,
+        kernel_size,
+        dilation,
+        padding,
+        stride);
   } else {
     TORCH_CHECK(
         false,
@@ -22,21 +28,44 @@ inline Tensor fold(const Tensor& input, const FoldOptions& options) {
         "(got ", input.dim(), "D)");
   }
 }
+} // namespace detail
 
-inline Tensor unfold(const Tensor& input, const UnfoldOptions& options) {
+inline Tensor fold(const Tensor& input, const FoldOptions& options) {
+  return detail::fold(
+    input,
+    options.output_size(),
+    options.kernel_size(),
+    options.dilation(),
+    options.padding(),
+    options.stride());
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor unfold(const Tensor& input,
+                     ExpandingArray<2> kernel_size,
+                     ExpandingArray<2> dilation,
+                     ExpandingArray<2> padding,
+                     ExpandingArray<2> stride) {
   if (input.dim() == 4) {
     return torch::im2col(
         input,
-        options.kernel_size(),
-        options.dilation(),
-        options.padding(),
-        options.stride());
+        kernel_size,
+        dilation,
+        padding,
+        stride);
   } else {
     TORCH_CHECK(
         false,
         "Input Error: Only 4D input Tensors are supported "
         "(got ", input.dim(), "D)");
   }
+}
+} // namespace detail
+
+inline Tensor unfold(const Tensor& input, const UnfoldOptions& options) {
+  return detail::unfold(input, options.kernel_size(), options.dilation(), options.padding(), options.stride());
 }
 
 } // namespace functional
