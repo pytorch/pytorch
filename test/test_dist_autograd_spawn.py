@@ -4,11 +4,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from dist_autograd_test import DistAutogradTest
 from common_distributed import MultiProcessTestCase
 from common_utils import TEST_WITH_ASAN, run_tests
+from process_group_rpc_agent_test_fixture import ProcessGroupRpcAgentTestFixture
 
 import unittest
 
 @unittest.skipIf(TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues")
-class DistAutogradTestWithSpawn(MultiProcessTestCase, DistAutogradTest):
+class DistAutogradTestWithSpawn(MultiProcessTestCase, ProcessGroupRpcAgentTestFixture, DistAutogradTest):
 
     def setUp(self):
         super(DistAutogradTestWithSpawn, self).setUp()

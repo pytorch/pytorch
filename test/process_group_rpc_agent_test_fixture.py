@@ -1,8 +1,13 @@
-import rpc_test
+#!/usr/bin/env python3
+
 import torch.distributed.rpc as rpc
 
 
-class ProcessGroupRpcTest(rpc_test.RpcTest):
+class ProcessGroupRpcAgentTestFixture(object):
+    @property
+    def rpc_backend_name(self):
+        return "PROCESS_GROUP"
+
     @property
     def rpc_agent_options(self):
         return rpc.backend_registry.construct_rpc_agent_options(

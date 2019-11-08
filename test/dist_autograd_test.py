@@ -7,7 +7,8 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+from dist_utils import dist_init, TEST_CONFIG
+from rpc_agent_test_fixture import RpcAgentTestFixture
 
 import threading
 
@@ -153,7 +154,7 @@ class ExecMode(Enum):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
-class DistAutogradTest(object):
+class DistAutogradTest(RpcAgentTestFixture):
 
     def _initialize_pg(self):
         # This is for tests using `dist.barrier`.
@@ -194,14 +195,6 @@ class DistAutogradTest(object):
 
     def _check_rpc_done(self, rank_distance):
         _check_rpc_done(rank_distance)
-
-    @property
-    def world_size(self):
-        return 4
-
-    @property
-    def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
     @dist_init
     def test_autograd_context(self):

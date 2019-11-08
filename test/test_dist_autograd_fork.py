@@ -9,9 +9,10 @@ torch.set_default_dtype(torch.double)
 from dist_autograd_test import DistAutogradTest
 from common_distributed import MultiProcessTestCase
 from common_utils import run_tests
+from process_group_rpc_agent_test_fixture import ProcessGroupRpcAgentTestFixture
 
 
-class DistAutogradTestWithFork(MultiProcessTestCase, DistAutogradTest):
+class DistAutogradTestWithFork(MultiProcessTestCase, ProcessGroupRpcAgentTestFixture, DistAutogradTest):
 
     def setUp(self):
         super(DistAutogradTestWithFork, self).setUp()
