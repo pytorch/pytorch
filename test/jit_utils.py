@@ -37,13 +37,13 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 @contextmanager
 def enable_profiling_mode():
-    if GRAPH_EXECUTOR == ProfilingMode.FULL:
+    if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
     try:
         yield
     finally:
-        if GRAPH_EXECUTOR == ProfilingMode.FULL:
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
             torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
@@ -317,7 +317,7 @@ class JitTestCase(TestCase):
         return defined_vars
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               outputs=None, capture_output=False, profiling=ProfilingMode.FULL):
+                               outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
         """
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the AST frontend
@@ -354,7 +354,7 @@ class JitTestCase(TestCase):
                     inputs_requires_grad=False,
                     capture_output=False,
                     frames_up=1,
-                    profiling=ProfilingMode.FULL):
+                    profiling=ProfilingMode.PROFILING):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode():
                 if isinstance(script, str):
@@ -420,7 +420,7 @@ class JitTestCase(TestCase):
 
         # regardless of what the user passes in checkTrace
         # if we are running simple executor we can't test backward graphs
-        if GRAPH_EXECUTOR == ProfilingMode.EXECUTOR:
+        if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
             inputs_require_grads = False
 
         # TODO: check gradients for parameters, not just inputs

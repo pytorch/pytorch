@@ -105,10 +105,10 @@ def LSTMCellF(input, hx, cx, *params):
 
 def doAutodiffCheck(testname):
 
-    if GRAPH_EXECUTOR == ProfilingMode.EXECUTOR:
+    if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
 
-    if GRAPH_EXECUTOR == ProfilingMode.OFF:
+    if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
         return True
 
 
@@ -143,7 +143,7 @@ meth_call = torch._C.ScriptMethod.__call__
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
-        if GRAPH_EXECUTOR == ProfilingMode.FULL:
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             with enable_profiling_mode():
                 callable(*args, **kwargs)
                 return callable(*args, **kwargs)
@@ -159,7 +159,7 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
 
-torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.OFF)
+torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # even though FULL_PROFILER should be our default
 # we haven't tested every single test in this file
 # but we enable FULL_PROFILER for a large subset
@@ -571,14 +571,14 @@ class TestJit(JitTestCase):
         self.assertTrue(len(list(trace.graph.nodes())) == 0)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.EXECUTOR, "Simple executor doesn't have shape information")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
             # if result == 2 we will trigger a bailout and
             # the unprofiled graph should return the correct result
             self.assertEqual(func(input, profile_and_replay=True), result)
             gre = func.graph_for(input)
-            if GRAPH_EXECUTOR == ProfilingMode.FULL:
+            if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
                 FileCheck().check("prim::Constant").check_next("prim::BailoutTemplate").run(gre)
             else:
                 FileCheck().check_not("prim::If").run(gre)
@@ -2328,7 +2328,7 @@ graph(%Ra, %Rb):
     def run_ge_tests(self, optimize, use_cuda):
 
         with enable_profiling_mode():
-            gradients = GRAPH_EXECUTOR != ProfilingMode.EXECUTOR
+            gradients = GRAPH_EXECUTOR != ProfilingMode.SIMPLE
             with torch.jit.optimized_execution(optimize):
                 def rand(*args):
                     t = torch.rand(*args).float()
@@ -4776,7 +4776,7 @@ a")
                     self.checkScript(func5, (x, y))
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.EXECUTOR, "Simple executor doesn't support backward")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't support backward")
     def test_pow_scalar_backward_cuda(self):
         # see that scalar exponent works with cuda base (#19253)
         with enable_profiling_mode():
@@ -4870,7 +4870,7 @@ a")
                 test()
                 test()
 
-            if GRAPH_EXECUTOR != ProfilingMode.EXECUTOR:
+            if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
                 with self.assertLeaksNoCudaTensors():
                     test(backward=True)
                     test(backward=True)
@@ -5274,7 +5274,7 @@ a")
                 output_ref = torch.cat((x, x), y)
                 self.assertEqual(output, output_ref)
 
-                if GRAPH_EXECUTOR != ProfilingMode.EXECUTOR:
+                if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
                     self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
 
                     grad = torch.autograd.grad(output.sum(), x)
@@ -5317,7 +5317,7 @@ a")
                 output = func2(x, y, profile_and_replay=True)
                 output_ref = torch.stack((x, y), 0)
                 self.assertEqual(output, output_ref)
-                if GRAPH_EXECUTOR != ProfilingMode.EXECUTOR:
+                if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
                     self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
 
                     grads = torch.autograd.grad(output.sum(), (x, y))
@@ -5338,7 +5338,7 @@ a")
                 outputs_ref = torch.unbind(x, dim=y)
                 self.assertEqual(outputs, outputs_ref)
 
-                if GRAPH_EXECUTOR != ProfilingMode.EXECUTOR:
+                if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
                     self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
 
                     grad = torch.autograd.grad(_sum_of_list(outputs), x)
@@ -5346,7 +5346,7 @@ a")
                     self.assertEqual(grad, grad_ref)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.FULL, "Profiling executor fails to recognize that tensors in a list require gradients")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Profiling executor fails to recognize that tensors in a list require gradients")
     def test_meshgrid(self):
         with enable_profiling_mode():
             @torch.jit.script
@@ -5362,7 +5362,7 @@ a")
                 outputs = func(inputs, profile_and_replay=True)
                 self.assertEqual(outputs, outputs_ref)
 
-                if GRAPH_EXECUTOR != ProfilingMode.EXECUTOR:
+                if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
                     self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
 
                     grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
@@ -5393,7 +5393,7 @@ a")
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
         self.checkScript(func, [alpha, beta, x, y], optimize=False)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.FULL, "skip if profiling isn't enabled")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_profiling_graph_executor(self):
         @torch.jit.script
         def def_in_one_branch(x, z):
@@ -5503,7 +5503,7 @@ a")
             m()
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.EXECUTOR, "NYI: fuser support for Sandcastle")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "NYI: fuser support for Sandcastle")
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -5528,7 +5528,7 @@ a")
 
         self.assertTrue(loop_inputs[1].requires_grad())
 
-        if GRAPH_EXECUTOR == ProfilingMode.FULL:
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
             self.assertFalse(bailouts_in_outer_block[1].output().requires_grad())
         else:
@@ -6175,7 +6175,7 @@ a")
         with self.assertRaisesRegex(Exception, ""):
             test(1, None)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.OFF, "the current version of Profiler doesn't profile/specialize Optionals")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the current version of Profiler doesn't profile/specialize Optionals")
     def test_optional_tensor(self):
         @torch.jit.script
         def fn(x, y):
@@ -6216,7 +6216,7 @@ a")
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(next(g.outputs()).type().str(), "Tensor")
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.OFF, "the current version of Profiler doesn't profile/specialize Optionals")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the current version of Profiler doesn't profile/specialize Optionals")
     def test_optional_list(self):
         @torch.jit.script
         def fn(x, y):
@@ -6914,7 +6914,7 @@ a")
                 self.assertEqual(t1.device, t2.device)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.EXECUTOR, "Simple Executor doesn't have any shapes to propagate")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
         def func():
@@ -6922,7 +6922,7 @@ a")
         ''')
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
-        if GRAPH_EXECUTOR == ProfilingMode.FULL:
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             expected_shape = ["Long(1)", "Bool(1)", "Double(1)", "Double()", "Long()", "Bool()", "Long(1, 1)"]
         else:
             expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
@@ -6932,7 +6932,7 @@ a")
                 code = tensor_template.format(tensor_op=op, input=inp)
                 scope = {}
                 exec(code, globals(), scope)
-                if GRAPH_EXECUTOR == ProfilingMode.FULL:
+                if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
                     fn = self.checkScript(code, ())
                     FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(fn.graph_for())
                 else:
@@ -6946,7 +6946,7 @@ a")
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
-        if GRAPH_EXECUTOR == ProfilingMode.FULL:
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_dtype.graph_for(5, profile_and_replay=True)
             # both should have completed shapes
             FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
@@ -6960,7 +6960,7 @@ a")
             a = torch.as_tensor(input, dtype=input.dtype)
             return a, torch.as_tensor(input, dtype=torch.float)
 
-        if GRAPH_EXECUTOR == ProfilingMode.FULL:
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay=True)
             FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
         else:
@@ -10914,7 +10914,7 @@ a")
 
         self.checkScript(foo, ())
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.OFF, "the original version of test_rand")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the original version of test_rand")
     def test_rand(self):
         def test_rand():
             a = torch.rand([3, 4])
@@ -10926,7 +10926,7 @@ a")
         self.assertEqual(out.dtype, torch.double)
         g = fn.graph_for()
         # Testing shape analysis correctly setting type
-        if GRAPH_EXECUTOR != ProfilingMode.EXECUTOR:
+        if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
             FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
 
         @torch.jit.script
@@ -10936,10 +10936,10 @@ a")
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
-        if GRAPH_EXECUTOR != ProfilingMode.EXECUTOR:
+        if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
             FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.FULL, "the original version of test_rand")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the original version of test_rand")
     def test_rand_profiling(self):
         def test_rand():
             a = torch.rand([3, 4])
@@ -10975,7 +10975,7 @@ a")
         FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.EXECUTOR, "Simple executor doesn't support gradients")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't support gradients")
     def test_mm_batching(self):
 
         with enable_profiling_mode():
@@ -10990,12 +10990,12 @@ a")
 
             inputs = get_lstm_inputs('cpu', training=True, seq_length=10)
             slstm(*inputs, profile_and_replay=True).sum().backward(retain_graph=True)
-            if GRAPH_EXECUTOR == ProfilingMode.FULL:
+            if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
                 slstm(*inputs, profile_and_replay=True).sum().backward()
 
             fw_graph = slstm.graph_for(*inputs)
             bw_graph = backward_graph(slstm, diff_graph_idx=0)
-            if GRAPH_EXECUTOR == ProfilingMode.OFF:
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                 self.assertTrue('prim::MMBatchSide' in str(fw_graph))
                 self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
 
@@ -13991,7 +13991,7 @@ a")
             x.add_(torch.ones(2, 3))
             return x_view
 
-        self.checkScript(fn, (), profiling=ProfilingMode.EXECUTOR)
+        self.checkScript(fn, (), profiling=ProfilingMode.SIMPLE)
 
     def test_cpp_function_tensor_str(self):
         x = torch.randn(2, 2)
@@ -16231,7 +16231,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
-    if no_grad or GRAPH_EXECUTOR == ProfilingMode.EXECUTOR:
+    if no_grad or GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         # skip grad tests
         return
 

@@ -23,7 +23,7 @@ if __name__ == '__main__':
 def pyfn(a, b):
     return a * b
 
-@unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.EXECUTOR, "Simple Executor doesn't support gradients")
+@unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't support gradients")
 class TestAutodiffSubgraphSlicing(JitTestCase):
     # TODO: It is better if we can test directly on graphs instead of the current
     # end-to-end fashion.
@@ -165,9 +165,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # GuardElimination can't get rid of a prim::BailOut on ^pyfn
         # which makes us create two `prim::DifferentiableGraph`s
         # instead of just one
-        num_nodes = 4 if GRAPH_EXECUTOR == ProfilingMode.FULL else 3
+        num_nodes = 4 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 3
         self.assertGraphSize(graph, num_nodes)
-        num_diff_nodes = 2 if GRAPH_EXECUTOR == ProfilingMode.FULL else 1
+        num_diff_nodes = 2 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 1
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', num_diff_nodes)
 
     def test_respects_lexical_scoping(self):

@@ -45,9 +45,9 @@ torch.backends.disable_global_flags()
 
 
 class ProfilingMode(Enum):
-    OFF = 1
-    EXECUTOR = 2
-    FULL = 3
+    LEGACY = 1
+    SIMPLE = 2
+    PROFILING = 3
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
@@ -56,12 +56,12 @@ parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
 
-GRAPH_EXECUTOR = ProfilingMode.FULL
+GRAPH_EXECUTOR = ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
-    GRAPH_EXECUTOR = ProfilingMode.OFF
+    GRAPH_EXECUTOR = ProfilingMode.LEGACY
 elif args.ge_config == 'simple':
-    GRAPH_EXECUTOR = ProfilingMode.EXECUTOR
+    GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
