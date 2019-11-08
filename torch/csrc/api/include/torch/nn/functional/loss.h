@@ -110,7 +110,7 @@ namespace detail {
 inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
-    Tensor weight,
+    const Tensor& weight,
     BCELossOptions::reduction_t reduction) {
   auto reduction_enum = enumtype::reduction_get_enum(reduction);
 
@@ -126,12 +126,13 @@ inline Tensor binary_cross_entropy(
       "!= input nelement (", input.numel(), ")");
   }
 
-  if (weight.defined()) {
-    auto new_size = at::infer_size(target.sizes(), weight.sizes());
-    weight = weight.expand(new_size);
+  auto weight_ = weight;
+  if (weight_.defined()) {
+    auto new_size = at::infer_size(target.sizes(), weight_.sizes());
+    weight_ = weight_.expand(new_size);
   }
 
-  return torch::binary_cross_entropy(input, target, weight, reduction_enum);
+  return torch::binary_cross_entropy(input, target, weight_, reduction_enum);
 }
 } // namespace detail
 
@@ -173,7 +174,7 @@ inline Tensor multi_margin_loss(
     const Tensor& target,
     int64_t p,
     double margin,
-    Tensor weight,
+    const Tensor& weight,
     MultiMarginLossOptions::reduction_t reduction) {
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
   if (weight.defined()) {
@@ -312,7 +313,7 @@ namespace detail {
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    Tensor weight,
+    const Tensor& weight,
     MultiLabelSoftMarginLossOptions::reduction_t reduction) {
   auto loss = -(target * torch::log_sigmoid(input) + (1 - target) * torch::log_sigmoid(-input));
   if (weight.defined()) {
