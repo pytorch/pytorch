@@ -26,11 +26,8 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
     const auto it = std::find(other.origin_.begin(), other.origin_.end(), name_);
     TORCH_CHECK(it == other.origin_.end(),
         op_name, ":",
-        " Cannot match ", name_,
-        " (at index ", origin_idx_, " of ", origin_, ")",
-        " with ", other.name_,
-        " (at index ", other.origin_idx_, " of ", other.origin_, ")",
-        " because the latter names already has ", name_, ".",
+        " Cannot match ", *this, " with ", other,
+        " because the latter names already have ", name_, ".",
         " Are your tensors misaligned?");
     return *this;
   }
@@ -43,10 +40,8 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
   // unify(A, B)
   TORCH_CHECK(name_ == other.name_,
       op_name, ":",
-      " Expected ", name_,
-      " (at index ", origin_idx_, " of ", origin_, ")",
-      " to match ", other.name_,
-      " (at index ", other.origin_idx_, " of ", other.origin_, ")",
+      " Expected ", *this,
+      " to match ", other,
       " but they do not match.");
   return *this;
 }
@@ -87,6 +82,34 @@ TensorNames TensorNames::unifyFromRight(const TensorNames& other, const char* op
 
 void TensorNames::append(TensorName&& name) {
   names_.emplace_back(name);
+}
+
+void TensorNames::checkUnique(const char* op_name) const {
+  // O(N^2), but named tensors can have at most N = 64 dimensions, so this
+  // doesn't matter unless benchmarking tells us it does. The alternative is
+  // to create some sort of set data structure but the overhead of that
+  // might dominate for small sizes.
+  for (auto it = names_.begin(); it != names_.end(); ++it) {
+    const auto name = it->toDimname();
+    if (name.isWildcard()) continue;
+
+    auto dup = std::find_if(it + 1, names_.end(),
+        [&](const TensorName& other) { return other.toDimname() == name; });
+    TORCH_CHECK(dup == names_.end(),
+        op_name, ": ",
+        "Attempted to propagate dims ", *it, " and ", dup, " to the output, ",
+        "but that would create a tensor with duplicate names ", toDimnameVec(),
+        ". Please rename your inputs with Tensor.rename to prevent this.");
+  }
+}
+
+// Let's say the TensorName represents 'C' in ['N', 'C', 'H, 'W'].
+// It should print like:
+// 'C' (index 1 of ['N', 'C', 'H', 'W'])
+std::ostream& operator<<(std::ostream& out, const TensorName& tensorname) {
+  out << tensorname.name_ << " (index " << tensorname.origin_idx_ << " of ";
+  out << tensorname.origin_ << ")";
+  return out;
 }
 
 std::vector<Dimname> TensorNames::toDimnameVec() const {
