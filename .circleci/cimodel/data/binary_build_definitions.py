@@ -68,7 +68,7 @@ class Conf(object):
             job_def["filters"] = {"branches": {"only": "nightly"}}
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
-        if phase == "test":
+        if phase == "test" or phase == "nightlytest":
             if not self.smoke:
                 job_def["requires"].append(self.gen_build_name("build"))
             if not (self.smoke and self.os == "macos"):
@@ -80,7 +80,7 @@ class Conf(object):
             if self.os == "linux" and phase != "upload":
                 job_def["docker_image"] = self.gen_docker_image()
 
-        if phase == "test":
+        if phase == "test" or phase == "nightlytest":
             if self.cuda_version:
                 job_def["resource_class"] = "gpu.medium"
         if phase == "upload":
@@ -150,7 +150,7 @@ def get_nightly_tests():
 def get_jobs(toplevel_key, smoke):
     jobs_list = []
     configs = gen_build_env_list(smoke)
-    phase = "build" if toplevel_key == "binarybuilds" else "test"
+    phase = "nightlybuild" if toplevel_key == "binarybuilds" else "nightlytest"
     for build_config in configs:
         jobs_list.append(build_config.gen_workflow_job(phase))
 
