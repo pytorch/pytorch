@@ -4039,7 +4039,6 @@ def foo(x):
             # type: (List[int]) -> int
             return fn(x)
 
-    @unittest.skip('Currently borken https://github.com/pytorch/pytorch/issues/29367')
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
