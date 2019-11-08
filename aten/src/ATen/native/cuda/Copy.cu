@@ -114,6 +114,8 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
+  // TODO(VitalyFedyunin): This is becomes sub-optimal if we move non-contiguous
+  // tensors, need to rewrite it.
   AT_ASSERT(iter.ntensors() == 2);
 
   Device dst_device = iter.device(0);
@@ -136,7 +138,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
-      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1));
+      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), MemoryFormat::Contiguous);
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 
