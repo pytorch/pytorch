@@ -29,7 +29,7 @@ enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast };
 // If you are seeing this, it means that this call site was not checked if
 // the memory format could be preserved, and it was switched to old default
 // behaviour of contiguous
-#define LEGACY_CONTIGUOUS_MEMORY_FORMAT get_contiguous_memory_format()
+#define LEGACY_CONTIGUOUS_MEMORY_FORMAT c10::get_contiguous_memory_format()
 
 C10_DEPRECATED inline MemoryFormat get_contiguous_memory_format() {
   return MemoryFormat::Contiguous;
