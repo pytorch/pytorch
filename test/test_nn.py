@@ -4,7 +4,11 @@ import sys
 import random
 import string
 import unittest
-import unittest.mock as mock
+try:
+    import unittest.mock as mock
+except ImportError:
+    # isn't available in py2
+    pass
 import itertools
 import warnings
 import pickle
