@@ -245,6 +245,24 @@ inline Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets,
     options.zero_infinity());
 }
 
+inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
+                               const PoissonNLLLossOptions& options = {}) {
+  return torch::poisson_nll_loss(input, target, options.log_input(),
+    options.full(), options.eps(),
+    enumtype::reduction_get_enum(options.reduction()));
+}
+
+inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
+  const Tensor& target, const MarginRankingLossOptions& options = {}) {
+  TORCH_CHECK(
+    input1.dim() != 0 && input2.dim() != 0 && target.dim() != 0,
+    "margin_ranking_loss does not support scalars, got sizes: "
+    "input1: ", input1.sizes(), ", input2: ", input2.sizes(),
+    ", target: ", target.sizes());
+  return torch::margin_ranking_loss(input1, input2, target, options.margin(),
+    enumtype::reduction_get_enum(options.reduction()));
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

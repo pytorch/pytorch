@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/Distance.h>
 
@@ -36,12 +37,10 @@ Tensor euclidean_dist_out(const Tensor& x1, const Tensor& x2) {
   return result;
 }
 
-Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
-  TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
+static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.type().device_type();
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
-  TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.type().device_type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
@@ -50,7 +49,6 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   TORCH_CHECK(!x1.is_cuda() || x1.get_device() == x2.get_device(), "device of X1 (", x1.get_device(), ") must match device of X2 (", x2.get_device(), ")");
   int64_t c1 = x1.size(-1);
   int64_t c2 = x2.size(-1);
-  TORCH_CHECK(c1 == c2, "X1 and X2 must have the same number of columns. X1: ", c1, " X2: ", c2);
   // 0 - default value. If p = 2 and r1 > 25 or r2 > 25 (these values are based on performance metrics),
   // it will try to compute distance using matrix multiplication approach
   // 1 - force to use matrix multiplication for p = 2
@@ -99,6 +97,25 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   return result;
 }
 
+Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+  TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
+  TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
+  TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
+#ifdef BUILD_NAMEDTENSOR
+  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
+#endif
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return cdist_impl(x1, x2, p, compute_mode);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+#endif
+  return result;
+}
+
 Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& cdist) {
   TORCH_CHECK(x1.is_contiguous(), "_cdist_backward requires X1 to be contiguous");
   TORCH_CHECK(x2.is_contiguous(), "_cdist_backward requires X2 to be contiguous");
@@ -142,7 +159,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   TORCH_CHECK(pdist.is_contiguous(), "_pdist_backward requires pdist to be contiguous");
   auto device = self.type().device_type();
   TORCH_CHECK(device == kCPU || device == kCUDA, "_pdist_backward only supports CPU and CUDA devices, got: ", device);
-  Tensor result = at::empty_like(self);
+  Tensor result = at::empty_like(self, at::MemoryFormat::Contiguous);
   pdist_backward_stub(device, result, grad, self, p, pdist);
   return result;
 }
