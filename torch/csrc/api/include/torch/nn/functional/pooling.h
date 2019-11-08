@@ -11,9 +11,9 @@ namespace detail {
 inline Tensor avg_pool1d(const Tensor& input,
                          ExpandingArray<1> kernel_size,
                          ExpandingArray<1> stride,
-                         ExpandingArray<1> padding = 0,
-                         bool ceil_mode = false,
-                         bool count_include_pad = true) {
+                         ExpandingArray<1> padding,
+                         bool ceil_mode,
+                         bool count_include_pad) {
   return torch::avg_pool1d(
       input,
       kernel_size,
@@ -38,10 +38,10 @@ namespace detail {
 inline Tensor avg_pool2d(const Tensor& input,
                          ExpandingArray<2> kernel_size,
                          ExpandingArray<2> stride,
-                         ExpandingArray<2> padding = 0,
-                         bool ceil_mode = false,
-                         bool count_include_pad = true,
-                         c10::optional<int64_t> divisor_override = c10::nullopt) {
+                         ExpandingArray<2> padding,
+                         bool ceil_mode,
+                         bool count_include_pad,
+                         c10::optional<int64_t> divisor_override) {
   return torch::avg_pool2d(
       input,
       kernel_size,
@@ -68,10 +68,10 @@ namespace detail {
 inline Tensor avg_pool3d(const Tensor& input,
                          ExpandingArray<3> kernel_size,
                          ExpandingArray<3> stride,
-                         ExpandingArray<3> padding = 0,
-                         bool ceil_mode = false,
-                         bool count_include_pad = true,
-                         c10::optional<int64_t> divisor_override = c10::nullopt) {
+                         ExpandingArray<3> padding,
+                         bool ceil_mode,
+                         bool count_include_pad,
+                         c10::optional<int64_t> divisor_override) {
   return torch::avg_pool3d(
       input,
       kernel_size,
@@ -100,9 +100,9 @@ namespace detail {
 inline Tensor max_pool1d(const Tensor& input,
                          ExpandingArray<1> kernel_size,
                          ExpandingArray<1> stride,
-                         ExpandingArray<1> padding = 0,
-                         ExpandingArray<1> dilation = 1,
-                         bool ceil_mode = false) {
+                         ExpandingArray<1> padding,
+                         ExpandingArray<1> dilation,
+                         bool ceil_mode) {
    return torch::max_pool1d(
       input,
       kernel_size,
@@ -128,9 +128,9 @@ inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   const Tensor& input,
   ExpandingArray<1> kernel_size,
   ExpandingArray<1> stride,
-  ExpandingArray<1> padding = 0,
-  ExpandingArray<1> dilation = 1,
-  bool ceil_mode = false) {
+  ExpandingArray<1> padding,
+  ExpandingArray<1> dilation,
+  bool ceil_mode) {
   return torch::max_pool1d_with_indices(
       input,
       kernel_size,
@@ -155,9 +155,9 @@ namespace detail {
 inline Tensor max_pool2d(const Tensor& input,
                          ExpandingArray<2> kernel_size,
                          ExpandingArray<2> stride,
-                         ExpandingArray<2> padding = 0,
-                         ExpandingArray<2> dilation = 1,
-                         bool ceil_mode = false) {
+                         ExpandingArray<2> padding,
+                         ExpandingArray<2> dilation,
+                         bool ceil_mode) {
   return torch::max_pool2d(
       input,
       kernel_size,
@@ -183,9 +183,9 @@ inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(
   const Tensor& input,
   ExpandingArray<2> kernel_size,
   ExpandingArray<2> stride,
-  ExpandingArray<2> padding = 0,
-  ExpandingArray<2> dilation = 1,
-  bool ceil_mode = false) {
+  ExpandingArray<2> padding,
+  ExpandingArray<2> dilation,
+  bool ceil_mode) {
   return torch::max_pool2d_with_indices(
       input,
       kernel_size,
@@ -210,9 +210,9 @@ namespace detail {
 inline Tensor max_pool3d(const Tensor& input,
                          ExpandingArray<3> kernel_size,
                          ExpandingArray<3> stride,
-                         ExpandingArray<3> padding = 0,
-                         ExpandingArray<3> dilation = 1,
-                         bool ceil_mode = false) {
+                         ExpandingArray<3> padding,
+                         ExpandingArray<3> dilation,
+                         bool ceil_mode) {
   return torch::max_pool3d(
       input,
       kernel_size,
@@ -238,9 +238,9 @@ inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(
   const Tensor& input,
   ExpandingArray<3> kernel_size,
   ExpandingArray<3> stride,
-  ExpandingArray<3> padding = 0,
-  ExpandingArray<3> dilation = 1,
-  bool ceil_mode = false) {
+  ExpandingArray<3> padding,
+  ExpandingArray<3> dilation,
+  bool ceil_mode) {
   return torch::max_pool3d_with_indices(
       input,
       kernel_size,
@@ -415,8 +415,8 @@ inline Tensor max_unpool1d(
     const Tensor& indices,
     ExpandingArray<1> kernel_size,
     ExpandingArray<1> stride,
-    ExpandingArray<1> padding = 0,
-    const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt) {
+    ExpandingArray<1> padding,
+    const c10::optional<std::vector<int64_t>>& output_size) {
   auto output_size_ = _unpool_output_size(input, kernel_size,
                                           stride, padding,
                                           output_size);
@@ -443,8 +443,8 @@ inline Tensor max_unpool2d(
   const Tensor& indices,
   ExpandingArray<2> kernel_size,
   ExpandingArray<2> stride,
-  ExpandingArray<2> padding = 0,
-  const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt) {
+  ExpandingArray<2> padding,
+  const c10::optional<std::vector<int64_t>>& output_size) {
   auto output_size_ = _unpool_output_size(input, kernel_size,
                                           stride, padding,
                                           output_size);
@@ -470,8 +470,8 @@ inline Tensor max_unpool3d(
   const Tensor& indices,
   ExpandingArray<3> kernel_size,
   ExpandingArray<3> stride,
-  ExpandingArray<3> padding = 0,
-  const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt) {
+  ExpandingArray<3> padding,
+  const c10::optional<std::vector<int64_t>>& output_size) {
   auto output_size_ = _unpool_output_size(input, kernel_size,
                                           stride, padding,
                                           output_size);
@@ -500,7 +500,7 @@ inline Tensor lp_pool1d(
   float norm_type,
   ExpandingArray<1> kernel_size,
   ExpandingArray<1> stride,
-  bool ceil_mode = false) {
+  bool ceil_mode) {
   Tensor out = detail::avg_pool1d(
     input.pow(norm_type),
     kernel_size,
@@ -527,7 +527,7 @@ inline Tensor lp_pool2d(
   float norm_type,
   ExpandingArray<2> kernel_size,
   ExpandingArray<2> stride,
-  bool ceil_mode = false) {
+  bool ceil_mode) {
   int kw = (*kernel_size)[0];
   int kh = (*kernel_size)[1];
   Tensor out = detail::avg_pool2d(
