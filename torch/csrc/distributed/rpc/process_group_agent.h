@@ -12,6 +12,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+struct ProcessGroupRpcAgentOptions : public RpcAgentOptions {
+  ProcessGroupRpcAgentOptions() {}
+  int numSendRecvThreads;
+};
+
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {

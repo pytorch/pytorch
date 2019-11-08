@@ -27,8 +27,14 @@ def requires_process_group_agent(message=""):
 VALUE_FUTURE = concurrent.futures.Future()
 
 
-def stub_start_rpc_backend_handler(
-    store, self_name, self_rank, worker_name_to_id, *args, **kwargs
+def stub_construct_rpc_agent_options_handler(
+    **kwargs
+):
+    return mock.Mock()  # RpcAgentOptions.
+
+
+def stub_init_rpc_backend_handler(
+    store, self_name, self_rank, world_size, rpc_agent_options
 ):
     return mock.Mock()  # RpcAgent.
 
@@ -206,6 +212,20 @@ class RpcTest(object):
     def init_method(self):
         return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
+    @property
+    def rpc_backend(self):
+        return rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name]
+
+    @property
+    def rpc_agent_options(self):
+        # This is an abstract test suite class,
+        # different RpcAgent has different types of RpcAgentOptions.
+        raise NotImplementedError(
+            (
+                "self.rpc_agent_options property not implemented for {rpc_backend}."
+            ).format(rpc_backend=self.rpc_backend)
+        )
+
     @dist_init
     def test_worker_id(self):
         n = self.rank + 1
@@ -243,14 +263,14 @@ class RpcTest(object):
         backend_name = "stub_backend"
 
         backend = rpc.backend_registry.register_backend(
-            backend_name, stub_start_rpc_backend_handler
+            backend_name, stub_construct_rpc_agent_options_handler, stub_init_rpc_backend_handler
         )
 
         with self.assertRaisesRegex(
             RuntimeError, "^RPC backend .+: already registered$"
         ):
             rpc.backend_registry.register_backend(
-                backend_name, stub_start_rpc_backend_handler
+                backend_name, stub_construct_rpc_agent_options_handler, stub_init_rpc_backend_handler
             )
 
         rpc.init_model_parallel(
@@ -258,7 +278,8 @@ class RpcTest(object):
             backend=backend,
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -270,7 +291,8 @@ class RpcTest(object):
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
         rpc.join_rpc()
 
@@ -281,7 +303,8 @@ class RpcTest(object):
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
         # This is for the below `dist.barrier`.
@@ -303,7 +326,8 @@ class RpcTest(object):
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
         rpc.join_rpc()
 
@@ -315,8 +339,8 @@ class RpcTest(object):
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         base_file_name = self.file_name
@@ -328,8 +352,8 @@ class RpcTest(object):
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         # Use a different file path for FileStore to avoid rendezvous mismatch.
@@ -340,8 +364,8 @@ class RpcTest(object):
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         # Use a different file path for FileStore to avoid rendezvous mismatch.
@@ -354,8 +378,8 @@ class RpcTest(object):
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         from torch.distributed.rpc.api import _agent
@@ -464,7 +488,8 @@ class RpcTest(object):
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
         n = self.rank + 1
@@ -969,17 +994,22 @@ class RpcTest(object):
 
     @dist_init(setup_model_parallel=False)
     def test_set_rpc_timeout(self):
-        timeout = timedelta(seconds=1)
+        test_timeout = timedelta(seconds=1)
+
+        # A new `RpcAgentOptions` is constructed
+        # when accessing `self.rpc_agent_options`.
+        rpc_agent_options = self.rpc_agent_options
+        rpc_agent_options.rpc_timeout = test_timeout
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            backend=self.rpc_backend,
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
-            rpc_timeout=timeout
+            world_size=self.world_size,
+            rpc_agent_options=rpc_agent_options,
         )
         set_timeout = rpc.get_rpc_timeout()
-        self.assertEqual(timeout, set_timeout)
+        self.assertEqual(test_timeout, set_timeout)
         rpc.join_rpc()
 
 

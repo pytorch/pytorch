@@ -51,6 +51,11 @@ struct TORCH_API SerializedPyObj final {
   const std::vector<at::Tensor> tensors_;
 };
 
+struct RpcAgentOptions {
+  RpcAgentOptions() {}
+  std::chrono::milliseconds rpcTimeout;
+};
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

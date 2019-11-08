@@ -4,10 +4,8 @@ from . import _start_rpc_agent
 from . import _destroy_rref_context, _cleanup_python_rpc_handler
 from . import WorkerInfo
 from . import backend_registry
-from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
-import datetime
 import functools
 import sys
 import torch
@@ -66,9 +64,8 @@ def _init_rpc(
     store=None,
     self_name=None,
     self_rank=-1,
-    worker_name_to_id=None,
-    num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-    rpc_timeout=DEFAULT_RPC_TIMEOUT,
+    world_size=-1,
+    rpc_agent_options=None,
 ):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
@@ -79,19 +76,13 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    if not isinstance(rpc_timeout, datetime.timedelta):
-        raise RuntimeError(
-            "`rpc_timeout` must be a `datetime.timedelta`."
-        )
-
     _agent = backend_registry.init_backend(
         backend,
         store=store,
         self_name=self_name,
         self_rank=self_rank,
-        worker_name_to_id=worker_name_to_id,
-        num_send_recv_threads=num_send_recv_threads,
-        rpc_timeout=rpc_timeout,
+        world_size=world_size,
+        rpc_agent_options=rpc_agent_options,
     )
     _start_rpc_agent(_agent)
 

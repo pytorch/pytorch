@@ -74,22 +74,20 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
     @wraps(old_test_method)
     def new_test_method(self, *arg, **kwargs):
         self.worker_id = self.rank
-        self.worker_name_to_id = {
-            "worker{}".format(rank): rank for rank in range(self.world_size)
-        }
 
         if setup_model_parallel:
             global _ALL_NODE_NAMES
-            _ALL_NODE_NAMES = self.worker_name_to_id.keys()
+            _ALL_NODE_NAMES = {
+                "worker{rank}".format(rank=rank) for rank in range(self.world_size)
+            }
 
-            # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
             rpc.init_model_parallel(
-                self_name="worker%d" % self.rank,
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                self_name="worker{rank}".format(rank=self.rank),
+                backend=self.rpc_backend,
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         return_value = old_test_method(self, *arg, **kwargs)
