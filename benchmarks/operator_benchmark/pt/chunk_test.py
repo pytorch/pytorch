@@ -18,7 +18,7 @@ chunk_short_configs = op_bench.config_list(
         [512, 512, 2],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"],
 )
@@ -27,7 +27,7 @@ chunks_long_configs = op_bench.cross_product_configs(
     M=[128, 1024],
     N=[128, 1024],
     chunks=[2, 4],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 

@@ -645,6 +645,14 @@ TEST_F(FunctionalTest, SELU) {
   }
 }
 
+TEST_F(FunctionalTest, GELU) {
+  GELU model;
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
+  const auto y = F::gelu(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, Hardshrink) {
   const auto size = 3;
   for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -1017,16 +1025,6 @@ TEST_F(FunctionalTest, Normalize) {
 
     ASSERT_EQ(input.grad().numel(), 1);
   }
-}
-
-TEST_F(FunctionalTest, GeLU) {
-  auto x = torch::tensor({{2., 3.}, {4., 5.}});
-  auto y_exp = torch::tensor({{1.9545, 2.9960}, {3.9999, 5.0000}}) +
-        torch::tensor({{-2.3842e-07, -4.9829e-05}, {-2.6703e-05, -1.4305e-06}});
-  auto y = F::gelu(x);
-  ASSERT_EQ(y.ndimension(), 2);
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2}));
-  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(FunctionalTest, ReLU) {
@@ -1712,5 +1710,58 @@ TEST_F(FunctionalTest, CTCLoss) {
           loss.index_select(0, torch::tensor({0, 2}, torch::kLong))
       ));
     }
+  }
+}
+
+TEST_F(FunctionalTest, PoissonNLLLoss) {
+  const auto input = torch::tensor({0.5, 1.5, 2.5});
+  const auto target = torch::tensor({1., 2., 3.});
+  const auto component_wise_loss = torch::exp(input) - target * input;
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target)));
+  ASSERT_TRUE(torch::allclose(component_wise_loss,
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kNone))));
+  ASSERT_TRUE(torch::allclose(torch::sum(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kSum))));
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kMean))));
+}
+
+TEST_F(FunctionalTest, MarginRankingLoss) {
+  {
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    ASSERT_TRUE(torch::allclose(
+      F::margin_ranking_loss(input1, input2, target),
+      (-target * (input1 - input2)).clamp(0).mean()
+    ));
+  }
+  {
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      F::margin_ranking_loss(input1, input2, target,
+        MarginRankingLossOptions().margin(0.5).reduction(torch::kSum)
+      ),
+      (-target * (input1 - input2) + margin).clamp(0).sum()
+    ));
+  }
+  {
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      F::margin_ranking_loss(input1, input2, target,
+        MarginRankingLossOptions().margin(0.5).reduction(torch::kMean)
+      ),
+      (-target * (input1 - input2) + margin).clamp(0).mean()
+    ));
   }
 }
