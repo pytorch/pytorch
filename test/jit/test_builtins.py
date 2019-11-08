@@ -28,7 +28,7 @@ class TestBuiltins(JitTestCase):
         class HasB(torch.nn.Module):
             def __init__(self):
                 super(HasB, self).__init__()
-                self.b = 0
+                self.b = 1
 
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -37,10 +37,15 @@ class TestBuiltins(JitTestCase):
 
             def forward(self):
                 # use a list to encode hasattr results
-                l : List[int] = []
+                l = torch.jit.annotate(List[int], [])
                 for mod in self.mods:
                     l.append(int(hasattr(mod, "a")))
                     l.append(int(hasattr(mod, "b")))
+                    # actually retrieve the attr to test static refinement
+                    if hasattr(mod, "a"):
+                        l.append(mod.a)
+                    if hasattr(mod, "b"):
+                        l.append(mod.b)
                 return l
 
         self.checkModule(Mod(), ())
@@ -191,3 +196,11 @@ class TestBuiltins(JitTestCase):
 
         check_cast('bool', 'int', True)
         check_cast('bool', 'float', True)
+
+    def test_print_kwargs(self):
+        with self.assertRaisesRegex(RuntimeError, 'print doesn\'t accept any keyword arguments'):
+            cu = torch.jit.CompilationUnit('''
+            def print_kwargs(x):
+                print(x, flush=True)
+                return x
+            ''')
