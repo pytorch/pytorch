@@ -11931,6 +11931,11 @@ class TestTorchDeviceType(TestCase):
         flat.resize_as_(nhwc, memory_format=torch.preserve_format)
         self.assertTrue(flat.is_contiguous(memory_format=torch.channels_last))
 
+    def test_memory_format_resize_(self, device):
+        flat = torch.randn(10 * 3 * 32 * 32, device=device)
+        flat.resize_as_((10, 3, 32, 32), memory_format=torch.preserve_format)
+        self.assertTrue(flat.is_contiguous(memory_format=torch.channels_last))
+
     def test_memory_format_empty_like(self, device):
         x = torch.randn(4, 3, 8, 8, device=device)
         nhwc = x.contiguous(memory_format=torch.channels_last)
