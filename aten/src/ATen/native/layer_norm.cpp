@@ -23,7 +23,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     int64_t M,
     int64_t N,
     double eps) {
-  Tensor Y = at::native::empty_like(X);
+  Tensor Y = at::native::empty_like(X, at::MemoryFormat::Contiguous);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   if (M > 0) {
@@ -45,13 +45,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X);
+    dX = at::native::empty_like(X, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
-    dgamma = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
+    dgamma = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous) : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    dbeta = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
+    dbeta = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous) : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
   }
   if (M > 0) {
     LayerNormBackwardKernel(
