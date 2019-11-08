@@ -227,8 +227,8 @@ Tensor empty_like(
       // Copy the tensors with channels to avoid accidental overrides
       return at::_empty_per_channel_affine_quantized(
           self.sizes(),
-          self.q_per_channel_scales().clone(),
-          self.q_per_channel_zero_points().clone(),
+          self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
+          self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_axis(),
           options,
           memory_format);
@@ -253,7 +253,7 @@ Tensor empty_like(
 
 #ifdef BUILD_NAMEDTENSOR
   if (self.opt_names()) {
-    namedinference::propagate_names(result, self.opt_names());
+    namedinference::propagate_names(result, self.names());
   }
 #endif
 
@@ -398,6 +398,7 @@ Tensor ones_like(
   return native::ones_like(
       self, self.options(), optional_memory_format);
 }
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
