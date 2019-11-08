@@ -566,6 +566,21 @@ struct DefContext {
 
 enum class LoopStatus { NOT_IN_LOOP, IN_LOOP, IN_UNROLLED_LOOP };
 
+struct WithLoopStatus {
+  WithLoopStatus(LoopStatus* prev, LoopStatus new_status) {
+    prev_value_ = *prev;
+    prev_ptr_ = prev;
+    *prev = new_status;
+  }
+  ~WithLoopStatus() {
+    *prev_ptr_ = prev_value_;
+  }
+
+ private:
+  LoopStatus* prev_ptr_;
+  LoopStatus prev_value_;
+};
+
 struct to_ir {
   to_ir(
       const Def& def,
@@ -821,14 +836,13 @@ struct to_ir {
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
     auto prev_status = loop_status_;
-    loop_status_ = LoopStatus::NOT_IN_LOOP;
+    WithLoopStatus guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
     {
       WithInsertPoint guard(block);
       pushFrame(block, /*starts_def=*/true);
       emit_body(block);
       popFrame(/*ends_def=*/true);
     }
-    loop_status_ = prev_status;
     return std::make_shared<ClosureValue>(closure_node->output());
   }
 
@@ -1572,8 +1586,7 @@ struct to_ir {
     }
     n->addInput(max_trip_count_val);
 
-    LoopStatus prev_loop_status = loop_status_;
-    loop_status_ = LoopStatus::IN_LOOP;
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::IN_LOOP);
     Value* trip_count =
         body_block->addInput()->setType(IntType::get()); // Iteration num
     {
@@ -1599,7 +1612,6 @@ struct to_ir {
       emit_body();
       popFrame();
     }
-    loop_status_ = prev_loop_status;
   }
 
   void emitUnrolledLoop(
@@ -1611,9 +1623,7 @@ struct to_ir {
     TORCH_INTERNAL_ASSERT(
         static_len, "Unrolled loop iter should have static length");
     int64_t len = *static_len;
-    auto prev_status = loop_status_;
-    loop_status_ = LoopStatus::IN_UNROLLED_LOOP;
-
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::IN_UNROLLED_LOOP);
     // In order to support ModuleLists which return different types,
     // as with an nn.Sequential which has a module that returns a Dict and then
     // a module which returns a Tensor,
@@ -1627,7 +1637,6 @@ struct to_ir {
           targets, {sugared_value}, targets.range(), /*n_binders=*/1);
       emit_body();
     }
-    loop_status_ = prev_status;
   }
 
   void emitFor(
