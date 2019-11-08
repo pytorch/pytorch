@@ -363,22 +363,6 @@ class ONNXTracedModule(Module):
             return graph, outs[0]
 
 
-def _clone_inputs(args):
-    def clone_input(a):
-        if a is None:
-            return None
-        elif isinstance(a, torch.Tensor):
-            # TODO: figure out one liner to .clone() and set requires_grad
-            v = Variable(a.data.clone(memory_format=torch.preserve_format), requires_grad=a.requires_grad)
-            if a.grad is not None:
-                v.grad = clone_input(v.grad)
-            return v
-        else:
-            return a.clone(memory_format=torch.preserve_format)
-    return function._nested_map(lambda x: isinstance(x, torch.Tensor),
-                                clone_input, condition_msg="tensors")(args)
-
-
 # This is purely for developer debugging.  We are not going to advertise it.
 _JIT_DUMP = os.environ.get('PYTORCH_JIT_DUMP', False)
 _JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
@@ -458,7 +442,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     if not isinstance(args, tuple):
         args = (args,)
 
-    saved_args = _clone_inputs(args)
+    saved_args = copy.deepcopy(args)
     if is_module:
         saved_state = copy.deepcopy(model.state_dict())
 
@@ -538,7 +522,7 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
         if is_trace_module:
             copied_dict = {}
             for name, data in inputs.items():
-                copied_dict[name] = _clone_inputs(data)
+                copied_dict[name] = copy.deepcopy(data)
             check_mod = torch.jit.trace_module(
                 func.__self__ if hasattr(func, '__self__') else func,
                 copied_dict,
@@ -554,7 +538,7 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
         else:
             check_mod = torch.jit.trace(
                 func,
-                _clone_inputs(inputs),
+                copy.deepcopy(inputs),
                 check_trace=False,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
@@ -625,7 +609,7 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
 
         def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
             try:
-                outs = wrap_retval(mod(*_clone_inputs(inputs)))
+                outs = wrap_retval(mod(*copy.deepcopy(inputs)))
                 outs = [out for out in outs if isinstance(out, torch.Tensor)]
                 return outs
             except Exception as e:
