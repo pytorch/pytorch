@@ -141,12 +141,14 @@ Example::
 )",
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("get_gradients", [](int64_t contextId) {
-    const auto& autogradContext =
-        DistAutogradContainer::getInstance().retrieveContext(contextId);
-    return torch::jit::toPyObject(IValue(autogradContext.getGradients()));
-  },
-  R"(
+  module.def(
+      "get_gradients",
+      [](int64_t contextId) {
+        const auto& autogradContext =
+            DistAutogradContainer::getInstance().retrieveContext(contextId);
+        return torch::jit::toPyObject(IValue(autogradContext.getGradients()));
+      },
+      R"(
 Retrieves a map from Tensor to the appropriate gradient for that Tensor
 accumulated in the provided context_id as part of the distributed autograd
 backward pass.
