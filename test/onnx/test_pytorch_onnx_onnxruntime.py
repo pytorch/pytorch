@@ -1106,6 +1106,25 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (4, 2, 3, 4), dtype=torch.int32)
         self.run_test(ViewModel(), x)
 
+    def test_weight_norm(self):
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3))
+        x = torch.randn(1, 1, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3), dim=-2)
+        x = torch.randn(1, 1, 5, requires_grad=True)
+        self.run_test(model, x)
+
+    def test_weight_norm_nodim(self):
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -1760,7 +1779,7 @@ TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
                                dict(TestONNXRuntime.__dict__, opset_version=11))
 
 
-# opset 10 tests, with keep_initializers_as_inputs=False for 
+# opset 9 tests, with keep_initializers_as_inputs=False for 
 # IR version 4 style export.
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
@@ -1773,6 +1792,14 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=10,
+                                    keep_initializers_as_inputs=False))
+
+
+# opset 11 tests, with keep_initializers_as_inputs=False for 
+# IR version 4 style export.
+TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
+                                    (unittest.TestCase,),
+                                    dict(TestONNXRuntime.__dict__, opset_version=11,
                                     keep_initializers_as_inputs=False))
 
 

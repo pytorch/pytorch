@@ -185,15 +185,9 @@
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   supports_named_tensor: True
-  dispatch:
-    CPU: _abs__cpu
-    CUDA: _abs__cuda
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _abs_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: angle(Tensor self) -> Tensor
   variants: function, method
@@ -205,7 +199,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _angle_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: real(Tensor self) -> Tensor
   variants: function, method
@@ -217,7 +210,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _real_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: imag(Tensor self) -> Tensor
   variants: function, method
@@ -229,7 +221,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _imag_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: conj(Tensor self) -> Tensor
   variants: function, method
@@ -241,7 +232,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _conj_out_cpu
-    CUDA: _abs_out_cuda
 
 - func: acos(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1686,15 +1676,9 @@
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
-  dispatch:
-    CPU: mean_cpu_gpu
-    CUDA: mean_cpu_gpu
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: mean_out_cpu_gpu
-    CUDA: mean_out_cpu_gpu
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   supports_named_tensor: True

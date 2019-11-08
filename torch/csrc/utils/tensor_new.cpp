@@ -610,7 +610,7 @@ Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObje
 #ifdef BUILD_NAMEDTENSOR
     auto names = r.toDimnameListOptional(5);
     if (names) {
-      at::namedinference::propagate_names(new_tensor, std::move(names), /*validate_names=*/true);
+      at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
     }
 #endif
     new_tensor.detach_(); // ensure new_tensor a leaf node

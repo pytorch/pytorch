@@ -265,6 +265,16 @@ class TestOperators(TestCase):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
         self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
 
+    def test_conv_onnx_irv4_opset8(self):
+        # This test point checks that for opset 8 (or lower), even if
+        # keep_initializers_as_inputs is set to False, it is ignored,
+        # and initializers are listed as ONNX graph input, in accordance
+        # with ONNX IR v3 semantics (which apply to opset version <= 8).
+        x = torch.ones(1, 2, 5, 7, requires_grad=True)
+        conv_node = nn.Conv2d(2, 4, 3, bias=False)
+        conv_node.weight.data.fill_(1.0)
+        self.assertONNX(conv_node, x, opset_version=8, keep_initializers_as_inputs=False)
+
     def test_conv_variable_length(self):
         x = torch.ones(5, 3, 6, 6, requires_grad=True)
         model = torch.nn.Conv2d(3, 2, 3)

@@ -1,2 +1,3 @@
 vptr:libtorch.so
+vptr:libtorch_python.so
 vptr:libcaffe2.so

@@ -8,33 +8,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct PyFuture {
-  virtual py::object wait() const = 0;
-  virtual ~PyFuture() = default;
-};
-
-template <typename T>
-class PyFutureToHere final : public PyFuture {
- public:
-  explicit PyFutureToHere(std::shared_ptr<ivalue::Future> future);
-  py::object wait() const override;
-  ~PyFutureToHere() override = default;
-
- private:
-  const std::shared_ptr<ivalue::Future> future_;
-};
-
-template <typename T>
-class PyFutureLocalValue final : public PyFuture {
- public:
-  explicit PyFutureLocalValue(std::shared_ptr<OwnerRRef<T>> rref);
-  py::object wait() const override;
-  ~PyFutureLocalValue() override = default;
-
- private:
-  const std::shared_ptr<OwnerRRef<T>> rref_;
-};
-
 // Python wrapper of an RRef shared_ptr that supports Python
 // pickle and unpickle.
 class PyRRef {
@@ -45,8 +18,8 @@ class PyRRef {
 
   bool isOwner() const;
   WorkerInfo owner() const;
-  std::shared_ptr<PyFuture> toHere();
-  std::shared_ptr<PyFuture> localValue();
+  py::object toHere();
+  py::object localValue();
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
 
