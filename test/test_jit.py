@@ -2328,7 +2328,6 @@ graph(%Ra, %Rb):
     def run_ge_tests(self, optimize, use_cuda):
 
         with enable_profiling_mode():
-            gradients = GRAPH_EXECUTOR != ProfilingMode.SIMPLE
             with torch.jit.optimized_execution(optimize):
                 def rand(*args):
                     t = torch.rand(*args).float()
@@ -2336,22 +2335,22 @@ graph(%Ra, %Rb):
                         t = t.cuda()
                     return t
                 self.checkTrace(lambda a, b: a * b + b,
-                                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)], inputs_require_grads=gradients)
+                                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)])
                 # trivial identity
-                self.checkTrace(lambda a, b: (b, a), [rand(1), rand(1)], inputs_require_grads=gradients)
+                self.checkTrace(lambda a, b: (b, a), [rand(1), rand(1)])
 
                 def foo(a):
                     t = a * a
                     return t * t, 4 * t
-                self.checkTrace(foo, [rand(1)], inputs_require_grads=gradients)
+                self.checkTrace(foo, [rand(1)])
                 # unused input
                 self.checkTrace(
-                    lambda a, b: a * a, [rand(1), rand(1)], allow_unused=True, inputs_require_grads=gradients)
+                    lambda a, b: a * a, [rand(1), rand(1)], allow_unused=True)
                 # test outputs that do not get used in grad
-                self.checkTrace(foo, [rand(1)], drop=1, inputs_require_grads=gradients)
+                self.checkTrace(foo, [rand(1)], drop=1)
                 # test autograd fallback
                 self.checkTrace(lambda a, b: a * b /
-                                (a - 2 * b) + b, [rand(1), rand(1)], inputs_require_grads=gradients)
+                                (a - 2 * b) + b, [rand(1), rand(1)])
 
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
@@ -16231,7 +16230,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
-    if no_grad or GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
+    if no_grad:
         # skip grad tests
         return
 
