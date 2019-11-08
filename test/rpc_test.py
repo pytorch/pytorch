@@ -368,7 +368,7 @@ class RpcTest(object):
             rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 store=store,
-                self_name="".join(["a" for _ in range(500)]),
+                self_name="".join(["a" for i in range(500)]),
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
