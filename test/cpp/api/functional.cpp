@@ -1729,3 +1729,39 @@ TEST_F(FunctionalTest, PoissonNLLLoss) {
     F::poisson_nll_loss(input, target,
     PoissonNLLLossOptions().reduction(torch::kMean))));
 }
+
+TEST_F(FunctionalTest, MarginRankingLoss) {
+  {
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    ASSERT_TRUE(torch::allclose(
+      F::margin_ranking_loss(input1, input2, target),
+      (-target * (input1 - input2)).clamp(0).mean()
+    ));
+  }
+  {
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      F::margin_ranking_loss(input1, input2, target,
+        MarginRankingLossOptions().margin(0.5).reduction(torch::kSum)
+      ),
+      (-target * (input1 - input2) + margin).clamp(0).sum()
+    ));
+  }
+  {
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      F::margin_ranking_loss(input1, input2, target,
+        MarginRankingLossOptions().margin(0.5).reduction(torch::kMean)
+      ),
+      (-target * (input1 - input2) + margin).clamp(0).mean()
+    ));
+  }
+}
