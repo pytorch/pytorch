@@ -418,11 +418,6 @@ class JitTestCase(TestCase):
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
                    _force_outplace=False):
 
-        # regardless of what the user passes in checkTrace
-        # if we are running simple executor we can't test backward graphs
-        if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
-            inputs_require_grads = False
-
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
