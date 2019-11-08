@@ -2010,6 +2010,7 @@ t2.start()
                                      (2048 - test_iters) * (2048 - test_iters))
 
     @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
     def test_cusparse_multiple_threads_same_device(self):
         size = 1024
         num_threads = 2
