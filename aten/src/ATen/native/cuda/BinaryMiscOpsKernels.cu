@@ -1,4 +1,3 @@
-#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -20,19 +19,11 @@ void atan2_kernel_cuda(TensorIterator& iter) {
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  if (iter.common_dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "logical_xor_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-        return bool(a) != bool(b);
-      });
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_xor_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return static_cast<scalar_t>(bool(a) != bool(b));
     });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.common_dtype(), "logical_xor_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return static_cast<scalar_t>(bool(a) != bool(b));
-      });
-    });
-  }
+  });
 }
 
 void smooth_l1_kernel_cuda(TensorIterator& iter) {
