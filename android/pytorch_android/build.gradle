@@ -53,6 +53,7 @@ dependencies {
     api project(':fbjni')
 
     implementation 'com.android.support:appcompat-v7:28.0.0'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
 
     testImplementation 'junit:junit:' + rootProject.junitVersion
     testImplementation 'androidx.test:core:' + rootProject.coreVersion
@@ -72,4 +73,3 @@ task sourcesJar(type: Jar) {
 }
 
 artifacts.add('archives', sourcesJar)
-
