@@ -105,8 +105,6 @@ static void nll_loss2d_forward_out_frame(
     auto output_acc = output.accessor<scalar_t, 3>();
     auto target_acc = target.accessor<int64_t, 3>();
 
-    // we check target indicies but cannot throw inside parallel_for
-    std::atomic<int> invalid_target(-1);
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (int64_t b = start; b < end; b++) {
         for (int64_t h = 0; h < H; h++) {
@@ -117,26 +115,23 @@ static void nll_loss2d_forward_out_frame(
               output_acc[b][h][w] = static_cast<scalar_t>(0);
               continue;
             }
-            if (cur_target >= 0 && cur_target < n_classes) {
-              const scalar_t cur_weight = weight_data != nullptr
-                  ? weight_data[cur_target]
-                  : static_cast<scalar_t>(1);
-              output_acc[b][h][w] =
-                  -input_acc[b][cur_target][h][w] * cur_weight;
-            } else {
-              int tmp = -1;
-              invalid_target.compare_exchange_strong(tmp, cur_target);
-            }
+
+            // check target index
+            TORCH_CHECK(
+                cur_target >= 0 && cur_target < n_classes,
+                "Target ",
+                cur_target,
+                " out of bounds.");
+
+            // load optional weight value
+            const scalar_t cur_weight = weight_data != nullptr
+                ? weight_data[cur_target]
+                : static_cast<scalar_t>(1);
+            output_acc[b][h][w] = -input_acc[b][cur_target][h][w] * cur_weight;
           }
         }
       }
     });
-
-    TORCH_CHECK(
-        invalid_target.load() < 0,
-        "Target ",
-        invalid_target.load(),
-        " out of bounds.");
 
     return;
   }
@@ -250,6 +245,7 @@ static void nll_loss2d_backward_out_frame(
         }
       }
     });
+
     return;
   }
 
