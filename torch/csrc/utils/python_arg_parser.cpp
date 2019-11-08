@@ -539,7 +539,7 @@ void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* o
     }
   }
   if (class_not_seen_yet) {
-    int arg_index = overloaded_args.size()
+    int arg_index = overloaded_args.size();
     for (int j = 0; j < arg_index; j++) {
       if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
         // obj is a subclass of another object we've seen already so its
@@ -628,7 +628,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       continue;
     } else if (check_has_torch_function(obj)) {
       dst[i++] = obj;
-      append_overloaded_arg(overloaded_args, obj, num_args_with_torch_function);
+      append_overloaded_arg(overloaded_args, obj);
     } else if (param.check(obj, /*is_exact_class=*/false)) {
       // obj is a subclass of Tensor but it is not overloaded with a __torch_function__.
       dst[i++] = obj;
