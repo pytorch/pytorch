@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
@@ -117,10 +118,12 @@ void ProcessGroupAgent::collectNames() {
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::shared_ptr<c10d::ProcessGroup> pg,
-    int numSendRecvThreads)
+    int numSendRecvThreads,
+    std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
-          c10::guts::make_unique<RequestCallbackImpl>()),
+          c10::guts::make_unique<RequestCallbackImpl>(),
+          rpcTimeout),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
@@ -181,7 +184,8 @@ void ProcessGroupAgent::join() {
   //    effort to fix this problem).
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
-  futureCV_.wait(lock, [this] { return futures_.empty(); });
+  futureCV_.wait(
+      lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
@@ -274,9 +278,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
   if (message.isRequest()) {
+    // millisecond level precision of when request started.
+    auto futureStartTime =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch());
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
-      futures_[requestId] = future;
+      futures_[requestId] = std::make_pair(future, futureStartTime);
+      // insert future into timeouts map to keep track of its timeout
+      futureTimeouts_[futureStartTime].push_back(requestId);
     }
     message.setId(requestId);
   } else {
@@ -355,9 +365,10 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
+          std::chrono::milliseconds futureStartTime;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
-            fm = futures_[id];
+            std::tie(fm, futureStartTime) = futures_[id];
           }
           // Not holding lock on markCompleted as this could run callbacks that
           // call agent_->send
@@ -365,6 +376,15 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
             futures_.erase(id);
+            // look up the corresponding future by its time out and request ID,
+            // and remove it from the timeouts map
+            auto& futuresAtTime = futureTimeouts_[futureStartTime];
+            futuresAtTime.erase(
+                std::find(futuresAtTime.begin(), futuresAtTime.end(), id));
+            if (futuresAtTime.size() == 0) {
+              // remove the key from futureTimeouts_
+              futureTimeouts_.erase(futureStartTime);
+            }
           }
           futureCV_.notify_all();
         } else {

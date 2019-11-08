@@ -191,9 +191,9 @@ template <typename scalar_t>
 Tensor median_cuda_template(const Tensor& self) {
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone();
+    return self.clone(at::MemoryFormat::Contiguous);
   }
-  auto self_copy = self.clone().view(-1);
+  auto self_copy = self.clone(at::MemoryFormat::Contiguous).view(-1);
   auto values = at::empty({1}, self.options());
   auto indices = at::empty({1}, self.options().dtype(kLong));
   TORCH_CHECK(
