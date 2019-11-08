@@ -203,7 +203,7 @@ std::vector<at::Tensor> scatter(
             {at::DeviceType::CUDA, device_index},
             /*non_blocking=*/true,
             /*copy=*/false,
-            /*optional_memory_format=*/at::MemoryFormat::Preserve);
+            /*memory_format=*/at::MemoryFormat::Preserve);
   }
   return chunks;
 }
