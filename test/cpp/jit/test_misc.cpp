@@ -1002,7 +1002,7 @@ graph(%a):
   };
   run(graph, stack);
   // we will not run fusion in simple mode
-  if (!getExecutorMode() || getProfilingMode()) {
+  if (!getExecutorMode()) {
     AT_ASSERT(testPassValue);
   }
 }
