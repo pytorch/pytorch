@@ -1124,6 +1124,25 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (4, 2, 3, 4), dtype=torch.int32)
         self.run_test(ViewModel(), x)
 
+    def test_weight_norm(self):
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3))
+        x = torch.randn(1, 1, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3), dim=-2)
+        x = torch.randn(1, 1, 5, requires_grad=True)
+        self.run_test(model, x)
+
+    def test_weight_norm_nodim(self):
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
