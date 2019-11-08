@@ -12,8 +12,8 @@ namespace functional {
 namespace detail {
 inline Tensor interpolate(
   const Tensor& input,
-  std::vector<int64_t> size,
-  std::vector<double> scale_factor,
+  const std::vector<int64_t>& size,
+  const std::vector<double>& scale_factor,
   InterpolateFuncOptions::mode_t mode,
   c10::optional<bool> align_corners) {
   auto _check_size_scale_factor = [&](size_t dim) {
