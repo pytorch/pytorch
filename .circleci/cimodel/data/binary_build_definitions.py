@@ -147,26 +147,19 @@ def get_nightly_tests():
     return tests
 
 
-def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
-
-    jobs_list = ["setup"]
-
+def get_jobs(toplevel_key, smoke):
+    jobs_list = []
     configs = gen_build_env_list(smoke)
     phase = "build" if toplevel_key == "binarybuilds" else "test"
     for build_config in configs:
         jobs_list.append(build_config.gen_workflow_job(phase))
 
-    jobs_dict[toplevel_key] = OrderedDict(
-        jobs=jobs_list,
-    )
-
-    graph = visualization.generate_graph(get_root(smoke, toplevel_key))
-    graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")
+    return jobs_list
 
 
-def add_binary_build_jobs(jobs_dict):
-    add_jobs_and_render(jobs_dict, "binarybuilds", False, "5 5 * * *")
+def get_binary_build_jobs():
+    return get_jobs("binarybuilds", False)
 
 
-def add_binary_smoke_test_jobs(jobs_dict):
-    add_jobs_and_render(jobs_dict, "binarysmoketests", True, "15 16 * * *")
+def get_binary_smoke_test_jobs():
+    return get_jobs("binarysmoketests", True)

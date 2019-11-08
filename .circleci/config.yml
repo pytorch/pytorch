@@ -2197,12 +2197,6 @@ workflows:
           libtorch_variant: "shared-with-deps"
           docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
 
-##############################################################################
-# Daily smoke test trigger
-##############################################################################
-  binarysmoketests:
-    jobs:
-      - setup
       - smoke_linux_test:
           name: smoke_linux_manywheel_2_7m_cpu_devtoolset7
           build_environment: "manywheel 2.7m cpu devtoolset7"
@@ -3175,12 +3169,6 @@ workflows:
           filters:
             branches:
               only: postnightly
-##############################################################################
-# Daily binary build trigger
-##############################################################################
-  binarybuilds:
-    jobs:
-      - setup
       - binary_linux_build:
           name: binary_linux_manywheel_2_7m_cpu_devtoolset7_build
           build_environment: "manywheel 2.7m cpu devtoolset7"
