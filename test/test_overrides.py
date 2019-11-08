@@ -756,23 +756,34 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.div(t1, t3), 1)
         self.assertEqual(torch.div(t3, t1), 1)
 
-        # div between SubTensor and SubDiagonalTensor should return
-        # NotImplemented since both have an implementation that
+        # div between SubTensor and SubDiagonalTensor should raise
+        # TypeError since both have an implementation that
         # explicitly returns NotImplemented
-        self.assertEqual(torch.div(t2, t3), NotImplemented)
-        self.assertEqual(torch.div(t3, t2), NotImplemented)
+        with self.assertRaises(TypeError):
+            torch.div(t2, t3)
+        with self.assertRaises(TypeError):
+            torch.div(t3, t2)
 
-        # neither DiagonalTensor, SubdiagonalTensor, or SubTensor has a
-        # mul implmentation so all ops should return NotImplemented
-        self.assertEqual(torch.mul(t1, t1), NotImplemented)
-        self.assertEqual(torch.mul(t1, t2), NotImplemented)
-        self.assertEqual(torch.mul(t1, t3), NotImplemented)
-        self.assertEqual(torch.mul(t2, t1), NotImplemented)
-        self.assertEqual(torch.mul(t2, t2), NotImplemented)
-        self.assertEqual(torch.mul(t2, t3), NotImplemented)
-        self.assertEqual(torch.mul(t3, t1), NotImplemented)
-        self.assertEqual(torch.mul(t3, t2), NotImplemented)
-        self.assertEqual(torch.mul(t3, t3), NotImplemented)
+        # none of DiagonalTensor, SubdiagonalTensor, or SubTensor have a
+        # mul implmentation so all ops should raise TypeError
+        with self.assertRaises(TypeError):
+            torch.mul(t1, t1)
+        with self.assertRaises(TypeError):
+            torch.mul(t1, t2)
+        with self.assertRaises(TypeError):
+            torch.mul(t1, t3)
+        with self.assertRaises(TypeError):
+            torch.mul(t2, t1)
+        with self.assertRaises(TypeError):
+            torch.mul(t2, t2)
+        with self.assertRaises(TypeError):
+            torch.mul(t2, t3)
+        with self.assertRaises(TypeError):
+            torch.mul(t3, t1)
+        with self.assertRaises(TypeError):
+            torch.mul(t3, t2)
+        with self.assertRaises(TypeError):
+            torch.mul(t3, t3)
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
