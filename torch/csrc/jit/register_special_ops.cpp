@@ -309,7 +309,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
           // This matches `{}` with anything inside
-          std::regex unsupported_options("\\{[^\\}]+\\}");
+          std::regex unsupported_options(R"(\{[^\}]+\})");
           return [num_inputs, unsupported_options](Stack& stack) {
             auto format = peek(stack, 0, num_inputs).toStringRef();
 
