@@ -54,6 +54,7 @@ if is_available():
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
             rpc_timeout (datetime.timedelta): Timeout for RPCs. Defaults to 10 seconds.
+                0 means infinity.
         """
         # Rendezvous.
         world_size = len(worker_name_to_id)

@@ -336,7 +336,7 @@ class ONNXTracedModule(Module):
         def wrapper(*args):
             trace_inputs = _unflatten(args[:len(in_vars)], in_desc)
 
-            ret_inputs.append(tuple(x.clone() for x in args))
+            ret_inputs.append(tuple(x.clone(memory_format=torch.preserve_format) for x in args))
             if self._return_inputs_states:
                 inputs_states.append(_unflatten(args[:len(in_vars)], in_desc))
             outs.append(self.inner(*trace_inputs))
@@ -369,12 +369,12 @@ def _clone_inputs(args):
             return None
         elif isinstance(a, torch.Tensor):
             # TODO: figure out one liner to .clone() and set requires_grad
-            v = Variable(a.data.clone(), requires_grad=a.requires_grad)
+            v = Variable(a.data.clone(memory_format=torch.preserve_format), requires_grad=a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
         else:
-            return a.clone()
+            return a.clone(memory_format=torch.preserve_format)
     return function._nested_map(lambda x: isinstance(x, torch.Tensor),
                                 clone_input, condition_msg="tensors")(args)
 
@@ -480,11 +480,11 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             raise ValueError(("Model returns {} outputs, but default loss function "
                               "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
-        saved_outs = [v.data.clone() for v in out_vars]
+        saved_outs = [v.data.clone(memory_format=torch.preserve_format) for v in out_vars]
         loss = loss_fn(*out)
         grads = torch.autograd.grad([loss], in_vars)
         # TODO: I'm not sure if the clone here is necessary but it is safer
-        saved_grads = [v.data.clone() for v in grads]
+        saved_grads = [v.data.clone(memory_format=torch.preserve_format) for v in grads]
         return (saved_outs, saved_grads)
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
@@ -1001,36 +1001,38 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
-    torch.jit._trace_module_map = {}
+    old_module_map = torch.jit._trace_module_map
+    try:
+        torch.jit._trace_module_map = {}
 
-    def register_submods(mod, prefix):
-        for name, child in mod.named_children():
-            submod_qualname = prefix + '.' + name
-            torch.jit._trace_module_map[child] = submod_qualname
-            register_submods(child, submod_qualname)
+        def register_submods(mod, prefix):
+            for name, child in mod.named_children():
+                submod_qualname = prefix + '.' + name
+                torch.jit._trace_module_map[child] = submod_qualname
+                register_submods(child, submod_qualname)
 
-    torch.jit._trace_module_map['__module'] = mod
-    register_submods(mod, '__module')
+        torch.jit._trace_module_map['__module'] = mod
+        register_submods(mod, '__module')
 
-    module = make_module(mod, _module_class, _compilation_unit)
+        module = make_module(mod, _module_class, _compilation_unit)
 
-    for method_name, example_inputs in inputs.items():
-        # this is needed since Module.__call__ sets up some extra tracing
-        func = mod if method_name == "forward" else getattr(mod, method_name)
-        example_inputs = make_tuple(example_inputs)
-        module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-        check_trace_method = module._c._get_method(method_name)
+        for method_name, example_inputs in inputs.items():
+            # this is needed since Module.__call__ sets up some extra tracing
+            func = mod if method_name == "forward" else getattr(mod, method_name)
+            example_inputs = make_tuple(example_inputs)
+            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            check_trace_method = module._c._get_method(method_name)
 
-        # Check the trace against new traces created from user-specified inputs
-        if check_trace:
-            if check_inputs is not None:
-                _check_trace(check_inputs, func, check_trace_method,
-                             check_tolerance, _force_outplace, True, _module_class)
-            else:
-                _check_trace([inputs], func, check_trace_method,
-                             check_tolerance, _force_outplace, True, _module_class)
-
-    torch.jit._trace_module_map = None
+            # Check the trace against new traces created from user-specified inputs
+            if check_trace:
+                if check_inputs is not None:
+                    _check_trace(check_inputs, func, check_trace_method,
+                                 check_tolerance, _force_outplace, True, _module_class)
+                else:
+                    _check_trace([inputs], func, check_trace_method,
+                                 check_tolerance, _force_outplace, True, _module_class)
+    finally:
+        torch.jit._trace_module_map = old_module_map
 
     return module
 
@@ -1425,8 +1427,7 @@ class OrderedBufferDict(OrderedDictWrapper):
         super(OrderedBufferDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, _, param in
-                self.module._get_attributes() if isinstance(param, torch.Tensor)]
+        return [(name, param) for name, param in self.module._get_buffers()]
 
     def __setitem__(self, k, v):
         if not self.module._has_buffer(k):

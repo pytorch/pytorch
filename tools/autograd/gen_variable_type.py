@@ -511,7 +511,9 @@ def gen_variable_type(out, aten_declarations, template_path):
     registration_declarations = []
 
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived':
+        # TODO(Ailing): make copy_/einsum leaf nodes in followup PRs.
+        if dispatch_strategy(declaration) == 'use_derived'\
+                or declaration['name'] in ['copy_', 'einsum']:
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
 
     env = {

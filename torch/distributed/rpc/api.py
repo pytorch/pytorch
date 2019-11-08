@@ -7,6 +7,7 @@ from . import backend_registry
 from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
+import datetime
 import functools
 import sys
 import torch
@@ -78,6 +79,11 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
+    if not isinstance(rpc_timeout, datetime.timedelta):
+        raise RuntimeError(
+            "`rpc_timeout` must be a `datetime.timedelta`."
+        )
+
     _agent = backend_registry.init_backend(
         backend,
         store=store,
