@@ -8,7 +8,7 @@ namespace nn{
 namespace functional {
 
 namespace detail {
-inline Tensor elu(Tensor& input, double alpha = 1.0, bool inplace = false) {
+inline Tensor elu(Tensor& input, double alpha, bool inplace) {
   if (inplace) {
     return torch::elu_(input, alpha);
   } else {
@@ -24,7 +24,7 @@ inline Tensor elu(Tensor& input, const ELUOptions& options = {}) {
 // ============================================================================
 
 namespace detail {
-inline Tensor selu(Tensor& input, bool inplace = false) {
+inline Tensor selu(Tensor& input, bool inplace) {
   if (inplace) {
     return torch::selu_(input);
   } else {
@@ -41,7 +41,7 @@ inline Tensor selu(Tensor& input, const SELUOptions& options = {}) {
 
 namespace detail {
 inline Tensor hardshrink(const Tensor& input,
-                         double lambda = 0.5) {
+                         double lambda) {
   return torch::hardshrink(input, lambda);
 }
 } // namespace detail
@@ -55,9 +55,9 @@ inline Tensor hardshrink(const Tensor& input,
 
 namespace detail {
 inline Tensor hardtanh(Tensor& input,
-                       double min_val = -1.0,
-                       double max_val = 1.0,
-                       bool inplace = false) {
+                       double min_val,
+                       double max_val,
+                       bool inplace) {
   if (inplace) {
     return torch::hardtanh_(input, min_val, max_val);
   } else {
@@ -74,8 +74,8 @@ inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options = {}) {
 
 namespace detail {
 inline Tensor leaky_relu(Tensor& input,
-                         double negative_slope = 1e-2,
-                         bool inplace = false) {
+                         double negative_slope,
+                         bool inplace) {
   if (inplace) {
     return torch::leaky_relu_(input, negative_slope);
   } else {
@@ -98,9 +98,9 @@ inline Tensor logsigmoid(const Tensor& input) {
 
 namespace detail {
 inline Tensor gumbel_softmax(const Tensor& logits,
-                             double tau = 1.0,
-                             bool hard = false,
-                             int dim = -1) {
+                             double tau,
+                             bool hard,
+                             int dim) {
   auto gumbels = -torch::empty_like(logits).exponential_().log();  // ~Gumbel(0,1)
   gumbels = (logits + gumbels) / tau;  // ~Gumbel(logits, tau)
   auto y_soft = gumbels.softmax(dim);
@@ -126,7 +126,7 @@ inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxOptions& o
 
 namespace detail {
 inline Tensor softmax(const Tensor& input, int64_t dim,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+                      c10::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -148,7 +148,7 @@ inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
 
 namespace detail {
 inline Tensor softmin(const Tensor& input, int64_t dim,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+                      c10::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -170,7 +170,7 @@ inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
 
 namespace detail {
 inline Tensor log_softmax(const Tensor& input, int64_t dim,
-                          c10::optional<torch::Dtype> dtype = c10::nullopt) {
+                          c10::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -203,7 +203,7 @@ inline Tensor prelu(const Tensor& input, const Tensor& weight) {
 // ============================================================================
 
 namespace detail {
-inline Tensor relu(Tensor& input, bool inplace = false) {
+inline Tensor relu(Tensor& input, bool inplace) {
   if (inplace) {
     return torch::relu_(input);
   } else {
@@ -219,7 +219,7 @@ inline Tensor relu(Tensor& input, const ReLUOptions& options = {}) {
 // ============================================================================
 
 namespace detail {
-inline Tensor relu6(Tensor& input, bool inplace = false) {
+inline Tensor relu6(Tensor& input, bool inplace) {
   return detail::hardtanh(input, /*min_val=*/0, /*max_val=*/6, /*inplace=*/inplace);
 }
 } // namespace detail
@@ -232,10 +232,10 @@ inline Tensor relu6(Tensor& input, const ReLU6Options& options = {}) {
 
 namespace detail {
 inline Tensor rrelu(Tensor& input,
-                    double lower = 1.0 / 8.0,
-                    double upper = 1.0 / 3.0,
-                    bool inplace = false,
-                    bool training = false) {
+                    double lower,
+                    double upper,
+                    bool inplace,
+                    bool training) {
   if (inplace) {
     return torch::rrelu_(input, lower, upper, training);
   } else {
@@ -253,8 +253,8 @@ inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
 
 namespace detail {
 inline Tensor celu(Tensor& input,
-                   double alpha = 1.0,
-                   bool inplace = false) {
+                   double alpha,
+                   bool inplace) {
   if (inplace) {
     return torch::celu_(input, alpha);
   } else {
@@ -271,8 +271,8 @@ inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
 
 namespace detail {
 inline Tensor softplus(const Tensor& input,
-                       double beta = 1.0,
-                       double threshold = 20.0) {
+                       double beta,
+                       double threshold) {
   return torch::softplus(input, beta, threshold);
 }
 } // namespace detail
@@ -287,7 +287,7 @@ inline Tensor softplus(const Tensor& input,
 
 namespace detail {
 inline Tensor softshrink(const Tensor& input,
-                         double lambda = 0.5) {
+                         double lambda) {
   return torch::softshrink(input, lambda);
 }
 } // namespace detail
@@ -315,7 +315,7 @@ namespace detail {
 inline Tensor threshold(Tensor& input,
                         double threshold,
                         double value,
-                        bool inplace = false) {
+                        bool inplace) {
   if (inplace) {
     return torch::threshold_(input, threshold, value);
   } else {
