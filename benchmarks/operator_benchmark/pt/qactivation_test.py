@@ -42,10 +42,18 @@ qactivation_short_configs = op_bench.cross_product_configs(
     tags=('short',)
 )
 
+qactivation_ops = op_bench.op_list(
+    attrs=(
+        ('relu', nnq.ReLU),
+        ('relu6', nnq.ReLU6),
+    ),
+    attr_names=('op_name', 'op_func'),
+)
 
-class _ActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
+
+class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
     r"""Base class for all the activations."""
-    def setup(self, dims, permute_dims, dtype):
+    def __setup(self, dims, permute_dims, dtype):
         # Input
         f_input = (torch.rand(*dims) - 0.5) * 256
         scale = 1.0
@@ -61,30 +69,17 @@ class _ActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
             random.shuffle(new_shape)
             self.q_input = self.q_input.permute(new_shape)
 
+    def init(self, dims, permute_dims, inplace, dtype, op_func):
+        self.__setup(dims, permute_dims, dtype)
+        self.qop = op_func
+
     def forward(self):
         return self.qop(self.q_input)
 
 
-class QReLUBenchmark(_ActivationBenchmarkBase):
-    def init(self, dims, permute_dims, inplace, dtype):
-        super(QReLUBenchmark, self).setup(dims, permute_dims, dtype)
-        self.qop = nnq.ReLU(inplace=inplace)
-        self.set_module_name("QReLU")
-
-
-class QReLU6Benchmark(_ActivationBenchmarkBase):
-    def init(self, dims, permute_dims, inplace, dtype):
-        super(QReLU6Benchmark, self).setup(dims, permute_dims, dtype)
-        # TODO(z-a-f): Enable `inplace` after #29245
-        self.qop = nnq.ReLU6(inplace=False)
-        self.set_module_name("QReLU6")
-
-
-op_bench.generate_pt_test(qactivation_short_configs + qactivation_long_configs,
-                          QReLUBenchmark)
-op_bench.generate_pt_test(qactivation_short_configs + qactivation_long_configs,
-                          QReLU6Benchmark)
-
+op_bench.generate_pt_tests_from_op_list(qactivation_ops,
+                                        qactivation_short_configs + qactivation_long_configs,
+                                        QActivationBenchmarkBase)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
