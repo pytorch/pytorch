@@ -89,6 +89,9 @@ def _implement_torch_function(
         implementation, public_api, relevant_args, args, kwargs):
     """Implement a function with checks for __torch_function__ overrides.
 
+    See torch::autograd::handle_torch_function for the equivalent of this
+    function in the C++ implementation.
+
     Arguments
     ---------
     implementation : function
@@ -126,8 +129,7 @@ def _implement_torch_function(
     for overloaded_arg in overloaded_args:
         # Use `public_api` instead of `implemenation` so __torch_function__
         # implementations can do equality/identity comparisons.
-        result = overloaded_arg.__torch_function__(
-            public_api, args, kwargs)
+        result = overloaded_arg.__torch_function__(public_api, args, kwargs)
 
         if result is not NotImplemented:
             return result

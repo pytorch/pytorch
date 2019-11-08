@@ -516,6 +516,9 @@ void initTorchFunctions(PyObject* module) {
  * ensure there are arguments that are overloaded with
  * __torch_function__.
  *
+ * See torch._overrides._implement_torch_function for the equivalent
+ * code in the pure-python implementation.
+ *
  * 'r' is a parsed PythonArgs instance, returned from
  * PythonArgParser::parse.
  *
