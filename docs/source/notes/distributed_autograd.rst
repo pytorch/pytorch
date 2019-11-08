@@ -59,8 +59,9 @@ we attach ``send`` and ``recv`` functions to the autograd graph when we perform
 an RPC.
 
 - The ``send`` function is attached to the source of the RPC and it's output 
-  edges point to the input tensors of the RPC. The input for this function is 
-  received over the wire from the appropriate ``recv`` function.
+  edges point to the autograd function for the input tensors of the RPC. 
+  The input for this function is received over the wire from the appropriate 
+  ``recv`` function.
 - The ``recv`` function is attached to the destination of the RPC and its 
   inputs are retrieved from operators executed on the destination using the 
   input tensors. The output gradients of this function are passed over the wire 
@@ -142,7 +143,7 @@ This is what the autograd graph for the code above would look like:
 The first step the autograd engine performs as part of the backward pass is 
 computing the number of dependencies for each node in the autograd graph. This 
 helps the autograd engine know when a node in the graph is ready for execution.
-The numbers in brackets for ``add(1)`` and ``mul(0)`` denotes the number of 
+The numbers in brackets for ``add(1)`` and ``mul(0)`` denote the number of 
 dependencies. As you can see, this means during the backward pass the ``add`` 
 node needs 1 input and the ``mul`` node doesn't need any inputs (in other 
 words doesn't need to be executed). The local autograd engine computes these 
