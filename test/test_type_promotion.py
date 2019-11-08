@@ -1,7 +1,6 @@
 from functools import wraps
 
 import torch
-import unittest
 import itertools
 
 from common_utils import TestCase, run_tests, load_tests
@@ -170,16 +169,16 @@ class TestTypePromotion(TestCase):
                 y = torch.ones(10, dtype=dtype2, device=device)
                 func(x, y).sum().backward()
 
-    def _get_test_tensor(self, dtype, remove_zeros=False):
+    def _get_test_tensor(self, device, dtype, remove_zeros=False):
         shape = [20, 20, 20]
         if dtype == torch.bool:
-            tensor = torch.randint(0, 2, shape, device=self.device, dtype=dtype)
+            tensor = torch.randint(0, 2, shape, device=device, dtype=dtype)
         elif dtype.is_floating_point:
             # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
-            tensor = torch.randn(shape, device=self.device)
+            tensor = torch.randn(shape, device=device)
             tensor = tensor.to(dtype)
         else:
-            tensor = torch.randint(0, 15, shape, device=self.device, dtype=dtype)
+            tensor = torch.randint(0, 15, shape, device=device, dtype=dtype)
         if remove_zeros:
             # ensures no div-by-zero (with care for low precision uint8/half)
             tensor[torch.abs(tensor) < 0.05] = 5
@@ -202,8 +201,8 @@ class TestTypePromotion(TestCase):
                 if op == torch.sub and common_dtype != torch.bool:
                     # Subtraction, the `-` operator, with a bool tensor is not supported.
                     continue
-                first = self._get_test_tensor(dt1)
-                second = self._get_test_tensor(dt2, op == torch.div)
+                first = self._get_test_tensor(device, dt1)
+                second = self._get_test_tensor(device, dt2, op == torch.div)
                 # test ops with non-contiguous tensors
                 if non_contiguous:
                     first = first.transpose(0, 2)
