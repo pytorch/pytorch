@@ -654,6 +654,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29381")
     @dist_init
     def test_nested_rpc(self):
         n = self.rank + 1
@@ -834,6 +835,7 @@ class RpcTest(object):
 
         self.assertEqual(c, torch.ones(n, n) + 4)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_remote(self):
         n = self.rank + 1
@@ -847,6 +849,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_rref(self):
         n = self.rank + 1
