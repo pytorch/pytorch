@@ -364,7 +364,6 @@ class BuildExtension(build_ext, object):
                 self.compiler.spawn = original_spawn
 
         # Monkey-patch the _compile method.
-        print("mingbo debug: " + str(os.environ.get('PATH')))
         if self.compiler.compiler_type == 'msvc':
             self.compiler.compile = win_wrap_compile
         else:
