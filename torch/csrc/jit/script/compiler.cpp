@@ -1407,9 +1407,9 @@ struct to_ir {
     }
   }
 
-  CondValue emitHasAttr(Expr objExpr, Expr attrExpr) {
+  CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
     auto obj = emitExpr(objExpr);
-    const auto type = obj->type();
+    const auto& type = obj->type();
     if (attrExpr.kind() != TK_STRINGLITERAL) {
       throw ErrorReport(attrExpr)
           << "hasattr's second argument must be a string literal";
@@ -1426,7 +1426,7 @@ struct to_ir {
     return CondValue(*graph, objExpr.range(), hasAttr, {});
   }
 
-  CondValue emitIsInstance(Expr obj, Expr classinfo) {
+  CondValue emitIsInstance(const Expr& obj, const Expr& classinfo) {
     // turn (float, (int, tuple)) into a flat list of types and type kind
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
