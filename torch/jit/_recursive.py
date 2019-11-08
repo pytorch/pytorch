@@ -477,9 +477,6 @@ def check_module_initialized(mod):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(type(mod).__name__))
 
-def get_unbound_method_func(unbound_method):
-    return getattr(unbound_method, "__func__", unbound_method)
-
 def infer_methods_to_compile(nn_module):
     """
     Implements the default rules for which methods should act as starting
