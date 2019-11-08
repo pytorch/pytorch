@@ -59,6 +59,7 @@
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/six.h>
@@ -112,23 +113,18 @@ private:
 };
 
 struct PythonArgs {
-  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args, std::vector<PyObject*> overloaded_args)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args, std::vector<py::handle> overloaded_args)
     : idx(idx)
     , traceable(traceable)
     , signature(signature)
     , args(args)
     , overloaded_args(overloaded_args) {}
-  ~PythonArgs() {
-    for (auto arg : overloaded_args) {
-      Py_DECREF(arg);
-    }
-  }
 
   int idx;
   bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
-  std::vector<PyObject*> overloaded_args;
+  std::vector<py::handle> overloaded_args;
 
   inline bool has_torch_function();
   inline std::string get_func_name();
@@ -181,7 +177,7 @@ private:
 struct FunctionSignature {
   explicit FunctionSignature(const std::string& fmt);
 
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], std::vector<PyObject*> &overloaded_args, bool raise_exception);
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], std::vector<py::handle> &overloaded_args, bool raise_exception);
 
   std::string toString() const;
 
@@ -564,10 +560,12 @@ inline PyObject* PythonArgs::pyobject(int i) {
  *
  * 'name' is the attribute to search for.
  *
- * Returns a new reference to the value on success, NULL on failure.
+ * Returns a py::object wrapping the return value. If the attribute lookup failed
+ * the value will be NULL.
+ *
  */
 
-static PyObject * PyObject_FastGetAttrString(PyObject *obj, char *name)
+static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
 {
     PyTypeObject *tp = Py_TYPE(obj);
     PyObject *res = (PyObject *)NULL;
@@ -576,14 +574,14 @@ static PyObject * PyObject_FastGetAttrString(PyObject *obj, char *name)
     if (tp->tp_getattr != NULL) {
         res = (*tp->tp_getattr)(obj, name);
         if (res == NULL) {
-            PyErr_Clear();
+          PyErr_Clear();
         }
     }
     /* Attribute referenced by (PyObject *)name */
     else if (tp->tp_getattro != NULL) {
         PyObject *w = THPUtils_internString(name);
         if (w == NULL) {
-            return (PyObject *)NULL;
+          return py::object();
         }
         res = (*tp->tp_getattro)(obj, w);
         Py_DECREF(w);
@@ -591,7 +589,7 @@ static PyObject * PyObject_FastGetAttrString(PyObject *obj, char *name)
             PyErr_Clear();
         }
     }
-    return res;
+    return py::reinterpret_steal<py::object>(res);
 }
 
 // Makes sure that we don't check for __torch_function__ on basic Python types
@@ -643,14 +641,14 @@ static bool _is_basic_python_type(PyTypeObject *tp)
  * In future, could be made more like _Py_LookupSpecial
  */
 
-static PyObject* PyTorch_LookupSpecial(PyObject *obj, char* name)
+static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
 {
   PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
-    return NULL;
+    return py::object();
   }
   if(PyObject_HasAttrString(obj, name) == 0){
-    return NULL;
+    return py::object();
   }
   return PyObject_FastGetAttrString((PyObject *)tp, name);
 }
@@ -663,9 +661,8 @@ static PyObject* PyTorch_LookupSpecial(PyObject *obj, char* name)
  */
 static auto check_has_torch_function(PyObject* obj) -> bool
 {
-  PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
-  if(method != nullptr){
-    Py_DECREF(method);
+  py::object method = PyTorch_LookupSpecial(obj, "__torch_function__");
+  if(method.ptr() != nullptr){
     return true;
   }
   return false;

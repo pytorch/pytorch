@@ -491,7 +491,7 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
 }
 
 auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
-                              std::vector<PyObject*> &overloaded_args, bool raise_exception) -> bool {  // NOLINT
+                              std::vector<py::handle> &overloaded_args, bool raise_exception) -> bool {  // NOLINT
   auto nargs = PyTuple_GET_SIZE(args);
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
   ssize_t arg_pos = 0;
@@ -582,7 +582,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       // overloaded_args for this type with higher precedence than the superclass.
       bool class_not_seen_yet = true;
       for (int j = 0; j < num_args_with_torch_function; j++) {
-        if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j])) {
+        if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j].ptr())) {
           // obj is the same type as another parameter we've seen in a prior
           // iteration of the loop over parameters so we already have an entry
           // with the proper __torch_function__ implementation to call, so skip
@@ -595,7 +595,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         int arg_index = num_args_with_torch_function;
 
         for (int j = 0; j < num_args_with_torch_function; j++) {
-          if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j])))) {
+          if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
             // obj is a subclass of another object we've seen already so its
             // __torch_function__ should be called first, therefore we insert it
             // into overloaded_args before the superclass
@@ -606,7 +606,6 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         // add object to overloaded_args. If it's a subclass of another class
         // we've already seen it will be inserted before the superclass,
         // otherwise it will be inserted at the end of the array
-        Py_INCREF(obj);
         overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
         num_args_with_torch_function++;
       }
@@ -666,14 +665,14 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    std::vector<PyObject*> overloaded_args;
+    std::vector<py::handle> overloaded_args;
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
     return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
-    std::vector<PyObject*> overloaded_args;
+    std::vector<py::handle> overloaded_args;
     if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
       return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
@@ -695,7 +694,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    std::vector<PyObject*> overloaded_args;
+    std::vector<py::handle> overloaded_args;
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 

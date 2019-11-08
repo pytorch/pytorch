@@ -15,6 +15,7 @@
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_new.h"
@@ -529,36 +530,49 @@ void initTorchFunctions(PyObject* module) {
  */
 
 PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyTypeObject &torch_api) {
-  PyObject* torch_api_function =
-    PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
-  TORCH_INTERNAL_ASSERT(torch_api_function != NULL, "torch API function must exist");
-  PyObject* ret = nullptr;
-  for (auto arg : r.overloaded_args) {
-    PyObject* torch_function = PyObject_FastGetAttrString(arg, "__torch_function__");
-    ret = PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
-    if (ret == Py_NotImplemented) {
+  py::object torch_api_function = PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != NULL, "torch API function must exist");
+  py::object ret = py::object();
+  for (auto &arg : r.overloaded_args) {
+    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
+    PyObject* py_ret = PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL);
+    ret = py::reinterpret_borrow<py::object>(py_ret);
+    if (ret.ptr() == Py_NotImplemented) {
       // if ret returns NotImplemented, we check the next implementation in the
-      // precedence order, decrementing the reference count so as not to leak
-      // references to NotImplemented
-      Py_DECREF(ret);
-      ret = nullptr;
+      // precedence order, resetting ret to the null object so we don't leak
+      // references to NotImplemented.
+      ret = py::object();
     }
     else {
       // Return the reference to the result. This also covers the case where ret
-      // is NULL and __torch_function__ raised an exception, which we allow to
-      // propagate and return NULL
+      // is NULL and __torch_function__ raised an exception, which we throw below
       break;
     }
   }
-  Py_DECREF(torch_api_function);
-  if ((ret == nullptr) && (PyErr_Occurred() == NULL)) {
-    // if ret is null either an exception occurerd, so we return null, or
-    // __torch_function__ returned NotImplemented, so we return a new reference
-    // to NotImplemented
-    ret = Py_NotImplemented;
-    Py_INCREF(Py_NotImplemented);
+  if (ret.ptr() == nullptr) {
+    // if an exception occurred in a user's implementation of
+    // __array_function__, throw it
+    if (PyErr_Occurred() != NULL) {
+      throw py::error_already_set();
+    }
+    // otherwise all __torch_function__ implementations in overloaded_args
+    // returned NotImplemented, so we raise a TypeError.
+    std::stringstream ss;
+    ss << "no implementation found for 'torch." << r.get_func_name()
+       << "' on types that implement __torch_function__: [";
+    for (auto &arg : r.overloaded_args) {
+      ss << arg.ptr()->ob_type->tp_name;
+      if (arg != r.overloaded_args.back()) {
+        ss << ", ";
+      }
+      else {
+        ss << "]";
+      }
+    }
+    const std::string& tmp = ss.str();
+    PyErr_SetString(PyExc_TypeError, tmp.c_str());
   }
-  return ret;
+  return ret.ptr();
 }
 
 // generated methods start here
