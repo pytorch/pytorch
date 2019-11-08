@@ -1,7 +1,9 @@
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-#include <limits>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -57,5 +59,10 @@ void mul_kernel_cuda(TensorIterator& iter) {
     });
   }
 }
+
+REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
+REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
+REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
+REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
 
 }} // namespace at::native

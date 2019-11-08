@@ -1,8 +1,9 @@
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-#include <limits>
-
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -104,5 +105,12 @@ void ne_kernel_cuda(TensorIterator& iter) {
     });
   }
 }
+
+REGISTER_DISPATCH(lt_stub, &lt_kernel_cuda);
+REGISTER_DISPATCH(le_stub, &le_kernel_cuda);
+REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
+REGISTER_DISPATCH(ge_stub, &ge_kernel_cuda);
+REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
+REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda);
 
 }} // namespace at::native
