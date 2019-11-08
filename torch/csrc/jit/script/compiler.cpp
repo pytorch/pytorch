@@ -835,8 +835,7 @@ struct to_ir {
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
-    auto prev_status = loop_status_;
-    WithLoopStatus guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
     {
       WithInsertPoint guard(block);
       pushFrame(block, /*starts_def=*/true);
