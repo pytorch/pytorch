@@ -354,6 +354,13 @@ class TestJit(JitTestCase):
 
         traced_rec = torch.jit.trace(rec, (input))
 
+    def test_trace_legacy_ctor(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return (x + 1, torch.FloatTensor([0]))
+
+        traced_rec = torch.jit.trace(MyModule(), torch.randn(2, 2))
+
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
         m = torch.jit.ScriptModule()
