@@ -82,7 +82,7 @@ struct TORCH_API CrossMapLRN2dOptions {
 
 namespace functional {
 
-/// Options for the `normalize` module.
+/// Options for the `normalize` functional.
 struct TORCH_API NormalizeFuncOptions {
   /// The exponent value in the norm formulation. Default: 2.0
   TORCH_ARG(double, p) = 2.0;
