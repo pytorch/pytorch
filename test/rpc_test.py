@@ -831,6 +831,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382)
     @dist_init
     def test_nested_rref(self):
         n = self.rank + 1
