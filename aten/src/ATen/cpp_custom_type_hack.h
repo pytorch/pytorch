@@ -26,6 +26,9 @@ T& cast(const Tensor& packed) {
 
 template <typename T>
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
+  // None of this should trace, so turn off Variable handling
+  at::AutoNonVariableTypeMode guard;
+
   // We store this instance away in a Tensor and register a deleter function
   // so that we do not leak memory. On the other side, we pull out the storage's
   // data_ptr and get the right typed pointer.

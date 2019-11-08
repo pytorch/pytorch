@@ -74,12 +74,13 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return torch.topk(x, 3)
 
-        ops_9 = [{"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2},
-                 {"name" : "k", "i" : 3, "type" : 2}]}]
-        ops_10 = [{"op_name" : "Constant", "attributes" : [{"name" : "value", "type" : 4}]},
-                  {"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
-                  {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
-        ops = {9 : ops_9, 10 : ops_10}
+        ops_9 = [{"op_name": "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2},
+                 {"name": "k", "i" : 3, "type" : 2}]}]
+        ops_10 = [{"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
+                  {"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
+                  {"op_name": "Reshape"},
+                  {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}]
+        ops = {9: ops_9, 10: ops_10}
         x = torch.arange(1., 6., requires_grad=True)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
@@ -89,9 +90,10 @@ class TestONNXOpset(TestCase):
             def forward(self, input, k):
                 return torch.topk(input, k)
 
-        ops_10 = [{"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
-                  {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
-        ops = {10 : ops_10}
+        ops_10 = [{"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
+                  {"op_name": "Reshape"},
+                  {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}]
+        ops = {10: ops_10}
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
         module = MyModuleDynamic()
