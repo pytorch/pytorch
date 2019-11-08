@@ -19,7 +19,11 @@
 namespace torch {
 namespace jit {
 
+#ifdef FBCODE_CAFFE2
+static std::atomic<bool> profiling_mode{false};
+#else
 static std::atomic<bool> profiling_mode{true};
+#endif
 static std::atomic<bool> executor_mode{true};
 
 std::atomic<bool>& getProfilingMode() {

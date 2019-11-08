@@ -137,28 +137,6 @@ def doAutodiffCheck(testname):
         return False
     return True
 
-func_call = torch._C.ScriptFunction.__call__
-meth_call = torch._C.ScriptMethod.__call__
-
-def prof_callable(callable, *args, **kwargs):
-    if 'profile_and_replay' in kwargs:
-        del kwargs['profile_and_replay']
-        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            with enable_profiling_mode():
-                callable(*args, **kwargs)
-                return callable(*args, **kwargs)
-
-    return callable(*args, **kwargs)
-
-def prof_func_call(*args, **kwargs):
-    return prof_callable(func_call, *args, **kwargs)
-
-def prof_meth_call(*args, **kwargs):
-    return prof_callable(meth_call, *args, **kwargs)
-
-torch._C.ScriptFunction.__call__ = prof_func_call
-torch._C.ScriptMethod.__call__ = prof_meth_call
-
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # even though FULL_PROFILER should be our default
 # we haven't tested every single test in this file
