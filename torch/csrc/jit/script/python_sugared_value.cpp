@@ -204,48 +204,15 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-std::vector<std::shared_ptr<SugaredValue>> ConstantPythonTupleValue::asTuple(
-    const SourceRange& loc,
-    Function& m,
-    const c10::optional<size_t>& size_hint) {
-  py::tuple tup = self;
-  std::vector<std::shared_ptr<SugaredValue>> result;
-  result.reserve(tup.size());
-  for (py::handle t : tup) {
-    py::object obj = py::reinterpret_borrow<py::object>(t);
-    result.push_back(toSugaredValue(obj, m, loc, true));
-  }
-  return result;
-}
-
-Value* ConstantPythonTupleValue::asValue(const SourceRange& loc, Function& m) {
-  std::vector<Value*> values;
-  for (const auto& sugared_item : asTuple(loc, m)) {
-    values.push_back(sugared_item->asValue(loc, m));
-  }
-  auto node = m.graph()->createTuple(values);
-  return m.graph()->insertNode(node)->output();
-}
-
 Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
-static bool isModuleType(const TypePtr& type) {
-  TORCH_INTERNAL_ASSERT(type);
-  if (auto classType = type->cast<ClassType>()) {
-    return classType->is_module();
-  }
-  return false;
-}
-
-std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
+SugaredValuePtr ModuleValue::desugarModuleContainer(
     bool get_keys,
     bool get_values,
     const SourceRange& loc,
     Function& m) {
-  std::vector<std::shared_ptr<SugaredValue>> result;
-
   std::vector<std::string> submoduleNames;
   const auto& selfType = concreteType_->getJitType();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
@@ -254,11 +221,13 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
       continue;
     }
 
-    if (isModuleType(attrType)) {
+    if (attrType->is_module()) {
       submoduleNames.push_back(selfType->getAttributeName(i));
     }
   }
 
+  std::vector<SugaredValuePtr> keys;
+  std::vector<SugaredValuePtr> values;
   for (const auto& name : submoduleNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
@@ -266,21 +235,28 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
     auto mod_v = std::make_shared<ModuleValue>(
         module_v, concreteType_->findSubmoduleConcreteType(name));
 
-    if (get_keys && get_values) {
-      std::vector<std::shared_ptr<SugaredValue>> tup;
-      tup.push_back(name_v);
-      tup.push_back(mod_v);
-      result.push_back(
-          std::make_shared<ConstantTupleValue>(ConstantTupleValue(tup)));
-    } else if (get_keys) {
-      result.push_back(name_v);
-    } else if (get_values) {
-      result.push_back(mod_v);
-    } else {
-      TORCH_INTERNAL_ASSERT(false);
+    if (get_keys) {
+      keys.push_back(name_v);
+    }
+    if (get_values) {
+      values.push_back(mod_v);
     }
   }
-  return result;
+
+  if (get_keys && !get_values) {
+    return std::make_shared<SugaredTupleValue>(keys);
+  } else if (get_values && !get_keys) {
+    return std::make_shared<SugaredTupleValue>(values);
+  } else if (get_values && get_keys) {
+    auto key_list = std::make_shared<SugaredTupleValue>(keys);
+    auto value_list = std::make_shared<SugaredTupleValue>(values);
+    auto iterator = std::make_shared<IterableTree>();
+    iterator->addChild(loc, m, key_list);
+    iterator->addChild(loc, m, value_list);
+    return iterator->iter(loc, m);
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
 // This method controls how we desugar attribute lookups on ScriptModules.
@@ -290,17 +266,22 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const std::string& field) {
   // 1. Look inside script::Module object for the field.
   const auto& selfType = concreteType_->getJitType();
-  if (selfType->hasAttribute(field) && isModuleType(selfType->getAttribute(field))) {
+  if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
-    TORCH_INTERNAL_ASSERT(submoduleConcreteType);
-    return std::make_shared<ModuleValue>(
-        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    if (submoduleConcreteType != nullptr) {
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    } else {
+      // if submodule concrete type is not found, it is a Module Interface type,
+      // we return a SimpleValue instead of ModuleValue.
+      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+    }
   } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
       // ...otherwise, methods, parameters, attributes, and buffers are all
       // first class so they get returned as SimpleValues
-      return SimpleValue(self_).attr(loc, m, field);
+      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   }
 
   // 2. Check if it's a user-provided constant property.
@@ -324,7 +305,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       } else {
         get_keys = true;
       }
-      return std::make_shared<ConstantTupleMethod>(
+      return std::make_shared<ModuleDictMethod>(
           desugarModuleContainer(get_keys, get_values, loc, m), field);
     }
   }
@@ -342,8 +323,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<FunctionValue>(*fnAttr);
   }
 
-  // 6. Check if it's a property of the original Python class that this
-  // ScriptModule was derived from. The only class properties we handle are
+  // 6. Check if it's an attribute of the original Python class that this
+  // ScriptModule was derived from. The only class attributes we handle are
   // methods.
   py::object unboundMethod = py::getattr(
       concreteType_->getPyClass(),
@@ -351,9 +332,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       pybind11::cast<pybind11::none>(Py_None));
   if (py::isinstance<py::function>(unboundMethod)) {
     // For Python methods that we're trying to call directly, we need to bind
-    // the method to a self. TODO say more about tis
-    //
-    // If the function is @ignored
+    // the method to a self. (see the documentation for lazy_bind in Python for
+    // more info).
     bool isIgnoredFn =
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_ignored_fn")(unboundMethod));
@@ -375,7 +355,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         py::module::import("torch.jit._recursive")
             .attr("compile_unbound_method")(concreteType_, unboundMethod);
     TORCH_INTERNAL_ASSERT(!stub.is_none());
-    return SimpleValue(self_).attr(loc, m, field);
+    // Look up the attribute again, it will be available as a compiled method.
+    return attr(loc, m, field);
   }
 
   // We've exhausted all possibilities. Bailout with a hint to the user.
@@ -388,13 +369,11 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                          << " has no attribute '" << field << "' " << hint;
 }
 
-std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
-    const SourceRange& loc,
-    Function& m,
-    const c10::optional<size_t>& size_hint) {
+SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
   const auto iterableModuleKind = concreteType_->getIterableModuleKind();
   if (iterableModuleKind == IterableModuleKind::NONE) {
-    return SugaredValue::asTuple(loc, m, size_hint);
+    throw ErrorReport(loc)
+        << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
 
   // iterating over a dictionary returns the keys, iterating over a
@@ -512,7 +491,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       const auto l = static_cast<int8_t>(layout->layout);
       return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
-      return std::make_shared<ConstantPythonTupleValue>(obj);
+      py::tuple tup = obj;
+      std::vector<Value*> values;
+      values.reserve(tup.size());
+      for (py::handle t : tup) {
+        py::object obj = py::reinterpret_borrow<py::object>(t);
+        values.push_back(toSugaredValue(obj, m, loc, true)->asValue(loc, m));
+      }
+      return toSimple(
+          m.graph()->insertNode(m.graph()->createTuple(values))->output());
     }
   }
 

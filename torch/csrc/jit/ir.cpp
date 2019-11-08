@@ -585,7 +585,22 @@ void Graph::dump() const {
   std::cout << *this << "\n";
 }
 
-void LintGraph(std::shared_ptr<Graph>& graph) {
+void Graph::push_scope(const std::string& scope_name) {
+  current_scope_ = current_scope_->push(Symbol::scope(scope_name));
+  Node* block_node = insertNode(create(prim::TracedModuleForward, 0));
+  block_node->s_(attr::scope, scope_name);
+  Block* b = block_node->addBlock();
+  setInsertPoint(b);
+}
+void Graph::pop_scope() {
+  current_scope_ = current_scope_->parent();
+  if (insertPoint()->owningBlock()->owningNode()->kind() ==
+      prim::TracedModuleForward) {
+    setInsertPoint(insertPoint()->owningBlock()->owningNode()->next());
+  }
+}
+
+void LintGraph(const std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
@@ -1328,6 +1343,51 @@ void Node::removeFromList() {
   next->prev() = prev;
   this->next() = nullptr;
   this->prev() = nullptr;
+}
+
+Block* Node::findCommonAncestorBlockWith(Node* n) {
+  if (n->owningBlock() == owningBlock()) {
+    return owningBlock();
+  }
+
+  Node* n1 = this;
+  Node* n2 = n;
+
+  size_t d_1 = n1->blocksFromGraphBlock();
+  size_t d_2 = n2->blocksFromGraphBlock();
+
+  for (; d_1 > d_2; --d_1) {
+    n1 = n1->owningBlock()->owningNode();
+    // n2 contains n1
+  }
+
+  for (; d_2 > d_1; --d_2) {
+    n2 = n2->owningBlock()->owningNode();
+  }
+
+  // Now they are the same numer of blocks from the graph block,
+  // recurse upwards, checking if they are on the same block
+  while (true) {
+    if (n1->owningBlock() == n2->owningBlock()) {
+      return n1->owningBlock();
+    }
+
+    n1 = n1->owningBlock()->owningNode();
+    n2 = n2->owningBlock()->owningNode();
+
+    AT_ASSERT(n1 != nullptr);
+    AT_ASSERT(n2 != nullptr);
+  }
+}
+
+size_t Node::blocksFromGraphBlock() {
+  Node* n = this;
+  size_t dist = 0;
+  while (n->owningBlock()->owningNode()) {
+    n = n->owningBlock()->owningNode();
+    ++dist;
+  }
+  return dist;
 }
 
 inline const SourceRange& fakeRange() {

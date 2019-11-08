@@ -94,7 +94,7 @@ namespace c10 {
   _(prim, range)                     \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
-  _(prim, unchecked_cast)              \
+  _(prim, unchecked_cast)            \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
   _(aten, _ncf_unsqueeze)            \
@@ -118,7 +118,10 @@ namespace c10 {
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
   _(prim, LoopContinuation)          \
-  _(prim, annotate)          \
+  _(prim, annotate)                  \
+  _(prim, TracedModuleForward)       \
+  _(prim, TracedFork)                \
+  _(prim, TracedAttr)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -226,7 +229,8 @@ namespace c10 {
   _(attr, split)                     \
   _(attr, slot)                      \
   _(attr, kinds)                     \
-  _(attr, types)
+  _(attr, types)                     \
+  _(attr, scope)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
