@@ -3,20 +3,12 @@
  */
 
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/cuda/Exceptions.h>
 
 // In CUDA 8.0, definition of data types for sgemmex changed
 #if CUDA_VERSION < 8000
 #define CUDA_R_16F CUBLAS_DATA_HALF
 #endif
-
-#define TORCH_CUDABLAS_CHECK(EXPR)              \
-  do {                                          \
-    cublasStatus_t __err = EXPR;                \
-    TORCH_CHECK(__err == CUBLAS_STATUS_SUCCESS, \
-                "CUDA error: ",                 \
-                _cublasGetErrorEnum(__err),     \
-                " when calling `" #EXPR "`");   \
-  } while (0)
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
@@ -37,44 +29,6 @@
       X)
 
 namespace {
-
-static const char* _cublasGetErrorEnum(cublasStatus_t error) {
-  if (error == CUBLAS_STATUS_SUCCESS) {
-    return "CUBLAS_STATUS_SUCCESS";
-  }
-  if (error == CUBLAS_STATUS_NOT_INITIALIZED) {
-    return "CUBLAS_STATUS_NOT_INITIALIZED";
-  }
-  if (error == CUBLAS_STATUS_ALLOC_FAILED) {
-    return "CUBLAS_STATUS_ALLOC_FAILED";
-  }
-  if (error == CUBLAS_STATUS_INVALID_VALUE) {
-    return "CUBLAS_STATUS_INVALID_VALUE";
-  }
-  if (error == CUBLAS_STATUS_ARCH_MISMATCH) {
-    return "CUBLAS_STATUS_ARCH_MISMATCH";
-  }
-  if (error == CUBLAS_STATUS_MAPPING_ERROR) {
-    return "CUBLAS_STATUS_MAPPING_ERROR";
-  }
-  if (error == CUBLAS_STATUS_EXECUTION_FAILED) {
-    return "CUBLAS_STATUS_EXECUTION_FAILED";
-  }
-  if (error == CUBLAS_STATUS_INTERNAL_ERROR) {
-    return "CUBLAS_STATUS_INTERNAL_ERROR";
-  }
-#if CUDA_VERSION >= 6000
-  if (error == CUBLAS_STATUS_NOT_SUPPORTED) {
-    return "CUBLAS_STATUS_NOT_SUPPORTED";
-  }
-#endif
-#if CUDA_VERSION >= 6050
-  if (error == CUBLAS_STATUS_LICENSE_ERROR) {
-    return "CUBLAS_STATUS_LICENSE_ERROR";
-  }
-#endif
-  return "<unknown>";
-}
 
 static cublasOperation_t _cublasOpFromChar(char op) {
   switch (op) {
@@ -145,6 +99,44 @@ static void _cublasAdjustLdLevel3(
 namespace at {
 namespace cuda {
 namespace blas {
+
+const char* _cublasGetErrorEnum(cublasStatus_t error) {
+  if (error == CUBLAS_STATUS_SUCCESS) {
+    return "CUBLAS_STATUS_SUCCESS";
+  }
+  if (error == CUBLAS_STATUS_NOT_INITIALIZED) {
+    return "CUBLAS_STATUS_NOT_INITIALIZED";
+  }
+  if (error == CUBLAS_STATUS_ALLOC_FAILED) {
+    return "CUBLAS_STATUS_ALLOC_FAILED";
+  }
+  if (error == CUBLAS_STATUS_INVALID_VALUE) {
+    return "CUBLAS_STATUS_INVALID_VALUE";
+  }
+  if (error == CUBLAS_STATUS_ARCH_MISMATCH) {
+    return "CUBLAS_STATUS_ARCH_MISMATCH";
+  }
+  if (error == CUBLAS_STATUS_MAPPING_ERROR) {
+    return "CUBLAS_STATUS_MAPPING_ERROR";
+  }
+  if (error == CUBLAS_STATUS_EXECUTION_FAILED) {
+    return "CUBLAS_STATUS_EXECUTION_FAILED";
+  }
+  if (error == CUBLAS_STATUS_INTERNAL_ERROR) {
+    return "CUBLAS_STATUS_INTERNAL_ERROR";
+  }
+#if CUDA_VERSION >= 6000
+  if (error == CUBLAS_STATUS_NOT_SUPPORTED) {
+    return "CUBLAS_STATUS_NOT_SUPPORTED";
+  }
+#endif
+#if CUDA_VERSION >= 6050
+  if (error == CUBLAS_STATUS_LICENSE_ERROR) {
+    return "CUBLAS_STATUS_LICENSE_ERROR";
+  }
+#endif
+  return "<unknown>";
+}
 
 /* LEVEL 3 BLAS FUNCTIONS */
 

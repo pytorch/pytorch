@@ -208,14 +208,6 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
-static bool isModuleType(const TypePtr& type) {
-  TORCH_INTERNAL_ASSERT(type);
-  if (auto classType = type->cast<ClassType>()) {
-    return classType->is_module();
-  }
-  return false;
-}
-
 SugaredValuePtr ModuleValue::desugarModuleContainer(
     bool get_keys,
     bool get_values,
@@ -229,7 +221,7 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
       continue;
     }
 
-    if (isModuleType(attrType)) {
+    if (attrType->is_module()) {
       submoduleNames.push_back(selfType->getAttributeName(i));
     }
   }
@@ -274,17 +266,22 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const std::string& field) {
   // 1. Look inside script::Module object for the field.
   const auto& selfType = concreteType_->getJitType();
-  if (selfType->hasAttribute(field) && isModuleType(selfType->getAttribute(field))) {
+  if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
-    TORCH_INTERNAL_ASSERT(submoduleConcreteType);
-    return std::make_shared<ModuleValue>(
-        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    if (submoduleConcreteType != nullptr) {
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    } else {
+      // if submodule concrete type is not found, it is a Module Interface type,
+      // we return a SimpleValue instead of ModuleValue.
+      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+    }
   } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
       // ...otherwise, methods, parameters, attributes, and buffers are all
       // first class so they get returned as SimpleValues
-      return SimpleValue(self_).attr(loc, m, field);
+      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   }
 
   // 2. Check if it's a user-provided constant property.
@@ -326,8 +323,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<FunctionValue>(*fnAttr);
   }
 
-  // 6. Check if it's a property of the original Python class that this
-  // ScriptModule was derived from. The only class properties we handle are
+  // 6. Check if it's an attribute of the original Python class that this
+  // ScriptModule was derived from. The only class attributes we handle are
   // methods.
   py::object unboundMethod = py::getattr(
       concreteType_->getPyClass(),
@@ -335,9 +332,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       pybind11::cast<pybind11::none>(Py_None));
   if (py::isinstance<py::function>(unboundMethod)) {
     // For Python methods that we're trying to call directly, we need to bind
-    // the method to a self. TODO say more about tis
-    //
-    // If the function is @ignored
+    // the method to a self. (see the documentation for lazy_bind in Python for
+    // more info).
     bool isIgnoredFn =
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_ignored_fn")(unboundMethod));
@@ -359,7 +355,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         py::module::import("torch.jit._recursive")
             .attr("compile_unbound_method")(concreteType_, unboundMethod);
     TORCH_INTERNAL_ASSERT(!stub.is_none());
-    return SimpleValue(self_).attr(loc, m, field);
+    // Look up the attribute again, it will be available as a compiled method.
+    return attr(loc, m, field);
   }
 
   // We've exhausted all possibilities. Bailout with a hint to the user.

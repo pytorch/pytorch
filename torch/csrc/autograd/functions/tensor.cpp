@@ -19,7 +19,7 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   auto& grad = grads[0];
   variable_list grad_inputs(2);
   if (should_compute_output(0)) {
-    grad_inputs[0] = at::zeros_like(grad);
+    grad_inputs[0] = at::zeros_like(grad, at::MemoryFormat::Contiguous);
   }
   if (should_compute_output(1)) {
     at::DeviceGuard device_guard(src_device);
@@ -73,7 +73,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
   // double-backprop is disabled.
-  auto res = (*fn)({ grad_slice.clone() });
+  auto res = (*fn)({ grad_slice.clone(at::MemoryFormat::Contiguous) });
 
   variable_list grad_inputs(num_outputs());
   for (size_t i = 0; i < res.size(); i++) {

@@ -20,20 +20,6 @@ TH_API void THNN_(VolumetricConvolutionMM_updateOutput)(
 
 #if !defined(TH_REAL_IS_LONG)
 
-TH_API void THNN_(AbsCriterion_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *target,            // tensor with target values
-          THTensor *output,            // [OUT] a one-element tensor with loss
-          int64_t reduction);
-TH_API void THNN_(AbsCriterion_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *target,            // tensor with target values
-          THTensor *gradOutput,
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          int64_t reduction);
-
 TH_API void THNN_(BCECriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
