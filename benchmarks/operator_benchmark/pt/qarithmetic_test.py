@@ -37,7 +37,7 @@ class _QFunctionalBinaryArithmeticBenchmarkBase(op_bench.TorchBenchmarkBase):
         self.qfunctional = QFunctional()
 
     def forward(self):
-        return getattr(self.qfunctional, self.qop)(self.q_input)
+        return getattr(self.qfunctional, self.qop)(self.q_input, self.q_input)
 
 
 class QFunctionalAddBenchmarkBase(_QFunctionalBinaryArithmeticBenchmarkBase):
