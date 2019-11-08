@@ -116,7 +116,7 @@ static void upsample_linear1d_out_cuda_template(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scale_1) {
+    double scales_1) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_linear1d_out_cuda", {input_arg, output_arg});
 
@@ -170,7 +170,7 @@ static void upsample_linear1d_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scale_1) {
+    double scales_1) {
   TensorArg grad_output_arg{grad_output_, "grad_output_", 1},
       grad_input_arg{grad_input, "grad_input", 2};
   checkAllSameGPU(
@@ -232,9 +232,9 @@ Tensor& upsample_linear1d_out_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scale_1) {
+    double scales_1) {
   upsample_linear1d_out_cuda_template(
-      output, input, output_size, align_corners, scale_1);
+      output, input, output_size, align_corners, scales_1);
   return output;
 }
 
@@ -242,10 +242,10 @@ Tensor upsample_linear1d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scale_1) {
-  Tensor output = at::empty_like(input);
+    double scales_1) {
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
   upsample_linear1d_out_cuda_template(
-      output, input, output_size, align_corners, scale_1);
+      output, input, output_size, align_corners, scales_1);
   return output;
 }
 
@@ -255,9 +255,9 @@ Tensor& upsample_linear1d_backward_out_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scale_1) {
+    double scales_1) {
   upsample_linear1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scale_1);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_1);
   return grad_input;
 }
 
@@ -266,10 +266,10 @@ Tensor upsample_linear1d_backward_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scale_1) {
-  Tensor grad_input = at::empty_like(grad_output);
+    double scales_1) {
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
   upsample_linear1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scale_1);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_1);
   return grad_input;
 }
 

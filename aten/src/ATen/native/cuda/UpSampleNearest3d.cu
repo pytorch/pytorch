@@ -26,9 +26,12 @@ __global__ void upsample_nearest3d_out_frame(
     size_t dst_dim_d,
     size_t dst_dim_h,
     size_t dst_dim_w,
-    scalar_t* output) {
+    scalar_t* output,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
 
-  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
     return;
 
@@ -37,19 +40,19 @@ __global__ void upsample_nearest3d_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_d / dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
   int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
 
-  scale_factor = (float)src_dim_h / (float)dst_dim_h;
+  scale_factor = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
 
-  scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  scale_factor = (scales_3 > 0.) ? (float)(1. / (float)(scales_3)) : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 
-  int src_idx = c * src_c_stride + src_z * src_dim_h * src_dim_w +
+  size_t src_idx = c * src_c_stride + src_z * src_dim_h * src_dim_w +
       src_y * src_dim_w + src_x;
   for (int b = 0; b < dim_b; b++) {
     output[dst_idx] = input[src_idx];
@@ -71,9 +74,12 @@ __global__ void upsample_nearest3d_backward_out_frame(
     size_t dst_dim_d,
     size_t dst_dim_h,
     size_t dst_dim_w,
-    scalar_t* grad_i) {
+    scalar_t* grad_i,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
 
-  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
     return;
 
@@ -82,17 +88,17 @@ __global__ void upsample_nearest3d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_d / dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
   int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
   int src_z_up = nearest_neighbor_compute_source_index(scale_factor, dst_z+1, src_dim_d+1);
 
-  scale_factor = (float)src_dim_h / (float)dst_dim_h;
+  scale_factor = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
   int src_y_up = nearest_neighbor_compute_source_index(scale_factor, dst_y+1, src_dim_h+1);
 
-  scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  scale_factor = (scales_3 > 0.) ? (float)(1. / (float)(scales_3)) : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
   int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
@@ -102,7 +108,7 @@ __global__ void upsample_nearest3d_backward_out_frame(
     for (int z = src_z; z < src_z_up; z++) {
       for (int y = src_y; y < src_y_up; y++) {
         for (int x = src_x; x < src_x_up; x++) {
-          int src_idx = b * dim_c * src_c_stride + c * src_c_stride +
+          size_t src_idx = b * dim_c * src_c_stride + c * src_c_stride +
               z * src_dim_h * src_dim_w + y * src_dim_w + x;
           grad += grad_o[src_idx];
         }
@@ -116,7 +122,10 @@ __global__ void upsample_nearest3d_backward_out_frame(
 static void upsample_nearest3d_out_cuda_template(
     Tensor& output,
     const Tensor& input_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest3d_out_cuda", {input_arg, output_arg});
 
@@ -163,9 +172,6 @@ static void upsample_nearest3d_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
-  // safe check for int32 indexing; implicitly restrict launch config for kernel
-  TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
-
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
@@ -184,7 +190,10 @@ static void upsample_nearest3d_out_cuda_template(
             output_depth,
             output_height,
             output_width,
-            odata);
+            odata,
+            scales_1,
+            scales_2,
+            scales_3);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -194,7 +203,10 @@ static void upsample_nearest3d_backward_out_cuda_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -242,9 +254,6 @@ static void upsample_nearest3d_backward_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
-  // safe check for int32 indexing; implicitly restrict launch config for kernel
-  TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
-
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
@@ -264,7 +273,10 @@ static void upsample_nearest3d_backward_out_cuda_template(
                 input_depth,
                 input_height,
                 input_width,
-                idata);
+                idata,
+                scales_1,
+                scales_2,
+                scales_3);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -275,14 +287,18 @@ static void upsample_nearest3d_backward_out_cuda_template(
 Tensor& upsample_nearest3d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntArrayRef output_size) {
-  upsample_nearest3d_out_cuda_template(output, input, output_size);
+    IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
+  upsample_nearest3d_out_cuda_template(output, input, output_size, scales_1, scales_2, scales_3);
   return output;
 }
 
-Tensor upsample_nearest3d_cuda(const Tensor& input, IntArrayRef output_size) {
-  Tensor output = at::empty_like(input);
-  upsample_nearest3d_out_cuda_template(output, input, output_size);
+Tensor upsample_nearest3d_cuda(const Tensor& input, IntArrayRef output_size,
+                               double scales_1, double scales_2, double scales_3) {
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  upsample_nearest3d_out_cuda_template(output, input, output_size, scales_1, scales_2, scales_3);
   return output;
 }
 
@@ -290,19 +306,25 @@ Tensor& upsample_nearest3d_backward_out_cuda(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1, scales_2, scales_3);
   return grad_input;
 }
 
 Tensor upsample_nearest3d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
-  Tensor grad_input = at::empty_like(grad_output);
+    IntArrayRef input_size,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
   upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1, scales_2, scales_3);
   return grad_input;
 }
 
