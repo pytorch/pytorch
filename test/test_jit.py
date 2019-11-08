@@ -10989,9 +10989,9 @@ a")
             slstm = torch.jit.script(lstm)
 
             inputs = get_lstm_inputs('cpu', training=True, seq_length=10)
-            slstm(*inputs, profile_and_replay = True).sum().backward(retain_graph=True)
+            slstm(*inputs, profile_and_replay=True).sum().backward(retain_graph=True)
             if GRAPH_EXECUTOR == ProfilingMode.FULL:
-                slstm(*inputs, profile_and_replay = True).sum().backward()
+                slstm(*inputs, profile_and_replay=True).sum().backward()
 
             fw_graph = slstm.graph_for(*inputs)
             bw_graph = backward_graph(slstm, diff_graph_idx=0)
@@ -11003,7 +11003,7 @@ a")
             out = lstm(*inputs)
             self.assertEqual(slstm(*inputs), lstm(*inputs))
             self.assertEqual(torch.autograd.grad(slstm(*inputs).sum(), inputs),
-                            torch.autograd.grad(lstm(*inputs).sum(), inputs))
+                             torch.autograd.grad(lstm(*inputs).sum(), inputs))
 
     def test_loop_unrolling(self):
         def fn(x):
