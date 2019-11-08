@@ -7566,6 +7566,16 @@ a")
                         break
                 ''')
 
+        with self.assertRaisesRegex(RuntimeError, "do not support break or continue inside"):
+            @torch.jit.script
+            def foo(x):
+                i = 0
+                for a in (1, "2", 1.5):
+                    b = a
+                    if x:
+                        break
+                return b
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
