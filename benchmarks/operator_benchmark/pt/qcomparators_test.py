@@ -36,25 +36,26 @@ class QComparatorBenchmark(op_bench.TorchBenchmarkBase):
         scale = 1.0
         zero_point = 0
 
-        self.q_input_a = torch.quantize_per_tensor(f_input, scale=scale,
-                                                   zero_point=zero_point,
-                                                   dtype=dtype)
+        q_input_a = torch.quantize_per_tensor(f_input, scale=scale,
+                                              zero_point=zero_point,
+                                              dtype=dtype)
         if other_scalar:
-            self.q_input_b = 42
+            q_input_b = 42
         else:
-            self.q_input_b = self.q_input_a.clone()
+            q_input_b = q_input_a.clone()
 
         if not contig:
             permute_dims = list(range(f_input.ndim))[::-1]
-            self.q_input_a = self.q_input_a.permute(permute_dims)
+            q_input_a = q_input_a.permute(permute_dims)
 
-        self.out = torch.tensor([], dtype=torch.bool) if out_variant else None
         self.qop = op_func
+        self.args = (q_input_a, q_input_b)
+        self.kwargs = {}
+        if out_variant:
+            self.kwargs['out'] = torch.tensor([], dtype=torch.bool)
 
     def forward(self):
-        if self.out is not None:
-            return self.qop(self.q_input_a, self.q_input_b, out=self.out)
-        return self.qop(self.q_input_a, self.q_input_b)
+        return self.qop(*self.args, **self.kwargs)
 
 
 op_bench.generate_pt_tests_from_op_list(qcomparators_ops,
