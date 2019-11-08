@@ -490,6 +490,56 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
   throw TypeError("invalid keyword arguments");
 }
 
+void fill_overloaded_args(std::vector<py::handle> &overloaded_args, PyObject* obj, int &num_args_with_torch_function) {
+  // obj has a __torch_function__ implementation and may either be a
+  // subclass of Tensor or a Tensor-like duck type. We may need to
+  // append this object to the overloaded_args vector, which tracks all
+  // of the arguments with distinct __torch_function__ implementations
+  // we've seen so far.
+  //
+  // If this is the first argument we've seen with __torch_function__
+  // defined, we unconditionally add obj to the overloaded_args vector.
+  //
+  // If we've already seen arguments with __torch_function__ defined,
+  // then we first need to check if obj is the same type as any of the
+  // entries in overloaded_args.  If so, we can ignore obj since we
+  // already have an entry in overloaded_args with the same
+  // __torch_function__ implementation.
+  //
+  // If it's a different type, we then need to check if it's a subclass
+  // of one of the types we've already seen. If so, we need to insert an
+  // entry in overloaded_args for this type with higher precedence than
+  // the superclass.
+  bool class_not_seen_yet = true;
+  for (int j = 0; j < num_args_with_torch_function; j++) {
+    if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j].ptr())) {
+      // obj is the same type as another parameter we've seen in a prior
+      // iteration of the loop over parameters so we already have an entry
+      // with the proper __torch_function__ implementation to call, so skip
+      // this parameter
+      class_not_seen_yet = false;
+      break;
+    }
+  }
+  if (class_not_seen_yet) {
+    int arg_index = num_args_with_torch_function;
+    for (int j = 0; j < num_args_with_torch_function; j++) {
+      if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
+        // obj is a subclass of another object we've seen already so its
+        // __torch_function__ should be called first, therefore we
+        // insert it into overloaded_args before the superclass
+        arg_index = j;
+        break;
+      }
+    }
+    // add object to overloaded_args. If it's a subclass of another class
+    // we've already seen it will be inserted before the superclass,
+    // otherwise it will be inserted at the end of the array
+    overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
+    num_args_with_torch_function++;
+  }
+}
+
 auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               std::vector<py::handle> &overloaded_args, bool raise_exception) -> bool {  // NOLINT
   auto nargs = PyTuple_GET_SIZE(args);
@@ -562,56 +612,10 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       continue;
     } else if (check_has_torch_function(obj)) {
       dst[i++] = obj;
-      // obj has a __torch_function__ implementation and may either be a
-      // subclass of Tensor or a Tensor-like duck type. We may need to append
-      // this object to the overloaded_args vector, which tracks all of the
-      // arguments with distinct __torch_function__ implementations we've seen
-      // so far.
-      //
-      // If this is the first argument we've seen with __torch_function__
-      // defined, we unconditionally add obj to the overloaded_args vector.
-      //
-      // If we've already seen arguments with __torch_function__ defined, then
-      // we first need to check if obj is the same type as any of the entries in
-      // overloaded_args.  If so, we can ignore obj since we already have an
-      // entry in overloaded_args with the same __torch_function__
-      // implementation.
-      //
-      // If it's a different type, we then need to check if it's a subclass of one
-      // of the types we've already seen. If so, we need to insert an entry in
-      // overloaded_args for this type with higher precedence than the superclass.
-      bool class_not_seen_yet = true;
-      for (int j = 0; j < num_args_with_torch_function; j++) {
-        if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j].ptr())) {
-          // obj is the same type as another parameter we've seen in a prior
-          // iteration of the loop over parameters so we already have an entry
-          // with the proper __torch_function__ implementation to call, so skip
-          // this parameter
-          class_not_seen_yet = false;
-          break;
-        }
-      }
-      if (class_not_seen_yet) {
-        int arg_index = num_args_with_torch_function;
-
-        for (int j = 0; j < num_args_with_torch_function; j++) {
-          if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
-            // obj is a subclass of another object we've seen already so its
-            // __torch_function__ should be called first, therefore we insert it
-            // into overloaded_args before the superclass
-            arg_index = j;
-            break;
-          }
-        }
-        // add object to overloaded_args. If it's a subclass of another class
-        // we've already seen it will be inserted before the superclass,
-        // otherwise it will be inserted at the end of the array
-        overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
-        num_args_with_torch_function++;
-      }
+      fill_overloaded_args(overloaded_args, obj, num_args_with_torch_function);
     } else if (param.check(obj, /*is_exact_class=*/false)) {
-      dst[i++] = obj;
       // obj is a subclass of Tensor but it is not overloaded with a __torch_function__.
+      dst[i++] = obj;
     } else if (raise_exception) {
       if (is_kwd) {
         // foo(): argument 'other' must be str, not int
