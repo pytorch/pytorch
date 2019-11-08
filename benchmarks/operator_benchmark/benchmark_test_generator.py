@@ -3,22 +3,23 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import copy 
+import copy
 import ast
 import json
+import torch
 from benchmark_core import TestConfig
 from benchmark_pytorch import register_pytorch_op_test_case
 from benchmark_utils import SkipInputShape
 
 
-def _register_test(bench_op_obj, orig_test_attrs, tags, OperatorTestCase, run_backward, bwd_input): 
-    """ Register tests with the benchmark backend. 
-        Args: 
-            bench_op_obj: an object which instantiated from a subclass of 
+def _register_test(bench_op_obj, orig_test_attrs, tags, OperatorTestCase, run_backward, bwd_input):
+    """ Register tests with the benchmark backend.
+        Args:
+            bench_op_obj: an object which instantiated from a subclass of
                 Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
                 creation and operator execution.
-            test_attrs: a dictionary includes test configs. 
-            tags: a attribute in test config to filter inputs 
+            test_attrs: a dictionary includes test configs.
+            tags: a attribute in test config to filter inputs
             OperatorTestCase: a named tuple to save the metadata of an test
             run_backward: a bool parameter indicating backward path
     """
@@ -26,8 +27,8 @@ def _register_test(bench_op_obj, orig_test_attrs, tags, OperatorTestCase, run_ba
     test_attrs = {k: str(v) for k, v in test_attrs.items()}
     ascii_test_attrs = ast.literal_eval(json.dumps(test_attrs))
     input_config = str(ascii_test_attrs)[1:-1].replace('\'', '')
-    if bwd_input: 
-        # When auto_set is used, the test name needs to include input.  
+    if bwd_input:
+        # When auto_set is used, the test name needs to include input.
         test_attrs.update({'bwd': bwd_input})
     test_name = bench_op_obj.test_name(**test_attrs)
     test_config = TestConfig(test_name, input_config, tags, run_backward)
@@ -46,6 +47,7 @@ def _generate_test(configs, bench_op, OperatorTestCase, run_backward, op_name_fu
     for config in configs:
         test_attrs = {}
         tags = None
+        keep_config = True
         for attr in config:
             # tags is only used in our benchmark backend to filter tests and
             # it will be removed from config which is then passed to the init function
@@ -55,7 +57,19 @@ def _generate_test(configs, bench_op, OperatorTestCase, run_backward, op_name_fu
             if "tags" in attr:
                 tags = attr["tags"]
                 continue
+
+            # if 'cuda' is sepcified in input shape but the testing machines doesn't
+            # support, we will skip this input
+            if 'cuda' in attr.values():
+                if not torch.cuda.is_available():
+                    keep_config = False
+                    break
+
             test_attrs.update(attr)
+
+        if not keep_config:
+            continue
+
         if tags is None:
             raise ValueError("Missing tags in configs")
         input_config = str(test_attrs)[1:-1].replace('\'', '')
@@ -82,21 +96,21 @@ def _generate_test(configs, bench_op, OperatorTestCase, run_backward, op_name_fu
 
         input_name = None
 
-        # _num_inputs_require_grads is used to track the number of tensors 
+        # _num_inputs_require_grads is used to track the number of tensors
         # which use auto_set().
-        if op._num_inputs_require_grads > 0: 
+        if op._num_inputs_require_grads > 0:
             input_name = 'all'
         _register_test(op, test_attrs, tags, OperatorTestCase, run_backward, input_name)
 
-        # This for loop is only used when auto_set is used. 
-        # _pass_count counts how many times init has been called. 
-        # _auto_set_counter is reset after init is called. 
+        # This for loop is only used when auto_set is used.
+        # _pass_count counts how many times init has been called.
+        # _auto_set_counter is reset after init is called.
         for i in range(op._num_inputs_require_grads):
             op._pass_count += 1
             op._auto_set_counter = 0
 
-            # TODO(mingzhe09088): remove this deepcopy when we encounter 
-            # performance issue. 
+            # TODO(mingzhe09088): remove this deepcopy when we encounter
+            # performance issue.
             new_op = copy.deepcopy(op)
             new_op.init(**init_dict)
             # Input name index will start from input1
