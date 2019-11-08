@@ -138,12 +138,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   EliminateDeadCode(copy);
   GRAPH_DUMP("Optimized Graph : ", copy);
   // cache
-
-  static const char* prof_opt = std::getenv("PYTORCH_OPT");
-  if (prof_opt) {
-    TORCH_INTERNAL_ASSERT(!getProfilingMode());
-  }
-  
   optimized_plan_ = ExecutionPlan(copy);
   return *optimized_plan_;
 }

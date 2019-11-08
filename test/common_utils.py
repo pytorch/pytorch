@@ -60,10 +60,8 @@ GRAPH_EXECUTOR = ProfilingMode.FULL
 args, remaining = parser.parse_known_args()
 if args.ge_config == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.OFF
-    print("legacy")
 elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.EXECUTOR
-    print("simple")
 
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
