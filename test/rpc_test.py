@@ -760,7 +760,6 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), my_function(n, n + 1, n + 2))
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29156")
     @dist_init
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
