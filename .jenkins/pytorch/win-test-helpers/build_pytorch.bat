@@ -65,8 +65,9 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 
 set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
-:: Target only our CI GPU machine's CUDA arch to speed up the build
-set TORCH_CUDA_ARCH_LIST=7.5
+:: Target only our CI GPU machine's CUDA arch to speed up the build, we can overwrite with env var
+:: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
+if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=7.5
 
 sccache --stop-server
 sccache --start-server
