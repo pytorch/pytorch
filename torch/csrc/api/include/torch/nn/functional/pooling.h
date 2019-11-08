@@ -509,7 +509,8 @@ inline Tensor lp_pool1d(
     kernel_size,
     stride,
     /*padding=*/0,
-    ceil_mode);
+    ceil_mode,
+    /*count_include_pad=*/true);
 
   return (torch::sign(out) * relu(torch::abs(out))).mul((*kernel_size)[0]).pow(1. / norm_type);
 }
@@ -538,7 +539,9 @@ inline Tensor lp_pool2d(
     kernel_size,
     stride,
     /*padding=*/0,
-    ceil_mode);
+    ceil_mode,
+    /*count_include_pad=*/true,
+    /*divisor_override=*/c10::nullopt);
 
   return (torch::sign(out) * relu(torch::abs(out))).mul(kw * kh).pow(1. / norm_type);
 }
