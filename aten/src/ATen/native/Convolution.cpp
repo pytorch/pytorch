@@ -748,8 +748,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(input, at::MemoryFormat::Contiguous),
-          at::empty_like(weight, at::MemoryFormat::Contiguous),
+          at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
+          at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
           at::empty({}));
 }
 

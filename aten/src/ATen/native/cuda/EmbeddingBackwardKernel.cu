@@ -210,7 +210,7 @@ Tensor embedding_backward_cuda_kernel(
   int64_t num_of_segments;
   {
     auto sorted_indices_dev = thrust::device_ptr<int64_t>(sorted_indices.data_ptr<int64_t>());
-    auto dummy = at::empty_like(sorted_indices, at::MemoryFormat::Contiguous);
+    auto dummy = at::empty_like(sorted_indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto dummy_dev = thrust::device_ptr<int64_t>(dummy.data_ptr<int64_t>());
     auto ends = thrust::unique_by_key_copy(
             policy,
