@@ -57,6 +57,7 @@ goto cuda_build_common
 
 :cuda_build_common
 
+set DISTUTILS_USE_SDK=1
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
