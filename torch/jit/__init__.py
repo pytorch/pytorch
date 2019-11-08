@@ -1758,7 +1758,7 @@ if _enabled:
         def __dir__(self):
             self_method = getattr(self, "__dir__")
             if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__dir__"):
-                return super().__dir__()
+                return super(RecursiveScriptModule, self).__dir__()
             return self_method()
 
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
