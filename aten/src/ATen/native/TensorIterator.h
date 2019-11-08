@@ -191,6 +191,7 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
+  ScalarType common_dtype() const { return common_dtype_; }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
@@ -286,6 +287,10 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
+  bool needs_dynamic_casting() const {
+    return (common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_;
+  }
+
   void set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
   }
@@ -337,6 +342,8 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
+  void fast_set_up();
+  bool can_use_fast_set_up();
 #ifdef BUILD_NAMEDTENSOR
   void compute_names();
   void propagate_names_to_outputs();
@@ -352,6 +359,7 @@ protected:
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
   CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
+  ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
@@ -360,6 +368,8 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
+  bool have_differing_types_ = false;
+  bool all_ops_same_shape_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
