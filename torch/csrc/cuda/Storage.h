@@ -36,10 +36,8 @@
 #define THCPBoolStorage_CData(obj)        (obj)->cdata
 #define THCPBFloat16Storage_CData(obj)    (obj)->cdata
 
-#ifdef _THP_CORE
 #define THCPStorageType TH_CONCAT_3(THCP,Real,StorageType)
 #define THCPStorageBaseStr TH_CONCAT_STRING_3(Cuda,Real,StorageBase)
-#endif
 
 #include <torch/csrc/cuda/override_macros.h>
 
