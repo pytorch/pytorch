@@ -495,7 +495,6 @@ class RpcTest(object):
         value = VALUE_FUTURE.result()
         self.assertEqual(value, expected_src_rank)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28932")
     @dist_init
     def test_py_built_in(self):
         n = self.rank + 1
