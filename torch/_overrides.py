@@ -136,12 +136,12 @@ def _implement_torch_function(
     types, overloaded_args = _get_overloaded_types_and_args(relevant_args)
     # Short-cut for common cases: no overload or only Tensor overload
     # (directly or with subclasses that do not override __torch_function__).
-    if (not overloaded_args or types == _TENSOR_ONLY):
+    if not overloaded_args or types == _TENSOR_ONLY:
         return implementation(*args, **kwargs)
 
     # Call overrides
     for overloaded_arg in overloaded_args:
-        # Use `public_api` instead of `implemenation` so __torch_function__
+        # Use `public_api` instead of `implementation` so __torch_function__
         # implementations can do equality/identity comparisons.
         result = overloaded_arg.__torch_function__(public_api, args, kwargs)
 
