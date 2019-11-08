@@ -257,7 +257,7 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
   int dstDims = dst.dim();
   int srcDims = src.dim();
 
-  TORCH_CHECK(index.dim() == 1, "expecting vector of indices");
+  TORCH_CHECK(index.dim() <= 1, "Index must be vector or scalar");
   TORCH_CHECK(dim >= 0 && dim < dstDims, "Indexing dim is out of bounds");
 
   ptrdiff_t dstSliceSize = 1;
