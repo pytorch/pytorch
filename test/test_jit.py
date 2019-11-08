@@ -4039,6 +4039,7 @@ def foo(x):
             # type: (List[int]) -> int
             return fn(x)
 
+    @unittest.skip('Currently borken https://github.com/pytorch/pytorch/issues/29367')
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -9396,6 +9397,28 @@ a")
             return b
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+    def test_script_copy(self):
+        class M(torch.nn.Module):
+            __annotations__ = {
+                "val": Optional[torch.Tensor]
+            }
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.val = None
+
+            def some_method(self):
+                return 3
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                self.val = x + self.some_method()
+                return x
+
+        m = torch.jit.script(M())
+        # test copy
+        m_c = m.copy()
 
     @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
