@@ -85,17 +85,11 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   validate();
 }
 
-std::string Device::str() const {
-  std::string str = DeviceTypeName(type(), /* lower case */ true);
-  if (has_index()) {
-    str.push_back(':');
-    str.append(to_string(index()));
-  }
-  return str;
-}
-
 std::ostream& operator<<(std::ostream& stream, const Device& device) {
-  stream << device.str();
+  stream << device.type();
+  if (device.has_index()) {
+    stream << ":" << device.index();
+  }
   return stream;
 }
 

@@ -86,9 +86,6 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
-  /// Same string as returned from operator<<.
-  std::string str() const;
-
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
