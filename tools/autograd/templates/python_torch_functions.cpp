@@ -565,7 +565,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
        << "' on types that implement __torch_function__: [";
     for (auto &arg : r.overloaded_args) {
       ss << arg.ptr()->ob_type->tp_name;
-      if (arg != r.overloaded_args.back()) {
+      if (!arg.is(r.overloaded_args.back())) {
         ss << ", ";
       }
       else {
