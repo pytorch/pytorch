@@ -85,17 +85,28 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
     if 'cubic' in mode:
         mode = 'cubic'
     align_corners = sym_help._maybe_get_const(align_corners, 'b')
-    align_corners = False if sym_help._is_none(align_corners) else align_corners
+    align_corners = False if not isinstance(align_corners, bool) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
     # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
-        input_size = input.type().sizes()
-        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
-        is_scalar = ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        input_size = g.op("Shape", input)
+        input_size = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+        # in some cases size is not a packed list but size is a scalar
+        # We need to also verify that (sym_help._maybe_get_const(size, 't').dim() == 0)
+        # but this information is not always available. Try to get the dim,
+        # and if not assume that it is not a scalar.
+        try:
+            is_scalar = not sym_help._is_packed_list(size) and ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        except:
+            sym_help.warning("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
+            is_scalar = not sym_help._is_packed_list(size)
+
         if is_scalar:
+            if not input.isCompleteTensor():
+                return sym_help._unimplemented("interpolate (with a scalar output_size)", "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)
@@ -111,6 +122,8 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
                     mode_s=mode,  # nearest, linear, or cubic
                     nearest_mode_s="floor")
     else:  # if not sym_help._is_none(scales)
+        if not input.isCompleteTensor():
+            return sym_help._unimplemented("interpolate (with scales)", "missing input shape")
         scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
         return g.op("Resize",
                     input,

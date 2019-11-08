@@ -596,6 +596,20 @@ class TestONNXRuntime(unittest.TestCase):
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_interpolate_no_shape(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                x = torch.add(x, x)
+                out1 = torch.nn.functional.interpolate(x, mode="nearest", size=(16,16))
+                out2 = torch.nn.functional.interpolate(x, mode="nearest", size=(int(y.size(0)), int(y.size(1))))
+                return out1, out2
+
+        x = torch.randn(1, 2, 4, 4, requires_grad=True)
+        y = torch.randn(16, 16, requires_grad=True)
+        self.run_test(MyModel(), (x, y))
+
     def test_groupnorm(self):
         model = torch.nn.GroupNorm(3, 6, 0.002)
         x = torch.randn(4, 6, 180, 180, 180)
