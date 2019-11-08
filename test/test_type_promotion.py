@@ -1,6 +1,8 @@
 from functools import wraps
 
 import torch
+import unittest
+import itertools
 
 from common_utils import TestCase, run_tests, load_tests
 from common_device_type import instantiate_device_type_tests
@@ -162,40 +164,58 @@ class TestTypePromotion(TestCase):
         if self.device_type == 'cuda':
             f_dtypes = f_dtypes + [torch.half]
         i_dtypes = [torch.int, torch.long]
-        for f in ['add', 'sub', 'rsub', 'mul', 'div']:
-            for dtype1 in f_dtypes:
-                for dtype2 in (f_dtypes + i_dtypes):
-                    x = torch.ones(10, requires_grad=True, dtype=dtype1, device=device)
-                    y = torch.ones(10, dtype=dtype2, device=device)
+        for func in [torch.add, torch.sub, torch.rsub, torch.mul, torch.div]:
+            for dtype1, dtype2 in itertools.product(f_dtypes, f_dtypes + i_dtypes):
+                x = torch.ones(10, requires_grad=True, dtype=dtype1, device=device)
+                y = torch.ones(10, dtype=dtype2, device=device)
+                func(x, y).sum().backward()
 
-                    func = getattr(torch, f)
-                    func(x, y).sum().backward()
+    def _get_test_tensor(self, dtype, remove_zeros=False):
+        shape = [20, 20, 20]
+        if dtype == torch.bool:
+            tensor = torch.randint(0, 2, shape, device=self.device, dtype=dtype)
+        elif dtype.is_floating_point:
+            # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
+            tensor = torch.randn(shape, device=self.device)
+            tensor = tensor.to(dtype)
+        else:
+            tensor = torch.randint(0, 15, shape, device=self.device, dtype=dtype)
+        if remove_zeros:
+            # ensures no div-by-zero (with care for low precision uint8/half)
+            tensor[torch.abs(tensor) < 0.05] = 5
+        return tensor
 
-    # verifies that a.add(b) is the same as a.to(b.dtype).add(b) in cases
-    # where that should hold.
+    # verifies that torch.<op>(first, second) is the same as 
+    # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
     @multiple_default_dtypes
     def test_many_promotions(self, device):
-        from_to = {
-            torch.float16: torch.float32,
-            torch.half: torch.float16,
-            torch.int: torch.long,
-            torch.uint8: torch.long,
-            torch.uint8: torch.float,
-            torch.int: torch.float,
-            torch.int: torch.double,
-            torch.int16: torch.long,
-            torch.float16: torch.double,
-            torch.bool: torch.long,
-            torch.bool: torch.float
-        }
+        # Can also include half on CPU in cases where it will be promoted to a
+        # supported dtype
+        dtypes1 = torch.testing.get_all_math_dtypes('cuda')
+        dtypes2 = torch.testing.get_all_math_dtypes(device)
+        ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
+        for dt1, dt2 in itertools.product(dtypes1, dtypes2):
+            for op, non_contiguous in itertools.product(ops, [True, False]):
+                common_dtype = torch.promote_types(dt1, dt2)
+                if common_dtype == torch.half and self.device_type == 'cpu':
+                    continue
+                if op == torch.sub and common_dtype != torch.bool:
+                    # Subtraction, the `-` operator, with a bool tensor is not supported.
+                    continue
+                first = self._get_test_tensor(dt1)
+                second = self._get_test_tensor(dt2, op == torch.div)
+                # test ops with non-contiguous tensors
+                if non_contiguous:
+                    first = first.transpose(0, 2)
+                    second = second.transpose(2, 1)
+                    self.assertNotEqual(first.stride(), second.stride(), "some non-contiguous issues could be missed if tensors have same strides")
 
-        for k, v in from_to.items():
-            a = torch.rand([3, 3], device=device).to(k)  # no _th_uniform for half on cpu.
-            b = torch.rand([3, 3], device=device).to(v)
-            c = a.add(b)
-            d = a.to(v).add(b)
-            self.assertEqual(c.dtype, d.dtype, message='from {} to {}'.format(k, v))
-            self.assertEqual(c, d, message='from {} to {}'.format(k, v))
+                self.assertEqual(not first.is_contiguous(), non_contiguous)
+                self.assertEqual(not second.is_contiguous(), non_contiguous)
+                result = op(first, second)
+                expected = op(first.to(common_dtype), second.to(common_dtype))
+                self.assertEqual(result.dtype, expected.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                self.assertEqual(result, expected, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
     @multiple_default_dtypes
     def test_non_promoting_ops(self, device):
