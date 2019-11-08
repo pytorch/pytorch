@@ -94,7 +94,7 @@ def get_rref_list(values):
 
 
 def add_rref_to_value(rref, value):
-    return rref.to_here().wait() + value
+    return rref.to_here() + value
 
 
 def run_nested_pickle(pickle_cls_instance, tensor):
@@ -931,7 +931,7 @@ class RpcTest(object):
     @dist_init
     def test_local_rref_no_fork(self):
         local_rref = RRef(35)
-        self.assertEqual(local_rref.local_value().wait(), 35)
+        self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
     def test_return_local_rrefs(self):
@@ -970,7 +970,7 @@ class RpcTest(object):
             rpc.remote(
                 dst_worker,
                 add_rref_to_value,
-                args=(rref, 50)).to_here().wait(), 90)
+                args=(rref, 50)).to_here(), 90)
 
     @dist_init
     def test_remote_same_worker(self):
