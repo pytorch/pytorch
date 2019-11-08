@@ -284,9 +284,9 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
 
-  std::ostringstream version;
-  version << kProducedFileFormatVersion << "\n";
-  writeRecord("version", version.str().c_str(), version.str().size());
+  std::string version = c10::to_string(kProducedFileFormatVersion);
+  version.push_back('\n');
+  writeRecord("version", version.c_str(), version.size());
 }
 
 void PyTorchStreamWriter::writeRecord(
