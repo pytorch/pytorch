@@ -13397,15 +13397,14 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     def test_atomic_add(self, device):
-        # todo: we should probably expose a dtype.is_signed()
+        # https://github.com/pytorch/pytorch/issues/29475
         def is_signed(dtype):
             return torch.is_signed(torch.tensor(0, dtype=dtype))
-        # https://github.com/pytorch/pytorch/issues/29153
         for dtype in torch.testing.get_all_math_dtypes(device):
             size = [5, 5]
             if dtype.is_floating_point:
                 tensor = torch.rand(size, dtype=dtype, device=device)
-            if is_signed(dtype):
+            elif is_signed(dtype):
                 tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
             else:
                 tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
@@ -13413,16 +13412,7 @@ class TestTorchDeviceType(TestCase):
             # index_add calls atomicAdd on cuda.
             empty = torch.zeros(size, dtype=dtype, device=device)
             added = empty.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
-            self.assertEqual(added.sum(), tensor.sum())
-
-            # sparse.to_dense() on non-coalesced tensors calls index_add, which was where
-            # this issue was first noticed.
-            s = tensor.to_sparse()
-            indices = torch.cat((s.indices(), s.indices()), 1)
-            values = torch.cat((s.values(), s.values()), 0)
-            sparse = torch.sparse_coo_tensor(indices=indices, values=values, size=tuple(size), dtype=dtype, device=device)
-
-            self.assertEqual(sparse.to_dense().to(torch.double), sparse.to(torch.double).to_dense())
+            self.assertEqual(added, tensor)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
