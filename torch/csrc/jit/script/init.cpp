@@ -433,16 +433,6 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
   return true;
 }
 
-// used to temporarily implement _has_attribute in the python wrapper
-// we should replace these individual functions with direct bindings to the
-// _parameters, _modules, and _buffers dictionaries
-struct LegacyAttributePolicy {
-  static bool valid(const ClassTypePtr& typ, size_t i) {
-    return !detail::ModulePolicy::valid(typ, i) &&
-        !detail::ParameterPolicy::valid(typ, i);
-  }
-};
-
 // helper used to implement ._parameters, ._buffers, ._modules dicts
 // inside of script nn.Module
 template <typename Policy>
@@ -470,47 +460,26 @@ struct slot_dict_impl {
   }
 
   void setattr(const std::string& name, py::object value) {
-    size_t N = module_->type()->getAttributeSlot(name);
-    const TypePtr& type = module_->type()->getAttribute(N);
-    module_->setSlot(N, toIValue(std::move(value), type));
+    const TypePtr& type = module_->type()->getAttribute(name);
+    script::Module(module_).setattr(name, toIValue(std::move(value), type));
   }
 
+  py::object getattr(const std::string& name) {
+    return toPyObject(script::Module(module_).attr(name));
+  }
+
+  static void bind(const py::module& m, const char* name) {
+    py::class_<slot_dict_impl<Policy>>(m, name)
+        .def(py::init(
+            [](Module& m) { return slot_dict_impl<Policy>(m.module_object()); }))
+        .def("contains", &slot_dict_impl<Policy>::contains)
+        .def("items", &slot_dict_impl<Policy>::items)
+        .def("setattr", &slot_dict_impl<Policy>::setattr)
+        .def("getattr", &slot_dict_impl<Policy>::getattr);
+  }
  private:
   script::ModulePtr module_;
 };
-
-// helpers to implement _set_parameter, _get_parameter, _has_parameter, etc.
-// these can be removed once everything works directly from bound slot_dict
-// objects
-template <typename Policy>
-static void set_generic(
-    Module& self,
-    const std::string& name,
-    py::object value) {
-  slot_dict_impl<Policy>(self.module_object()).setattr(name, std::move(value));
-}
-
-static py::object get_generic(Module& self, const std::string& name) {
-  return toPyObject(self.attr(name));
-}
-
-template <typename Policy>
-static py::tuple get_generic_list(Module& self) {
-  auto the_list = script::slot_list_impl<script::detail::NamedPolicy<Policy>>(
-      self.module_object(), false, false);
-  py::tuple result(the_list.size());
-  auto i = 0;
-  for (const auto& e : the_list) {
-    py::tuple r(2);
-    result[i++] = std::make_tuple(e.name, toPyObject(e.value));
-  }
-  return result;
-}
-
-template <typename Policy>
-static bool has_generic(Module& self, const std::string& name) {
-  return slot_dict_impl<Policy>(self.module_object()).contains(name);
-}
 
 template <typename T>
 py::list debugMakeList(const T& list) {
@@ -554,6 +523,7 @@ static py::dict _jit_debug_module_iterators(Module& module) {
       debugMakeNamedList(module.named_attributes(true));
   return result;
 }
+
 
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -625,30 +595,24 @@ void initJitScriptBindings(PyObject* module) {
                 name, unshaped, toIValue(std::move(value), type));
           })
       .def("_register_module", &Module::register_module)
-      .def("_register_buffer", &Module::register_buffer)
       .def(
-          "_set_attribute",
+          "setattr",
           [](Module& self, const std::string& name, py::object value) {
-            auto ivalue =
-                toIValue(std::move(value), self.type()->getAttribute(name));
+            TypePtr type = self.type()->getAttribute(name);
+            TORCH_CHECK(type, "Module has no attribute '", name, "'");
+            auto ivalue = toIValue(std::move(value), type);
             self.setattr(name, ivalue);
           })
-      .def("_set_parameter", &set_generic<detail::ParameterPolicy>)
-      .def("_get_parameter", &get_generic)
-      .def("_get_buffer", &get_generic)
-      .def("_get_attribute", &get_generic)
-      .def("_get_module", &get_generic)
       .def(
-          "_get_modules",
-          [](Module& self) {
-            std::vector<std::pair<std::string, Module>> modules;
-            for (const NameModule& s : self.named_children()) {
-              modules.emplace_back(std::make_pair(s.name, s.value));
-            }
-            return modules;
+          "getattr",
+          [](Module& self, const std::string& name) {
+            return toPyObject(self.attr(name));
           })
-      .def("_get_parameters", get_generic_list<script::detail::ParameterPolicy>)
-      .def("_get_buffers", get_generic_list<script::detail::BufferPolicy>)
+      .def(
+          "hasattr",
+          [](Module& self, const std::string& name) {
+            return self.hasattr(name);
+          })
       .def(
           "_replicate_for_data_parallel",
           [](Module& module) {
@@ -658,7 +622,8 @@ void initJitScriptBindings(PyObject* module) {
                 /*should_mangle*/ true);
             ClassTypePtr module_cls = module.module_object()->type();
             for (size_t i = 0, N = module_cls->numAttributes(); i < N; ++i) {
-              if (LegacyAttributePolicy::valid(module_cls, i) &&
+              if (!detail::ModulePolicy::valid(module_cls, i) &&
+                  !detail::ParameterPolicy::valid(module_cls, i) &&
                   !detail::BufferPolicy::valid(module_cls, i)) {
                 replica.register_attribute(
                     module_cls->getAttributeName(i),
@@ -668,10 +633,6 @@ void initJitScriptBindings(PyObject* module) {
             }
             return replica;
           })
-      .def("_has_attribute", has_generic<LegacyAttributePolicy>)
-      .def("_has_parameter", has_generic<script::detail::ParameterPolicy>)
-      .def("_has_buffer", has_generic<script::detail::BufferPolicy>)
-      .def("_has_module", has_generic<script::detail::ModulePolicy>)
       .def(
           "_has_method",
           [](Module& self, const std::string& name) {
@@ -730,6 +691,10 @@ void initJitScriptBindings(PyObject* module) {
           "clone_method", [](Module& m, Module& orig, const std::string& name) {
             m.clone_method(orig, name);
           });
+
+  slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
+  slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
+  slot_dict_impl<script::detail::ModulePolicy>::bind(m, "ModuleDict");
 
   py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(m, "ErrorReport")
       .def(py::init<SourceRange>())
