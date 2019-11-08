@@ -535,8 +535,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
   py::object ret = py::object();
   for (auto &arg : r.overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
-    PyObject* py_ret = PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL);
-    ret = py::reinterpret_borrow<py::object>(py_ret);
+    ret = py::reinterpret_borrow<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
     if (ret.ptr() == Py_NotImplemented) {
       // if ret returns NotImplemented, we check the next implementation in the
       // precedence order, resetting ret to the null object so we don't leak
@@ -551,9 +550,10 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
   }
   if (ret.ptr() == nullptr) {
     // if an exception occurred in a user's implementation of
-    // __array_function__, throw it
+    // __array_function__, allow the exception to continue propagating
+    // by returning NULL
     if (PyErr_Occurred() != NULL) {
-      throw py::error_already_set();
+      return NULL;
     }
     // otherwise all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.

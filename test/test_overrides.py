@@ -116,6 +116,10 @@ def diagonal_mm(mat1, mat2):
 def diagonal_div(input, other, out=None):
     return 1
 
+@implements_diagonal(torch.add)
+def add(mat1, mat2):
+    raise ValueError
+
 # The dispatch table for SubTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_SUB = {}
 
@@ -784,6 +788,12 @@ class TestTorchFunctionOverride(TestCase):
             torch.mul(t3, t2)
         with self.assertRaises(TypeError):
             torch.mul(t3, t3)
+
+    def test_diagonal_add_raises(self):
+        t1 = DiagonalTensor(5, 2)
+        t2 = DiagonalTensor(5, 2)
+        with self.assertRaises(ValueError):
+            torch.add(t1, t2)
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
