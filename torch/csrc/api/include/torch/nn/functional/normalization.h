@@ -62,13 +62,27 @@ inline Tensor local_response_norm(
     TORCH_CHECK(dim >=3, "Expected 3D or higher dimensionality input (got ", dim, " dimensions)");
     auto div = input.mul(input).unsqueeze(1);
     if (dim == 3) {
-      div = detail::pad(div, /*pad=*/{0, 0, size / 2, (size - 1) / 2});
-      div = detail::avg_pool2d(div, /*kernel_size=*/{size, 1}, /*stride=*/1).squeeze(1);
+      div = detail::pad(div, /*pad=*/{0, 0, size / 2, (size - 1) / 2}, /*mode=*/torch::kConstant, /*value=*/0);
+      div = detail::avg_pool2d(
+        div,
+        /*kernel_size=*/{size, 1},
+        /*stride=*/1,
+        /*padding=*/0,
+        /*ceil_mode=*/false,
+        /*count_include_pad=*/true,
+        /*divisor_override=*/c10::nullopt).squeeze(1);
     } else {
       auto sizes = input.sizes();
       div = div.view({sizes[0], 1, sizes[1], sizes[2], -1});
-      div = detail::pad(div, /*pad=*/{0, 0, 0, 0, size / 2, (size - 1) / 2});
-      div = detail::avg_pool3d(div, /*kernel_size=*/{size, 1, 1}, /*stride=*/1).squeeze(1);
+      div = detail::pad(div, /*pad=*/{0, 0, 0, 0, size / 2, (size - 1) / 2}, /*mode=*/torch::kConstant, /*value=*/0);
+      div = detail::avg_pool3d(
+        div,
+        /*kernel_size=*/{size, 1, 1},
+        /*stride=*/1,
+        /*padding=*/0,
+        /*ceil_mode=*/false,
+        /*count_include_pad=*/true,
+        /*divisor_override=*/c10::nullopt).squeeze(1);
       div = div.view(sizes);
     }
     div = div.mul(alpha).add(k).pow(beta);
