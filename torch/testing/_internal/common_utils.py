@@ -1312,6 +1312,13 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices.
+
+    Parameters:
+      dtype - the data type
+      device - the device kind
+      singular - when True, the output will be singular
+    """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
     silent = kwargs.get("silent", False)
@@ -1324,7 +1331,7 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     s = torch.zeros(rows, columns, dtype=dtype, device=device)
     k = min(rows, columns)
     for i in range(k):
-        s[i, i] = (i + 1) / (k + 1)
+        s[i, i] = float(i + 1) / (k + 1)
     if singular:
         # make matrix singular
         s[k - 1, k - 1] = 0
@@ -1333,6 +1340,98 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
             # in LU factorization will be non-trivial
             s[0, 0] = 0
     return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
+
+
+def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices with
+    given rank.
+    """
+    B = random_matrix(rows, rank, *batch_dims, **kwargs)
+    C = random_matrix(rank, columns, *batch_dims, **kwargs)
+    return B.matmul(C)
+
+
+def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
+    """Return rectangular random sparse matrix within given density.
+
+    The density of the result approaches to given density as the size
+    of the matrix is increased and a relatively small value of density
+    is specified but higher than min(rows, columns)/(rows * columns)
+    for non-singular matrices.
+    """
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    singular = kwargs.get("singular", False)
+
+    k = min(rows, columns)
+    nonzero_elements = max(min(rows, columns), int(rows * columns * density))
+
+    row_indices = [i % rows for i in range(nonzero_elements)]
+    column_indices = [i % columns for i in range(nonzero_elements)]
+    random.shuffle(column_indices)
+    indices = [row_indices, column_indices]
+    values = torch.randn(nonzero_elements, dtype=dtype, device=device)
+    # ensure that the diagonal dominates
+    values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
+    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    return A.coalesce()
+
+
+def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
+    """Return random sparse positive-definite matrix with given density.
+
+    The eigenvalues of the matrix are defined as::
+      arange(1, matrix_size+1)/matrix_size
+
+    Algorithm:
+      A = diag(arange(1, matrix_size+1)/matrix_size)
+      while <A density is smaller than required>:
+          <choose random i, j in range(matrix_size), theta in [0, 2*pi]>
+          R = <rotation matrix (i,j,theta)>
+          A = R^T A R
+    """
+    import math
+    torch = kwargs.get('torch', globals()['torch'])
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    data = dict([((i, i), float(i + 1) / matrix_size)
+                 for i in range(matrix_size)])
+
+
+    def multiply(data, N, i, j, cs, sn, left=True):
+        for k in range(N):
+            if left:
+                ik, jk = (k, i), (k, j)
+            else:
+                ik, jk = (i, k), (j, k)
+            aik, ajk = data.get(ik, 0), data.get(jk, 0)
+            aik, ajk = cs * aik + sn * ajk, -sn * aik + cs * ajk
+            if aik:
+                data[ik] = aik
+            else:
+                data.pop(ik, None)
+            if ajk:
+                data[jk] = ajk
+            else:
+                data.pop(jk, None)
+
+    target_nnz = density * matrix_size * matrix_size
+    while len(data) < target_nnz:
+        i = random.randint(0, matrix_size - 1)
+        j = random.randint(0, matrix_size - 1)
+        if i != j:
+            theta = random.uniform(0, 2 * math.pi)
+            cs = math.cos(theta)
+            sn = math.sin(theta)
+            multiply(data, matrix_size, i, j, cs, sn, left=True)
+            multiply(data, matrix_size, i, j, cs, sn, left=False)
+    icoords, jcoords, values = [], [], []
+    for (i, j), v in sorted(data.items()):
+        icoords.append(i)
+        jcoords.append(j)
+        values.append(v)
+    indices = [icoords, jcoords]
+    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):

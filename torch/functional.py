@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
-
+from .lowrank import pca
+from .lowrank import svd as svd_lowrank
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
@@ -16,12 +17,15 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
+    'lobpcg',
     'lu',
     'lu_unpack',
     'norm',
     'meshgrid',
+    'pca',
     'split',
     'stft',
+    'svd_lowrank',
     'tensordot',
     'unique',
     'unique_consecutive',

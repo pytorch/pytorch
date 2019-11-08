@@ -8782,6 +8782,133 @@ class TestTorchDeviceType(TestCase):
             u, s_actual, v = torch.svd(a, compute_uv=False)
             self.assertEqual(s_expect, s_actual, "Singular values don't match")
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    def test_svd_lowrank(self, device):
+        from common_utils import random_lowrank_matrix, random_sparse_matrix
+
+        def run_subtest(actual_rank, matrix_size, batches, device, **options):
+            density = options.pop('density', 1)
+            if isinstance(matrix_size, int):
+                rows = columns = matrix_size
+            else:
+                rows, columns = matrix_size
+            if density == 1:
+                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device)
+                a = a_input
+            else:
+                assert batches == ()
+                a_input = random_sparse_matrix(rows, columns, density, device=device)
+                a = a_input.to_dense()
+
+            q = min(*size)
+            u, s, v = torch.svd_lowrank(a_input, q=q, **options)
+
+            # check if u, s, v is a SVD
+            u, s, v = u[..., :q], s[..., :q], v[..., :q]
+            A = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
+            self.assertEqual(A, a)
+
+            # check if svd_lowrank produces same singular values as torch.svd
+            U, S, V = torch.svd(a)
+            self.assertEqual(s.shape, S.shape)
+            self.assertEqual(u.shape, U.shape)
+            self.assertEqual(v.shape, V.shape)
+            self.assertEqual(s, S)
+
+            if density == 1:
+                # actual_rank is known only for dense inputs
+                #
+                # check if pairs (u, U) and (v, V) span the same
+                # subspaces, respectively
+                u, s, v = u[..., :actual_rank], s[..., :actual_rank], v[..., :actual_rank]
+                U, S, V = U[..., :actual_rank], S[..., :actual_rank], V[..., :actual_rank]
+                self.assertEqual(u.transpose(-2, -1).matmul(U).det().abs(), torch.ones(batches))
+                self.assertEqual(v.transpose(-2, -1).matmul(V).det().abs(), torch.ones(batches))
+
+        all_batches = [(), (1,), (3,), (2, 3)]
+        for actual_rank, size, all_batches in [
+                (2, (17, 4), all_batches),
+                (4, (17, 4), all_batches),
+                (4, (17, 17), all_batches),
+                (10, (100, 40), all_batches),
+                (7, (1000, 1000), [()]),
+        ]:
+            # dense input
+            for batches in all_batches:
+                run_subtest(actual_rank, size, batches, device)
+                if size != size[::-1]:
+                    run_subtest(actual_rank, size[::-1], batches, device)
+
+        # sparse input
+        for size in [(17, 4), (4, 17), (17, 17), (100, 40), (40, 100), (1000, 1000)]:
+            for density in [0.005, 0.1]:
+                run_subtest(None, size, (), device, density=density)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    def test_pca(self, device):
+        from common_utils import random_lowrank_matrix, random_sparse_matrix
+
+        def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, **options):
+            density = options.pop('density', 1)
+            if isinstance(matrix_size, int):
+                rows = columns = matrix_size
+            else:
+                rows, columns = matrix_size
+            if density == 1:
+                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device)
+                a = a_input
+            else:
+                a_input = random_sparse_matrix(rows, columns, density, device=device)
+                a = a_input.to_dense()
+
+            u, s, v = torch.pca(a_input, q=guess_rank, **options)
+
+            self.assertEqual(s.shape[-1], guess_rank)
+            self.assertEqual(u.shape[-2], rows)
+            self.assertEqual(u.shape[-1], guess_rank)
+            self.assertEqual(v.shape[-1], guess_rank)
+            self.assertEqual(v.shape[-2], columns)
+
+            A1 = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
+            ones_m1 = torch.ones(batches + (rows, 1), dtype=a.dtype, device=device)
+            c = a.sum(axis=-2) / rows
+            c = c.reshape(batches + (1, columns))
+            A2 = a - ones_m1.matmul(c)
+            self.assertEqual(A1, A2)
+
+            if density == 1:
+                # actual rank is known only for dense input
+                detect_rank = (s.abs() > 1e-5).sum(axis=-1)
+                self.assertEqual(actual_rank * torch.ones(batches, device=device), detect_rank)
+                U, S, V = torch.svd(A2)
+                self.assertEqual(s[..., :actual_rank], S[..., :actual_rank])
+
+        all_batches = [(), (1,), (3,), (2, 3)]
+        for actual_rank, size, all_batches in [
+                (2, (17, 4), all_batches),
+                (2, (100, 4), all_batches),
+                (6, (100, 40), all_batches),
+                (12, (1000, 1000), [()]),
+        ]:
+            for batches in all_batches:
+                for guess_rank in [
+                        actual_rank,
+                        actual_rank + 2,
+                        actual_rank + 6,
+                ]:
+                    if guess_rank <= min(*size):
+                        run_subtest(guess_rank, actual_rank, size, batches, device)
+                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device)
+
+        # sparse input
+        for guess_rank, size in [
+                (4, (17, 4)), (4, (4, 17)), (16, (17, 17)),
+                (21, (100, 40)), (20, (40, 100)), (600, (1000, 1000))]:
+            for density in [0.005, 0.1]:
+                run_subtest(guess_rank, None, size, (), device, density=density)
+
     def test_lerp(self, device):
         start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
         for shapes in product(start_end_shapes, start_end_shapes):
@@ -13500,6 +13627,183 @@ class TestTorchDeviceType(TestCase):
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_lobpcg_basic(self, device, dtype):
+        self._test_lobpcg_method(device, dtype, 'basic')
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_lobpcg_ortho(self, device, dtype):
+        self._test_lobpcg_method(device, dtype, 'ortho')
+
+    def _test_lobpcg_method(self, device, dtype, method):
+        from common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
+        from torch.lobpcg import get_matmul, lobpcg, qform
+
+        def test_tracker(istep, A, B, X, E, R, rerr, nc, k, tol, **params):
+            if k <= nc:
+                dtype = X.dtype
+                device = X.device
+
+                # Check convergence
+                self.assertLessEqual(rerr[:k].max(), tol)
+
+                # Check B-orthogonality
+                I = torch.eye(k, k, dtype=dtype, device=device)
+                self.assertEqual(qform(B, X[:, :k]), I)
+
+                # Check block equation
+                self.assertEqual(qform(A, X[:, :k]) / E[:k], I, prec=0.2)
+
+        orig_lobpcg = lobpcg
+
+        def lobpcg(*args, **kwargs):
+            kwargs['tracker'] = test_tracker
+            kwargs['niter'] = 1000
+            kwargs['method'] = method
+            kwargs['tol'] = 1e-8
+            return orig_lobpcg(*args, **kwargs)
+        prec = 5e-4
+
+        # check dense input
+        mm = torch.matmul
+        for batches in [(), (2,), (2, 3)]:
+            for m, n, k in [
+                    (9, 3, 1),
+                    (9, 3, 2),
+                    (9, 2, 2),
+                    (100, 15, 5),
+            ]:
+                # skip tests that are known to fail with the basic
+                # LOBPCG method due to calling cholesky on singular
+                # input
+                if method == 'basic' and (m, n, k) in [(9, 2, 2), (100, 15, 5)]:
+                    continue
+                A = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
+                B = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
+                mm_A = get_matmul(A)
+                mm_B = get_matmul(B)
+
+                # classical eigenvalue problem, smallest eigenvalues
+                E, V = lobpcg(A, k=k, n=n, largest=False)
+                self.assertEqual(E.shape, batches + (k,))
+                self.assertEqual(V.shape, batches + (m, k))
+                self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+                e = torch.symeig(A)[0]
+                e_smallest = e[..., :k]
+                self.assertEqual(E, e_smallest)
+
+                # classical eigenvalue problem, largest eigenvalues
+                E, V = lobpcg(A, k=k, n=n, largest=True)
+                e_largest, _ = torch.sort(e[..., -k:], descending=True)
+                self.assertEqual(E, e_largest, prec=prec)
+                self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+
+                # generalized eigenvalue problem, smallest eigenvalues
+                E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
+                self.assertEqual(mm_A(A, V), mm(mm_B(B, V), E.diag_embed()), prec=prec)
+
+                # generalized eigenvalue problem, largest eigenvalues
+                E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
+                self.assertEqual(mm_A(A, V) / E.max(), mm(mm_B(B, V), (E / E.max()).diag_embed()),
+                                 prec=prec)
+
+        # check sparse input
+        for m, n, k, density in [
+                (5, 1, 1, 0.8),
+                (9, 3, 2, 0.5),
+                (100, 1, 1, 0.1),
+                (1000, 7, 3, 0.01),
+        ]:
+            # skip tests that are known to fail with the basic LOBCG
+            # method due to insufficient accuracy
+            if method == 'basic' and (m, n, k, density) in [(1000, 7, 3, 0.01)]:
+                continue
+            A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
+            B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
+            A_eigenvalues = torch.arange(1, m + 1, dtype=dtype) / m
+            mm_A = get_matmul(A)
+            mm_B = get_matmul(B)
+            e_smallest = A_eigenvalues[..., :k]
+            e_largest, _ = torch.sort(A_eigenvalues[..., -k:], descending=True)
+
+            # classical eigenvalue problem, smallest eigenvalues
+            E, V = lobpcg(A, k=k, n=n, largest=False)
+            self.assertEqual(E, e_smallest)            
+            self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+
+            # classical eigenvalue problem, largest eigenvalues
+            E, V = lobpcg(A, k=k, n=n, largest=True)
+            self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+            self.assertEqual(E, e_largest)
+
+            # generalized eigenvalue problem, smallest eigenvalues
+            E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
+            self.assertEqual(mm_A(A, V), mm_B(B, mm(V, E.diag_embed())), prec=prec)
+
+            # generalized eigenvalue problem, largest eigenvalues
+            E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
+            self.assertEqual(mm_A(A, V) / E.max(), mm(mm_B(B, V), (E / E.max()).diag_embed()),
+                             prec=prec)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_lobpcg_utils(self, device, dtype):
+        from common_utils import random_symmetric_pd_matrix, random_matrix
+        from torch.lobpcg import get_matmul, svqb, ortho, get_RR_transform
+        mm = torch.matmul
+
+        for m, n in [(5, 1), (6, 2), (9, 3), (100, 5)]:
+            # check svqb
+            M = random_symmetric_pd_matrix(m, device=device, dtype=dtype)
+            Uin = random_matrix(m, n, device=device)
+            mm_M = get_matmul(M)
+            for drop in [False, True]:
+                Uout = svqb(M, Uin, drop=drop)
+                self.assertEqual(mm(Uout.transpose(-2, -1), mm_M(M, Uout)),
+                                 torch.eye(Uout.shape[-1], device=device, dtype=dtype))
+
+            nv = max(1, n - 1)
+            V = svqb(M, random_matrix(m, nv, device=device), drop=False)
+            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, V)),
+                             torch.eye(V.shape[-1], device=device, dtype=dtype))
+
+            # check ortho
+            Uin = random_matrix(m, n, device=device)
+            U, _ = ortho(M, Uin, V, use_drop=False)
+            self.assertEqual(mm(U.transpose(-2, -1), mm_M(M, U)),
+                             torch.eye(U.shape[-1], device=device, dtype=dtype))
+            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, U)),
+                             torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
+
+            U, _ = ortho(M, Uin, V, use_drop=True)
+            self.assertEqual(mm(U.transpose(-2, -1), mm_M(M, U)),
+                             torch.eye(U.shape[-1], device=device, dtype=dtype))
+            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, U)),
+                             torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
+
+            Uin[:, 0] = V[:, 0]
+            U, _ = ortho(M, Uin, V, use_drop=True)
+            self.assertEqual(mm(U.transpose(-2, -1), mm_M(M, U)),
+                             torch.eye(U.shape[-1], device=device, dtype=dtype))
+            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, U)),
+                             torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
+
+            # check get_RR_transform
+            A = random_symmetric_pd_matrix(m, device=device, dtype=dtype)
+            S = random_matrix(m, n, device=device)
+            for B in [None, random_symmetric_pd_matrix(m, device=device, dtype=dtype)]:
+                Ri = get_RR_transform(B, S)
+                M = torch.chain_matmul(Ri.transpose(-2, -1), S.transpose(-2, -1), get_matmul(A)(A, S), Ri)
+                E, Z = torch.symeig(M, eigenvectors=True)
+                C = torch.matmul(Ri, Z)
+                self.assertEqual(torch.chain_matmul(S.transpose(-2, -1), get_matmul(A)(A, S), C),
+                                 torch.chain_matmul(S.transpose(-2, -1), get_matmul(B)(B, S), C, E.diag_embed()))
 
     @slowTest
     @onlyCPU
