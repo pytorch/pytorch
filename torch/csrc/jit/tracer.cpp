@@ -489,20 +489,6 @@ void addInputs(Node* n, const char* name, at::Layout value) {
 void addInputs(Node* n, const char* name, at::ScalarType value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
-
-void addInputs(
-    Node* n,
-    const char* name,
-    c10::optional<caffe2::TypeMeta> opt_dtype) {
-  if (opt_dtype.has_value()) {
-    return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
-}
-
 void addInputs(Node* n, const char* name, at::MemoryFormat value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
@@ -560,7 +546,7 @@ void addInputs(
 void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize
   // TensorOptions
-  addInputs(n, name, options.dtype_opt());
+  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
   addInputs(n, name, options.pinned_memory());
