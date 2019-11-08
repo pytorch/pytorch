@@ -24,14 +24,14 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:edge
+      image: windows-server-2019-nvidia:stable
       shell: bash.exe
 
   windows-cpu-with-nvidia-cuda:
     machine:
       # we will change to CPU host when it's ready
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:edge
+      image: windows-server-2019-vs2019:stable
       shell: bash.exe
 
 commands:
@@ -472,15 +472,13 @@ jobs:
       CUDA_VERSION: "10"
     steps:
       - checkout
-      - run:
-          name: Install Cudnn
-          command: |
-            cd c:/
-            choco install -y 7zip curl
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
-            curl -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-            7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-            cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+      # - run:
+      #     name: Install Cudnn
+      #     command: |
+      #       cd c:/
+      #       curl -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
+      #       7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
+      #       cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
       - run:
           name: Test
           no_output_timeout: "30m"
@@ -490,6 +488,7 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
             choco install -y 7zip curl
             .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
