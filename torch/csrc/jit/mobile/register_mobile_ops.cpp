@@ -5,7 +5,9 @@
 using Stack = std::vector<c10::IValue>;
 using torch::jit::peek;
 using torch::jit::drop;
+using torch::jit::pop;
 using torch::jit::pack;
+using torch::jit::push;
 
 namespace {
 at::Tensor toOptionalTensor(const c10::IValue& v) {
@@ -291,7 +293,7 @@ static auto registry0 = torch::RegisterOperators().op(
   []() {
   })
 ).op(
-  "_prim::ListConstruct.tensor",
+  "_prim::ListConstruct.Tensor",
   torch::RegisterOperators::options().catchAllKernel(
   []() {
   })
@@ -299,5 +301,210 @@ static auto registry0 = torch::RegisterOperators().op(
   "_prim::ListConstruct.generic",
   torch::RegisterOperators::options().catchAllKernel(
   []() {
+  })
+
+// Pytext operators
+).op(
+  "_aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::embedding(
+         (std::move(peek(*stack, 0, 5))).toTensor(),
+         (std::move(peek(*stack, 1, 5))).toTensor(),
+         (std::move(peek(*stack, 2, 5))).toInt(),
+         (std::move(peek(*stack, 3, 5))).toBool(),
+         (std::move(peek(*stack, 4, 5))).toBool()
+     );
+     drop(*stack, 5);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::dropout(Tensor input, float p, bool train) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::dropout(
+         (std::move(peek(*stack, 0, 3))).toTensor(),
+         (std::move(peek(*stack, 1, 3))).toDouble(),
+         (std::move(peek(*stack, 2, 3))).toBool()
+     );
+     drop(*stack, 3);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).permute(
+         (std::move(peek(*stack, 1, 2))).toIntListRef()
+     );
+     drop(*stack, 2);
+     pack(*stack, std::move(result_));
+  }).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+).op(
+  "_aten::matmul(Tensor self, Tensor other) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::matmul(
+         (std::move(peek(*stack, 0, 2))).toTensor(),
+         (std::move(peek(*stack, 1, 2))).toTensor()
+     );
+     drop(*stack, 2);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::mul(
+         (std::move(peek(*stack, 0, 2))).toTensor(),
+         (std::move(peek(*stack, 1, 2))).toTensor()
+     );
+     drop(*stack, 2);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::tanh(Tensor self) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::tanh(
+         (std::move(peek(*stack, 0, 1))).toTensor()
+     );
+     drop(*stack, 1);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::max(
+         (std::move(peek(*stack, 0, 3))).toTensor(),
+         (std::move(peek(*stack, 1, 3))).toInt(),
+         (std::move(peek(*stack, 2, 3))).toBool()
+     );
+     drop(*stack, 3);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::cat(
+         (std::move(peek(*stack, 0, 2))).toTensorListRef(),
+         (std::move(peek(*stack, 1, 2))).toInt()
+     );
+     drop(*stack, 2);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::__is__(t1 self, t2 obj) -> bool",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+      c10::IValue self, obj;
+      pop(*stack, self, obj);
+      push(*stack, self.isSameIdentity(obj));
+  })
+).op(
+  "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::log_softmax(
+       (std::move(peek(*stack, 0, 3))).toTensor(),
+       (std::move(peek(*stack, 1, 3))).toInt(),
+       (std::move(peek(*stack, 2, 3))).toOptional<c10::ScalarType>()
+     );
+     drop(*stack, 3);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+     auto result_ = at::softmax(
+       (std::move(peek(*stack, 0, 3))).toTensor(),
+       (std::move(peek(*stack, 1, 3))).toInt(),
+       (std::move(peek(*stack, 2, 3))).toOptional<c10::ScalarType>()
+     );
+     drop(*stack, 3);
+     pack(*stack, std::move(result_));
+  })
+).op(
+  "_prim::DictConstruct",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::TupleConstruct",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_aten::format",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_aten::warn",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::unchecked_cast",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("prim::unchecked_cast is called.");
+  })
+).op(
+  "_aten::len",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::len is called.");
+  })
+).op(
+  "_aten::chunk",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::chunk is called.");
+  })
+).op(
+  "_aten::__getitem__",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::__getitem__ is called.");
+  })
+).op(
+  "_aten::squeeze.dim",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::squeeze.dim is called.");
+  })
+).op(
+  "_aten::select.int",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::select.int is called.");
+  })
+).op(
+  "_aten::item",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::item is called.");
+  })
+).op(
+  "_aten::Float",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::Float is called.");
+  })
+).op(
+  "_aten::_set_item",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::_set_item is called.");
+  })
+).op(
+  "_aten::append",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+    AT_WARN("aten::append is called.");
   })
 );

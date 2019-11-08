@@ -477,7 +477,8 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  ExecutionPlan plan = getPlanFor(stack);
+  ExecutionPlan plan(graph);
+//  ExecutionPlan plan = getPlanFor(stack);
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }

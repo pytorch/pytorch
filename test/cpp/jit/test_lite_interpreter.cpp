@@ -4,6 +4,9 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/script.h>
+
+#include <torch/csrc/jit/instruction.h>
 
 // Tests go in torch::jit
 namespace torch {
@@ -94,5 +97,72 @@ void testLiteInterpreterInline() {
   auto output = bc.run_method("foo3", inputs);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
+namespace {
+void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opnames) {
+  auto methods = m.get_methods();
+  for (const auto& method : methods) {
+    const auto& func = method.function();
+    std::cout << "function name: " << func.name() << std::endl;
+    torch::jit::Code code(func.graph());
+    for (size_t i = 0; i < code.instructions().size(); ++i) {
+      auto ins = code.instructions()[i];
+      auto node = code.instructions_source()[i];
+      if (ins.op == OpCode::OP) {
+        auto opname = node->schema().operator_name();
+        std::string namestr = opname.name;
+        if (!opname.overload_name.empty())
+          namestr += "." + opname.overload_name;
+        std::cout << "    " << namestr << std::endl;
+        opnames.emplace(namestr);
+      }
+    }
+  }
+  for (const auto& sub_m : m.children()) {
+    std::cout << "sub module name: " << sub_m.name().qualifiedName() << std::endl;
+    dump_opnames(sub_m, opnames);
+  }
+}
+}
+
+void testLiteInterpreterModel() {
+  std::vector<torch::jit::IValue> inputs;
+
+//  auto L = c10::List<int64_t>({1, 1, 1});
+//  auto length = L.size();
+//  auto LL = c10::List<c10::List<int64_t>>({L});
+//  inputs.emplace_back(torch::jit::IValue(LL));
+//  auto bite_lens = c10::List<int64_t>({3});
+//  inputs.emplace_back(torch::jit::IValue(bite_lens));
+
+  auto options = torch::TensorOptions().dtype(torch::kI64);
+  int length = 3;
+  inputs.push_back(torch::ones({1, length}, options));
+  auto stensor = length * torch::ones({1}, options);
+  inputs.push_back(stensor);
+
+  auto m = load("/Users/myuan/data/pytext/BI/model_1107.pt1");
+
+  std::unordered_set<std::string> opnames;
+  dump_opnames(m, opnames);
+  std::cout << "-- Final List --" << std::endl;
+  for (auto name : opnames) {
+    std::cout << name << std::endl;
+  }
+
+  auto ref = m.forward(inputs);
+//  std::cout << ref << std::endl;
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  m._save_for_mobile("/Users/myuan/data/pytext/BI/model_1107.bc");
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+  std::cout << res << std::endl;
+}
+
 } // namespace torch
 } // namespace jit
