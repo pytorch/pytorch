@@ -625,7 +625,7 @@ inline c10::optional<py::object> tryToConvertToCustomClass(
   }
   return c10::nullopt;
 }
-inline py::object toPyObject(IValue&& ivalue) {
+inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
