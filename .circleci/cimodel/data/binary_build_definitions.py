@@ -42,9 +42,12 @@ class Conf(object):
     def get_name_prefix(self):
         return "smoke" if self.smoke else "binary"
 
-    def gen_build_name(self, build_or_test):
+    def gen_build_name(self, build_or_test, nightly):
 
         parts = [self.get_name_prefix(), self.os] + self.gen_build_env_parms()
+
+        if nightly:
+            parts.append("nightly")
 
         if self.libtorch_variant:
             parts.append(self.libtorch_variant)
@@ -55,9 +58,9 @@ class Conf(object):
         joined = "_".join(parts)
         return joined.replace(".", "_")
 
-    def gen_workflow_job(self, phase, upload_phase_dependency=None):
+    def gen_workflow_job(self, phase, upload_phase_dependency=None, nightly=False):
         job_def = OrderedDict()
-        job_def["name"] = self.gen_build_name(phase)
+        job_def["name"] = self.gen_build_name(phase, nightly)
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
         job_def["requires"] = ["setup"]
         if self.smoke:
@@ -68,9 +71,9 @@ class Conf(object):
             job_def["filters"] = {"branches": {"only": "nightly"}}
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
-        if phase == "test" or phase == "nightlytest":
+        if phase == "test":
             if not self.smoke:
-                job_def["requires"].append(self.gen_build_name("build"))
+                job_def["requires"].append(self.gen_build_name("build", nightly))
             if not (self.smoke and self.os == "macos"):
                 job_def["docker_image"] = self.gen_docker_image()
 
@@ -80,12 +83,12 @@ class Conf(object):
             if self.os == "linux" and phase != "upload":
                 job_def["docker_image"] = self.gen_docker_image()
 
-        if phase == "test" or phase == "nightlytest":
+        if phase == "test":
             if self.cuda_version:
                 job_def["resource_class"] = "gpu.medium"
         if phase == "upload":
             job_def["context"] = "org-member"
-            job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency)]
+            job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency, nightly)]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
@@ -150,9 +153,9 @@ def get_nightly_tests():
 def get_jobs(toplevel_key, smoke):
     jobs_list = []
     configs = gen_build_env_list(smoke)
-    phase = "nightlybuild" if toplevel_key == "binarybuilds" else "nightlytest"
+    phase = "build" if toplevel_key == "binarybuilds" else "test"
     for build_config in configs:
-        jobs_list.append(build_config.gen_workflow_job(phase))
+        jobs_list.append(build_config.gen_workflow_job(phase, nightly=True))
 
     return jobs_list
 
