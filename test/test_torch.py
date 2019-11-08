@@ -10325,9 +10325,6 @@ class TestTorchDeviceType(TestCase):
             for x in [torch.tensor((10, 10), dtype=dt, device=device),
                       torch.empty(10000, dtype=dt, device=device)]:  # large tensor
                 numel = x.numel()
-                if (self.device_type == 'cuda' and dt == torch.bfloat16):
-                    self.assertRaises(RuntimeError, lambda: x.fill_(1))
-                    continue
                 bound = 100 if dt in (torch.uint8, torch.int8) else 2000
                 for n in range(-bound, bound, bound // 10):
                     x.fill_(n)
@@ -10503,6 +10500,15 @@ class TestTorchDeviceType(TestCase):
             if dt == torch.bool:
                 # torch.bool is a special case and is being tested later
                 # in this test
+                continue
+
+            if self.device_type == 'cuda' and dt == torch.bfloat16:
+                self.assertRaises(RuntimeError, lambda: x > b)
+                self.assertRaises(RuntimeError, lambda: x < b)
+                self.assertRaises(RuntimeError, lambda: x == b)
+                self.assertRaises(RuntimeError, lambda: x != b)
+                self.assertRaises(RuntimeError, lambda: x >= b)
+                self.assertRaises(RuntimeError, lambda: x <= b)
                 continue
 
             self.assertEqual(x.lt(2), torch.tensor([True, False, False, False]))
