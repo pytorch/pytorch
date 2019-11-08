@@ -37,6 +37,9 @@ public:
   Stream getStream(Device d) const noexcept override {
     return impl_->getStream(d);
   }
+  Stream getDefaultStream(Device d) const override {
+    return impl_->getDefaultStream(d);
+  }
   Stream exchangeStream(Stream s) const noexcept override {
     return impl_->exchangeStream(s);
   }

@@ -139,7 +139,6 @@ void ConcretePythonOp::cloneFrom(Node* other_) {
   this->cconv = other->cconv;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->ignore_on_export = other->ignore_on_export;
   for (auto& sa : other->scalar_args) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());
@@ -679,6 +678,8 @@ void initPythonIRBindings(PyObject* module_) {
             return self->isSubtypeOf(other);
           });
 
+  py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
+      .def_static("get", &AnyType::get);
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
       .def_static("get", &NumberType::get);
   py::class_<IntType, Type, std::shared_ptr<IntType>>(m, "IntType")
@@ -723,6 +724,19 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }));
+  py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
+      m, "InterfaceType")
+      .def(py::init([](const std::string& qualified_name) {
+        return get_python_cu()->get_interface(
+            c10::QualifiedName(qualified_name));
+      }))
+      .def("getMethodNames", [](InterfaceType& self) {
+        std::vector<std::string> names;
+        for (const FunctionSchema& fn : self.methods()) {
+          names.emplace_back(fn.name());
+        }
+        return names;
+      });
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)

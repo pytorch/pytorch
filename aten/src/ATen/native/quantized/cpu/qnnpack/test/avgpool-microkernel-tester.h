@@ -220,7 +220,7 @@ class AvgPoolMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(q8avgpool_up_ukernel_function q8avgpool) const {
+  void test(pytorch_q8avgpool_up_ukernel_function q8avgpool) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
@@ -313,7 +313,7 @@ class AvgPoolMicrokernelTester {
     }
   }
 
-  void test(q8avgpool_mp_ukernel_function q8avgpool) const {
+  void test(pytorch_q8avgpool_mp_ukernel_function q8avgpool) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);

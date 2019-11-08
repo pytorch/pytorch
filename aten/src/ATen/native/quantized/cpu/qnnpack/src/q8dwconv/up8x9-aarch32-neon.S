@@ -11,7 +11,7 @@
 
 .syntax unified
 
-# void q8dwconv_ukernel_up8x9__aarch32_neon(
+# void pytorch_q8dwconv_ukernel_up8x9__aarch32_neon(
 #     size_t channels,
 #     size_t output_width,
 #     const uint8_t** input,
@@ -20,7 +20,7 @@
 #     size_t input_stride,
 #     size_t output_increment,
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION q8dwconv_ukernel_up8x9__aarch32_neon
+BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -390,7 +390,7 @@ BEGIN_FUNCTION q8dwconv_ukernel_up8x9__aarch32_neon
 
     VPOP {d8-d15}
     POP {r4, r5, r6, r7, r8, r9, r10, r11, pc}
-END_FUNCTION q8dwconv_ukernel_up8x9__aarch32_neon
+END_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits

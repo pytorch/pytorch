@@ -16,6 +16,10 @@ else()
   message(STATUS "Building c10d without CUDA/ROCm support")
 endif()
 
+if(USE_TBB)
+include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
 if(USE_GLOO)
   option(USE_C10D_GLOO "USE C10D GLOO" ON)
 endif()
@@ -42,6 +46,7 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
+  HashStore.cpp
   ProcessGroup.cpp
   Store.cpp
   PrefixStore.cpp
@@ -52,7 +57,7 @@ set(C10D_SRCS
 set(C10D_LIBS torch)
 
 if(USE_C10D_NCCL)
-  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
+  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp NCCLUtils.cpp)
   list(APPEND C10D_LIBS __caffe2_nccl)
 endif()
 
@@ -113,6 +118,7 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(HashStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)

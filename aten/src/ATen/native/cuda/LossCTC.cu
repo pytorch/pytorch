@@ -248,7 +248,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
     TORCH_CHECK(input_lengths[b] <= max_input_length,
-             "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", targets.size(0), " for ", targets_arg,
+             "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
   }
 
@@ -428,7 +428,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
                                                      const int64_t* __restrict__ tg_batch_offsets, int64_t tg_target_stride,
                                               int64_t batch_size, int64_t num_labels, int64_t BLANK, bool zero_infinity) {
   int64_t b = threadIdx.y + blockIdx.y * blockDim.y;
-  int64_t s = threadIdx.x + blockIdx.x * blockDim.y; // note, this directly indexes into targets, no targets prime!
+  int64_t s = threadIdx.x + blockIdx.x * blockDim.x; // note, this directly indexes into targets, not targets prime!
 
   if (b >= batch_size)
     return;
@@ -605,7 +605,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
   tg_batch_offsets = tg_batch_offsets.cuda();
 
-  Tensor log_beta = at::empty_like(log_alpha);
+  Tensor log_beta = at::empty_like(log_alpha, at::MemoryFormat::Contiguous);
   log_beta.fill_(neginf);
 
   Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))

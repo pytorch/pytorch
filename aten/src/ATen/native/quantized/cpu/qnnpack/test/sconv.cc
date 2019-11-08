@@ -24,7 +24,7 @@ TEST(SCONV_6x8__PSIMD, k_eq_1) {
       .n(8)
       .k(1)
       .aStride(37)
-      .test(sconv_ukernel_6x8__psimd);
+      .test(pytorch_sconv_ukernel_6x8__psimd);
 }
 
 TEST(SCONV_6x8__PSIMD, k_eq_1_strided_c) {
@@ -38,17 +38,17 @@ TEST(SCONV_6x8__PSIMD, k_eq_1_strided_c) {
       .k(1)
       .aStride(37)
       .cStride(17)
-      .test(sconv_ukernel_6x8__psimd);
+      .test(pytorch_sconv_ukernel_6x8__psimd);
 }
 
 TEST(SCONV_6x8__PSIMD, k_eq_1_qmin128) {
   GemmMicrokernelTester().mr(6).nr(8).np(8).kr(1).m(6).n(8).k(1).qmin(128).test(
-      sconv_ukernel_6x8__psimd);
+      pytorch_sconv_ukernel_6x8__psimd);
 }
 
 TEST(SCONV_6x8__PSIMD, k_eq_1_qmax128) {
   GemmMicrokernelTester().mr(6).nr(8).np(8).kr(1).m(6).n(8).k(1).qmax(128).test(
-      sconv_ukernel_6x8__psimd);
+      pytorch_sconv_ukernel_6x8__psimd);
 }
 
 TEST(SCONV_6x8__PSIMD, k_gt_1) {
@@ -62,7 +62,7 @@ TEST(SCONV_6x8__PSIMD, k_gt_1) {
         .n(8)
         .k(k)
         .aStride(37)
-        .test(sconv_ukernel_6x8__psimd);
+        .test(pytorch_sconv_ukernel_6x8__psimd);
   }
 }
 
@@ -78,7 +78,7 @@ TEST(SCONV_6x8__PSIMD, k_gt_1_strided_c) {
         .k(k)
         .aStride(37)
         .cStride(17)
-        .test(sconv_ukernel_6x8__psimd);
+        .test(pytorch_sconv_ukernel_6x8__psimd);
   }
 }
 
@@ -96,7 +96,7 @@ TEST(SCONV_6x8__PSIMD, k_gt_1_subtile) {
             .k(k)
             .aStride(37)
             .iterations(3)
-            .test(sconv_ukernel_6x8__psimd);
+            .test(pytorch_sconv_ukernel_6x8__psimd);
       }
     }
   }

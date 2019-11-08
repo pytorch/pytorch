@@ -74,6 +74,7 @@ class Header(object):
 # Order of this list matters to the generated config.yml.
 YAML_SOURCES = [
     File("header-section.yml"),
+    File("commands.yml"),
     File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("pytorch-build-params.yml"),
@@ -98,6 +99,8 @@ YAML_SOURCES = [
     Treegen(binary_build_definitions.add_binary_smoke_test_jobs, 1),
     Header("Daily binary build trigger"),
     Treegen(binary_build_definitions.add_binary_build_jobs, 1),
+    File("workflows-nightly-ios-binary-builds.yml"),
+    File("workflows-nightly-android-binary-builds.yml"),
     Header("Nightly tests"),
     Listgen(binary_build_definitions.get_nightly_tests, 3),
     File("workflows-nightly-uploads-header.yml"),

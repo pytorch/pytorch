@@ -18,11 +18,11 @@
 extern "C" {
 #endif
 
-#define DECLARE_U8RMAX_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_U8RMAX_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL uint8_t fn_name(size_t n, const uint8_t* x);
 
-DECLARE_U8RMAX_UKERNEL_FUNCTION(u8rmax_ukernel__neon)
-DECLARE_U8RMAX_UKERNEL_FUNCTION(u8rmax_ukernel__sse2)
+DECLARE_PYTORCH_U8RMAX_UKERNEL_FUNCTION(pytorch_u8rmax_ukernel__neon)
+DECLARE_PYTORCH_U8RMAX_UKERNEL_FUNCTION(pytorch_u8rmax_ukernel__sse2)
 
 #ifdef __cplusplus
 } /* extern "C" */

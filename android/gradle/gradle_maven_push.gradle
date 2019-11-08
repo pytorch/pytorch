@@ -25,6 +25,18 @@ def getRepositoryPassword() {
   return hasProperty('SONATYPE_NEXUS_PASSWORD') ? SONATYPE_NEXUS_PASSWORD : ""
 }
 
+def getHttpProxyHost() {
+  return project.properties['systemProp.http.proxyHost']
+}
+
+def getHttpProxyPort() {
+  return project.properties['systemProp.http.proxyPort']
+}
+
+def needProxy() {
+  return (getHttpProxyHost() != null) && (getHttpProxyPort() != null)
+}
+
 afterEvaluate { project ->
   uploadArchives {
     repositories {
@@ -37,9 +49,15 @@ afterEvaluate { project ->
 
         repository(url: getReleaseRepositoryUrl()) {
           authentication(userName: getRepositoryUsername(), password: getRepositoryPassword())
+          if (needProxy()) {
+            proxy(host: getHttpProxyHost(), port: getHttpProxyPort() as Integer, type: 'http')
+          }
         }
         snapshotRepository(url: getSnapshotRepositoryUrl()) {
           authentication(userName: getRepositoryUsername(), password: getRepositoryPassword())
+          if (needProxy()) {
+            proxy(host: getHttpProxyHost(), port: getHttpProxyPort() as Integer, type: 'http')
+          }
         }
 
         pom.project {

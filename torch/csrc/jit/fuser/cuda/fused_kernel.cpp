@@ -141,13 +141,16 @@ FusedKernelCUDA::FusedKernelCUDA(
 
   // Computes max blocks
 #ifdef __HIP_PLATFORM_HCC__
-  // XXX this is a temporary hack until the occupancy API is supported in ROCm
-  maxBlocks_ = 16 * prop_->multiProcessorCount;
+  // XXX HIP function signature is not compatible yet
+  uint32_t max_blocks;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+      &max_blocks, function_, 128, 0));
+  maxBlocks_ = max_blocks;
 #else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
-  maxBlocks_ *= prop_->multiProcessorCount;
 #endif
+maxBlocks_ *= prop_->multiProcessorCount;
 
   // Resets device (end of hacked at::DeviceGuard)
   at::cuda::set_device(prior_device);

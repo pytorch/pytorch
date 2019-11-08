@@ -130,7 +130,7 @@ PyObject* THPCppFunction_metadata(THPCppFunction *self, void *_unused)
   return metadata;
 }
 
-PyObject* THPCppFunction_requires_grad(THPCppFunction* self) {
+PyObject* THPCppFunction_requires_grad(THPCppFunction* self, void *unused) {
   Py_RETURN_TRUE;
 }
 
@@ -153,7 +153,7 @@ PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
   return registerFunctionHook(fn, hook);
 }
 
-PyObject* THPCppFunction_name(PyObject* self) {
+PyObject* THPCppFunction_name(PyObject* self, PyObject *noargs) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return THPUtils_packString(fn.name());
 }

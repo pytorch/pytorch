@@ -9,54 +9,55 @@ namespace dnnlowp {
 TensorQuantizationParams P99::ChooseQuantizationParams(
     const Histogram& hist,
     bool preserve_sparsity,
-    int /*precision*/) {
-  assert(preserve_sparsity); // only support preserve_sparsity
-
-  const std::vector<uint64_t> bins = *hist.GetHistogram();
-  int nbins = bins.size();
-  float min = hist.Min(), max = hist.Max();
-  assert(min <= 0.f);
-  assert(max >= 0.f);
+    int precision) {
+  float min, max;
+  std::vector<float> bins_f(
+      dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
+  int nbins = bins_f.size();
+  CAFFE_ENFORCE(min <= 0.f);
+  CAFFE_ENFORCE(max >= 0.f);
+  float org_max = max;
+  float org_min = min;
   float bin_width = (max - min) / nbins;
-  int zero_bin = ceil(-min / bin_width);
+  int zero_bin = round(-min / bin_width);
 
   int best_width = 0;
   double total_sum = 0;
   for (int i = 0; i < nbins; ++i) {
-    total_sum += bins[i];
+    total_sum += bins_f[i];
   }
-
-  for (int width = 0; width < nbins; ++width) {
-    int i_begin, i_end;
-    if (min == 0) {
-      i_begin = 0;
-      i_end = width - 1;
-    } else {
-      i_begin = std::max(0, zero_bin - width);
-      i_end = std::min(nbins - 1, zero_bin + width);
+  double sum = 0;
+  std::vector<double> CDF(nbins, 0.f);
+  for (int i = 0; i < nbins; ++i) {
+    sum += bins_f[i];
+    CDF[i] = (double)sum / total_sum;
+  }
+  CAFFE_ENFORCE(threshold_ > 0.5 && threshold_ < 1);
+  double left_quantile = (1.0f - threshold_) / 2.0f;
+  double right_quantile = 1.0f - left_quantile;
+  int i_begin = 0;
+  int i_end = nbins - 2;
+  bool finished = false;
+  while (i_begin <= i_end && !finished) {
+    finished = true;
+    if (CDF[i_begin] < left_quantile) {
+      i_begin++;
+      finished = false;
     }
-
-    double selected_sum = 0;
-    for (int i = i_begin; i <= i_end; ++i) {
-      selected_sum += bins[i];
-    }
-
-    if (selected_sum / total_sum >= 0.99) {
-      best_width = width;
-      break;
+    if (CDF[i_end] > right_quantile) {
+      finished = false;
+      i_end--;
     }
   }
+  min = i_begin * bin_width + org_min;
+  max = (i_end + 2) * bin_width + org_min;
 
-  if (min == 0) {
-    min = hist.Min();
-    max = hist.Min() + bin_width * best_width;
-  } else {
-    min = hist.Min() + bin_width * (zero_bin - best_width);
-    max = hist.Min() + bin_width * (zero_bin + best_width + 1);
-  }
+  VLOG(2) << "Org min " << org_min << " org max " << org_max << " found min "
+          << min << " max " << max;
 
   QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
-  return qfactory->ChooseQuantizationParams(min, max);
+  return qfactory->ChooseQuantizationParams(
+      min, max, precision, preserve_sparsity);
 } // ChooseQuantizationParams
 
 } // namespace dnnlowp

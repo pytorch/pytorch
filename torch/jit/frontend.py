@@ -7,6 +7,7 @@ import string
 from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
+from torch._utils_internal import get_source_lines_and_file
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -140,15 +141,16 @@ def _uses_true_division(fn):
 
 
 def get_jit_class_def(cls, self_name):
-    # Get defs for each method independently
+    # Get defs for each method within the current class independently
+    # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
-        cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
+        cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and m.__name__ in cls.__dict__)
+
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
-    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)
-    filename = inspect.getsourcefile(cls)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
@@ -157,9 +159,8 @@ def get_jit_class_def(cls, self_name):
 
 
 def get_jit_def(fn, self_name=None):
-    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(fn)
     source = ''.join(sourcelines)
-    filename = inspect.getsourcefile(fn)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
@@ -194,7 +195,8 @@ def build_class_def(ctx, py_def, methods, self_name):
 
 def build_def(ctx, py_def, type_line, self_name=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+    r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
+                       py_def.col_offset,
                        py_def.col_offset + len("def"))
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
@@ -246,6 +248,9 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
 
 
 def get_default_args(fn):
+    if fn is None:
+        return {}
+
     if PY2:
         argspec = inspect.getargspec(fn)
         if argspec.defaults is not None:

@@ -115,9 +115,8 @@ Tensor max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode) {
   if (self.is_quantized()) {
-    TORCH_CHECK(!ceil_mode, "Ceiling mode is not supported in quantized mode.")
     return at::quantized_max_pool2d(self, kernel_size, stride, padding,
-                                    dilation);
+                                    dilation, ceil_mode);
   }
   if (self.is_mkldnn()) {
     return at::mkldnn_max_pool2d(

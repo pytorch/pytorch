@@ -773,13 +773,12 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [var, nz, indices, grad, alpha],
                                    ftrl)
 
-    # TODO: (bddppq) test_unique keeps running into segfault on rocm 1.8.2
     @given(input=hu.tensor(max_value=20,
                            max_dim=1,
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs_no_hip)
+           **hu.gcs)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",
@@ -1639,13 +1638,13 @@ class TestOperators(hu.HypothesisTestCase):
         op = core.CreateOperator("Shape", ["data"], ["shape"], axes=axes)
         self.assertReferenceChecks(gc, op, [data, axes], shape_ref)
 
-    @given(data=hu.tensor(), **hu.gcs_cpu_only)
-    def test_has_elements(self, data, gc, dc):
-        op = core.CreateOperator("HasElements", ["data"], ["has_elements"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) > 0, ))
+    @given(x=hu.tensor(), y=hu.tensor(), **hu.gcs_cpu_only)
+    def test_has_elements(self, x, y, gc, dc):
+        op = core.CreateOperator("HasElements", ["x", "y"], ["has_elements"])
+        self.assertReferenceChecks(gc, op, [x, y], lambda x, y: (len(x) > 0 or len(y) > 0, ))
 
-        op = core.CreateOperator("IsEmpty", ["data"], ["is_empty"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) == 0, ))
+        op = core.CreateOperator("IsEmpty", ["x"], ["is_empty"])
+        self.assertReferenceChecks(gc, op, [x], lambda x: (len(x) == 0, ))
 
     @given(initial_iters=st.integers(0, 100),
            max_iters=st.integers(0, 100))

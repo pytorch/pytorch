@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define DECLARE_SGEMM_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_SGEMM_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(           \
       size_t mr,                                \
       size_t nr,                                \
@@ -29,10 +29,9 @@ extern "C" {
       size_t c_stride,                          \
       const struct pytorch_qnnp_fp32_clamping_params* clamping_params);
 
-DECLARE_SGEMM_UKERNEL_FUNCTION(sgemm_ukernel_5x8__neon)
-DECLARE_SGEMM_UKERNEL_FUNCTION(sgemm_ukernel_6x8__neon)
-
-DECLARE_SGEMM_UKERNEL_FUNCTION(sgemm_ukernel_6x8__psimd)
+DECLARE_PYTORCH_SGEMM_UKERNEL_FUNCTION(pytorch_sgemm_ukernel_5x8__neon)
+DECLARE_PYTORCH_SGEMM_UKERNEL_FUNCTION(pytorch_sgemm_ukernel_6x8__neon)
+DECLARE_PYTORCH_SGEMM_UKERNEL_FUNCTION(pytorch_sgemm_ukernel_6x8__psimd)
 
 #ifdef __cplusplus
 } /* extern "C" */

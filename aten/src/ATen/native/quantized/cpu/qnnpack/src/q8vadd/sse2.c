@@ -12,7 +12,7 @@
 #include <qnnpack/q8vadd.h>
 #include <qnnpack/scalar-utils.h>
 
-void q8vadd_ukernel__sse2(
+void pytorch_q8vadd_ukernel__sse2(
     size_t n,
     const uint8_t* a,
     const uint8_t* b,

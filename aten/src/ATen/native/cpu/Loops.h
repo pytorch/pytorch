@@ -42,13 +42,13 @@ namespace at { namespace native { namespace {
 
 using namespace vec256;
 
-template <typename traits, std::size_t... I>
+template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
-                 c10::guts::index_sequence<I...>) {
+                 c10::guts::index_sequence<INDEX...>) {
   return std::make_tuple(
-      *(typename traits::template arg<I>::type*)
-        (data[I] + i * strides[I])...);
+      *(typename traits::template arg<INDEX>::type*)
+        (data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename traits>
@@ -58,19 +58,19 @@ dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
   return dereference_impl<traits>(data, strides, i, Indices{});
 }
 
-template <typename traits, std::size_t... I>
+template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_vec_impl(char* C10_RESTRICT data[],
                      const typename traits::result_type& opt_scalar,
                      size_t S,
                      int64_t i,
-                     c10::guts::index_sequence<I...>) {
+                     c10::guts::index_sequence<INDEX...>) {
   using Vec = typename traits::result_type;
   using scalar_t = typename Vec::value_type;
   return std::make_tuple(
-      S == I + 1 ?
+      S == INDEX + 1 ?
       opt_scalar :
-      Vec::loadu(data[I] + i * sizeof(scalar_t))...);
+      Vec::loadu(data[INDEX] + i * sizeof(scalar_t))...);
 }
 
 template <typename traits>
@@ -80,13 +80,40 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
+template <typename func_t,
+    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+static inline void
+execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
+  using traits = function_traits<func_t>;
+  using result_type = typename traits::result_type;
+  for (; i < n; i++) {
+    result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
+    *out_ptr = c10::guts::apply(op, dereference<traits>(
+        &data[1],
+        &strides[1],
+        i));
+  }
+}
+
+template <typename func_t,
+    typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+static inline void
+execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
+  using traits = function_traits<func_t>;
+  for (; i < n; i++) {
+    c10::guts::apply(op, dereference<traits>(
+        &data[0],
+        &strides[0],
+        i));
+  }
+}
+
 // Basic loop operation (one output, N inputs). May be auto-vectorized
 // by the compiler. Supports inputs and outputs of different types.
 template <typename func_t>
 static inline void
 basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t op) {
   using traits = function_traits<func_t>;
-  using result_type = typename traits::result_type;
   constexpr int ntensors = traits::arity + 1;
 
   // Copying strides to temporary array helps auto vectorization in older GCC
@@ -96,13 +123,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
     strides[arg] = strides_[arg];
   }
 
-  for (; i < n; i++) {
-    result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
-    *out_ptr = c10::guts::apply(op, dereference<traits>(
-      &data[1],
-      &strides[1],
-      i));
-  }
+  execute_op(data, strides, i, n, op);
 }
 
 // Explicitly vectorized loop implementation. All inputs and outputs must be
@@ -150,15 +171,15 @@ static inline void unroll_contiguous_scalar_checks(
   cb(0);
 }
 
-template <typename traits, typename cb_t, size_t I0, size_t ...I>
+template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
 static inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
-    c10::guts::index_sequence<I0, I...>,
+    c10::guts::index_sequence<INDEX0, INDEX...>,
     const cb_t& cb) {
-  if (is_contiguous_scalar<traits, I0 + 1>(strides)) {
-    cb(I0 + 1);
+  if (is_contiguous_scalar<traits, INDEX0 + 1>(strides)) {
+    cb(INDEX0 + 1);
   } else {
-    unroll_contiguous_scalar_checks<traits>(strides, c10::guts::index_sequence<I...>{}, cb);
+    unroll_contiguous_scalar_checks<traits>(strides, c10::guts::index_sequence<INDEX...>{}, cb);
   }
 }
 
@@ -205,7 +226,8 @@ void cpu_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
 template <typename func_t>
 void cpu_serial_kernel(TensorIterator& iter, func_t op) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  TORCH_INTERNAL_ASSERT((std::is_void<typename traits::result_type>::value &&
+    iter.noutputs() == 0 && iter.ntensors() == traits::arity) || (iter.ntensors() >= traits::arity + 1));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
@@ -217,6 +239,7 @@ void cpu_serial_kernel(TensorIterator& iter, func_t op) {
       });
     }
   }, {0, iter.numel()});
+  iter.cast_outputs();
 }
 
 }}}  // namespace at::native::<anonymous>

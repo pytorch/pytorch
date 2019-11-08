@@ -10,8 +10,12 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/ThreadLocalDebugInfo.h>
 #include <c10/util/Exception.h>
+#include <c10/core/Stream.h>
+#include <c10/core/Event.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/util/Optional.h>
+#include <c10/core/StreamGuard.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -30,9 +34,6 @@
 #include <TH/TH.h>
 
 namespace torch { namespace autograd {
-
-// NB: -1 indicates the CPU worker!
-static constexpr int NO_DEVICE = -2;
 
 // Threads spawned by the engine are assigned a constant 'worker_device'
 // specifying what device they process work for.  This variable is initialized
@@ -56,26 +57,6 @@ static thread_local bool checkpoint_valid = true;
 static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
-
-struct NodeTask {
-  GraphTask* base_;
-  std::shared_ptr<Node> fn_;
-  // This buffer serves as an implicit "addition" node for all of the
-  // gradients flowing here.  Once all the dependencies are finished, we
-  // use the contents of this buffer to run the function.
-  InputBuffer inputs_;
-  // When worker receives a task with isShutdownTask = true, it will immediately
-  // exit. The engine sends a shutdown task to every queue upon its destruction.
-  bool isShutdownTask_;
-
-  int getReentrantDepth() const;
-
-  NodeTask(GraphTask* base, std::shared_ptr<Node> fn, InputBuffer inputs, bool isShutdownTask = false)
-    : base_(base)
-    , fn_(std::move(fn))
-    , inputs_(std::move(inputs))
-    , isShutdownTask_(isShutdownTask) {}
-};
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 // Shutdown tasks are first and then empty NodeTask are next.
@@ -102,7 +83,11 @@ struct ReadyQueue {
   // To protect read and writes to heap_
   std::mutex mutex_;
 
-  void push(NodeTask item);
+  // incrementOutstandingTasks indicates whether or not we should increment
+  // 'outstanding_tasks_' for the associated GraphTask. This should mostly
+  // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
+  // might set this to false.
+  void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
 };
@@ -137,82 +122,50 @@ struct ReadyQueue {
 // When the GraphTask is finished, the parent worker thread that is waiting on
 // the task is notified and the current thread returns to the pool.
 
-// GraphTask holds metadata needed for a single execution of backward()
-struct GraphTask {
-  std::exception_ptr exception_;
-  // Indicates if an error occurred while executing any task.  When this is
-  // true, it signals all threads to stop executing.
-  std::atomic_bool has_error_;
-  std::atomic<uint64_t> outstanding_tasks_;
-  // It is safe to read grad_mode_ and keep_graph_ without synchronization
-  bool keep_graph_;
-  bool grad_mode_;
-
-  // To protect reads/writes to no_ready_, dependencies_ , captured_vars_ and
-  // exception_
-  std::mutex mutex_;
-  // Notified when a task finishes executing.  Check outstanding_tasks_ to see
-  // if all tasks are done.
-  std::condition_variable not_done_;
-  std::unordered_map<Node*, InputBuffer> not_ready_;
-  std::unordered_map<Node*, int> dependencies_;
-
-  struct ExecInfo {
-    struct Capture {
-      Capture(int input_idx, int output_idx) : input_idx_(input_idx), output_idx_(output_idx) {}
-      int input_idx_; // within Node inputs
-      int output_idx_; // within the output vector of a GraphTask
-    };
-
-    bool should_execute() const {
-      return needed_ || captures_;
-    }
-
-    bool needed_ = false;
-    std::unique_ptr<std::vector<Capture>> captures_;
-  };
-  // Exec info has a bit complicated semantics. If it's empty, it means the task is
-  // run in a "default" mode, which means that all next_edges we encounter should
-  // get executed. If it's not empty, only functions that have an entry and this entry
-  // has needed == True should be executed.
-  // exec_info_.empty() means it's .backward(), otherwise it's .grad().
-  // exec_info_ is safe to read without synchronization
-  std::unordered_map<Node*, ExecInfo> exec_info_;
-  std::vector<Variable> captured_vars_;
-  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
-      at::getThreadLocalDebugInfo();
-
-  void init_to_execute(Node& graph_root, const edge_list& outputs);
-
-  // The value of worker_device in the thread that created this task.
-  // See Note [Reentrant backwards]
-  // Safe to read owner_ and reentrant_depth_ without synchronizaton
-  int owner_;
-  // The number of parent graph tasks for this graph task
-  const int reentrant_depth_;
-
-  bool can_checkpoint() {
-    return exec_info_.empty();
-  }
-
-  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth)
-    : has_error_(false)
-    , outstanding_tasks_(0)
-    , keep_graph_(keep_graph)
-    , grad_mode_(grad_mode)
-    , owner_(NO_DEVICE)
-    , reentrant_depth_(reentrant_depth) {}
-};
+// Note [Streaming backwards]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+// On CUDA devices the autograd engine's device operations are run on the
+// same stream that ran them in forward. This requires automatically
+// syncing the streams so that function A finishes producing its
+// output before function B consumes it.
+//
+// This synchronization occurs when outputs are placed into input buffers.
+// The functions corresponding to input buffer positions have metadata
+// recording their streams from forward, and during backward this
+// data is used to sync the producer's stream with the consumer's.
+//
+// When a CUDA function is run either all its inputs were accumulated on the
+// stream used to run the function OR the inputs are on different devices
+// and the function is responsible for properly acquiring them.
+//
+// Historically, the autograd engine ran all CUDA operations on their
+// device's DEFAULT stream. This meant that syncing (implicitly or
+// explicitly) with the default streams was required before and after
+// calling backward(). It also meant, however, that syncing with
+// the default streams after backward() was sufficient to ensure
+// that backward() had finished running. To preserve this historic
+// behavior the engine records "leaf streams," the streams of the
+// leaf variables, and syncs them with their device's default stream
+// at the end of backward. All other streams are already synchronized
+// to happen before at least one leaf stream (per the above), so syncing
+// the leaf streams with the default streams is sufficient to implement
+// the historic behavior.
 
 int NodeTask::getReentrantDepth() const {
-  return base_->reentrant_depth_;
+  std::shared_ptr<GraphTask> graph_task = base_.lock();
+  TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!")
+  return graph_task->reentrant_depth_;
 }
 
-auto ReadyQueue::push(NodeTask item) -> void {
+auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
   {
     // Lock mutex for writing to heap_
     std::lock_guard<std::mutex> lock(mutex_);
-    ++item.base_->outstanding_tasks_;
+    if (incrementOutstandingTasks) {
+      std::shared_ptr<GraphTask> graph_task = item.base_.lock();
+      TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!");
+      ++graph_task->outstanding_tasks_;
+    }
     heap_.push(std::move(item));
   }
   not_empty_.notify_one();
@@ -221,7 +174,7 @@ auto ReadyQueue::push(NodeTask item) -> void {
 auto ReadyQueue::pushShutdownTask() -> void {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    heap_.push(NodeTask(nullptr, nullptr, InputBuffer(0), true));
+    heap_.push(NodeTask({}, nullptr, InputBuffer(0), true));
   }
   not_empty_.notify_one();
 }
@@ -295,7 +248,8 @@ auto Engine::thread_init(int device) -> void {
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
   set_device(device);
-  thread_main(nullptr);
+  std::shared_ptr<GraphTask> graph_task = nullptr;
+  thread_main(graph_task, /* reentrant_thread */ false);
 }
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
@@ -312,11 +266,17 @@ auto Engine::thread_init(int device) -> void {
 // completely unrelated to that of Eval1 (it's not a recursive call).
 // It's all ok and is handled right now, but it should be accounted for
 // in case this code is to be changed.
-auto Engine::thread_main(GraphTask *graph_task) -> void {
+auto Engine::thread_main(
+    const std::shared_ptr<GraphTask>& graph_task,
+    bool reentrant_thread) -> void {
+  // Either reentrant_thread should be false or we should pass in a non-null
+  // graph_task.
+  TORCH_INTERNAL_ASSERT(reentrant_thread != (graph_task == nullptr));
+
   auto queue = ready_queues_[worker_device + 1];
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
-  while (!graph_task || graph_task->outstanding_tasks_ > 0) {
+  while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
     NodeTask task = queue->pop();
     // This will only work if the worker is running a non backward task
     // TODO Needs to be fixed this to work in all cases
@@ -324,39 +284,54 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
       C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
       break;
     }
-    if (task.fn_ && !task.base_->has_error_.load()) {
-      GradMode::set_enabled(task.base_->grad_mode_);
+
+    // local_graph_task represents the graph_task we retrieve from the queue.
+    // The outer graph_task represents the overall graph_task we need to execute
+    // for reentrant execution.
+    std::shared_ptr<GraphTask> local_graph_task;
+    if (!(local_graph_task = task.base_.lock())) {
+      // Reentrant thread's graph task should not expire since we hold a
+      // reference to it in this method.
+      TORCH_INTERNAL_ASSERT(!reentrant_thread);
+      LOG(INFO) << "GraphTask for function " << task.fn_->name()
+                << " is no longer valid, skipping execution";
+      continue;
+    }
+
+    if (task.fn_ && !local_graph_task->has_error_.load()) {
+      GradMode::set_enabled(local_graph_task->grad_mode_);
       try {
-        evaluate_function(task);
+        evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
       } catch (std::exception& e) {
-        thread_on_exception(task, e);
+        thread_on_exception(local_graph_task, task.fn_, e);
       }
     }
     // Notify downstream about the completion of tasks depending
     // on both where the task was executed, and who owned the overall
     // graph (in case of reentrant execution.)  See Note [Reentrant backwards].
-    auto base_owner = task.base_->owner_;
+    auto base_owner = local_graph_task->owner_;
     // Task from a non-worker thread. Easy case.
     if (base_owner == NO_DEVICE) {
-      if (--task.base_->outstanding_tasks_ == 0) {
+      if (--local_graph_task->outstanding_tasks_ == 0) {
         // Lock mutex to notify the GraphTask waiting on not_done_
-        std::lock_guard<std::mutex> lock(task.base_->mutex_);
-        task.base_->not_done_.notify_all();
+        std::lock_guard<std::mutex> lock(local_graph_task->mutex_);
+        local_graph_task->not_done_.notify_all();
       }
     } else {
       // If it's a task initiated from this thread, decrease the counter, but
       // don't do anything - loop condition will do all checks for us next.
       if (base_owner == worker_device) {
-        --task.base_->outstanding_tasks_;
-      // Otherwise send a dummy function task to the owning thread just to
-      // ensure that it's not sleeping. If it has work, it might see that
-      // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
-      // it's a no-op anyway.
+        --local_graph_task->outstanding_tasks_;
+        // Otherwise send a dummy function task to the owning thread just to
+        // ensure that it's not sleeping. If it has work, it might see that
+        // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
+        // it's a no-op anyway.
       } else if (base_owner != worker_device) {
-        if (--task.base_->outstanding_tasks_ == 0) {
+        if (--local_graph_task->outstanding_tasks_ == 0) {
           // Synchronize outstanding_tasks_ with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
-          ready_queue_by_index(base_owner).push(NodeTask(task.base_, nullptr, InputBuffer(0)));
+          ready_queue_by_index(base_owner)
+              .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
         }
       }
     }
@@ -368,7 +343,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   // a thread which is at its maximum stack depth and they keep exiting right
   // after. We will always switch to a new thread for each call, so, we'll keep
   // oscillating between the two threads.
-  if (graph_task && current_depth == 0) {
+  if (reentrant_thread && current_depth == 0) {
     graph_task->not_done_.notify_all();
   }
 }
@@ -381,24 +356,44 @@ void Engine::reentrant_thread_init() {
     ++thread_pool_shared_->num_workers_;
     tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
     --thread_pool_shared_->num_workers_;
-    auto graph_task = tp_shared->graphtasks_queue_.front();
+    auto task = tp_shared->graphtasks_queue_.front();
     tp_shared->graphtasks_queue_.pop();
     lk.unlock();
+    std::shared_ptr<GraphTask> graph_task;
+    if (!(graph_task = task.lock())) {
+      LOG(INFO) << "GraphTask has expired, skipping reentrant execution";
+      continue;
+    }
     set_device(graph_task->owner_);
     total_depth = graph_task->reentrant_depth_;
-    thread_main(graph_task);
+    thread_main(graph_task, /* reentrant thread*/ true);
   }
 }
 
-auto Engine::thread_on_exception(NodeTask& task, std::exception& e) -> void {
-  // Lock mutex for writing to task.base_->exception_
-  std::lock_guard<std::mutex> lock(task.base_->mutex_);
-  if (!task.base_->has_error_.load()) {
-    if (AnomalyMode::is_enabled()) {
-      task.fn_->metadata()->print_stack();
+void Engine::thread_on_exception(
+    std::shared_ptr<GraphTask>& graph_task,
+    const std::shared_ptr<Node>& fn,
+    std::exception& e) {
+  // Use std::current_exception() instead of passed in exception to get the
+  // appropriate exception_ptr.
+  graph_task->set_exception(std::current_exception(), fn);
+}
+
+void GraphTask::set_exception(
+    std::exception_ptr eptr,
+    const std::shared_ptr<Node>& fn) {
+  // Lock mutex for writing to exception_
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!has_error_.load()) {
+    if (AnomalyMode::is_enabled() && fn) {
+      fn->metadata()->print_stack();
     }
-    task.base_->exception_ = std::current_exception();
-    task.base_->has_error_ = true;
+    exception_ = std::move(eptr);
+    has_error_ = true;
+    if (exit_on_error_) {
+      // Notify other threads if we are supposed to exit on errors.
+      not_done_.notify_all();
+    }
   }
 }
 
@@ -423,8 +418,10 @@ static bool is_compatible_type(const at::DeprecatedTypeProperties& expected, con
       expected == actual.toBackend(toDense(actual.backend())));
 }
 
-template<typename F>
-static void validate_outputs(const edge_list& edges, variable_list& grads, const F& format_error) {
+void validate_outputs(
+    const edge_list& edges,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error) {
   if (grads.size() != edges.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
@@ -474,13 +471,18 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
   }
 }
 
-static variable_list call_function(NodeTask& task) {
+static variable_list call_function(
+    std::shared_ptr<GraphTask>& graph_task,
+    Node* func,
+    InputBuffer& inputBuffer) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
-  checkpoint_valid = task.base_->can_checkpoint() && prev_checkpoint_valid_state;
-  auto& fn = *task.fn_;
-  auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs_)));
+  checkpoint_valid =
+      graph_task->can_checkpoint() && prev_checkpoint_valid_state;
+  auto& fn = *func;
+  auto inputs =
+      call_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
 
-  if(!task.base_->keep_graph_) {
+  if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }
 
@@ -488,7 +490,7 @@ static variable_list call_function(NodeTask& task) {
   variable_list outputs;
 
   {
-    at::DebugInfoGuard guard(task.base_->debug_info_);
+    at::DebugInfoGuard guard(graph_task->debug_info_);
     if (has_post_hooks) {
       // In functions/accumulate_grad.cpp, there is some logic to check the
       // conditions under which the incoming gradient can be stolen directly
@@ -526,30 +528,48 @@ static variable_list call_function(NodeTask& task) {
   return outputs;
 }
 
-auto Engine::evaluate_function(NodeTask& task) -> void {
+void Engine::evaluate_function(
+    std::shared_ptr<GraphTask>& graph_task,
+    Node* func,
+    InputBuffer& inputs) {
   // If exec_info_ is not empty, we have to instrument the execution
-  auto & exec_info_ = task.base_->exec_info_;
+  auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
-    auto & fn_info = exec_info_.at(task.fn_.get());
-    if (auto *capture_vec = fn_info.captures_.get()) {
-      // Lock mutex for writing to task.base_->captured_vars_
-      std::lock_guard<std::mutex> lock(task.base_->mutex_);
+    auto& fn_info = exec_info_.at(func);
+    if (auto* capture_vec = fn_info.captures_.get()) {
+      // Lock mutex for writing to graph_task->captured_vars_.
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (auto capture : *capture_vec) {
-        task.base_->captured_vars_[capture.output_idx_] = task.inputs_[capture.input_idx_];
+        graph_task->captured_vars_[capture.output_idx_] =
+            inputs[capture.input_idx_];
       }
     }
-    if (!fn_info.needed_) return;
+    if (!fn_info.needed_) {
+      // Skip execution if we don't need to execute the function.
+      return;
+    }
   }
 
-  auto outputs = call_function(task);
+  // Switches to a function's CUDA stream (if applicable) before calling it
+  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
-  auto& fn = *task.fn_;
-  if (!task.base_->keep_graph_) {
+  auto outputs = call_function(graph_task, func, inputs);
+
+  auto& fn = *func;
+  if (!graph_task->keep_graph_) {
     fn.release_variables();
   }
 
   int num_outputs = outputs.size();
-  if (num_outputs == 0) return; // Don't even acquire the mutex
+  if (num_outputs == 0) { // Note: doesn't acquire the mutex
+    // Records leaf stream (if applicable)
+    // See note "Streaming backwards"
+    if (opt_parent_stream) {
+      graph_task->leaf_streams.emplace(*opt_parent_stream);
+    }
+    return;
+  }
 
   if (AnomalyMode::is_enabled()) {
     AutoGradMode grad_mode(false);
@@ -565,7 +585,7 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
   }
 
   // Lock mutex for the accesses to GraphTask dependencies_ and not_ready_ below
-  std::lock_guard<std::mutex> lock(task.base_->mutex_);
+  std::lock_guard<std::mutex> lock(graph_task->mutex_);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
     const auto& next = fn.next_edge(i);
@@ -574,8 +594,9 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
 
     // Check if the next function is ready to be computed
     bool is_ready = false;
-    auto& dependencies = task.base_->dependencies_;
+    auto& dependencies = graph_task->dependencies_;
     auto it = dependencies.find(next.function.get());
+
     if (it == dependencies.end()) {
       auto name = next.function->name();
       throw std::runtime_error(std::string("dependency not found for ") + name);
@@ -584,7 +605,7 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
       is_ready = true;
     }
 
-    auto& not_ready = task.base_->not_ready_;
+    auto& not_ready = graph_task->not_ready_;
     auto not_ready_it = not_ready.find(next.function.get());
     if (not_ready_it == not_ready.end()) {
       // Skip functions that aren't supposed to be executed
@@ -596,20 +617,35 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
       }
       // No buffers have been allocated for the function
       InputBuffer input_buffer(next.function->num_inputs());
-      input_buffer.add(next.input_nr, std::move(output));
+
+      // Accumulates into buffer
+      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      input_buffer.add(next.input_nr,
+                       std::move(output),
+                       opt_parent_stream,
+                       opt_next_stream);
+
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
+        queue.push(
+            NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
         not_ready.emplace(next.function.get(), std::move(input_buffer));
       }
     } else {
       // The function already has a buffer
       auto &input_buffer = not_ready_it->second;
-      input_buffer.add(next.input_nr, std::move(output));
+
+      // Accumulates into buffer
+      const auto opt_next_stream = next.function->stream(c10::DeviceType::CUDA);
+      input_buffer.add(next.input_nr,
+                       std::move(output),
+                       opt_parent_stream,
+                       opt_next_stream);
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(NodeTask(task.base_, next.function, std::move(input_buffer)));
+        queue.push(
+            NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
       }
     }
@@ -658,8 +694,6 @@ auto Engine::execute(const edge_list& roots,
                      bool keep_graph,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
-  std::call_once(start_threads_flag_, &Engine::start_threads, this);
-
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
@@ -669,51 +703,73 @@ auto Engine::execute(const edge_list& roots,
   // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
-  GraphTask graph_task(keep_graph, create_graph, worker_device == NO_DEVICE ? 0 : total_depth+1);
-  // Lock mutex while GraphTask is being set up
-  std::unique_lock<std::mutex> lock(graph_task.mutex_);
+  auto graph_task = std::make_shared<GraphTask>(
+      keep_graph,
+      create_graph,
+      worker_device == NO_DEVICE ? 0 : total_depth + 1);
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
-  compute_dependencies(graph_root.get(), graph_task);
+  compute_dependencies(graph_root.get(), *graph_task);
+
   if (!outputs.empty()) {
-    graph_task.init_to_execute(*graph_root, outputs);
+    graph_task->init_to_execute(*graph_root, outputs);
   }
-  ready_queue(at::kCPU).push(NodeTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  return execute_with_graph_task(graph_task, graph_root);
+}
+
+void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
+  std::call_once(start_threads_flag_, &Engine::start_threads, this);
+  ready_queue(at::kCPU).push(
+      std::move(task), /* incrementOutstandingTasks */ false);
+}
+
+bool graph_task_completed(const GraphTask& graph_task) {
+  return graph_task.outstanding_tasks_.load() == 0 ||
+      (graph_task.exit_on_error_ && graph_task.has_error_.load());
+}
+
+variable_list Engine::execute_with_graph_task(
+    std::shared_ptr<GraphTask> graph_task,
+    std::shared_ptr<Node> graph_root) {
+  std::call_once(start_threads_flag_, &Engine::start_threads, this);
+  // Lock mutex for GraphTask.
+  std::unique_lock<std::mutex> lock(graph_task->mutex_);
+
+  ready_queue(at::kCPU).push(
+      NodeTask(graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
     // Wait for all tasks to complete
-    graph_task.not_done_.wait(lock, [&graph_task]{
-      return graph_task.outstanding_tasks_.load() == 0;
-    });
+    graph_task->not_done_.wait(
+        lock, [&graph_task] { return graph_task_completed(*graph_task); });
   } else {
-    graph_task.owner_ = worker_device;
+    graph_task->owner_ = worker_device;
     ++total_depth;
     if(current_depth >= max_recursion_depth_){
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
-      add_thread_pool_task(&graph_task);
-      graph_task.not_done_.wait(lock, [&graph_task]{
-        return graph_task.outstanding_tasks_.load() == 0;
-      });
+      add_thread_pool_task(graph_task);
+      graph_task->not_done_.wait(
+          lock, [&graph_task] { return graph_task_completed(*graph_task); });
     } else {
       // Get back to work while we wait for our new graph_task to
       // complete!
       ++current_depth;
       lock.unlock();
-      thread_main(&graph_task);
+      thread_main(graph_task, /* reentrant_thread */ true);
       --current_depth;
     }
     --total_depth;
   }
 
   // Check for an exception while running backwards
-  if (graph_task.has_error_.load()) {
-    std::rethrow_exception(graph_task.exception_);
+  if (graph_task->has_error_.load()) {
+    std::rethrow_exception(graph_task->exception_);
   }
 
-  if (!graph_task.not_ready_.empty()) {
+  if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
   }
 
@@ -731,7 +787,19 @@ auto Engine::execute(const edge_list& roots,
     cb_lock.lock();
   }
 
-  return graph_task.captured_vars_;
+  // Syncs leaf streams with default streams (if necessary)
+  // See note "Streaming backwards"
+  for (const auto& leaf_stream : graph_task->leaf_streams) {
+    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+    const auto default_stream = guard.getDefaultStream(leaf_stream.device());
+    if (leaf_stream != default_stream) {
+      auto event = c10::Event{c10::DeviceType::CUDA};
+      event.record(leaf_stream);
+      default_stream.wait(event);
+    }
+  }
+
+  return graph_task->captured_vars_;
 }
 
 // note that when python is present, this base engine will be overriden
@@ -803,7 +871,7 @@ auto Engine::start_threads() -> void {
   }
 }
 
-void Engine::add_thread_pool_task(GraphTask *graph_task) {
+void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
   // threads but not enough workers to get to the the new task that will be

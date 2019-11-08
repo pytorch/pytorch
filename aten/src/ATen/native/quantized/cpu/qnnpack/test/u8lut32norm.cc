@@ -13,36 +13,36 @@
 #include "lut-norm-microkernel-tester.h"
 
 TEST(U8LUT32NORM__SCALAR, n_eq_1) {
-  LUTNormMicrokernelTester().n(1).test(u8lut32norm_ukernel__scalar);
+  LUTNormMicrokernelTester().n(1).test(pytorch_u8lut32norm_ukernel__scalar);
 }
 
 TEST(U8LUT32NORM__SCALAR, small_n) {
   for (size_t n = 2; n <= 16; n++) {
-    LUTNormMicrokernelTester().n(n).test(u8lut32norm_ukernel__scalar);
+    LUTNormMicrokernelTester().n(n).test(pytorch_u8lut32norm_ukernel__scalar);
   }
 }
 
 TEST(U8LUT32NORM__SCALAR, large_n) {
   for (size_t n = 16; n <= 128; n += 2) {
-    LUTNormMicrokernelTester().n(n).test(u8lut32norm_ukernel__scalar);
+    LUTNormMicrokernelTester().n(n).test(pytorch_u8lut32norm_ukernel__scalar);
   }
 }
 
 TEST(U8LUT32NORM__SCALAR, n_eq_1_inplace) {
   LUTNormMicrokernelTester().n(1).inplace(true).test(
-      u8lut32norm_ukernel__scalar);
+      pytorch_u8lut32norm_ukernel__scalar);
 }
 
 TEST(U8LUT32NORM__SCALAR, small_n_inplace) {
   for (size_t n = 2; n <= 16; n++) {
     LUTNormMicrokernelTester().n(n).inplace(true).test(
-        u8lut32norm_ukernel__scalar);
+        pytorch_u8lut32norm_ukernel__scalar);
   }
 }
 
 TEST(U8LUT32NORM__SCALAR, large_n_inplace) {
   for (size_t n = 16; n <= 128; n += 2) {
     LUTNormMicrokernelTester().n(n).inplace(true).test(
-        u8lut32norm_ukernel__scalar);
+        pytorch_u8lut32norm_ukernel__scalar);
   }
 }

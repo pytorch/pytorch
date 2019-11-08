@@ -11,14 +11,21 @@ android {
 
         sourceSets {
             main {
-                manifest.srcFile '../fbjni/ApplicationManifest.xml'
+                manifest.srcFile '../fbjni/java/com/facebook/jni/AndroidManifest.xml'
                 java {
                     srcDir '../fbjni/java'
                 }
             }
         }
     }
-
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+        }
+    }
     externalNativeBuild {
         cmake {
             path "../fbjni/CMakeLists.txt"
@@ -28,6 +35,14 @@ android {
 
 dependencies {
     compileOnly 'com.google.code.findbugs:jsr305:3.0.1'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
 }
 
 apply from: rootProject.file('gradle/release.gradle')
+
+task sourcesJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier = 'sources'
+}
+
+artifacts.add('archives', sourcesJar)

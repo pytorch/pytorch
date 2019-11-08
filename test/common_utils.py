@@ -22,7 +22,7 @@ import subprocess
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from functools import wraps, partial
+from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
@@ -32,7 +32,6 @@ import __main__
 import errno
 
 import expecttest
-import hashlib
 
 import torch
 import torch.cuda
@@ -42,8 +41,7 @@ import torch.backends.cudnn
 import torch.backends.mkl
 
 
-torch.set_default_tensor_type('torch.DoubleTensor')
-torch.backends.cudnn.disable_global_flags()
+torch.backends.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -90,6 +88,25 @@ def shell(command, cwd=None):
         # Always call p.wait() to ensure exit
         p.wait()
 
+ALL_TENSORTYPES = [torch.float,
+                   torch.double,
+                   torch.half]
+
+# Used to run the same test with different tensor types
+def repeat_test_for_types(dtypes):
+    def repeat_helper(f):
+        @wraps(f)
+        def call_helper(self, *args):
+            for dtype in dtypes:
+                if PY34:
+                    with TestCase.subTest(self, dtype=dtype):
+                        f(self, *args, dtype=dtype)
+                else:
+                    f(self, *args, dtype=dtype)
+
+        return call_helper
+    return repeat_helper
+
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
@@ -120,6 +137,7 @@ PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
@@ -184,7 +202,6 @@ TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -208,57 +225,31 @@ def skipIfRocm(fn):
     return wrapper
 
 
+def skipIfCompiledWithoutNumpy(fn):
+    # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
+    # build, numpy tests will fail
+    numpy_support = TEST_NUMPY
+    if numpy_support:
+        try:
+            # The numpy module is present, verify that PyTorch is compiled with
+            # numpy support
+            torch.from_numpy(numpy.array([2, 2]))
+        except RuntimeError:
+            numpy_support = False
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not numpy_support:
+            raise unittest.SkipTest("PyTorch was compiled without numpy support")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 
 def _test_function(fn, device):
     def run_test_function(self):
         return fn(self, device)
     return run_test_function
-
-
-class torchtest():
-    """Allows to generate and run per-device unittests.
-
-    This decorator class allows to generate and run per-device unittest.
-
-    Example:
-
-    class _TestTorchMixin(torchtest):
-
-        @torchtest.for_all_device_types()
-        def test_zeros_like(self, device):
-            expected = torch.zeros((100, 100,), device=device)
-
-    Will execute:
-
-        test_zeros_like (__main__.TestTorch) ... skipped 'Look at test_zeros_like_cpu, test_zeros_like_cuda results.'
-        test_zeros_like_cpu (__main__.TestTorch) ... ok
-        test_zeros_like_cuda (__main__.TestTorch) ... ok
-
-    To work properly, test class should be inherited from `torchtest`.
-    for_all_device_types decorator does not guarantee proper functionality in
-    combination with other decorators.
-
-    Please do not extend this decorator to support other cases (such as dtype,
-    layouts, etc) without consulting with bigger group. Devices is the special
-    case as build flags control additions/removals (see
-    https://github.com/pytorch/pytorch/pull/23824 for the reference).
-    """
-    @classmethod
-    def for_all_device_types(cls):
-        def wrapper(fn):
-            test_names = []
-
-            for device in torch.testing.get_all_device_types():
-                test_name = fn.__name__ + '_' + device
-                assert not hasattr(cls, test_name), "Duplicated test name: " + test_name
-                setattr(cls, test_name, _test_function(fn, device))
-                test_names.append(test_name)
-
-            @wraps(fn)
-            def empty_test(*args, **kwargs):
-                raise unittest.SkipTest("Look at {} results.".format(", ".join(test_names)))
-            return empty_test
-        return wrapper
 
 
 def skipIfNoLapack(fn):
@@ -471,14 +462,14 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                verbosity=hypothesis.Verbosity.verbose))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=10,
-                verbosity=hypothesis.Verbosity.verbose))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "debug",
             hypothesis.settings(
@@ -495,7 +486,7 @@ try:
                 database=None,
                 max_examples=100,
                 min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.verbose))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -503,7 +494,7 @@ try:
                 database=None,
                 max_examples=10,
                 min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.verbose))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "debug",
             hypothesis.settings(
@@ -513,10 +504,10 @@ try:
                 min_satisfying_examples=1,
                 verbosity=hypothesis.Verbosity.verbose))
 
-        hypothesis.settings.load_profile(
-            "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                         'dev')
-        )
+    hypothesis.settings.load_profile(
+        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
+                                                     'dev')
+    )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
@@ -538,7 +529,7 @@ class TestCase(expecttest.TestCase):
 
         # Wraps the tested method if we should enforce non default CUDA stream.
         self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+        if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
             self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
@@ -723,11 +714,21 @@ class TestCase(expecttest.TestCase):
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
                                  message=message, allow_inf=allow_inf)
-                self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
-                self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                 prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                if x.qscheme() == torch.per_tensor_affine:
+                    self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_zero_point(), y.q_zero_point(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                elif x.qscheme() == torch.per_channel_affine:
+                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
+                                     prec=prec, message=message)
+                self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),
                                  y.int_repr().to(torch.int32), prec=prec,
                                  message=message, allow_inf=allow_inf)
@@ -988,7 +989,6 @@ class TestCase(expecttest.TestCase):
         assertNotRegex = unittest.TestCase.assertNotRegexpMatches
 
 
-
 def download_file(url, binary=True):
     if sys.version_info < (3,):
         from urlparse import urlsplit
@@ -1052,9 +1052,9 @@ def prod_single_zero(dim_size):
     return result
 
 
-def random_square_matrix_of_rank(l, rank):
+def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
-    A = torch.randn(l, l)
+    A = torch.randn(l, l, dtype=dtype, device=device)
     u, s, v = A.svd()
     for i in range(l):
         if i >= rank:
@@ -1064,20 +1064,28 @@ def random_square_matrix_of_rank(l, rank):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l, *batches):
-    A = torch.randn(*(batches + (l, l)))
+def random_symmetric_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l, *batches):
-    A = torch.randn(*(batches + (l, l)))
+def random_symmetric_psd_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1))
 
 
-def random_symmetric_pd_matrix(l, *batches):
-    A = torch.randn(*(batches + (l, l)))
-    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(l) * 1e-5
+def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
+                    dtype=dtype, device=device)
+    return torch.matmul(A, A.transpose(-2, -1)) \
+        + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -1098,40 +1106,42 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **kwargs):
+def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
+                                                   **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
-        return torch.ones(matrix_size, matrix_size)
+        return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
 
-    A = torch.randn(batch_dims + (matrix_size, matrix_size))
+    A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
     u, _, v = A.svd()
-    s = torch.arange(1., matrix_size + 1).mul_(1.0 / (matrix_size + 1)).diag()
+    s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
     return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
 
 
-def random_linalg_solve_processed_inputs(A_dims, b_dims, gen_fn, transform_fn, cast_fn):
-    """
-    For solve methods, this returns the following values:
-    RHS tensor: generated using torch.randn
-    LHS tensor: generated using gen_fn
-    Transformed LHS tensor(s): returned after calling transform_fn.
-                               This can be a tuple or a single tensor depending on transform_fn
-                               For instance, if transform_fn == torch.cholesky, then the return value
-                               is a single tensor. If transform_fn == torch.lu, then the return value
-                               is a tuple of tensors
-    """
-    RHS = cast_fn(torch.randn(*b_dims))
-    LHS = cast_fn(gen_fn(*A_dims))
-    transformed_LHS = transform_fn(LHS)
-    return RHS, LHS, transformed_LHS
+def random_matrix(rows, columns, *batch_dims, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    silent = kwargs.get("silent", False)
+    singular = kwargs.get("singular", False)
+    if silent and not torch._C.has_lapack:
+        return torch.ones(rows, columns, dtype=dtype, device=device)
 
-
-def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
-    b, A, (LU_data, LU_pivots, info) = random_linalg_solve_processed_inputs(
-        A_dims, b_dims, random_fullrank_matrix_distinct_singular_value,
-        partial(torch.lu, get_infos=True, pivot=pivot), cast)
-    self.assertEqual(info, torch.zeros_like(info))
-    return b, A, LU_data, LU_pivots
+    A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
+    u, _, v = A.svd(some=False)
+    s = torch.zeros(rows, columns, dtype=dtype, device=device)
+    k = min(rows, columns)
+    for i in range(k):
+        s[i, i] = (i + 1) / (k + 1)
+    if singular:
+        # make matrix singular
+        s[k - 1, k - 1] = 0
+        if k > 2:
+            # increase the order of singularity so that the pivoting
+            # in LU factorization will be non-trivial
+            s[0, 0] = 0
+    return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
 
 
 def brute_pdist(inp, p=2):
@@ -1267,32 +1277,11 @@ def check_test_defined_in_running_script(test_case):
             test_case.id(), running_script_path, test_case_class_file)
 
 
-num_shards = os.environ.get('TEST_NUM_SHARDS', None)
-shard = os.environ.get('TEST_SHARD', None)
-if num_shards is not None and shard is not None:
-    num_shards = int(num_shards)
-    shard = int(shard)
-
-    def load_tests(loader, tests, pattern):
-        set_running_script_path()
-        test_suite = unittest.TestSuite()
-        for test_group in tests:
-            for test in test_group:
-                check_test_defined_in_running_script(test)
-                name = test.id().split('.')[-1]
-                if name in THESE_TAKE_WAY_TOO_LONG:
-                    continue
-                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
-                if hash_id % num_shards == shard:
-                    test_suite.addTest(test)
-        return test_suite
-else:
-
-    def load_tests(loader, tests, pattern):
-        set_running_script_path()
-        test_suite = unittest.TestSuite()
-        for test_group in tests:
-            for test in test_group:
-                check_test_defined_in_running_script(test)
-                test_suite.addTest(test)
-        return test_suite
+def load_tests(loader, tests, pattern):
+    set_running_script_path()
+    test_suite = unittest.TestSuite()
+    for test_group in tests:
+        for test in test_group:
+            check_test_defined_in_running_script(test)
+            test_suite.addTest(test)
+    return test_suite

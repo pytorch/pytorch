@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
@@ -39,27 +41,53 @@ import warnings
 
 black_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
-    "arange", "masked_fill"
+    "arange", "masked_fill",
+    "index_fill", "index_copy"
 ]
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
 
 
-def upsample_nearest2d(g, input, output_size, align_corners=None):
-    align_corners = sym_help._maybe_get_scalar(align_corners)
-    if align_corners:
-        return _unimplemented("upsample_neareset2d", "align_corners == True")
+def _interpolate(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, align_corners=None):
+        sym_help._interpolate_warning(interpolate_mode)
+        align_corners = sym_help._maybe_get_scalar(align_corners)
+        if align_corners:
+            return _unimplemented(name, "align_corners == True")
+        output_size = sym_help._maybe_get_const(output_size, 'is')
+        if sym_help._is_value(output_size):
+            return _unimplemented(name, "torch._C.Value (output_size) indexing")
+        else:
+            scales = [1. if i < 2 else
+                      float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                      for i in range(0, dim)]
+        return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
+    return symbolic_fn
 
-    output_size = sym_help._maybe_get_const(output_size, 'is')
-    if sym_help._is_value(output_size):
-        return _unimplemented("upsample_nearest2d", "torch._C.Value (output_size) indexing")
-    else:
-        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-        scales = [1., 1., height_scale, width_scale]
-        return g.op("Upsample", input, mode_s="nearest",
-                    scales_f=scales)
+
+upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
+upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
+upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
+
+
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    align_corners = sym_help._maybe_get_const(align_corners, 'b')
+    if not sym_help._is_none(align_corners) and align_corners:
+        return _unimplemented("interpolate", "align_corners == True")
+
+    if not sym_help._is_none(scale_factor) and sym_help._is_value(scale_factor):
+        return _unimplemented("interpolate", "dynamic scales in opset 8")
+
+    if not sym_help._is_none(size) and sym_help._is_value(size):
+        return _unimplemented("interpolate", "dynamic size in opset 8")
+
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
+    return g.op("Upsample", input, mode_s=mode, scales_f=scales)
 
 
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
@@ -193,6 +221,8 @@ def flatten(g, input, start_dim, end_dim):
 
 
 def _constant_fill(g, sizes, dtype, const_value):
+    if dtype is None:
+        dtype = 6  # float
     if not sym_help.scalar_type_to_pytorch_type[dtype].is_floating_point:
         result = g.op(
             "ConstantFill", sizes, dtype_i=sym_help.cast_pytorch_to_onnx["Float"], input_as_shape_i=1, value_f=const_value)
@@ -215,8 +245,8 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 0)
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 0)
 
@@ -226,8 +256,8 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 1)
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 1)
 
@@ -242,7 +272,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
         return _constant_fill(g, sizes, dtype, const_value)
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, fill_value)

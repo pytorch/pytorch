@@ -33,7 +33,7 @@ inline uint32_t roundUp(uint32_t x, uint32_t q) {
 
 static void sgemmBenchmark(
     benchmark::State& state,
-    sgemm_ukernel_function sgemm,
+    pytorch_sgemm_ukernel_function sgemm,
     uint32_t mc,
     uint32_t nc,
     uint32_t kc,
@@ -57,7 +57,7 @@ static void sgemmBenchmark(
   std::vector<float, AlignedAllocator<float, 32>> w(
       ncStride * kcStride + ncStride);
   std::fill(w.begin(), w.end(), 0.0f);
-  pack_sgemm_w(nc, kc, nr, kr, k.data(), b.data(), w.data());
+  pytorch_pack_sgemm_w(nc, kc, nr, kr, k.data(), b.data(), w.data());
   std::vector<float> c(mc * nc);
   std::fill(c.begin(), c.end(), std::nanf(""));
 
@@ -89,7 +89,7 @@ static void sgemmBenchmark(
 
 static void sgemm_in_l1(
     benchmark::State& state,
-    sgemm_ukernel_function sgemm,
+    pytorch_sgemm_ukernel_function sgemm,
     uint32_t mr,
     uint32_t nr,
     uint32_t np,
@@ -109,7 +109,7 @@ static void sgemm_in_l1(
 
 static void sgemm(
     benchmark::State& state,
-    sgemm_ukernel_function sgemm,
+    pytorch_sgemm_ukernel_function sgemm,
     uint32_t mr,
     uint32_t nr,
     uint32_t np,
@@ -493,18 +493,18 @@ static void VGG(benchmark::internal::Benchmark* b) {
 BENCHMARK_CAPTURE(
     sgemm_in_l1,
     6x8__psimd,
-    sgemm_ukernel_6x8__psimd,
+    pytorch_sgemm_ukernel_6x8__psimd,
     6,
     8,
     8,
     1);
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
-BENCHMARK_CAPTURE(sgemm_in_l1, 5x8__neon, sgemm_ukernel_5x8__neon, 5, 8, 8, 1);
-BENCHMARK_CAPTURE(sgemm_in_l1, 6x8__neon, sgemm_ukernel_6x8__neon, 6, 8, 8, 1);
+BENCHMARK_CAPTURE(sgemm_in_l1, 5x8__neon, pytorch_sgemm_ukernel_5x8__neon, 5, 8, 8, 1);
+BENCHMARK_CAPTURE(sgemm_in_l1, 6x8__neon, pytorch_sgemm_ukernel_6x8__neon, 6, 8, 8, 1);
 #endif
 
 static void sgemm_6x8__psimd(benchmark::State& state, const char* net) {
-  sgemm(state, sgemm_ukernel_6x8__psimd, 6, 8, 8, 1);
+  sgemm(state, pytorch_sgemm_ukernel_6x8__psimd, 6, 8, 8, 1);
 }
 
 BENCHMARK_CAPTURE(sgemm_6x8__psimd, mobilenet_v1, "MobileNet v1")
@@ -551,11 +551,11 @@ BENCHMARK_CAPTURE(sgemm_6x8__psimd, vgg, "VGG")->Apply(VGG);
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
 static void sgemm_5x8__neon(benchmark::State& state, const char* net) {
-  sgemm(state, sgemm_ukernel_5x8__neon, 5, 8, 8, 1);
+  sgemm(state, pytorch_sgemm_ukernel_5x8__neon, 5, 8, 8, 1);
 }
 
 static void sgemm_6x8__neon(benchmark::State& state, const char* net) {
-  sgemm(state, sgemm_ukernel_6x8__neon, 6, 8, 8, 1);
+  sgemm(state, pytorch_sgemm_ukernel_6x8__neon, 6, 8, 8, 1);
 }
 
 BENCHMARK_CAPTURE(sgemm_5x8__neon, mobilenet_v1, "MobileNet v1")

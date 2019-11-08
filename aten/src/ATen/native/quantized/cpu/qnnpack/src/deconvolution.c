@@ -169,7 +169,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
       packed_group_weights_size * groups);
 
   for (uint32_t group = 0; group < groups; group++) {
-    pack_q8deconv_w(
+    pytorch_pack_q8deconv_w(
         group_output_channels,
         kernel_size,
         group_input_channels,

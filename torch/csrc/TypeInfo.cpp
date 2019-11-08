@@ -123,7 +123,7 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::kHalf,
       self->type, "epsilon", [] {
         return PyFloat_FromDouble(
             std::numeric_limits<
@@ -132,14 +132,14 @@ static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_max(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self->type, "max", [] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::kHalf, self->type, "max", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max());
   });
 }
 
 static PyObject* THPFInfo_min(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self->type, "min", [] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::kHalf, self->type, "min", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::lowest());
   });
@@ -170,7 +170,7 @@ static PyObject* THPIInfo_min(THPFInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self->type, "min", [] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::kHalf, self->type, "min", [] {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
   });
@@ -193,7 +193,7 @@ PyTypeObject THPFInfoType = {
     sizeof(THPFInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
-    nullptr, /* tp_print */
+    0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
@@ -243,7 +243,7 @@ PyTypeObject THPIInfoType = {
     sizeof(THPIInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
-    nullptr, /* tp_print */
+    0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */

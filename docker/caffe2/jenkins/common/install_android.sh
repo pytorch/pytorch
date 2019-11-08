@@ -2,7 +2,7 @@
 
 set -ex
 
-[ -n "${ANDROID_NDK}" ] || ANDROID_NDK=r13b
+[ -n "${ANDROID_NDK}" ] || ANDROID_NDK=r19c
 
 apt-get update
 apt-get install -y --no-install-recommends autotools-dev autoconf unzip

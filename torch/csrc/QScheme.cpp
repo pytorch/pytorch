@@ -22,7 +22,7 @@ PyObject *THPQScheme_New(at::QScheme qscheme, const std::string& name)
   return self.release();
 }
 
-PyObject *THPQScheme_reduce(THPQScheme *self) {
+PyObject *THPQScheme_reduce(THPQScheme *self, PyObject *noargs) {
   return THPUtils_packString(self->name);
 }
 
@@ -43,7 +43,7 @@ PyTypeObject THPQSchemeType = {
   sizeof(THPQScheme),                          /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */

@@ -12,7 +12,7 @@
 
 #include <qnnpack/u8maxpool.h>
 
-void u8maxpool_ukernel_sub16__sse2(
+void pytorch_u8maxpool_ukernel_sub16__sse2(
     size_t n,
     size_t ks,
     size_t kc,

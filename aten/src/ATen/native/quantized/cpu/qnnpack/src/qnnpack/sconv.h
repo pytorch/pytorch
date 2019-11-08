@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define DECLARE_SCONV_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_SCONV_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(           \
       size_t mr,                                \
       size_t nr,                                \
@@ -30,7 +30,7 @@ extern "C" {
       size_t c_stride,                          \
       const struct pytorch_qnnp_fp32_clamping_params* params);
 
-DECLARE_SCONV_UKERNEL_FUNCTION(sconv_ukernel_6x8__psimd)
+DECLARE_PYTORCH_SCONV_UKERNEL_FUNCTION(pytorch_sconv_ukernel_6x8__psimd)
 
 #ifdef __cplusplus
 } /* extern "C" */

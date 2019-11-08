@@ -391,94 +391,6 @@ void testAliasAnalysis() {
     AliasDb aliasDb(graph);
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
   }
-  {
-    // test fork/wait
-
-    // a = rand(1)
-    // fut = fork(a)
-    //    Subgraph is: return a.add_(1)
-    // ... some unrelated code
-    // c = wait(b)
-    // d = a + a
-
-    auto graph = std::make_shared<Graph>();
-    auto constant = graph->insertConstant(1);
-    auto a = graph->insert(aten::rand, {constant});
-
-    auto forkNode = graph->insertNode(graph->create(prim::fork));
-    auto forkBlock = forkNode->addBlock();
-    {
-      WithInsertPoint g(forkBlock);
-      auto aMut = graph->insert(aten::add_, {a, constant});
-      forkBlock->registerOutput(aMut);
-      forkNode->output()->setType(FutureType::create(aMut->type()));
-    }
-    script::lambdaLiftFork(forkNode);
-
-    auto fut = forkNode->output();
-    auto wait = graph->insert(aten::wait, {fut})->node();
-    auto d = graph->insert(aten::add, {a, a});
-
-    graph->lint();
-
-    // Should not be able to move `d` before the wait call
-    AliasDb aliasDb(graph);
-    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
-  }
-  {
-    // test fork/wait in an if statement
-
-    // a = rand(1)
-    // if 1:
-    //   fut = fork(a)
-    //     Subgraph is: return a.add_(1)
-    // else:
-    //   fut = fork(a)
-    //     Subgraph is: return a.sub_(1)
-    // c = wait(b)
-    // d = a + a
-
-    auto graph = std::make_shared<Graph>();
-    auto constant = graph->insertConstant(1);
-    auto a = graph->insert(aten::rand, {constant});
-    auto if_ = insertIf(
-        *graph,
-        constant,
-        [&]() -> std::vector<Value*> {
-          auto forkNode = graph->insertNode(graph->create(prim::fork));
-          auto forkBlock = forkNode->addBlock();
-          {
-            WithInsertPoint g(forkBlock);
-            auto aMut = graph->insert(aten::add_, {a, constant});
-            forkBlock->registerOutput(aMut);
-            forkNode->output()->setType(FutureType::create(aMut->type()));
-          }
-          script::lambdaLiftFork(forkNode);
-          return {forkNode->output()};
-        },
-        [&]() -> std::vector<Value*> {
-          auto forkNode = graph->insertNode(graph->create(prim::fork));
-          auto forkBlock = forkNode->addBlock();
-          {
-            WithInsertPoint g(forkBlock);
-            auto aMut = graph->insert(aten::sub_, {a, constant});
-            forkBlock->registerOutput(aMut);
-            forkNode->output()->setType(FutureType::create(aMut->type()));
-          }
-          script::lambdaLiftFork(forkNode);
-          return {forkNode->output()};
-        });
-
-    auto fut = if_->output();
-    auto wait = graph->insert(aten::wait, {fut})->node();
-    auto d = graph->insert(aten::add, {a, a});
-
-    graph->lint();
-
-    // Should not be able to move `d` before the wait call
-    AliasDb aliasDb(graph);
-    ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
-  }
 
   // test none value does not have writers
   {
@@ -1119,7 +1031,7 @@ void testAliasRegistration() {
                   })
                   .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
         },
-        "Tried to register operator foo::rand3(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
     expectThrows<c10::Error>(
@@ -1132,7 +1044,7 @@ void testAliasRegistration() {
                   })
                   .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
         },
-        "Tried to register operator foo::rand4(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
     expectThrows<c10::Error>(
@@ -1145,7 +1057,7 @@ void testAliasRegistration() {
                   })
                   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
         },
-        "Tried to register operator foo::rand5 with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
+        "Tried to register operator foo::rand5(Tensor _0) -> (Tensor _0) with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
   }
   {
     auto registry = torch::RegisterOperators().op(
@@ -1235,7 +1147,7 @@ void testAliasRegistration() {
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
                   .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },
-        "Tried to register operator foo::rand11(Tensor(a) arg1) -> Tensor(a) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
     expectThrows<c10::Error>(
@@ -1247,7 +1159,7 @@ void testAliasRegistration() {
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
                   .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },
-        "Tried to register operator foo::rand12(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
+        "Tried to register operator foo::rand12(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
 }
 

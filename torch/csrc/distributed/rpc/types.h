@@ -8,11 +8,12 @@ namespace distributed {
 namespace rpc {
 
 using worker_id_t = int16_t;
-using local_id_t = uint64_t;
+using local_id_t = int64_t;
 
-struct GloballyUniqueId final {
+struct TORCH_API GloballyUniqueId final {
   GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
   GloballyUniqueId(const GloballyUniqueId& other) = default;
+  GloballyUniqueId& operator=(const GloballyUniqueId& other) = delete;
 
   bool operator==(const GloballyUniqueId& other) const;
   bool operator!=(const GloballyUniqueId& other) const;
@@ -32,10 +33,23 @@ struct GloballyUniqueId final {
   const local_id_t localId_;
 };
 
-std::ostream& operator<<(std::ostream& os, const GloballyUniqueId& globalId);
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const GloballyUniqueId& globalId);
 
 using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;
+
+struct TORCH_API SerializedPyObj final {
+  SerializedPyObj(std::string&& payload, std::vector<at::Tensor>&& tensors)
+      : payload_(std::move(payload)), tensors_(std::move(tensors)) {}
+
+  std::vector<at::IValue> toIValues() const;
+  static SerializedPyObj fromIValues(std::vector<at::IValue> value);
+
+  const std::string payload_;
+  const std::vector<at::Tensor> tensors_;
+};
 
 } // namespace rpc
 } // namespace distributed

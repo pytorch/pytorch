@@ -16,25 +16,23 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
-    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
-    'dist_autograd',
     'distributed',
     'distributions',
     'docs_coverage',
     'expecttest',
     'fake_quant',
     'indexing',
-    'indexing_cuda',
     'jit',
     'logging',
     'mkldnn',
@@ -49,8 +47,6 @@ TESTS = [
     'quantized',
     'quantized_tensor',
     'quantized_nn_mods',
-    'quantizer',
-    'rpc',
     'sparse',
     'torch',
     'type_info',
@@ -65,28 +61,41 @@ TESTS = [
     'function_schema',
 ]
 
+# skip < 3.3 because mock is added in 3.3 and is used in rpc_fork and rpc_spawn
+# skip python2 for rpc and dist_autograd tests that do not support python2
+if PY33:
+    TESTS.extend([
+        'rpc_fork',
+        'rpc_spawn',
+        'dist_autograd_fork',
+        'dist_autograd_spawn',
+    ])
+
 # skip < 3.6 b/c fstrings added in 3.6
 if PY36:
-    TESTS.append('jit_py3')
+    TESTS.extend([
+        'jit_py3',
+    ])
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
-    'c10d',
-    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
-    'nccl',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
-DISTRIBUTED_TESTS_CONFIG = {
-    'gloo': {
-        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
-    },
-}
+DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
@@ -98,7 +107,10 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
-
+    if dist.is_gloo_available():
+        DISTRIBUTED_TESTS_CONFIG['gloo'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
@@ -387,6 +399,8 @@ def get_selected_tests(options):
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
             WINDOWS_BLACKLIST.append('cpp_extensions')
+            WINDOWS_BLACKLIST.append('jit')
+            WINDOWS_BLACKLIST.append('jit_fuser')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
 

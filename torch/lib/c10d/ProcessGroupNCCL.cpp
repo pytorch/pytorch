@@ -217,21 +217,14 @@ void ProcessGroupNCCL::WorkNCCL::wait() {
   synchronize();
 }
 
-std::unordered_map<std::string, ssize_t> ProcessGroupNCCL::pgUniqueNCCLIDCnt_;
-std::unordered_map<std::string, ssize_t>
-    ProcessGroupNCCL::processGroupCounterMap_;
-
-std::mutex ProcessGroupNCCL::pgTrackingLock_;
-
 ProcessGroupNCCL::ProcessGroupNCCL(
     const std::shared_ptr<Store>& store,
     int rank,
     int size,
-    const std::string& groupName,
     const std::chrono::milliseconds& opTimeout)
     : ProcessGroup(rank, size),
       store_(store),
-      groupName_(groupName),
+      ncclCommCounter_(0),
       terminateWatchdog_(false),
       opTimeout_(opTimeout) {
   char* blockingWait = getenv(NCCL_BLOCKING_WAIT);
@@ -253,28 +246,18 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         std::string(NCCL_BLOCKING_WAIT));
   }
 
-  // Generate the Process Group ID for current PG, this needs to be identical
-  // for all processes
-  std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  // Default group is an empty string
-  const auto groupKey = groupName_ + "_";
-  if (processGroupCounterMap_.count(groupKey) == 0) {
-    processGroupCounterMap_[groupKey] = -1;
-  }
-  ++processGroupCounterMap_[groupKey];
-  processGroupID_ = std::to_string(processGroupCounterMap_[groupKey]);
-  groupPgID_ = groupName_ + "_" + processGroupID_;
-  pgUniqueNCCLIDCnt_[groupPgID_] = -1;
+#ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+#endif
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  pgUniqueNCCLIDCnt_.erase(groupPgID_);
   terminateWatchdog_.store(true);
   watchdogCV_.notify_one();
+#ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
+#endif
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -335,7 +318,7 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
     if (ncclAsyncErr != ncclSuccess) {
       return std::make_exception_ptr(std::runtime_error(
-          "NCCL error: " + std::string(ncclGetErrorString(ncclAsyncErr))));
+          "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr)));
     }
   }
 
@@ -343,36 +326,22 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
 }
 
 void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
-  // Every time when we create a new unique NCCL ID, we need to use a new
-  // global key to access/update the store.
-  // The key is a combination of processGroupID_ and the current count of
-  // NCCL unique ID created
-  std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  auto groupPgId = groupName_ + "_" + processGroupID_;
-  const auto uniqueNCCLIDCnt = ++pgUniqueNCCLIDCnt_[groupPgID_];
-
-  lock.unlock();
-
-  std::string storeKey =
-      processGroupID_ + "_" + std::to_string(uniqueNCCLIDCnt);
-
-  // Rank 0 writes to the store as bcast
+  // For every NCCL communicator that we create we need to broadcast
+  // a unique ID from rank 0 to all other ranks. This broadcast is
+  // done by rank 0 setting a key in the store and all other ranks
+  // retrieving the contents of that key. A single process group
+  // may create multiple NCCL communicators, so we use a sequence
+  // number to differentiate between them.
+  std::string storeKey = std::to_string(ncclCommCounter_++);
   if (rank_ == 0) {
-    auto ncclIDVal = std::vector<uint8_t>(
+    auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
-    store_->set(storeKey, ncclIDVal);
-    // Other ranks get to the store
+    store_->set(storeKey, vec);
   } else {
-    auto ncclIDVal = store_->get(storeKey);
-    // Just a sanity check
-    if (ncclIDVal.size() != NCCL_UNIQUE_ID_BYTES) {
-      throw std::runtime_error(
-          "Unexpected NCCL unique ID length received "
-          "from the store");
-    }
-    // Now put the data back to the input pointer
-    memcpy(ncclID, ncclIDVal.data(), NCCL_UNIQUE_ID_BYTES);
+    auto vec = store_->get(storeKey);
+    AT_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
+    std::memcpy(ncclID, vec.data(), vec.size());
   }
 }
 
@@ -734,6 +703,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           }
         }
       });
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllgatherOptions& /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(

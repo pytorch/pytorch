@@ -166,7 +166,7 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t>
 __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
-    const PackedTensorAccessor<scalar_t, 4>& data,
+    const PackedTensorAccessor64<scalar_t, 4>& data,
     int batch,
     int channel,
     int height,
@@ -181,7 +181,7 @@ __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t, typename accscalar_t>
 __device__ __forceinline__ static void upsample_increment_value_bounded(
-    PackedTensorAccessor<scalar_t, 4>& data,
+    PackedTensorAccessor64<scalar_t, 4>& data,
     int batch,
     int channel,
     int height,

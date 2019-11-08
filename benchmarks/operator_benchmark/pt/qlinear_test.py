@@ -40,9 +40,9 @@ class QLinearBenchmark(op_bench.TorchBenchmarkBase):
         scale = 1.0 / 255
         zero_point = 0
         X = torch.randn(N, IN, dtype=torch.float32)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         W = torch.randn(OUT, IN, dtype=torch.float32)
-        qW = torch.quantize_linear(W, scale=scale, zero_point=0, dtype=torch.qint8)
+        qW = torch.quantize_per_tensor(W, scale=scale, zero_point=0, dtype=torch.qint8)
 
         self.input = qX
         self.qlinear = nnq.Linear(IN, OUT)

@@ -10,7 +10,7 @@
 
 #include <qnnpack/x8lut.h>
 
-void x8lut_ukernel__scalar(
+void pytorch_x8lut_ukernel__scalar(
     size_t n,
     const uint8_t* x,
     const uint8_t t[RESTRICT_STATIC 256],

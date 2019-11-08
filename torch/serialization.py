@@ -1,5 +1,4 @@
 import difflib
-import inspect
 import os
 import io
 import shutil
@@ -9,9 +8,11 @@ import torch
 import tarfile
 import tempfile
 import warnings
+import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
+from torch._utils_internal import get_source_lines_and_file
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
@@ -170,22 +171,40 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _with_file_like(f, mode, body):
-    """
-    Executes a body function with a file object for f, opening
-    it in 'mode' if it is a string filename.
-    """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = open(f, mode)
-    try:
-        return body(f)
-    finally:
-        if new_fd:
-            f.close()
+class _open_file_like(object):
+    def __init__(self, name_or_buffer, mode):
+        self.is_path = _open_file_like.is_path(name_or_buffer)
+        if self.is_path:
+            self.fname = name_or_buffer
+        else:
+            self.buffer = name_or_buffer
+        self.mode = mode
+
+    def open_path(self):
+        return open(self.fname, self.mode)
+
+    def open_handle(self):
+        return self.buffer
+
+    @staticmethod
+    def is_path(name_or_buffer):
+        return isinstance(name_or_buffer, str) or \
+            (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+
+    def __enter__(self):
+        if self.is_path:
+            file_like = self.open_path()
+        else:
+            file_like = self.open_handle()
+
+        self.file_like = file_like
+        return self.file_like
+
+    def __exit__(self, *args):
+        if self.is_path:
+            # Only close the `file_like` if it was opened by this object
+            self.file_like.close()
 
 
 def _is_compressed_file(f):
@@ -257,7 +276,8 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
-    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
+    with _open_file_like(f, 'wb') as opened_file:
+        _save(obj, opened_file, pickle_module, pickle_protocol)
 
 
 def _save(obj, f, pickle_module, pickle_protocol):
@@ -285,13 +305,14 @@ def _save(obj, f, pickle_module, pickle_protocol):
             serialized_container_types[obj] = True
             source_file = source = None
             try:
-                source_file = inspect.getsourcefile(obj)
-                source = inspect.getsource(obj)
+                source_lines, _, source_file = get_source_lines_and_file(obj)
+                source = ''.join(source_lines)
             except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
                               "for correctness upon loading.")
             return ('module', obj, source_file, source)
+
         elif torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
             # Offset is always 0, but we keep it for backwards compatibility
@@ -377,9 +398,9 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
-        pickle_load_args: optional keyword arguments passed over to
+        pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
-            :attr:`encoding=...`.
+            :attr:`errors=...`.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
@@ -387,10 +408,10 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
 
     .. note::
-        In Python 3, when loading files saved by Python 2, you may encounter
-        ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``. This is
-        caused by the difference of handling in byte strings in Python2 and
-        Python 3. You may use extra :attr:`encoding` keyword argument to specify how
+        By default, we decode byte strings as ``utf-8``.  This is to avoid a common error
+        case ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``
+        when loading files saved by Python 2 in Python 3.  If this default
+        is incorrect, you may use an extra :attr:`encoding` keyword argument to specify how
         these objects should be loaded, e.g., :attr:`encoding='latin1'` decodes them
         to strings using ``latin1`` encoding, and :attr:`encoding='bytes'` keeps them
         as byte arrays which can be decoded later with ``byte_array.decode(...)``.
@@ -409,20 +430,31 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         >>> with open('tensor.pt', 'rb') as f:
                 buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
+        # Load a module with 'ascii' encoding for unpickling
+        >>> torch.load('module.pt', encoding='ascii')
     """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)):
-        new_fd = True
-        f = open(f, 'rb')
-    elif (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = f.open('rb')
-    try:
-        return _load(f, map_location, pickle_module, **pickle_load_args)
-    finally:
-        if new_fd:
-            f.close()
+    if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
+        pickle_load_args['encoding'] = 'utf-8'
+
+    with _open_file_like(f, 'rb') as opened_file:
+        return _load(opened_file, map_location, pickle_module, **pickle_load_args)
+
+
+# Register pickling support for layout instances such as
+# torch.sparse_coo, etc
+def _get_layout(name):
+    """Get layout extension object from its string representation.
+    """
+    cache = _get_layout.cache
+    if not cache:
+        for v in torch.__dict__.values():
+            if isinstance(v, torch.layout):
+                cache[str(v)] = v
+    return cache[name]
+
+
+_get_layout.cache = {}
+copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 
 def _load(f, map_location, pickle_module, **pickle_load_args):
@@ -449,7 +481,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
 
     def _check_container_source(container_type, source_file, original_source):
         try:
-            current_source = inspect.getsource(container_type)
+            current_source = ''.join(get_source_lines_and_file(container_type)[0])
         except Exception:  # saving the source is optional, so we can ignore any errors
             warnings.warn("Couldn't retrieve source code for container of "
                           "type " + container_type.__name__ + ". It won't be checked "

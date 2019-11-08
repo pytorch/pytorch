@@ -10,7 +10,7 @@
 
 .syntax unified
 
-# void hgemm_ukernel_8x8__aarch32_neonfp16arith(
+# void pytorch_hgemm_ukernel_8x8__aarch32_neonfp16arith(
 #     size_t mr,
 #     size_t nr,
 #     size_t k,
@@ -20,7 +20,7 @@
 #     __fp16*restrict c,
 #     size_t c_stride,
 #     const struct pytorch_qnnp_fp16_clamping_params clamping_params[restrict static 1])
-BEGIN_FUNCTION hgemm_ukernel_8x8__aarch32_neonfp16arith
+BEGIN_FUNCTION pytorch_hgemm_ukernel_8x8__aarch32_neonfp16arith
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -505,7 +505,7 @@ BEGIN_FUNCTION hgemm_ukernel_8x8__aarch32_neonfp16arith
     VPOP {d8-d15}
     POP {r4, r5, r6, r7, r8, r9, r10, r11}
     BX lr
-END_FUNCTION hgemm_ukernel_8x8__aarch32_neonfp16arith
+END_FUNCTION pytorch_hgemm_ukernel_8x8__aarch32_neonfp16arith
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits

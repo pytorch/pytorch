@@ -1,9 +1,11 @@
 #pragma once
 
+#include <c10/util/StringUtil.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
+#include <ATen/core/operator_name.h>
 #include <unordered_map>
 
 namespace c10 {
@@ -11,6 +13,23 @@ namespace c10 {
 // schema as used in the compiler for resolving function calls and reporting
 // errors. These objects should be constructed from C10 schema once those
 // are available.
+
+struct Argument;
+struct FunctionSchema;
+
+namespace detail {
+inline bool defaultValueEquals_(
+    const c10::optional<IValue>& lhs,
+    const c10::optional<IValue>& rhs) {
+  if (lhs.has_value()) {
+    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
+  } else {
+    return !rhs.has_value();
+  }
+}
+} // namespace detail
+
+bool operator==(const Argument& lhs, const Argument& rhs);
 
 struct Argument {
   Argument(
@@ -78,6 +97,15 @@ struct Argument {
     return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
   }
 
+  // this function check whether this Argument is backward compatible with
+  // the old one. we consider the following cases are backward compatible:
+  //   1) two arguments are equal
+  //   2) this arg's type should be subtype of old
+  //   3) this arg must provide the same default value if old arg has one,
+  bool isBackwardCompatibleWith(
+      const Argument& old,
+      std::ostream* why_not=nullptr) const;
+
 private:
   std::string name_;
   TypePtr type_;
@@ -94,16 +122,6 @@ private:
   bool is_inferred_type_;
 };
 
-namespace detail {
-inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::optional<IValue>& rhs) {
-  if (lhs.has_value()) {
-    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
-  } else {
-    return !rhs.has_value();
-  }
-}
-}
-
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
   return lhs.name() == rhs.name()
           && *lhs.type() == *rhs.type()
@@ -113,10 +131,7 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && lhs.alias_info() == rhs.alias_info();
 }
 
-struct OperatorName final {
-  std::string name;
-  std::string overload_name;
-};
+bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
 
 struct FunctionSchema {
   FunctionSchema(
@@ -142,10 +157,26 @@ struct FunctionSchema {
       : FunctionSchema(
             name.toQualString(),
             std::move(overload_name),
-            std::move(std::move(arguments)),
-            std::move(std::move(returns)),
+            std::move(arguments),
+            std::move(returns),
             is_vararg,
             is_varret) {}
+
+  // check whether this schema is backward compatible with the old one.
+  // the following conditions are considered as this schema is backward
+  // compatible with old:
+  //   1) two schemas are equal
+  //   2) this schema has the same or more positional args than old,
+  //      and any positional arg in this schema is backward compatible
+  //      with the corresponding one in old schema, which could be an arg
+  //      or a kwarg, if it has, or it must provide a default value
+  //   3) this schema has the same or more kwargs than old, and all the kwargs
+  //      in old schema can find the corresponding kwarg in this schema which
+  //      is backward compatible with the old kwarg, and the extra kwargs in
+  //      this schema must provide default values.
+  bool isBackwardCompatibleWith(
+      const FunctionSchema& old,
+      std::ostream* why_not=nullptr) const;
 
 private:
   OperatorName name_;
@@ -237,9 +268,9 @@ public:
     return false;
   }
 
-  // can a function with this schema be substituted for a function of rhs's 
+  // can a function with this schema be substituted for a function of rhs's
   // schema and have the program typecheck?
-  // as_method - if true, treat this schema as a method and ignore 
+  // as_method - if true, treat this schema as a method and ignore
   // the first argument, which will be the object in both cases
   bool isSubtypeOf(const FunctionSchema& rhs, bool as_method, std::ostream* why_not=nullptr) const;
 };
@@ -292,15 +323,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   if (arg.default_value()) {
     out << "=";
     if (arg.type()->kind() == c10::TypeKind::StringType) {
-        // TODO prettify the result, such as using \n to represent \012
-        out << "\'";
-        std::ios_base::fmtflags flags(out.flags());
-        for (unsigned char c : arg.default_value().value().toStringRef()) {
-          out << "\\" << std::oct << std::setfill('0') << std::setw(3)
-            << static_cast<uint64_t>(c);
-        }
-        out.flags(flags);
-        out << "\'";
+        printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();
     }

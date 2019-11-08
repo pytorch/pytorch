@@ -1,6 +1,6 @@
 ext {
     bintrayRepo = 'maven'
-    bintrayUserOrg = 'facebook'
+    bintrayUserOrg = 'pytorch'
     bintrayName = "${GROUP}:${POM_ARTIFACT_ID}"
     bintrayDescription = POM_DESCRIPTION
     projectUrl = POM_URL

@@ -42,11 +42,7 @@ def argument_to_declaration(param, func=None):
     arg['name'] = name
 
     if func is not None:
-        default_inits = func.get('default_init', {})
         wrap_dims = func.get('wrap_dim', {})
-        if name in default_inits:
-            # non constexpr defaults
-            arg['default_init'] = default_inits[name]
         if name in wrap_dims:
             arg['wrap_dim'] = wrap_dims[name]
 

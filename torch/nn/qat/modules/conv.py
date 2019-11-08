@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
+from torch.nn.intrinsic import ConvReLU2d
 
 class Conv2d(NNConv2d):
     r"""
@@ -14,8 +15,7 @@ class Conv2d(NNConv2d):
     default.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
     """
     _FLOAT_MODULE = NNConv2d
@@ -28,11 +28,11 @@ class Conv2d(NNConv2d):
                                      groups=groups, bias=bias, padding_mode=padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.observer = qconfig.activation()
+        self.activation_post_process = qconfig.activation()
         self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
-        return self.observer(
+        return self.activation_post_process(
             self.conv2d_forward(input, self.weight_fake_quant(self.weight)))
 
     @classmethod
@@ -47,7 +47,9 @@ class Conv2d(NNConv2d):
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert mod.qconfig, 'Input float module must have a valid qconfig'
-            qconfig = mod.qconfig
+        if type(mod) == ConvReLU2d:
+            mod = mod[0]
+        qconfig = mod.qconfig
         qat_conv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                        stride=mod.stride, padding=mod.padding, dilation=mod.dilation,
                        groups=mod.groups, bias=mod.bias is not None,

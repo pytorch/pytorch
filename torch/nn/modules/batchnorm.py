@@ -8,8 +8,6 @@ from .. import functional as F
 from .. import init
 
 
-# TODO: check contiguous in THNN
-# TODO: use separate backend functions?
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
@@ -69,7 +67,7 @@ class _BatchNorm(Module):
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
+                self.num_batches_tracked = self.num_batches_tracked + 1
                 if self.momentum is None:  # use cumulative moving average
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
@@ -437,7 +435,7 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
+            self.num_batches_tracked = self.num_batches_tracked + 1
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average
@@ -499,8 +497,8 @@ class SyncBatchNorm(_BatchNorm):
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
-                module_output.weight.data = module.weight.data.clone().detach()
-                module_output.bias.data = module.bias.data.clone().detach()
+                module_output.weight.data = module.weight.data.clone(memory_format=torch.preserve_format).detach()
+                module_output.bias.data = module.bias.data.clone(memory_format=torch.preserve_format).detach()
                 # keep reuqires_grad unchanged
                 module_output.weight.requires_grad = module.weight.requires_grad
                 module_output.bias.requires_grad = module.bias.requires_grad

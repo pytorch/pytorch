@@ -6,33 +6,35 @@ circular dependency problems
 
 import inspect
 import weakref
+import warnings
 import torch._C
 from torch._six import builtins
+from torch._utils_internal import get_source_lines_and_file
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 
-def createResolutionCallback(frames_up=0):
+def createResolutionCallbackFromFrame(frames_up=0):
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallback (by default).
+    the function which called createResolutionCallbackFromFrame (by default).
 
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
 
     frames_up is number of additional frames to go up on the stack.
     The default value is 0, which correspond to the frame of the caller
-    of createResolutionCallback. Also for example, if frames_up is set
-    to 1, then the frame of the caller's caller of createResolutionCallback
+    of createResolutionCallbackFromFrame. Also for example, if frames_up is set
+    to 1, then the frame of the caller's caller of createResolutionCallbackFromFrame
     will be taken.
 
     For example, the following program prints 2::
 
         def bar():
-            cb = createResolutionCallback(1)
+            cb = createResolutionCallbackFromFrame(1)
             print(cb("foo"))
 
         def baz():
@@ -73,6 +75,48 @@ def get_closure(fn):
 
     return captures
 
+# [local resolution in python]
+# Depending on where a variable is defined, and where it is used, we may
+# or may not be able to recover its value when recursively compiling a
+# script function. Remember in the general case, a module or function is
+# first defined and then later scripted. This means we do not have a
+# chance to capture the active frames when the function is defined. Hence any
+# name resolution has to happen later on the created closure. The way
+# python captures type annotations restricts what we can recover. The
+# follow example illustrates the different cases:
+#
+#         class MyGlobalClass:
+#         ...
+#         def my_local_scope():
+#             @torch.jit.script
+#             class MyClass:
+#                 ...
+#             @torch.jit.script
+#             class MyClassUsedAsVar:
+#                 ...
+#             def eg(x: MyClass, y: MyGlobalClass):
+#                 a_local_capture : Foo
+#                 return MyClassUsedAsVar(x)
+#
+# MyGlobalClass is defined in the __globals__ dictionary of function
+# 'eg', so it is always recoverable. my_local_scope introduces a new local
+# variable scope in the function. Classes defined here are only visible as
+# local variables. For the case of MyClassUsedAsVar, it is captured
+# because it is used as a variable inside the body of the function, and we
+# can resolve it using the captures returned from `get_closure`. However,
+# the type annotations are not captured by the closure. In Python
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# annotations on `eg``, but starting in Python 4.0, they will represented as
+# strings and no longer present. Furthermore, since the body of `eg` does
+# not reference those names, they do not appear in the list of closed over
+# variables. In Python 2.x, type annotations are in comments, leading to a
+# similar situation where their definitions are not available. We anticipate
+# that most users will not run into this issue because their modules and
+# functions will be defined at a global scope like MyGlobalClass. In cases
+# where they are not, it is possible to work around issues by declaring the
+# values global in the function.
+
+
 
 def createResolutionCallbackFromClosure(fn):
     """
@@ -96,7 +140,8 @@ def can_compile_class(cls):
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
         return False
-    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    names = cls.__dict__
+    fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
 
@@ -168,7 +213,7 @@ class FunctionModifiers(object):
     Used to denote the behavior of a function in TorchScript. See export() and
     ignore() for details.
     """
-    IGNORE_AND_DROP = "ignore (leave as a call to Python, replace with a 'raise' on torch.jit.save)"
+    UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
     DEFAULT = "default (compile if called from a exported function / forward)"
@@ -176,11 +221,12 @@ class FunctionModifiers(object):
 
 def export(fn):
     """
-    This decorator indicates that a method is used as an entry point into a
-    ``ScriptModule`` and should be compiled. ``forward`` implicitly is assumbed to be an
-    entry point, so it does not need this decorator. Functions and methods
-    called from ``forward`` are compiled as they are seen, so they do not need
-    this decorator either.
+    This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
+    :class:`ScriptModule` and should be compiled.
+
+    ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
+    Functions and methods called from ``forward`` are compiled as they are seen
+    by the compiler, so they do not need this decorator either.
 
     Example (using ``@torch.jit.export`` on a method):
 
@@ -219,23 +265,52 @@ def export(fn):
     return fn
 
 
-def ignore(drop_on_export=False):
+def unused(fn):
     """
     This decorator indicates to the compiler that a function or method should
-    be ignored and left as a Python function.
+    be ignored and replaced with the raising of an exception. This allows you
+    to leave code in your model that is not yet TorchScript compatible and still
+    export your model.
 
-    Arguments:
+        Example (using ``@torch.jit.unused`` on a method)::
 
-        drop_on_export (bool):  When ``False``, calls to this function will
-                                that will be run with ``example_inputs``.
-                                arguments and returns to ``func`` must be tensors
-                                or (possibly nested) tuples that
-                                contain tensors. When ``True``, any calls to
-                                this function from other TorchScript code will be replaced
-                                with a `raise` when the model is saved.
-                                This allows you to leave code in your TorchScript model that is only ever
-                                run when the Python interpreter is present, but not run after you save
-                                and load your model.
+            import torch
+            import torch.nn as nn
+
+            class MyModule(nn.Module):
+                def __init__(self, use_memory_efficent):
+                    super(MyModule, self).__init__()
+                    self.use_memory_efficent = use_memory_efficent
+
+                @torch.jit.unused
+                def memory_efficient(self, x):
+                    import pdb
+                    pdb.set_trace()
+                    return x + 10
+
+                def forward(self, x):
+                    # Use not-yet-scriptable memory efficient mode
+                    if self.use_memory_efficient:
+                        return self.memory_efficient(x)
+                    else:
+                        return x + 10
+
+            m = torch.jit.script(MyModule(use_memory_efficent=False))
+            m.save("m.pt")
+
+            m = torch.jit.script(MyModule(use_memory_efficient=True))
+            # exception raised
+            m(torch.rand(100))
+    """
+    fn._torchscript_modifier = FunctionModifiers.UNUSED
+    return fn
+
+def ignore(drop=False, **kwargs):
+    """
+    This decorator indicates to the compiler that a function or method should
+    be ignored and left as a Python function. This allows you to leave code in
+    your model that is not yet TorchScript compatible. Models with ignored
+    functions cannot be exported; use torch.jit.unused instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -261,7 +336,7 @@ def ignore(drop_on_export=False):
         # Error! The call `debugger` cannot be saved since it calls into Python
         m.save("m.pt")
 
-    Example (using ``@torch.jit.ignore(drop_on_export=True)`` on a method):
+    Example (using ``@torch.jit.ignore(drop=True)`` on a method):
 
     .. testcode::
 
@@ -269,7 +344,7 @@ def ignore(drop_on_export=False):
         import torch.nn as nn
 
         class MyModule(nn.Module):
-            @torch.jit.ignore(drop_on_export=True)
+            @torch.jit.ignore(drop=True)
             def training_method(self, x):
                 import pdb
                 pdb.set_trace()
@@ -290,24 +365,37 @@ def ignore(drop_on_export=False):
         import os
         os.remove('m.pt')
     """
-    if callable(drop_on_export):
-        # used without any args, so drop_on_export is actually a function
+
+    if callable(drop):
+        # used without any args, so drop is actually a function
         #   @torch.jit.ignore
         #   def fn(...):
-        fn = drop_on_export
+        fn = drop
         fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
 
-    if isinstance(drop_on_export, bool):
-        def decorator(fn):
-            if drop_on_export:
-                fn._torchscript_modifier = FunctionModifiers.IGNORE_AND_DROP
-            else:
-                fn._torchscript_modifier = FunctionModifiers.IGNORE
-            return fn
-        return decorator
-    raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
-                       "a function but got {}".format(drop_on_export))
+    if not isinstance(drop, bool):
+        raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
+                           "a function but got {}".format(drop))
+
+    # for backwards compat
+    drop_on_export = kwargs.pop("drop_on_export", None)
+    if drop_on_export:
+        warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
+                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+
+        drop = drop_on_export
+    elif drop:
+        warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
+                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+
+    def decorator(fn):
+        if drop:
+            fn._torchscript_modifier = FunctionModifiers.UNUSED
+        else:
+            fn._torchscript_modifier = FunctionModifiers.IGNORE
+        return fn
+    return decorator
 
 
 def module_has_exports(mod):
@@ -318,17 +406,16 @@ def module_has_exports(mod):
                 return True
     return False
 
-def should_drop_on_export(fn):
+def should_drop(fn):
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False
-    return attr is FunctionModifiers.IGNORE_AND_DROP
+    return attr is FunctionModifiers.UNUSED
 
 
 def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
-    return mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
-
+    return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
 def get_torchscript_modifier(fn):
     if not callable(fn):
@@ -337,18 +424,11 @@ def get_torchscript_modifier(fn):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
-
-def _parameter_list(parameter_names_fn):
-    """
-    Decorator to denote that a function returns a list of all the parameters
-    in a module
-    """
-    def decorator(fn):
-        fn._parameter_names_fn = parameter_names_fn
-        return fn
-
-    return decorator
-
+def copy_torchscript_modifier(orig, new):
+    attr = get_torchscript_modifier(orig)
+    if attr is None:
+        return
+    new._torchscript_modifier = attr
 
 # overloading registration
 # overloads get registered in this file, and compiled in torch/jit/__init__.py
@@ -434,16 +514,16 @@ def _get_overloaded_methods(method, mod_class):
     if overloads is None:
         return None
 
-    method_line_no = inspect.getsourcelines(method)[1]
-    mod_class_fileno = inspect.getsourcelines(mod_class)[1]
-    mod_end_fileno = mod_class_fileno + len(inspect.getsourcelines(mod_class)[0])
+    method_line_no = get_source_lines_and_file(method)[1]
+    mod_class_fileno = get_source_lines_and_file(mod_class)[1]
+    mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
-        raise Exception("Overloads are not useable when a module is redaclared within the same file: " + str(method))
+        raise Exception("Overloads are not useable when a module is redeclared within the same file: " + str(method))
     return overloads
 
 try:
     import typing
-    from typing import Tuple, List, Dict, Optional
+    from typing import Tuple, List, Dict, Optional, Any
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -463,13 +543,20 @@ try:
 
     def is_optional(ann):
         # Optional[T] is just shorthand for Union[T, None], so check for both
+        def safe_is_subclass(the_type, super_type):
+            # Don't throw if `the_type` isn't a class type (e.g. if it is
+            # another type annotation instance)
+            if not inspect.isclass(the_type):
+                return False
+            return issubclass(the_type, super_type)
+
         union_optional = False
         if ann.__module__ == 'typing' and \
            (getattr(ann, '__origin__', None) is typing.Union):
             args = getattr(ann, '__args__', ())
             if len(args) == 2:
-                union_optional = (issubclass(args[1], type(None)) and not issubclass(args[0], type(None))) \
-                    or (issubclass(args[0], type(None)) and not issubclass(args[1], type(None)))
+                union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
+                    or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
 
         optional = ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Optional)
@@ -522,10 +609,14 @@ except ImportError:
         def __getitem__(self, types):
             return OptionalInstance(types)
 
+    class AnyCls(object):
+        pass
+
     Tuple = TupleCls()  # noqa: T484
     List = ListCls()  # noqa: T484
     Dict = DictCls()  # noqa: T484
     Optional = DictCls()  # noqa: T484
+    Any = AnyCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
@@ -579,7 +670,7 @@ for i in range(2, 7):
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.Function):
+    if isinstance(obj, torch.jit.ScriptFunction):
         return obj.qualified_name
 
     name = obj.__name__

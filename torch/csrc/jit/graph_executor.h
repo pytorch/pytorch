@@ -1,10 +1,13 @@
 #pragma once
 
+#include <atomic>
+#include <memory>
+
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
-#include <memory>
+#include <torch/csrc/jit/update_graph_executor_opt.h>
 
 namespace torch {
 namespace jit {
@@ -57,10 +60,8 @@ TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
-TORCH_API bool& getProfilingMode();
-
-TORCH_API void setGraphExecutorOptimize(bool o);
-TORCH_API bool getGraphExecutorOptimize();
+TORCH_API std::atomic<bool> &getProfilingMode();
+TORCH_API std::atomic<bool>& getExecutorMode();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)

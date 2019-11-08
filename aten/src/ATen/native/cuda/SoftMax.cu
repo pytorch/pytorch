@@ -6,6 +6,7 @@
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
+#include <c10/macros/Macros.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/NumericLimits.cuh>
@@ -122,7 +123,11 @@ void SpatialSoftMax_getLaunchSizes(
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
 #ifdef __HIP_PLATFORM_HCC__
-  max_active_blocks = 16;
+  // XXX HIP function signature is not compatible yet.
+  uint32_t max_blocks;
+  cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
+                                                k, block_threads, smem_size);
+  max_active_blocks = max_blocks;
 #else
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
                                                 k, block_threads, smem_size);
@@ -136,7 +141,7 @@ inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
   uint64_t max_block_size = std::min(dim_size / ILP, static_cast<uint64_t>(max_threads));
   while (block_size < max_block_size) block_size *= 2;
   // Launch at least a single warp - the kernel assumes that.
-  block_size = std::max(block_size, static_cast<uint64_t>(32));
+  block_size = std::max(block_size, static_cast<uint64_t>(C10_WARP_SIZE));
   return dim3(block_size);
 }
 
@@ -332,13 +337,13 @@ blockReduce(AccumT* smem, AccumT val,
   AccumT warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
-  uint32_t mask = (((uint64_t)1) << (blockDim.x / 32)) - 1;
-  if (threadIdx.x < 32) {
-    int lane = threadIdx.x % 32;
-    if (lane < blockDim.x / 32) {
+  uint32_t mask = (((uint64_t)1) << (blockDim.x / C10_WARP_SIZE)) - 1;
+  if (threadIdx.x < C10_WARP_SIZE) {
+    int lane = threadIdx.x % C10_WARP_SIZE;
+    if (lane < blockDim.x / C10_WARP_SIZE) {
 #pragma unroll
-      for (int i = 0; i < 32; ++i) {
-        warpVal = r(warpVal, smem[lane * 32 + i]);
+      for (int i = 0; i < C10_WARP_SIZE; ++i) {
+        warpVal = r(warpVal, smem[lane * C10_WARP_SIZE + i]);
       }
 #if CUDA_VERSION >= 9000
       __syncwarp(mask);
@@ -353,7 +358,7 @@ blockReduce(AccumT* smem, AccumT val,
   AccumT blockVal = defaultVal;
 
   if (threadIdx.x == 0) {
-    for (int i = 0; i < blockDim.x / 32; ++i) {
+    for (int i = 0; i < blockDim.x / C10_WARP_SIZE; ++i) {
       blockVal = r(blockVal, smem[i]);
     }
     smem[0] = blockVal;
@@ -484,7 +489,7 @@ template<template<typename, typename, typename> class Epilogue, bool is_log_soft
 Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float){
   if (half_to_float) AT_ASSERTM(input_.scalar_type() == ScalarType::Half,"conversion is supported for Half type only");
   auto input = input_.contiguous();
-  Tensor output = half_to_float ? at::empty_like(input, input.options().dtype(ScalarType::Float)) : at::empty_like(input);
+  Tensor output = half_to_float ? at::empty_like(input, input.options().dtype(ScalarType::Float)) : at::empty_like(input, at::MemoryFormat::Contiguous);
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
@@ -566,7 +571,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
 template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
 Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool half_to_float){
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
-  Tensor gI = half_to_float ? at::empty_like(grad_, grad_.options().dtype(ScalarType::Half)) : at::empty_like(grad_);
+  Tensor gI = half_to_float ? at::empty_like(grad_, grad_.options().dtype(ScalarType::Half)) : at::empty_like(grad_, at::MemoryFormat::Contiguous);
   if (grad_.numel() == 0) {
     return gI;
   }

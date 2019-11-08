@@ -23,160 +23,116 @@ namespace native {
 template<class scalar_t>
 void magmaSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
-    magma_int_t* ipiv, scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
-  AT_ERROR("solve only takes float or double Tensors");
-}
+    magma_int_t* ipiv, scalar_t* dB, magma_int_t lddb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaSolveBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, scalar_t** dB_array, magma_int_t lddb,
-    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
-  AT_ERROR("solve only takes float or double Tensors");
-}
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaLu(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
-    magma_int_t* ipiv, magma_int_t* info) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    magma_int_t* ipiv, magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuBatched(
     magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
-    const MAGMAQueue& magma_queue) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaLuNoPiv(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
-    magma_int_t* info) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuNoPivBatched(
     magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("lu only takes float or double Tensors");
-}
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
-inline magma_int_t magmaGetriOptimalBlocksize(magma_int_t n) {
-  AT_ERROR("getri only takes float or double Tensors");
-}
+inline magma_int_t magmaGetriOptimalBlocksize(magma_int_t n);
 
 template<class scalar_t>
 void magmaGetri(
     magma_int_t n, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv, scalar_t* dwork,
-    magma_int_t lwork, magma_int_t* info) {
-  AT_ERROR("getri only takes float or double Tensors");
-}
+    magma_int_t lwork, magma_int_t* info);
 
 template<class scalar_t>
 void magmaGetriBatched(
     magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, scalar_t** dinvA_array, magma_int_t lddia,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("getri only takes float or double Tensors");
-}
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaCholeskySolve(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
-    scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
-  AT_ERROR("cholesky_solve only takes float or double Tensors");
-}
+    scalar_t* dB, magma_int_t lddb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaCholeskySolveBatched(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
-    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("cholesky_solve only takes float or double Tensors");
-}
+    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaCholesky(
     magma_uplo_t uplo, magma_int_t n, scalar_t* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  AT_ERROR("cholesky only takes float or double Tensors");
-}
+    magma_int_t ldda, magma_int_t* info);
 
 template<class scalar_t>
 void magmaCholeskyBatched(
     magma_uplo_t uplo, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("cholesky only takes float or double Tensors");
-}
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaTriangularSolve(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb) {
-  AT_ERROR("triangular_solve only takes float or double Tensors");
-}
+    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb);
 
 template<class scalar_t>
 void magmaTriangularSolveBatched(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
-    const MAGMAQueue& magma_queue) {
-  AT_ERROR("triangular_solve only takes float or double Tensors");
-}
+    const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
-inline magma_int_t magmaGeqrfOptimalBlocksize(magma_int_t m, magma_int_t n) {
-  AT_ERROR("geqrf only takes float or double Tensors");
-}
+inline magma_int_t magmaGeqrfOptimalBlocksize(magma_int_t m, magma_int_t n);
 
 template<class scalar_t>
 void magmaGeqrf(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
-    scalar_t* tau, scalar_t* dT, magma_int_t* info, bool is_v2) {
-  AT_ERROR("geqrf only takes float or double Tensors");
-}
+    scalar_t* tau, scalar_t* dT, magma_int_t* info, bool is_v2);
 
 template<class scalar_t>
 void magmaOrgqr(
     magma_int_t m, magma_int_t n, magma_int_t k, scalar_t* dA,
-    magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info) {
-  AT_ERROR("orgqr only takes float or double Tensors");
-}
+    magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaSymeig(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     scalar_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork,
-    magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
-  AT_ERROR("symeig only takes float or double Tensors");
-}
+    magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
 
 template<class scalar_t>
 void magmaSvd(
     magma_vec_t jobz, magma_int_t m, magma_int_t n, scalar_t* A,
     magma_int_t lda, scalar_t* s, scalar_t* U, magma_int_t ldu,
     scalar_t* VT, magma_int_t ldvt, scalar_t* work, magma_int_t lwork,
-    magma_int_t* iwork, magma_int_t* info) {
-  AT_ERROR("svd only takes float or double Tensors");
-}
+    magma_int_t* iwork, magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv,
-    scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
-  AT_ERROR("lu_solve only takes float or double Tensors");
-}
+    scalar_t* dB, magma_int_t lddb, magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuSolveBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info,
-    magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("lu_solve only takes float or double Tensors");
-}
+    magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<>
 void magmaSolve<double>(
@@ -890,7 +846,9 @@ AT_ERROR("lu: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   auto self_data = self.data_ptr<scalar_t>();
+  magma_int_t m = magma_int_cast(self.size(-2), "m");
   magma_int_t n = magma_int_cast(self.size(-1), "n");
+  magma_int_t k = std::min(m, n);
 
   if (self.dim() == 2) {
     // If `pivots` is defined, then we have to compute them.
@@ -900,12 +858,12 @@ AT_ERROR("lu: MAGMA library not found in "
     // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
-      Tensor piv_tmp = at::empty({n}, at::kInt);
+      Tensor piv_tmp = at::empty({k}, at::kInt);
       magmaLu<scalar_t>(
-        n, n, self_data, n, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
+        m, n, self_data, m, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
       pivots.copy_(piv_tmp);
     } else {
-      magmaLuNoPiv<scalar_t>(n, n, self_data, n, info_tmp.data_ptr<magma_int_t>());
+      magmaLuNoPiv<scalar_t>(m, n, self_data, m, info_tmp.data_ptr<magma_int_t>());
     }
     infos.copy_(info_tmp);
   } else {
@@ -932,11 +890,11 @@ AT_ERROR("lu: MAGMA library not found in "
         pivots_array[i] = &pivots_data[i * pivots_matrix_stride];
       }
       magmaLuBatched<scalar_t>(
-        n, n, self_array, n, pivots_array,
+        m, n, self_array, m, pivots_array,
         infos.data_ptr<magma_int_t>(), batch_size, magma_queue);
     } else {
       magmaLuNoPivBatched<scalar_t>(
-        n, n, self_array, n, infos.data_ptr<magma_int_t>(),
+        m, n, self_array, m, infos.data_ptr<magma_int_t>(),
         batch_size, magma_queue);
     }
   }
@@ -947,127 +905,65 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
-  squareCheckInputs(self);
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+  auto k = std::min(m, n);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
-  Tensor pivots_tensor = at::arange(1, self.size(-1) + 1, self.options().dtype(at::kInt)).expand(req_size).contiguous();
+  req_size.back() = k;
+  Tensor pivots_tensor = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand(req_size).contiguous();
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(at::kInt));
 
   Tensor self_working_copy;
   if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self);
+    self_working_copy = at::empty_like(self, at::MemoryFormat::Contiguous);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_cuda", [&]{
-      apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
-    });
+        apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
+        if (self.dim() > 2 && pivot && m == n && m <= 32) {
+          /*
+            The magma implementation of small singular square batch
+            matrices has a bug that results nan values in the LU
+            factorization results, see
+            https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+
+            TODO: disable this block for magma versions that implement a bug fix
+          */
+          auto batch_size = infos_tensor.numel();
+          auto infos_array = infos_tensor.view({batch_size});
+          auto infos_cpu = infos_array.to(at::kCPU);
+          auto infos_data = infos_cpu.data_ptr<int>();
+          auto input_array = self.view({batch_size, m, n});
+          auto working_array = self_working_copy.view({batch_size, m, n});
+          auto pivots_array = pivots_tensor.view({batch_size, k});
+          for (int64_t i = 0; i < batch_size; i++) {
+            auto info = infos_data[i];
+            if (info > 0) {
+              /*
+                We'll recompute LU factorization of singular matrices
+                using the non-batch implementation to workaround the
+                magma bug (magma issue 13).
+              */
+              working_array[i].copy_(input_array[i]);
+              auto matrix = working_array[i];
+              auto pivots = pivots_array[i];
+              auto infos = infos_array[i];
+              apply_lu<scalar_t>(matrix, pivots, infos, pivot);
+            }
+          }
+        }
+      });
   }
   if (check_errors) {
     if (self.dim() == 2) {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
+      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
     } else {
-      batchCheckErrors(infos_tensor, "lu");
+      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
     }
   }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <typename scalar_t, typename IndexType, bool upper>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
-__global__
-void triu_tril_kernel(
-    cuda::detail::TensorInfo<scalar_t, IndexType> result_info,
-    const cuda::detail::TensorInfo<scalar_t, IndexType> self_info,
-    const int64_t k, const int64_t N) {
-  int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (linear_idx >= N) {
-    return;
-  }
-
-  auto dims = self_info.dims;
-
-  IndexType self_offset = 0, result_offset = 0;
-  // Compute column index and corresponding offset
-  IndexType col = linear_idx % self_info.sizes[dims - 1];
-  linear_idx /= self_info.sizes[dims - 1];
-  self_offset += self_info.strides[dims - 1] * col; 
-  result_offset += result_info.strides[dims - 1] * col;
-
-  // Compute row index and corresponding offset
-  IndexType row = linear_idx % self_info.sizes[dims - 2];
-  linear_idx /= self_info.sizes[dims - 2];
-  self_offset += self_info.strides[dims - 2] * row;
-  result_offset += result_info.strides[dims - 2] * row;
-
-  // Compute remaining offsets
-  IndexType running_index;
-  #pragma unroll
-  for (IndexType i = dims - 3; i >= 0; --i) {
-    running_index = linear_idx % self_info.sizes[i];
-    linear_idx /= self_info.sizes[i];
-    self_offset += running_index * self_info.strides[i];
-    result_offset += running_index * result_info.strides[i];
-  }
-
-  bool mask = upper ? (col - row >= k) : (col - row <= k);
-  result_info.data[result_offset] = mask ? self_info.data[self_offset] : scalar_t(0);
-}
-
-template <bool upper>
-Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, const char* name) {
-  int64_t N = self.numel();
-  dim3 dim_block = cuda::getApplyBlock();
-  dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), name, [&]{
-    if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
-      triu_tril_kernel<scalar_t, int32_t, upper>
-        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          result_info, self_info, k, N);
-    } else {
-      auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
-      triu_tril_kernel<scalar_t, int64_t, upper>
-        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          result_info, self_info, k, N);
-    }
-  });
-  AT_CUDA_CHECK(cudaGetLastError());
-  return result;
-}
-
-Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  return tril_cuda_out(self, self, k);
-}
-
-Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
-  if (self.numel() == 0) {
-    return result;
-  }
-  return triu_tril_cuda_template<false>(result, self, k, "tril");
-}
-
-Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  return triu_cuda_out(self, self, k);
-}
-
-Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
-  if (self.numel() == 0) {
-    return result;
-  }
-  return triu_tril_cuda_template<true>(result, self, k, "triu");
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1315,7 +1211,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
                               : at::empty(self_sizes, self.options().device(at::kCPU));
 
   if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self));
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self, at::MemoryFormat::Contiguous));
   }
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
@@ -1323,15 +1219,16 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     apply_symeig<scalar_t>(self_working_copy, eigvals_working_copy, eigenvectors, upper, infos);
   });
 
-  if (!eigenvectors) {
-    self_working_copy.zero_();
-  }
   if (self.dim() > 2) {
     batchCheckErrors(infos, "symeig_cuda");
   } else {
     singleCheckErrors(infos[0], "symeig_cuda");
   }
-  return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
+  if (eigenvectors) {
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
+  } else {
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), at::empty({0}, self.options()));
+  }
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1527,7 +1424,7 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
 
   if (self.numel() == 0 || LU_data.numel() == 0) {
-    return at::zeros_like(self);
+    return at::zeros_like(self, at::MemoryFormat::Contiguous);
   }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);

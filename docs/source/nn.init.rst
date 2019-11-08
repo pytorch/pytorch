@@ -1,6 +1,8 @@
 .. role:: hidden
     :class: hidden-section
 
+.. _nn-init-doc:
+
 torch.nn.init
 =============
 

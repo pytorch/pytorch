@@ -272,8 +272,9 @@ C10_EXPORT void Gemm<float, CPUContext>(
     float* C,
     CPUContext* /*context*/,
     TensorProto::DataType /*math_type*/) {
-  const int lda = (trans_A == CblasNoTrans) ? K : M;
-  const int ldb = (trans_B == CblasNoTrans) ? N : K;
+  // MKL expects ld? >= 1
+  const int lda = std::max((trans_A == CblasNoTrans) ? K : M, 1);
+  const int ldb = std::max((trans_B == CblasNoTrans) ? N : K, 1);
   cblas_sgemm(
       CblasRowMajor,
       trans_A,
@@ -367,9 +368,10 @@ C10_EXPORT void GemmBatched<float, CPUContext>(
     TensorProto::DataType /* math_type */) {
 #ifdef CAFFE2_USE_MKL
   (void)context;
-  const int lda = (trans_A == CblasNoTrans) ? K : M;
-  const int ldb = (trans_B == CblasNoTrans) ? N : K;
-  const int ldc = N;
+  // MKL expects ld? >= 1
+  const int lda = std::max((trans_A == CblasNoTrans) ? K : M, 1);
+  const int ldb = std::max((trans_B == CblasNoTrans) ? N : K, 1);
+  const int ldc = std::max(N, 1);
   cblas_sgemm_batch(
       CblasRowMajor,
       &trans_A,
@@ -416,9 +418,10 @@ C10_EXPORT void GemmStridedBatched<float, CPUContext>(
     TensorProto::DataType /* math_type */) {
 #ifdef CAFFE2_USE_MKL
   (void)context;
-  const int lda = (trans_A == CblasNoTrans) ? K : M;
-  const int ldb = (trans_B == CblasNoTrans) ? N : K;
-  const int ldc = N;
+  // MKL expects ld? >= 1
+  const int lda = std::max((trans_A == CblasNoTrans) ? K : M, 1);
+  const int ldb = std::max((trans_B == CblasNoTrans) ? N : K, 1);
+  const int ldc = std::max(N, 1);
   std::vector<const float*> A_array(batch_size);
   std::vector<const float*> B_array(batch_size);
   std::vector<float*> C_array(batch_size);

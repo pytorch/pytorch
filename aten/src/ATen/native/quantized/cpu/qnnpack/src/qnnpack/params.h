@@ -263,7 +263,7 @@ union pytorch_qnnp_u8_clamping_params {
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
 };
 
-typedef void (*q8gemm_ukernel_function)(
+typedef void (*pytorch_q8gemm_ukernel_function)(
     size_t mr,
     size_t nr,
     size_t k,
@@ -274,7 +274,7 @@ typedef void (*q8gemm_ukernel_function)(
     size_t c_stride,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
-typedef void (*q8conv_ukernel_function)(
+typedef void (*pytorch_q8conv_ukernel_function)(
     size_t mr,
     size_t nr,
     size_t kc,
@@ -285,7 +285,7 @@ typedef void (*q8conv_ukernel_function)(
     size_t c_stride,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
-typedef void (*q8gemm_xzp_ukernel_function)(
+typedef void (*pytorch_q8gemm_xzp_ukernel_function)(
     size_t mr,
     size_t nr,
     size_t k,
@@ -297,7 +297,7 @@ typedef void (*q8gemm_xzp_ukernel_function)(
     size_t c_stride,
     const union pytorch_qnnp_q31_requantization_params* requantization_params);
 
-typedef void (*q8sum_rows_ukernel_function)(
+typedef void (*pytorch_q8sum_rows_ukernel_function)(
     const uint8_t* a,
     size_t m,
     size_t k,
@@ -305,18 +305,18 @@ typedef void (*q8sum_rows_ukernel_function)(
     int32_t multiplier,
     int32_t* sums);
 
-typedef void (*xzipc_ukernel_function)(size_t n, const void* x, void* y);
+typedef void (*pytorch_xzipc_ukernel_function)(size_t n, const void* x, void* y);
 
 typedef void (
-    *xzipv_ukernel_function)(size_t n, size_t m, const void* x, void* y);
+    *pytorch_xzipv_ukernel_function)(size_t n, size_t m, const void* x, void* y);
 
-typedef void (*x8lut_ukernel_function)(
+typedef void (*pytorch_x8lut_ukernel_function)(
     size_t n,
     const uint8_t* x,
     const uint8_t* t,
     uint8_t* y);
 
-typedef void (*sgemm_ukernel_function)(
+typedef void (*pytorch_sgemm_ukernel_function)(
     size_t mr,
     size_t nr,
     size_t k,
@@ -327,7 +327,7 @@ typedef void (*sgemm_ukernel_function)(
     size_t c_stride,
     const struct pytorch_qnnp_fp32_clamping_params* clamping_params);
 
-typedef void (*sconv_ukernel_function)(
+typedef void (*pytorch_sconv_ukernel_function)(
     size_t mr,
     size_t nr,
     size_t kc,
@@ -338,7 +338,7 @@ typedef void (*sconv_ukernel_function)(
     size_t c_stride,
     const struct pytorch_qnnp_fp32_clamping_params* clamping_params);
 
-typedef void (*hgemm_ukernel_function)(
+typedef void (*pytorch_hgemm_ukernel_function)(
     size_t mr,
     size_t nr,
     size_t k,
@@ -349,7 +349,7 @@ typedef void (*hgemm_ukernel_function)(
     size_t c_stride,
     const struct pytorch_qnnp_fp16_clamping_params* clamping_params);
 
-typedef void (*q8dwconv_up_ukernel_function)(
+typedef void (*pytorch_q8dwconv_up_ukernel_function)(
     size_t channels,
     size_t output_width,
     const uint8_t** input,
@@ -359,7 +359,7 @@ typedef void (*q8dwconv_up_ukernel_function)(
     size_t output_increment,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
-typedef void (*q8dwconv_mp_ukernel_function)(
+typedef void (*pytorch_q8dwconv_mp_ukernel_function)(
     size_t channels,
     size_t output_width,
     const uint8_t** input,
@@ -370,7 +370,7 @@ typedef void (*q8dwconv_mp_ukernel_function)(
     size_t output_increment,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
-typedef void (*q8gavgpool_up_ukernel_function)(
+typedef void (*pytorch_q8gavgpool_up_ukernel_function)(
     size_t m,
     size_t n,
     const uint8_t* x,
@@ -379,7 +379,7 @@ typedef void (*q8gavgpool_up_ukernel_function)(
     uint8_t* y,
     const union pytorch_qnnp_avgpool_quantization_params* quantization_params);
 
-typedef void (*q8gavgpool_mp_ukernel_function)(
+typedef void (*pytorch_q8gavgpool_mp_ukernel_function)(
     size_t m,
     size_t n,
     const uint8_t* x,
@@ -389,7 +389,7 @@ typedef void (*q8gavgpool_mp_ukernel_function)(
     uint8_t* y,
     const union pytorch_qnnp_avgpool_quantization_params* quantization_params);
 
-typedef void (*q8avgpool_up_ukernel_function)(
+typedef void (*pytorch_q8avgpool_up_ukernel_function)(
     size_t n,
     size_t ks,
     size_t kc,
@@ -400,7 +400,7 @@ typedef void (*q8avgpool_up_ukernel_function)(
     size_t y_increment,
     const union pytorch_qnnp_avgpool_quantization_params* quantization_params);
 
-typedef void (*q8avgpool_mp_ukernel_function)(
+typedef void (*pytorch_q8avgpool_mp_ukernel_function)(
     size_t n,
     size_t ks,
     size_t kc,
@@ -412,7 +412,7 @@ typedef void (*q8avgpool_mp_ukernel_function)(
     size_t y_increment,
     const union pytorch_qnnp_avgpool_quantization_params* quantization_params);
 
-typedef void (*u8maxpool_ukernel_function)(
+typedef void (*pytorch_u8maxpool_ukernel_function)(
     size_t n,
     size_t ks,
     size_t kc,
@@ -422,37 +422,37 @@ typedef void (*u8maxpool_ukernel_function)(
     size_t y_increment,
     const union pytorch_qnnp_u8_clamping_params* params);
 
-typedef void (*u8clamp_ukernel_function)(
+typedef void (*pytorch_u8clamp_ukernel_function)(
     size_t n,
     const uint8_t* x,
     uint8_t* y,
     const union pytorch_qnnp_u8_clamping_params* params);
 
-typedef uint8_t (*u8rmax_ukernel_function)(size_t n, const uint8_t* x);
+typedef uint8_t (*pytorch_u8rmax_ukernel_function)(size_t n, const uint8_t* x);
 
-typedef void (*u8lut32norm_ukernel_function)(
+typedef void (*pytorch_u8lut32norm_ukernel_function)(
     size_t n,
     const uint8_t* x,
     const uint32_t* t,
     uint8_t* y);
 
-typedef void (*q8vadd_ukernel_function)(
+typedef void (*pytorch_q8vadd_ukernel_function)(
     size_t n,
     const uint8_t* a,
     const uint8_t* b,
     uint8_t* y,
     const union pytorch_qnnp_add_quantization_params* quantization_params);
 
-struct q8conv_parameters {
-  q8gemm_ukernel_function gemm;
-  q8conv_ukernel_function conv;
+struct pytorch_q8conv_parameters {
+  pytorch_q8gemm_ukernel_function gemm;
+  pytorch_q8conv_ukernel_function conv;
   uint8_t mr;
   uint8_t nr;
   uint8_t kr;
 };
 
-struct q8conv_xzp_parameters {
-  q8gemm_xzp_ukernel_function gemm;
+struct pytorch_q8conv_xzp_parameters {
+  pytorch_q8gemm_xzp_ukernel_function gemm;
   /* no conv ukernel */
   uint8_t mr;
   uint8_t nr;
@@ -461,68 +461,68 @@ struct q8conv_xzp_parameters {
   size_t kthreshold;
 };
 
-struct q8dwconv_up_parameters {
-  q8dwconv_up_ukernel_function updw;
+struct pytorch_q8dwconv_up_parameters {
+  pytorch_q8dwconv_up_ukernel_function updw;
   uint8_t cr;
 };
 
-struct q8dwconv_mp_parameters {
-  q8dwconv_mp_ukernel_function mpdw;
+struct pytorch_q8dwconv_mp_parameters {
+  pytorch_q8dwconv_mp_ukernel_function mpdw;
   uint8_t cr;
 };
 
-struct q8sum_rows_parameters {
-  q8sum_rows_ukernel_function sum_rows;
+struct pytorch_q8sum_rows_parameters {
+  pytorch_q8sum_rows_ukernel_function sum_rows;
   uint32_t m;
 };
 
-struct q8gavgpool_parameters {
-  q8gavgpool_up_ukernel_function ltnr;
-  q8gavgpool_up_ukernel_function genr_lemr;
-  q8gavgpool_mp_ukernel_function genr_gtmr;
+struct pytorch_q8gavgpool_parameters {
+  pytorch_q8gavgpool_up_ukernel_function ltnr;
+  pytorch_q8gavgpool_up_ukernel_function genr_lemr;
+  pytorch_q8gavgpool_mp_ukernel_function genr_gtmr;
   uint8_t mr;
   uint8_t nr;
 };
 
-struct q8avgpool_parameters {
-  q8avgpool_up_ukernel_function ltkr;
-  q8avgpool_up_ukernel_function gekr_lemr;
-  q8avgpool_mp_ukernel_function gekr_gtmr;
+struct pytorch_q8avgpool_parameters {
+  pytorch_q8avgpool_up_ukernel_function ltkr;
+  pytorch_q8avgpool_up_ukernel_function gekr_lemr;
+  pytorch_q8avgpool_mp_ukernel_function gekr_gtmr;
   uint8_t mr;
   uint8_t qr;
   uint8_t kr;
 };
 
-struct u8maxpool_parameters {
-  u8maxpool_ukernel_function ltkr;
-  u8maxpool_ukernel_function gekr;
+struct pytorch_u8maxpool_parameters {
+  pytorch_u8maxpool_ukernel_function ltkr;
+  pytorch_u8maxpool_ukernel_function gekr;
   uint8_t mr;
   uint8_t qr;
   uint8_t kr;
 };
 
-struct x8zip_parameters {
-  xzipc_ukernel_function x2;
-  xzipc_ukernel_function x3;
-  xzipc_ukernel_function x4;
-  xzipv_ukernel_function xm;
+struct pytorch_x8zip_parameters {
+  pytorch_xzipc_ukernel_function x2;
+  pytorch_xzipc_ukernel_function x3;
+  pytorch_xzipc_ukernel_function x4;
+  pytorch_xzipv_ukernel_function xm;
 };
 
 struct pytorch_qnnp_parameters {
-  struct q8conv_parameters q8conv;
-  struct q8conv_xzp_parameters q8conv_xzp;
-  struct q8dwconv_up_parameters q8dw9;
-  struct q8dwconv_mp_parameters q8dw25;
-  struct q8sum_rows_parameters q8sum_rows;
-  q8vadd_ukernel_function q8vadd;
-  struct q8gavgpool_parameters q8gavgpool;
-  struct q8avgpool_parameters q8avgpool;
-  struct u8maxpool_parameters u8maxpool;
-  u8lut32norm_ukernel_function u8lut32norm;
-  u8clamp_ukernel_function u8clamp;
-  u8rmax_ukernel_function u8rmax;
-  struct x8zip_parameters x8zip;
-  x8lut_ukernel_function x8lut;
+  struct pytorch_q8conv_parameters q8conv;
+  struct pytorch_q8conv_xzp_parameters q8conv_xzp;
+  struct pytorch_q8dwconv_up_parameters q8dw9;
+  struct pytorch_q8dwconv_mp_parameters q8dw25;
+  struct pytorch_q8sum_rows_parameters q8sum_rows;
+  pytorch_q8vadd_ukernel_function q8vadd;
+  struct pytorch_q8gavgpool_parameters q8gavgpool;
+  struct pytorch_q8avgpool_parameters q8avgpool;
+  struct pytorch_u8maxpool_parameters u8maxpool;
+  pytorch_u8lut32norm_ukernel_function u8lut32norm;
+  pytorch_u8clamp_ukernel_function u8clamp;
+  pytorch_u8rmax_ukernel_function u8rmax;
+  struct pytorch_x8zip_parameters x8zip;
+  pytorch_x8lut_ukernel_function x8lut;
   bool initialized;
 };
 

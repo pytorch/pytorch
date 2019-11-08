@@ -23,33 +23,33 @@ void RMSprop::step() {
       continue;
     }
 
-    if (options.weight_decay_ > 0) {
+    if (options.weight_decay() > 0) {
       NoGradGuard guard;
-      p.grad() = p.grad() + options.weight_decay_ * p;
+      p.grad() = p.grad() + options.weight_decay() * p;
     }
 
     auto square_average = buffer_at(square_average_buffers, i);
-    square_average.mul_(options.alpha_)
-        .addcmul_(p.grad(), p.grad(), 1.0 - options.alpha_);
+    square_average.mul_(options.alpha())
+        .addcmul_(p.grad(), p.grad(), 1.0 - options.alpha());
 
     Tensor average;
-    if (options.centered_ > 0) {
+    if (options.centered() > 0) {
       auto& grad_average = buffer_at(grad_average_buffers, i);
-      grad_average.mul_(options.alpha_).add_(p.grad(), 1.0 - options.alpha_);
+      grad_average.mul_(options.alpha()).add_(p.grad(), 1.0 - options.alpha());
       average = square_average.addcmul(grad_average, grad_average, -1.0)
                     .sqrt()
-                    .add_(options.eps_);
+                    .add_(options.eps());
     } else {
-      average = square_average.sqrt().add_(options.eps_);
+      average = square_average.sqrt().add_(options.eps());
     }
 
     NoGradGuard guard;
-    if (options.momentum_ > 0) {
+    if (options.momentum() > 0) {
       auto& momentum = buffer_at(momentum_buffers, i);
-      momentum.mul_(options.momentum_).addcdiv_(p.grad(), average);
-      p.add_(momentum, -options.learning_rate_);
+      momentum.mul_(options.momentum()).addcdiv_(p.grad(), average);
+      p.add_(momentum, -options.learning_rate());
     } else {
-      p.addcdiv_(p.grad(), average, -options.learning_rate_);
+      p.addcdiv_(p.grad(), average, -options.learning_rate());
     }
   }
 }

@@ -15,15 +15,13 @@ namespace jit {
 // introduce more granularity here (e.g. List[int] will never alias
 // List[float]).
 c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
-    return TypeKind::TensorType;
-  }
 
   switch (type->kind()) {
     case TypeKind::ListType:
     case TypeKind::TupleType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
+    case TypeKind::TensorType:
       return type->kind();
     case TypeKind::OptionalType:
       return getMutableTypeKind(type->cast<OptionalType>()->getElementType());
@@ -339,6 +337,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
+    case prim::unchecked_cast:
       return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
@@ -347,12 +346,17 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      AT_ERROR("Analyzing prim::profile isn't yet implemented");
-      // TODO: simply mapping inputs' aliases to outputs'
-      // should work but a) we should probably avoid exposing
-      // prim::profile to optimizations b) the alias semantics
-      // might be more complicated than just mapAliases
-      // mapAliases(node->inputs(), node->outputs());
+      if (node->inputs().size() > 0) {
+        makePointerTo(node->output(), node->inputs().at(0));
+      }
+      return;
+    case prim::BailOut:
+      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
+                            prim::BailoutTemplate);
+      makePointerTo(node->output(), node->inputs().at(1));
+      return;
+    case prim::Guard:
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:
@@ -361,6 +365,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
+    case prim::isinstance:
       // These ops do nothing
       return;
     default:
@@ -1248,6 +1253,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,
+      prim::isinstance,
+      prim::unchecked_cast,
   };
 
   // Operators that should not be used by alias analysis
@@ -1257,7 +1264,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Drop,
       at::onnx::Reshape,
       at::onnx::Shape,
-      prim::AutogradAnyNonZero,
       prim::AutogradAdd,
   };
 

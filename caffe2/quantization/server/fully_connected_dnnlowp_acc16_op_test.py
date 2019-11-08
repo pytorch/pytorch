@@ -19,9 +19,9 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
     # correctness test with no quantization error in inputs
     # fbgemm currently only supports N a multiple of 64
     @given(
-        input_channels=st.sampled_from((32, 64)),
-        output_channels=st.sampled_from((64, 128, 256)),
-        batch_size=st.sampled_from((32, 64, 128, 256)),
+        input_channels=st.sampled_from([32, 64]),
+        output_channels=st.sampled_from([64, 128, 256]),
+        batch_size=st.sampled_from([0, 32, 64, 128, 256]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         **hu.gcs_cpu_only
@@ -52,7 +52,8 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         X = np.round(np.random.rand(batch_size, input_channels) * 4 + X_min)
         X = X.astype(np.float32)
         X[:, 0] = X_min
-        X[0, 1] = X_max
+        if batch_size != 0:
+            X[0, 1] = X_max
 
         W_min = -100
         W_max = W_min + 255
@@ -111,10 +112,10 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     @given(
-        input_channels=st.sampled_from((2, 2)),
-        output_channels=st.sampled_from((4, 4)),
-        batch_size=st.sampled_from((1, 1)),
-        nbits_in_non_outlier=st.sampled_from((0, 6)),
+        input_channels=st.sampled_from([2]),
+        output_channels=st.sampled_from([4]),
+        batch_size=st.sampled_from([0, 1]),
+        nbits_in_non_outlier=st.sampled_from([0, 6]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         prepack_weight=st.booleans(),
@@ -148,7 +149,8 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         X = np.round(np.random.rand(batch_size, input_channels) * 4 + X_min)
         X = X.astype(np.float32)
         X[:, 0] = X_min
-        X[0, 1] = X_max
+        if batch_size != 0:
+            X[0, 1] = X_max
 
         W_min = -100
         W_max = W_min + 255
@@ -184,7 +186,9 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
-            x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
+            X_min = 0 if X.size == 0 else X.min()
+            X_max = 0 if X.size == 0 else X.max()
+            x_q_param = dnnlowp_utils.choose_quantization_params(X_min, X_max)
 
             if do_prepack_weight:
                 inputs = ["W"]

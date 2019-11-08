@@ -393,6 +393,9 @@ Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& 
 }
 
 Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen_) {
+#ifdef BUILD_NAMEDTENSOR
+  NoNamesGuard guard;
+#endif
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
@@ -733,19 +736,19 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
 }
 
 Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty_like(mean);
+  Tensor ret = at::empty_like(mean, at::MemoryFormat::Contiguous);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(std);
+  Tensor ret = at::empty_like(std, at::MemoryFormat::Contiguous);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean);
+  Tensor ret = at::empty_like(mean, at::MemoryFormat::Contiguous);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }

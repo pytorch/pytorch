@@ -633,8 +633,13 @@ class TestCase(hu.HypothesisTestCase):
                     comm_size=comm_size,
                     device_option=device_option,
                     tmpdir=tmpdir)
-        # Check that test finishes quickly because connections get closed
-        self.assertLess(time.time() - start_time, 2.0)
+        # Check that test finishes quickly because connections get closed.
+        # This assert used to check that the end to end runtime was less
+        # than 2 seconds, but this may not always be the case if there
+        # is significant overhead in starting processes. Ideally, this
+        # assert is replaced by one that doesn't depend on time but rather
+        # checks the success/failure status of the barrier that is run.
+        self.assertLess(time.time() - start_time, 20.0)
 
     def _test_io_error(
         self,

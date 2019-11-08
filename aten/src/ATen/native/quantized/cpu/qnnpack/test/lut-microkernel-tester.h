@@ -48,7 +48,7 @@ class LUTMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(x8lut_ukernel_function x8lut) const {
+  void test(pytorch_x8lut_ukernel_function x8lut) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);

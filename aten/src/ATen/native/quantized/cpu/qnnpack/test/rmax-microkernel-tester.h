@@ -39,7 +39,7 @@ class RMaxMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(u8rmax_ukernel_function u8rmax) const {
+  void test(pytorch_u8rmax_ukernel_function u8rmax) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);

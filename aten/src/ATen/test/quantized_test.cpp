@@ -18,7 +18,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   Tensor r = at::ones({num_elements});
   const double scale = 1.0;
   const int64_t zero_point = 2;
-  const Tensor qr = at::quantize_linear(r, scale, zero_point, kQUInt8);
+  const Tensor qr = at::quantize_per_tensor(r, scale, zero_point, kQUInt8);
   ASSERT_EQ(qr.q_scale(), scale);
   ASSERT_EQ(qr.q_zero_point(), zero_point);
   ASSERT_TRUE(qr.is_quantized());
@@ -54,7 +54,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   // Check for correct requantization
   double new_scale = 2.0;
   int64_t new_zero_point = 1;
-  Tensor reqr = at::quantize_linear(r, new_scale, new_zero_point, kQInt8);
+  Tensor reqr = at::quantize_per_tensor(r, new_scale, new_zero_point, kQInt8);
   auto reqr_data = reqr.data_ptr<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
     reqr_data[i].val_ = requantize_val<quint8, qint8>(scale, zero_point,
@@ -79,7 +79,7 @@ TEST(TestQTensor, RoundingMode) {
     6, 6, 8, 8, 10, 10};  // scale = 1.0
 
   Tensor x = from_blob(x_values.data(), x_values.size());
-  Tensor qx = at::quantize_linear(x, /*scale=*/1.0, zero_point, kQUInt8);
+  Tensor qx = at::quantize_per_tensor(x, /*scale=*/1.0, zero_point, kQUInt8);
 
   auto qx_data = qx.data_ptr<quint8>();
   for (size_t idx = 0; idx < x_values.size(); ++idx) {
@@ -92,7 +92,7 @@ TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
   const int32_t zero_point = 2;
-  Tensor qr = at::quantize_linear(r, scale, zero_point, kQUInt8);
+  Tensor qr = at::quantize_per_tensor(r, scale, zero_point, kQUInt8);
   ASSERT_EQ(r.item().to<float>(), qr.item().to<float>());
 }
 
@@ -124,21 +124,21 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
   auto zero_points = randint(10, {10}).toType(kLong);
   int val = 100;
   int ch_axis = 0;
-  Tensor q = at::_empty_per_channel_affine_quantized_like(
+  Tensor q = at::_empty_per_channel_affine_quantized(
+      {numel},
       scales,
       zero_points,
-      {numel},
-      {ch_axis},
+      ch_axis,
       at::device(at::kCPU).dtype(kQUInt8));
   // Assigning to QTensor
-  auto* q_data = q.data<quint8>();
+  auto* q_data = q.data_ptr<quint8>();
   for (int i = 0; i < numel; ++i) {
     q_data[i].val_ = val;
   }
 
   // dequantize
   auto r = q.dequantize();
-  auto* r_data = r.data<float>();
+  auto* r_data = r.data_ptr<float>();
   for (int i = 0; i < numel; ++i) {
     ASSERT_EQ(
         r_data[i],

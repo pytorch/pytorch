@@ -6,22 +6,22 @@
 #include <ATen/core/DistributionsHelper.h>
 
 TH_API void THTensor_(random)(THTensor *self, at::Generator *_generator);
-TH_API void THTensor_(clampedRandom)(THTensor *self, at::Generator *_generator, int64_t min, int64_t max);
-TH_API void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t max);
-TH_API void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p);
+TH_API void THTensor_(clampedRandom)(THTensor *self, int64_t min, int64_t max, at::Generator *_generator);
+TH_API void THTensor_(cappedRandom)(THTensor *self, int64_t max, at::Generator *_generator);
+TH_API void THTensor_(geometric)(THTensor *self, double p, at::Generator *_generator);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 TH_API void THTensor_(bernoulli_Tensor)(THTensor *self, at::Generator *_generator, THTensor *p);
-TH_API void THTensor_(uniform)(THTensor *self, at::Generator *_generator, double a, double b);
-TH_API void THTensor_(normal)(THTensor *self, at::Generator *_generator, double mean, double stdv);
-TH_API void THTensor_(normal_means)(THTensor *self, at::Generator *gen, THTensor *means, double stddev);
-TH_API void THTensor_(normal_stddevs)(THTensor *self, at::Generator *gen, double mean, THTensor *stddevs);
-TH_API void THTensor_(normal_means_stddevs)(THTensor *self, at::Generator *gen, THTensor *means, THTensor *stddevs);
-TH_API void THTensor_(exponential)(THTensor *self, at::Generator *_generator, double lambda);
-TH_API void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median, double sigma);
-TH_API void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean, double stdv);
+TH_API void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_generator);
+TH_API void THTensor_(normal)(THTensor *self, double mean, double stdv, at::Generator *_generator);
+TH_API void THTensor_(normal_means)(THTensor *self, THTensor *means, double stddev, at::Generator *gen);
+TH_API void THTensor_(normal_stddevs)(THTensor *self, double mean, THTensor *stddevs, at::Generator *gen);
+TH_API void THTensor_(normal_means_stddevs)(THTensor *self, THTensor *means, THTensor *stddevs, at::Generator *gen);
+TH_API void THTensor_(exponential)(THTensor *self, double lambda, at::Generator *_generator);
+TH_API void THTensor_(cauchy)(THTensor *self, double median, double sigma, at::Generator *_generator);
+TH_API void THTensor_(logNormal)(THTensor *self, double mean, double stdv, at::Generator *_generator);
 TH_API void THTensor_(multinomialAliasSetup)(THTensor *prob_dist, THLongTensor *J, THTensor *q);
-TH_API void THTensor_(multinomialAliasDraw)(THLongTensor *self, at::Generator *_generator, THTensor *q, THLongTensor *J, int n_sample);
+TH_API void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator *_generator);
 #endif
 
 #if defined(TH_REAL_IS_BYTE)

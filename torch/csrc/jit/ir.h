@@ -188,7 +188,7 @@ struct Value {
     if (hasDebugName()) {
       return unique_name_;
     }
-    return std::to_string(unique());
+    return c10::to_string(unique());
   }
   TORCH_API std::string debugNameBase() const;
   Node* node() {
@@ -628,20 +628,21 @@ struct TORCH_API Node {
 
   void dump() const;
 
-  std::ostream& print(
-      std::ostream& out,
-      size_t level,
-      std::vector<const Node*>* groups,
-      bool print_source_locations = true) const;
+  std::ostream &print(std::ostream &out, size_t level,
+                      std::vector<const Node *> *groups,
+                      bool print_source_locations = true,
+                      bool print_attributes = true, bool print_scopes = true,
+                      bool print_body = true) const;
 
   virtual ~Node() = default;
 
   // Methods for accessing attributes
-  void copyAttributes(const Node& rhs) {
+  Node* copyAttributes(const Node& rhs) {
     values_.clear();
     for (const AVPtr& i : rhs.values_) {
       values_.push_back(i->clone());
     }
+    return this;
   }
   bool hasAttribute(Symbol name) const {
     AT_ASSERT(name.is_attr());
@@ -704,6 +705,8 @@ struct TORCH_API Node {
   CREATE_ACCESSOR(Ints, is)
   CREATE_ACCESSOR(Graph, g)
   CREATE_ACCESSOR(Graphs, gs)
+  CREATE_ACCESSOR(Type, ty)
+  CREATE_ACCESSOR(Types, tys)
 
 #undef CREATE_ACCESSOR
 
@@ -734,9 +737,13 @@ struct TORCH_API Node {
     return getAttr<TensorsAttr>(name);
   }
 
+  Block* findCommonAncestorBlockWith(Node* n);
+
+  size_t blocksFromGraphBlock();
+
  private:
   void printAttrValue(std::ostream& out, const Symbol& name) const;
-  void printAttributes(std::ostream& out, bool ignore_subgraph) const;
+  void printAttributes(std::ostream &out, bool ignore_subgraph) const;
 
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {
@@ -906,6 +913,9 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+  void replaceOutput(size_t i, Value* n) {
+    output_->replaceInput(i, n);
+  }
   void permuteOutputs(const std::vector<size_t>& new_inputs) {
     output_->permuteInputs(new_inputs);
   }
@@ -1020,12 +1030,9 @@ struct Graph {
     return unique_names_;
   }
 
-  void push_scope(const std::string& scope_name) {
-    current_scope_ = current_scope_->push(Symbol::scope(scope_name));
-  }
-  void pop_scope() {
-    current_scope_ = current_scope_->parent();
-  }
+  TORCH_API void push_scope(const std::string& scope_name);
+  TORCH_API void pop_scope();
+
   ScopePtr current_scope() {
     return current_scope_;
   }
@@ -1062,8 +1069,7 @@ struct Graph {
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
       at::ArrayRef<Value*> values,
-      c10::optional<c10::QualifiedName> qualname = c10::nullopt,
-      std::shared_ptr<FunctionSchema> schema=nullptr);
+      TupleTypePtr optional_named_tuple = nullptr);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(
       Value* tup,
@@ -1092,6 +1098,13 @@ struct Graph {
   }
   TORCH_API Node* createStore(const std::string& name, Value* v);
   TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
+  TORCH_API Node* createIsInstance(
+      Value* v,
+      at::ArrayRef<TypePtr> types,
+      bool is_list,
+      bool is_tuple);
+
+  TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
 
   TORCH_API Value* insertFunctionCall(
       Function* callee,
@@ -1293,10 +1306,6 @@ struct ProfileOp : public Node {
 struct TORCH_API PythonOp : public Node {
   using Node::Node;
 
-  // should this Python function be skipped over when exported (i.e. for
-  // debugging functions that only run in Python)
-  bool ignore_on_export = false;
-
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;
   void cloneFrom(Node* other_) override = 0;
@@ -1309,7 +1318,7 @@ struct TORCH_API PythonOp : public Node {
   virtual void lint_python() const = 0;
 };
 
-TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
+TORCH_API void LintGraph(const std::shared_ptr<Graph>& graph);
 
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
 

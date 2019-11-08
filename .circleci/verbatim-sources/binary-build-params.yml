@@ -15,6 +15,7 @@ binary_linux_build_params: &binary_linux_build_params
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     LIBTORCH_VARIANT: << parameters.libtorch_variant >>
+    ANACONDA_USER: pytorch
   resource_class: << parameters.resource_class >>
   docker:
     - image: << parameters.docker_image >>

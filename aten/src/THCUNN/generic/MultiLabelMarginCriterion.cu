@@ -33,7 +33,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         1, dim,
-        reduction == Reduction::Mean
+        reduction == at::Reduction::Mean
         );
     THCudaCheck(cudaGetLastError());
   }
@@ -47,7 +47,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     dim3 blocks(input->size(0));
     dim3 threads(MULTILABELMARGIN_THREADS);
 
-    if (reduction != Reduction::None)
+    if (reduction != at::Reduction::None)
     {
       THCTensor *output_tmp = THCTensor_(newWithSize1d)(state, input->size(0));
       THCTensor_(resize1d)(state, output, 1);
@@ -59,7 +59,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THCIndexTensor_(data)(state, target),
           THCTensor_(data)(state, istarget),
           nframe, dim,
-          reduction == Reduction::Mean
+          reduction == at::Reduction::Mean
           );
       THCudaCheck(cudaGetLastError());
       THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(THCTensor_(sumall)(state, output_tmp)));
@@ -122,8 +122,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         1, gradInput->size(0),
-        reduction == Reduction::Mean,
-        reduction != Reduction::None);
+        reduction == at::Reduction::Mean,
+        reduction != at::Reduction::None);
 
   }
   else if(gradInput->dim() == 2)
@@ -145,8 +145,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         gradInput->size(0), gradInput->size(1),
-        reduction == Reduction::Mean,
-        reduction != Reduction::None);
+        reduction == at::Reduction::Mean,
+        reduction != at::Reduction::None);
   }
   else
     AT_ERROR("non-empty vector or matrix expected, got size: ", gradInput->sizes());

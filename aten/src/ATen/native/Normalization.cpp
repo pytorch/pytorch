@@ -6,6 +6,8 @@
 #include <ATen/Config.h>
 
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <vector>
 
@@ -54,20 +56,12 @@ struct Var {
   }
 };
 
-/// A fast path for CPU inference when all tensors are contiguous.
-/// This code achieves machine bandwidth peak without AVX support.
-/// If this changes for future architectures, we can move it to the cpu/
-/// directory.
 template<typename scalar_t>
-void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
+void batch_norm_cpu_inference_collect_liner_and_constant_terms(
+    scalar_t* alpha, scalar_t* beta, int64_t n_channel,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& mean, const Tensor& variance, double eps) {
-  int64_t n_batch = input.size(0);
-  int64_t n_channel = input.size(1);
-  int64_t image_size = input.numel() / n_batch / n_channel;
 
-  scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
   const scalar_t* weight_data = weight.defined() ? weight.data_ptr<scalar_t>() : nullptr;
   const scalar_t* bias_data = bias.defined() ? bias.data_ptr<scalar_t>() : nullptr;
   const scalar_t* mean_data = mean.data_ptr<scalar_t>();
@@ -84,17 +78,38 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   ///   the constant term beta(c) = bias(c) - mean(c) * inv_var(c) * weight(c)
   /// Note that this is only a good idea if (input_size >> c), in degenerate
   /// cases where image_size == 1 && batch_size == 1, it is slow.
-  Tensor alpha = at::empty_like(mean);
-  Tensor beta = at::empty_like(mean);
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
-  scalar_t* beta_data = beta.data_ptr<scalar_t>();
   for (int64_t c = 0; c < n_channel; c++) {
     scalar_t inv_var = 1 / std::sqrt(var_data[c] + static_cast<scalar_t>(eps));
     scalar_t weight_v = weight_data ? weight_data[c] : 1;
     scalar_t bias_v = bias_data ? bias_data[c] : 0;
-    alpha_data[c] = inv_var * weight_v;
-    beta_data[c] = bias_v - mean_data[c] * inv_var * weight_v;
+    alpha[c] = inv_var * weight_v;
+    beta[c] = bias_v - mean_data[c] * inv_var * weight_v;
   }
+}
+
+/// A fast path for CPU inference when all tensors are contiguous.
+/// This code achieves machine bandwidth peak without AVX support.
+/// If this changes for future architectures, we can move it to the cpu/
+/// directory.
+template<typename scalar_t>
+void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
+    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    const Tensor& mean, const Tensor& variance, double eps) {
+
+  int64_t n_batch = input.size(0);
+  int64_t n_channel = input.size(1);
+  int64_t image_size = input.numel() / n_batch / n_channel;
+
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.data_ptr<scalar_t>();
+
+  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* beta_data = beta.data_ptr<scalar_t>();
+
+  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+      alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
@@ -125,6 +140,58 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   }
 }
 
+/// A fast path for CPU inference when all tensors are channels last contiguous.
+/// This code achieves machine bandwidth peak without AVX support.
+/// If this changes for future architectures, we can move it to the cpu/
+/// directory.
+template<typename scalar_t>
+void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
+    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    const Tensor& mean, const Tensor& variance, double eps) {
+
+  int64_t n_batch = input.size(0);
+  int64_t n_channel = input.size(1);
+  int64_t image_size = input.numel() / n_batch / n_channel;
+
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.data_ptr<scalar_t>();
+
+  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* beta_data = beta.data_ptr<scalar_t>();
+
+  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+      alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
+
+  // Apply the linear terms to the input,
+  // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
+  // No need to use parallel_for as this function is supposed to be
+  // memory-limited.
+  // Keep the loop struture simple to make sure compiler vetorization kicks in.
+  if (n_channel != 1) {
+    for (int64_t n = 0; n < n_batch; ++n) {
+      for (int64_t i = 0; i < image_size; ++i) {
+        for (int64_t c = 0; c < n_channel; ++c) {
+          // Keep all the offset calculation within the inner loop for
+          // simplicity. Compilers are very good at hoisting the common part
+          // outside.
+          int64_t offset = n * image_size * n_channel + i * n_channel + c;
+          output_data[offset] = input_data[offset] * alpha_data[c] + beta_data[c];
+        }
+      }
+    }
+  } else {
+    // n_channel == 1
+    for (int64_t n = 0; n < n_batch; ++n) {
+      for (int64_t i = 0; i < image_size; ++i) {
+        int64_t offset = n * image_size + i;
+        output_data[offset] = input_data[offset] * alpha_data[0] + beta_data[0];
+      }
+    }
+  }
+}
+
 template<typename scalar_t>
 std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
@@ -132,18 +199,34 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool train, double eps) {
 
-  Tensor output = at::empty_like(input);
-
-  // Check if we should use the fast path.
+  // Check if we should use the fast path for contiguous memory format
   if (!train && input.is_contiguous()
       && (!weight.defined() || weight.is_contiguous())
       && (!bias.defined() || bias.is_contiguous())
       && running_mean.is_contiguous()
       && running_var.is_contiguous()) {
-    batch_norm_cpu_inference_contiguous<scalar_t>(output, input, weight, bias,
-      running_mean, running_var, eps);
+
+    Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+    batch_norm_cpu_inference_contiguous<scalar_t>(
+      output, input, weight, bias, running_mean, running_var, eps);
     return std::make_tuple(output, save_mean, save_invstd);
   }
+
+  // Check if we should use the fast path for channel last memory format
+  if (!train && input.is_contiguous(at::MemoryFormat::ChannelsLast)
+      && (!weight.defined() || weight.is_contiguous())
+      && (!bias.defined() || bias.is_contiguous())
+      && running_mean.is_contiguous()
+      && running_var.is_contiguous()) {
+
+    Tensor output = at::empty_like(input, at::MemoryFormat::ChannelsLast);
+    batch_norm_cpu_inference_channels_last<scalar_t>(
+      output, input, weight, bias, running_mean, running_var, eps);
+    return std::make_tuple(output, save_mean, save_invstd);
+  }
+
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+
   int64_t n_input = input.size(1);
 
   auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
@@ -170,8 +253,9 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       scalar_t w = weight.defined() ? weight.data_ptr<scalar_t>()[f * weight.stride(0)] : 1;
       scalar_t b = bias.defined() ? bias.data_ptr<scalar_t>()[f * bias.stride(0)] : 0;
 
-      CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
-        o = ((i - mean) * invstd) * w + b;
+      auto iter = TensorIterator::unary_op(out, in);
+      cpu_serial_kernel(iter, [=](const scalar_t i) -> scalar_t {
+        return ((i - mean) * invstd) * w + b;
       });
     }
   });
@@ -199,18 +283,24 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
     for (int64_t f = b_begin; f < b_end; ++f) {
       Tensor in = input.select(1, f);
-
+      
       // compute mean per input
+      auto iter = TensorIterator();
+      iter.add_input(in);
+      iter.build();
       accscalar_t sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
-          sum += i;
-        });
+      cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
+        sum += i;
+      });
       scalar_t mean = sum / n;
       save_mean_a[f] = mean;
 
       // compute variance per input
+      iter = TensorIterator();
+      iter.add_input(in);
+      iter.build();
       accscalar_t var_sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
+      cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
         var_sum += (i - mean) * (i - mean);
       });
       save_var_transform_a[f] = VarTransform<accscalar_t>{}(var_sum / n, eps);
@@ -240,13 +330,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::empty_like(input);
+    grad_input = at::empty_like(input, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
-    grad_weight = at::empty_like(weight);
+    grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight);
+    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
 
   auto weight_a = conditional_accessor_1d<scalar_t>(weight);
@@ -281,15 +371,22 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
         // sum over all gradOutput in feature plane
         accscalar_t sum = 0;
-        CPU_tensor_apply1<scalar_t>(grad_out, [&](const scalar_t& g) {
-            sum += g;
-          });
+        auto iter = TensorIterator();
+        iter.add_input(grad_out);
+        iter.build();
+        cpu_serial_kernel(iter, [&](const scalar_t g) -> void {
+          sum += g;
+        });
 
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
-        CPU_tensor_apply2<scalar_t,scalar_t>(in, grad_out, [&](const scalar_t& i, const scalar_t& go) {
-            dotp += (i - mean) * go;
-          });
+        iter = TensorIterator();
+        iter.add_input(in);
+        iter.add_input(grad_out);
+        iter.build();
+        cpu_serial_kernel(iter, [&](const scalar_t i, const scalar_t go) -> void {
+          dotp += (i - mean) * go;
+        });
 
         if (grad_input_mask[0]) {
           Tensor grad_in = grad_input.select(1, f);
@@ -301,23 +398,25 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
-
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, in, [&](scalar_t& gi, const scalar_t& i) {
-                gi = (i - mean)* k;
-              });
+            iter = TensorIterator::unary_op(grad_in, in);
+            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              return (i - mean) * k;
+            });
 
             accscalar_t grad_mean = sum / n;
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
-            gi = (go - grad_mean - gi) * invstd * w;
-              });
+            iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
+            cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
+              return (go - grad_mean - gi) * invstd * w;
+            });
           } else {
             // when in evaluation mode
             // Q(X) = X - running_mean  ; i.e. input centered to zero mean
             // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
             // dL/dX = w / running_std
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
-                gi = go * invstd * w;
-              });
+            iter = TensorIterator::unary_op(grad_in, grad_out);
+            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              return i * invstd * w;
+            });
           }
         }
         if (grad_input_mask[1]) {
@@ -336,7 +435,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 // of backends, while enabling it to keep the information about the used backend, so that it can
 // use its corresponding backward implementation.
 // XXX: The indices of backends need to be kept synchronized between this function and its _backward.
-std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
@@ -372,13 +471,15 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
     return std::tuple_cat(
              at::cudnn_batch_norm(
-               input.contiguous(), weight.contiguous(),
+               input.contiguous(input.suggest_memory_format()), weight.contiguous(),
                bias.contiguous(),
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
              std::make_tuple(1));
   }
+
+  Tensor reserve = at::empty({0}, input.options().dtype(kByte));
 
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
@@ -397,12 +498,14 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
+             std::tuple<Tensor>(reserve),
              std::make_tuple(2));
   }
 
   return std::tuple_cat(
            at::native_batch_norm(
              input, weight, bias, running_mean, running_var, training, momentum, eps),
+           std::tuple<Tensor>(reserve),
            std::make_tuple(0));
 }
 
@@ -411,11 +514,13 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     const Tensor& save_mean /* optional */, const Tensor& save_var_transform /* optional */,
-    bool train, double epsilon, std::array<bool, 3> output_mask) {
+    bool train, double epsilon, std::array<bool, 3> output_mask, const Tensor &reservedSpace) {
   if (impl_index == 0) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {
-    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
+    // TODO: _batch_norm_impl_index_backward is only used in JIT. cudnn NHWC
+    // format conversion is done inside cudnn_batch_norm_backward instead
+    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon, reservedSpace);
   } else if (impl_index == 2) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
   }

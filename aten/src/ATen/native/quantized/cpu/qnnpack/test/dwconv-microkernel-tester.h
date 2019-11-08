@@ -168,7 +168,7 @@ class DWConvMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(q8dwconv_up_ukernel_function q8dwconv) const {
+  void test(pytorch_q8dwconv_up_ukernel_function q8dwconv) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -205,7 +205,7 @@ class DWConvMicrokernelTester {
 
       std::fill(packedWeights.begin(), packedWeights.end(), 0xA5);
 
-      pack_q8dw_w(
+      pytorch_pack_q8dw_w(
           kernelHeight(),
           kernelWidth(),
           channels(),
@@ -307,7 +307,7 @@ class DWConvMicrokernelTester {
     }
   }
 
-  void test(q8dwconv_mp_ukernel_function q8dwconv) const {
+  void test(pytorch_q8dwconv_mp_ukernel_function q8dwconv) const {
     ASSERT_EQ(25, kernelSize())
         << "only 5x5 microkernel is currently supported";
 
@@ -351,7 +351,7 @@ class DWConvMicrokernelTester {
 
       ASSERT_EQ(25, kernelSize())
           << "only 5x5 microkernel is currently supported";
-      pack_q8dw_w_dilation(
+      pytorch_pack_q8dw_w_dilation(
           kernelHeight(),
           kernelWidth(),
           channels(),
@@ -364,7 +364,7 @@ class DWConvMicrokernelTester {
           bias.data(),
           packedWeights.data(),
           true);
-      pack_q8dw_w_dilation(
+      pytorch_pack_q8dw_w_dilation(
           kernelHeight(),
           kernelWidth(),
           channels(),
@@ -378,7 +378,7 @@ class DWConvMicrokernelTester {
           packedWeights.data() +
               (10 + sizeof(int32_t) / sizeof(uint8_t)) * packedChannels(),
           false);
-      pack_q8dw_w_dilation(
+      pytorch_pack_q8dw_w_dilation(
           kernelHeight(),
           kernelWidth(),
           channels(),

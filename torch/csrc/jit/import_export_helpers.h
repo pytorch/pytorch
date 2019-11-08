@@ -1,30 +1,32 @@
 #pragma once
 
+#include <memory>
 #include <string>
+
+namespace caffe2 {
+namespace serialize {
+class PyTorchStreamReader;
+}
+} // namespace caffe2
 
 namespace torch {
 namespace jit {
 
-// Utility functions to maintain consistency between import and export paths.
-namespace ImportExportHelpers {
+struct Source;
 
 // Convert a class type's qualifier name to the corresponding path the source
 // file it should be written to.
 //
 // Qualifier is like: foo.bar.baz
 // Returns: libs/foo/bar/baz.py
-std::string qualifierToPath(
+std::string qualifierToArchivePath(
     const std::string& qualifier,
     const std::string& export_prefix);
 
-// Convert a source file path to a class type's qualifier name.
-//
-// Path is like: libs/foo/bar/baz.py
-// Returns: foo.bar.baz
-std::string pathToQualifier(
-    const std::string& classPath,
-    const std::string& export_prefix);
+std::shared_ptr<Source> findSourceInArchiveFromQualifier(
+    caffe2::serialize::PyTorchStreamReader& reader,
+    const std::string& export_prefix,
+    const std::string& qualifier);
 
-} // namespace ImportExportHelpers
 } // namespace jit
 } // namespace torch

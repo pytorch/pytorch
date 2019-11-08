@@ -146,3 +146,16 @@ the original, un-quantized floating point values.
 NO_GRADIENT(Fused8BitRowwiseQuantizedToHalfFloat);
 
 } // namespace caffe2
+
+// To workaround comma
+
+using Fused8BitRowwiseQuantizedToFloatCPUOp =
+    caffe2::Fused8BitRowwiseQuantizedToFloatOp<
+        float,
+        caffe2::convertfp32fp32,
+        caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    Fused8BitRowwiseQuantizedToFloat,
+    "_caffe2::Fused8BitRowwiseQuantizedToFloat(Tensor scale_bias_quantized_input) -> Tensor",
+    Fused8BitRowwiseQuantizedToFloatCPUOp);

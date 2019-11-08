@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/C++17.h>
@@ -73,6 +74,8 @@ struct CAFFE2_API NoNamesGuard {
   bool prev_mode;
 };
 
+void check_names_valid_for(const Tensor& tensor, DimnameList names);
+void check_names_valid_for(int64_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
@@ -86,8 +89,10 @@ namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
-CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
+CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names, bool validate_names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
+
+void check_names_valid_for(TensorImpl* impl, DimnameList names);
 
 // Returns true if the tensor's names exist and are not all 'None'.
 // Returns false if the tensor's names don't exist (were not allocated),

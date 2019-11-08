@@ -485,11 +485,11 @@ void testEvalModeForLoadedModule() {
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
   torch::jit::script::Module module = torch::jit::load(module_path);
-  AT_ASSERT(module.get_module("dropout").is_training());
+  AT_ASSERT(module.attr("dropout").toModule().is_training());
   module.eval();
-  AT_ASSERT(!module.get_module("dropout").is_training());
+  AT_ASSERT(!module.attr("dropout").toModule().is_training());
   module.train();
-  AT_ASSERT(module.get_module("dropout").is_training());
+  AT_ASSERT(module.attr("dropout").toModule().is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -741,14 +741,14 @@ void testRecordFunction() {
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   auto t2 = invokeTestRecordFunction(t);
-  t2.backward();
+  t2.backward(torch::ones_like(t2));
   auto eager_inputs = traced_inputs;
   traced_inputs.clear();
 
   t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   t2 = invokeTestRecordFunctionJIT(t);
-  t2.backward();
+  t2.backward(torch::ones_like(t2));
   auto jit_inputs = traced_inputs;
   traced_inputs.clear();
 
@@ -864,7 +864,7 @@ void testThreadLocalDebugInfo() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = t.pow(2);
-    t2.backward();
+    t2.backward(torch::ones_like(t2));
   }
   autograd::profiler::popCallback();
 
@@ -905,7 +905,7 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](const Node* node) {
+          [](const Node* node) -> Operation {
             return [](Stack& stack) {
               push(stack, IValue());
               return 0;
@@ -914,7 +914,7 @@ void testNoneSchemaMatch() {
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](const Node* node) {
+          [](const Node* node) -> Operation {
             return [](Stack& stack) {
               IValue a = pop(stack);
               if (a.isNone()) {
@@ -964,8 +964,8 @@ void testModuleConversion() {
 
     m.to(at::kCUDA);
     m.to(at::kCPU);
-    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cpu());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
@@ -973,8 +973,8 @@ void testModuleConversion() {
     m.register_buffer("bar", torch::ones({}));
 
     m.to(at::kCUDA);
-    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cuda());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cuda());
   }
 }
 
@@ -1049,7 +1049,7 @@ void testInsertAndEliminateRedundantGuards() {
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
-  ASSERT_EQ(num_guards, 11);
+  ASSERT_EQ(num_guards, 12);
   // now eliminate as many guards as possible
   // we should be left with two guards on x and y's defs
   EliminateRedundantGuards(copy);

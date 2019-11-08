@@ -2,6 +2,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/util/Optional.h>
 
 C10_DEFINE_bool(
@@ -28,28 +29,36 @@ const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "        x.set_(y)";
 
 at::Tensor& TensorImpl::grad() {
-  if (autograd_meta()) {
-    return autograd_meta()->grad();
+  if (type_set_.has(TensorTypeId::VariableTensorId)) {
+    if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+    return autograd_meta_->grad();
   } else {
     AT_ERROR("grad is not implemented for Tensor");
   }
 }
 
 const at::Tensor& TensorImpl::grad() const {
-  if (autograd_meta()) {
-    return autograd_meta()->grad();
+  if (type_set_.has(TensorTypeId::VariableTensorId)) {
+    // Yes, I know this looks really weird.  But I don't really have a choice as
+    // long as this function returns a const reference to Tensor.  I'm not
+    // really sure how I would have designed this API differently, but it
+    // is not so easy to fix right now because the mutable counterpart of
+    // this function must keep working so that "x.grad() = ..." keeps working
+    // (part of public API).
+    if (!autograd_meta_) impl::GetAutogradMetaFactory()->undefined_tensor();
+    return autograd_meta_->grad();
   } else {
     AT_ERROR("grad is not implemented for Tensor");
   }
 }
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id)
-    : TensorImpl(std::move(storage), type_id, storage.dtype(), storage.device()) {}
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set)
+    : TensorImpl(std::move(storage), type_set, storage.dtype(), storage.device()) {}
 
-TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
-    : TensorImpl({}, type_id, data_type, std::move(device_opt)) {}
+TensorImpl::TensorImpl(TensorTypeSet type_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+    : TensorImpl({}, type_set, data_type, std::move(device_opt)) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type,
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::TypeMeta& data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},
@@ -57,8 +66,8 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      type_id_(type_id) {
-  if (type_id != TensorTypeId::UndefinedTensorId) {
+      type_set_(type_set.remove(TensorTypeId::VariableTensorId)) {
+  if (!type_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
@@ -129,6 +138,37 @@ bool TensorImpl::compute_strides_like_channels_last() const {
   return false;
 }
 
+bool TensorImpl::compute_non_overlapping_and_dense() const {
+  if (dim() == 1) {
+    return size(0) < 2 || stride(0) == 1;
+  }
+  SmallVector<int64_t,5> perm;
+  perm.resize(dim());
+  for (int64_t i = 0; i < dim(); i ++) {
+    perm[i] = i;
+  }
+  // Sort by strides, leaving 0 and 1 sized dims at the end of the array
+  std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
+      if (sizes_[a] < 2) {
+        return false;
+      } else if (sizes_[b] < 2) {
+        return true;
+      }
+      return strides_[a] < strides_[b];
+  });
+  auto require_stride = 1;
+  for (int64_t i = 0; i < dim(); i ++) {
+    if (sizes_[perm[i]] < 2) {
+      return true;
+    }
+    if (strides_[perm[i]] != require_stride) {
+      return false;
+    }
+    require_stride *= sizes_[perm[i]];
+  }
+  return true;
+}
+
 void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
@@ -194,68 +234,86 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
-#ifdef BUILD_NAMEDTENSOR
-NamedTensorMetaInterface::~NamedTensorMetaInterface() {}
-
-std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() const {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "Attempting to clone a NamedTensorMetaInterface instance.");
+void TensorImpl::set_requires_grad(bool requires_grad) {
+  TORCH_INTERNAL_ASSERT(type_set_.has(TensorTypeId::VariableTensorId), "set_requires_grad is not implemented for Tensor");
+  if (!requires_grad && !autograd_meta_) return;
+  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  // NB: In principle, setting requires_grad to false could result in
+  // the AutogradMeta becoming equal to a default constructed state,
+  // in which case we could apply the nullptr AutogradMeta optimization
+  // (see autograd_meta_ docs).  But we don't do this right now.  Note
+  // that it is unsound to unconditionally set AutogradMeta to false
+  // when you set requires_grad to False, as there may be nontrivial
+  // information content in the other fields; for example, we may
+  // have set the string name for a Variable, or there may be hooks
+  // registered for it.
+  autograd_meta_->set_requires_grad(requires_grad, this);
 }
 
-int64_t NamedTensorMetaInterface::slow_dim() const {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "NamedTensorMetaInterface::slow_dim not implemented.");
-}
-#endif
-
-/// NOTE [ Treating Variables as non-Variables in type dispatch ]
-///
-/// Previously, in VariableType_*.cpp (generated by gen_variable_type.py), when
-/// a function is using the 'use_derived' strategy, we call its implementation
-/// on the base non-Variable type (`baseType`), passing unwrapped tensors to the
-/// call so that any `.dispatch_type()` calls in the implementation can treat the passed
-/// tensors as non-Variables and won't dispatch back to functions in VariableType.
-///
-/// However, after the Variable/Tensor merge, there is no concept of unwrapping
-/// a tensor anymore, and directly passing variables to the base type calls will
-/// cause the `.dispatch_type()` dispatch in the implementation to treat the tensor as a
-/// variable, and any function dispatch based on `.dispatch_type()` will dispatch back to
-/// VariableType, which is not what we want.
-///
-/// The solution to the above problem is to add `at::NonVariableTypeMode`, which
-/// when enabled will cause `legacyTensorType()` and `getType()` to always return
-/// non-Variable type, even if the tensor being called on is a variable.
-///
-/// TODO: Since `torch::NoGradGuard` serves the same purpose in libtorch, we should
-/// merge these two thread-local guards.
-
-/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported. In that case, we don't provide
-/// `at::NonVariableTypeMode`.
-#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
-
-thread_local bool NonVariableTypeMode_enabled = false;
-
-bool NonVariableTypeMode::is_enabled() {
-  return NonVariableTypeMode_enabled;
+bool TensorImpl::requires_grad() const {
+  TORCH_INTERNAL_ASSERT(type_set_.has(TensorTypeId::VariableTensorId), "set_requires_grad is not implemented for Tensor");
+  if (!autograd_meta_) return false;
+  return autograd_meta_->requires_grad();
 }
 
-void NonVariableTypeMode::set_enabled(bool enabled) {
-  NonVariableTypeMode_enabled = enabled;
+void TensorImpl::set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
+  // NB: autograd_meta may be null!  That just means it's the default
+  // constructor
+  autograd_meta_ = std::move(autograd_meta);
+  type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
 }
 
-#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
-bool NonVariableTypeMode::is_enabled() {
-  throw std::runtime_error("NonVariableTypeMode is not supported on mobile");
+c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
+  // NB: Might return null!
+  return autograd_meta_.get();
 }
 
-void NonVariableTypeMode::set_enabled(bool enabled) {
-  throw std::runtime_error("NonVariableTypeMode is not supported on mobile");
+void TensorImpl::copy_tensor_metadata(
+    const TensorImpl* src_impl,
+    TensorImpl* dest_impl,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) {
+  dest_impl->storage_ = src_impl->storage_;
+  dest_impl->sizes_ = src_impl->sizes_;
+  dest_impl->strides_ = src_impl->strides_;
+  dest_impl->storage_offset_ = src_impl->storage_offset_;
+  dest_impl->data_type_ = src_impl->data_type_;
+  dest_impl->device_opt_ = src_impl->device_opt_;
+  // We can copy tensor metadata from a Variable tensor into a non-Variable
+  // tensor.  In that case, it is WRONG to preserve VariableTensorId,
+  // because metadata copy does NOT transfer autograd_meta_ information.
+  auto type_set = src_impl->type_set_.remove(TensorTypeId::VariableTensorId);
+  if (dest_impl->type_set_.has(TensorTypeId::VariableTensorId)) {
+    type_set = type_set.add(TensorTypeId::VariableTensorId);
+  }
+  dest_impl->type_set_ = type_set;
+  dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+  dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
+  dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+  dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
+  dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
+  dest_impl->reserved_ = src_impl->reserved_;
+  dest_impl->set_version_counter(version_counter);
+  dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  if (src_impl->named_tensor_meta_ != nullptr) {
+    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
+  }
 }
 
-#endif
+namespace impl {
+
+namespace {
+AutogradMetaFactory* meta_factory = nullptr;
+}
+
+void SetAutogradMetaFactory(AutogradMetaFactory* factory) {
+  meta_factory = factory;
+}
+AutogradMetaFactory* GetAutogradMetaFactory() {
+  TORCH_CHECK(meta_factory, "Support for autograd has not been loaded; have you linked against libtorch.so?")
+  return meta_factory;
+}
+
+} // namespace impl
 
 } // namespace c10

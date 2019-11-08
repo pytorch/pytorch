@@ -13,33 +13,33 @@
 #include "lut-microkernel-tester.h"
 
 TEST(X8LUT__SCALAR, n_eq_1) {
-  LUTMicrokernelTester().n(1).test(x8lut_ukernel__scalar);
+  LUTMicrokernelTester().n(1).test(pytorch_x8lut_ukernel__scalar);
 }
 
 TEST(X8LUT__SCALAR, small_n) {
   for (size_t n = 2; n <= 16; n++) {
-    LUTMicrokernelTester().n(n).test(x8lut_ukernel__scalar);
+    LUTMicrokernelTester().n(n).test(pytorch_x8lut_ukernel__scalar);
   }
 }
 
 TEST(X8LUT__SCALAR, large_n) {
   for (size_t n = 16; n <= 128; n += 2) {
-    LUTMicrokernelTester().n(n).test(x8lut_ukernel__scalar);
+    LUTMicrokernelTester().n(n).test(pytorch_x8lut_ukernel__scalar);
   }
 }
 
 TEST(X8LUT__SCALAR, n_eq_1_inplace) {
-  LUTMicrokernelTester().n(1).inplace(true).test(x8lut_ukernel__scalar);
+  LUTMicrokernelTester().n(1).inplace(true).test(pytorch_x8lut_ukernel__scalar);
 }
 
 TEST(X8LUT__SCALAR, small_n_inplace) {
   for (size_t n = 2; n <= 16; n++) {
-    LUTMicrokernelTester().n(n).inplace(true).test(x8lut_ukernel__scalar);
+    LUTMicrokernelTester().n(n).inplace(true).test(pytorch_x8lut_ukernel__scalar);
   }
 }
 
 TEST(X8LUT__SCALAR, large_n_inplace) {
   for (size_t n = 16; n <= 128; n += 2) {
-    LUTMicrokernelTester().n(n).inplace(true).test(x8lut_ukernel__scalar);
+    LUTMicrokernelTester().n(n).inplace(true).test(pytorch_x8lut_ukernel__scalar);
   }
 }
