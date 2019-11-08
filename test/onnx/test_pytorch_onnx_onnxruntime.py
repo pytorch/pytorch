@@ -595,7 +595,7 @@ class TestONNXRuntime(unittest.TestCase):
                         continue
                 self._interpolate(xi, mode_i, True, is_upsample)
                 # test with align_corners if supported
-                if mode is not 'nearest':
+                if mode != 'nearest':
                     self._interpolate(xi, mode_i, True, is_upsample, True)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
@@ -603,7 +603,7 @@ class TestONNXRuntime(unittest.TestCase):
                     self._interpolate_script(xi, mode_i, True, is_upsample)
                     self._interpolate(xi, mode_i, False, is_upsample)
                     # test with align_corners if supported
-                    if mode is not 'nearest':
+                    if mode != 'nearest':
                         self._interpolate(xi, mode_i, True, is_upsample, True)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
 

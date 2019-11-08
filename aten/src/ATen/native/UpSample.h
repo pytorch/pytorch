@@ -116,13 +116,9 @@ static inline scalar_t compute_scales_value(
     const double scale,
     int64_t input_size,
     int64_t output_size) {
-      if (output_size > 1) {
-          return (scale > 0.)
-              ? static_cast<scalar_t>(1. / static_cast<scalar_t>(scale))
-              : (static_cast<scalar_t>(input_size) / static_cast<scalar_t>(output_size));
-      } else {
-          return scalar_t(0);
-      }
+      return (scale > 0.)
+          ? static_cast<scalar_t>(1. / static_cast<scalar_t>(scale))
+          : (static_cast<scalar_t>(input_size) / output_size);
 }
 
 template <typename scalar_t>
