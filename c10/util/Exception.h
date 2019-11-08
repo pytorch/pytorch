@@ -82,25 +82,30 @@ class C10_API Error : public std::exception {
   }
 };
 
-class C10_API Warning {
-  using handler_t =
-      void (*)(const SourceLocation& source_location, const char* msg);
-
- public:
-  /// Issue a warning with a given message. Dispatched to the current
-  /// warning handler.
-  static void warn(SourceLocation source_location, std::string msg);
-  /// Sets the global warning handler. This is not thread-safe, so it should
-  /// generally be called once during initialization.
-  static void set_warning_handler(handler_t handler);
+class C10_API WarningHandler {
+  public:
+  virtual ~WarningHandler() noexcept(false) {}
   /// The default warning handler. Prints the message to stderr.
-  static void print_warning(
+  virtual void process(
       const SourceLocation& source_location,
-      const char* msg);
-
- private:
-  static handler_t warning_handler_;
+      const std::string& msg);
 };
+
+namespace Warning {
+
+/// Issue a warning with a given message. Dispatched to the current
+/// warning handler.
+C10_API void warn(SourceLocation source_location, const std::string& msg);
+/// Sets the global warning handler. This is not thread-safe, so it should
+/// generally be called once during initialization or while holding the GIL
+/// for programs that use python.
+/// User is responsible for keeping the WarningHandler alive until
+/// it is not needed.
+C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
+/// Gets the global warning handler.
+C10_API WarningHandler* get_warning_handler() noexcept(true);
+
+} // namespace Warning
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into

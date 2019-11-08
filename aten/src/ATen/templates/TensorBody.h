@@ -229,7 +229,8 @@ class CAFFE2_API Tensor {
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
-        scalar_type());
+        scalar_type(),
+        is_variable());
   }
   TensorTypeSet type_set() const {
     return impl_->type_set();
