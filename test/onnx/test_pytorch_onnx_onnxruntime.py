@@ -738,23 +738,23 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     def test_batchnorm1d(self):
-        x = torch.randn(128, 128)
+        x = torch.randn(10, 128)
         model = torch.nn.BatchNorm1d(128, affine=True)
         self.run_test(model, x)
 
     def test_batchnorm1d_noaffine(self):
-        x = torch.randn(128, 128)
+        x = torch.randn(10, 128)
         model = torch.nn.BatchNorm1d(128, affine=False)
         self.run_test(model, x)
 
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
-        model = torch.nn.BatchNorm1d(128, affine=True)
+        model = torch.nn.BatchNorm2d(3, affine=True)
         self.run_test(model, x)
 
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
-        model = torch.nn.BatchNorm1d(128, affine=False)
+        model = torch.nn.BatchNorm2d(3, affine=False)
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
