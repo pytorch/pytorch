@@ -14,6 +14,11 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
 
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
+
 class TestRecursiveScript(JitTestCase):
     def test_inferred_nonetype(self):
         class M(nn.Module):
@@ -531,7 +536,44 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(m, (torch.randn(5, 5),))
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+    def test_function_attribute_in_submodule(self):
+        class N(nn.Module):
+            def __init__(self, norm):
+                super(N, self).__init__()
+                self.activation = torch.nn.functional.relu
+                self.norm = norm
+
+            def forward(self, src):
+                output = src
+                output = self.norm(output)
+                return output
+
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                encoder_norm = nn.ReLU()
+                self.encoder = N(encoder_norm)
+
+            def forward(self, x):
+                return self.encoder(x)
+
+        m = M()
+        self.checkModule(m, (torch.randn(5, 5), ))
+
+    def test_property(self):
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.x = 0
+
+            @property
+            def x_and_1(self):
+                return self.x + 1
+
+            def forward(self, new_x):
+                # type: (int) -> int
+                self.x = new_x
+                return self.x_and_1
+
+        with self.assertRaisesRegex(RuntimeError, "property"):
+            torch.jit.script(M())

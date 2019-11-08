@@ -7,67 +7,126 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor elu(Tensor& input, const ELUOptions& options = {}) {
-  if (options.inplace()) {
-    return torch::elu_(input, options.alpha());
+namespace detail {
+inline Tensor elu(Tensor& input, double alpha = 1.0, bool inplace = false) {
+  if (inplace) {
+    return torch::elu_(input, alpha);
   } else {
-    return torch::elu(input, options.alpha());
+    return torch::elu(input, alpha);
   }
 }
+} // namespace detail
 
-inline Tensor selu(Tensor& input, const SELUOptions& options = {}) {
-  if (options.inplace()) {
+inline Tensor elu(Tensor& input, const ELUOptions& options = {}) {
+  return detail::elu(input, options.alpha(), options.inplace());
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor selu(Tensor& input, bool inplace = false) {
+  if (inplace) {
     return torch::selu_(input);
   } else {
     return torch::selu(input);
   }
 }
+} // namespace detail
+
+inline Tensor selu(Tensor& input, const SELUOptions& options = {}) {
+  return detail::selu(input, options.inplace());
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor hardshrink(const Tensor& input,
+                         double lambda = 0.5) {
+  return torch::hardshrink(input, lambda);
+}
+} // namespace detail
 
 inline Tensor hardshrink(const Tensor& input,
                          const HardshrinkOptions& options = {}) {
-  return torch::hardshrink(input, options.lambda());
+  return detail::hardshrink(input, options.lambda());
 }
+
+// ============================================================================
+
+namespace detail {
+inline Tensor hardtanh(Tensor& input,
+                       double min_val = -1.0,
+                       double max_val = 1.0,
+                       bool inplace = false) {
+  if (inplace) {
+    return torch::hardtanh_(input, min_val, max_val);
+  } else {
+    return torch::hardtanh(input, min_val, max_val);
+  }
+}
+} // namespace detail
 
 inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options = {}) {
-  if (options.inplace()) {
-    return torch::hardtanh_(input, options.min_val(), options.max_val());
-  } else {
-    return torch::hardtanh(input, options.min_val(), options.max_val());
-  }
+  return detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
 }
 
-inline Tensor leaky_relu(Tensor& input, const LeakyReLUOptions& options = {}) {
-  if (options.inplace()) {
-    return torch::leaky_relu_(input, options.negative_slope());
+// ============================================================================
+
+namespace detail {
+inline Tensor leaky_relu(Tensor& input,
+                         double negative_slope = 1e-2,
+                         bool inplace = false) {
+  if (inplace) {
+    return torch::leaky_relu_(input, negative_slope);
   } else {
-    return torch::leaky_relu(input, options.negative_slope());
+    return torch::leaky_relu(input, negative_slope);
   }
 }
+} // namespace detail
+
+inline Tensor leaky_relu(Tensor& input, const LeakyReLUOptions& options = {}) {
+  return detail::leaky_relu(input, options.negative_slope(), options.inplace());
+}
+
+// ============================================================================
 
 inline Tensor logsigmoid(const Tensor& input) {
   return torch::log_sigmoid(input);
 }
 
-inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxOptions& options = {}) {
+// ============================================================================
+
+namespace detail {
+inline Tensor gumbel_softmax(const Tensor& logits,
+                             double tau = 1.0,
+                             bool hard = false,
+                             int dim = -1) {
   auto gumbels = -torch::empty_like(logits).exponential_().log();  // ~Gumbel(0,1)
-  gumbels = (logits + gumbels) / options.tau();  // ~Gumbel(logits, tau)
-  auto y_soft = gumbels.softmax(options.dim());
+  gumbels = (logits + gumbels) / tau;  // ~Gumbel(logits, tau)
+  auto y_soft = gumbels.softmax(dim);
 
   torch::Tensor ret;
-  if (options.hard()) {
+  if (hard) {
     // Straight through.
-    auto index = std::get<1>(y_soft.max(options.dim(), /*keepdim=*/true));
-    auto y_hard = torch::zeros_like(logits).scatter_(options.dim(), index, 1.0);
+    auto index = std::get<1>(y_soft.max(dim, /*keepdim=*/true));
+    auto y_hard = torch::zeros_like(logits).scatter_(dim, index, 1.0);
     ret = y_hard - y_soft.detach() + y_soft;
   } else {
     ret = y_soft;
   }
   return ret;
 }
+} // namespace detail
 
-inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
+inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxOptions& options = {}) {
+  return detail::gumbel_softmax(logits, options.tau(), options.hard(), options.dim());
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor softmax(const Tensor& input, int64_t dim,
                       c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  int64_t dim = options.dim();
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -78,10 +137,18 @@ inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
 
   return ret;
 }
+} // namespace detail
 
-inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
+inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
                       c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  int64_t dim = options.dim();
+  return detail::softmax(input, options.dim(), dtype);
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor softmin(const Tensor& input, int64_t dim,
+                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -92,10 +159,18 @@ inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
 
   return ret;
 }
+} // namespace detail
 
-inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
+inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
+                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+  return detail::softmin(input, options.dim(), dtype);
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor log_softmax(const Tensor& input, int64_t dim,
                           c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  int64_t dim = options.dim();
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -106,65 +181,151 @@ inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
 
   return ret;
 }
+} // namespace detail
+
+inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
+                          c10::optional<torch::Dtype> dtype = c10::nullopt) {
+  return detail::log_softmax(input, options.dim(), dtype);
+}
+
+// ============================================================================
+
+inline Tensor gelu(const Tensor& input) {
+  return torch::gelu(input);
+}
+
+// ============================================================================
 
 inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
 }
 
-inline Tensor relu(Tensor& input, const ReLUOptions& options = {}) {
-  if (options.inplace()) {
+// ============================================================================
+
+namespace detail {
+inline Tensor relu(Tensor& input, bool inplace = false) {
+  if (inplace) {
     return torch::relu_(input);
   } else {
     return torch::relu(input);
   }
 }
+} // namespace detail
+
+inline Tensor relu(Tensor& input, const ReLUOptions& options = {}) {
+  return detail::relu(input, options.inplace());
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor relu6(Tensor& input, bool inplace = false) {
+  return detail::hardtanh(input, /*min_val=*/0, /*max_val=*/6, /*inplace=*/inplace);
+}
+} // namespace detail
 
 inline Tensor relu6(Tensor& input, const ReLU6Options& options = {}) {
-  return hardtanh(input,
-    HardtanhOptions().min_val(0).max_val(6).inplace(options.inplace()));
+  return detail::relu6(input, options.inplace());
 }
+
+// ============================================================================
+
+namespace detail {
+inline Tensor rrelu(Tensor& input,
+                    double lower = 1.0 / 8.0,
+                    double upper = 1.0 / 3.0,
+                    bool inplace = false,
+                    bool training = false) {
+  if (inplace) {
+    return torch::rrelu_(input, lower, upper, training);
+  } else {
+    return torch::rrelu(input, lower, upper, training);
+  }
+}
+} // namespace detail
 
 inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
                     bool training = false) {
-  if (options.inplace()) {
-    return torch::rrelu_(input, options.lower(), options.upper(), training);
-  } else {
-    return torch::rrelu(input, options.lower(), options.upper(), training);
-  }
+  return detail::rrelu(input, options.lower(), options.upper(), options.inplace(), training);
 }
 
-inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
-  if (options.inplace()) {
-    return torch::celu_(input, options.alpha());
+// ============================================================================
+
+namespace detail {
+inline Tensor celu(Tensor& input,
+                   double alpha = 1.0,
+                   bool inplace = false) {
+  if (inplace) {
+    return torch::celu_(input, alpha);
   } else {
-    return torch::celu(input, options.alpha());
+    return torch::celu(input, alpha);
   }
 }
+} // namespace detail
+
+inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
+  return detail::celu(input, options.alpha(), options.inplace());
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor softplus(const Tensor& input,
+                       double beta = 1.0,
+                       double threshold = 20.0) {
+  return torch::softplus(input, beta, threshold);
+}
+} // namespace detail
 
 inline Tensor softplus(const Tensor& input,
                        const SoftplusOptions& options = {}) {
-  return torch::softplus(input, options.beta(), options.threshold());
+  return detail::softplus(input, options.beta(), options.threshold());
 }
+
+
+// ============================================================================
+
+namespace detail {
+inline Tensor softshrink(const Tensor& input,
+                         double lambda = 0.5) {
+  return torch::softshrink(input, lambda);
+}
+} // namespace detail
 
 inline Tensor softshrink(const Tensor& input,
                          const SoftshrinkOptions& options = {}) {
-  return torch::softshrink(input, options.lambda());
+  return detail::softshrink(input, options.lambda());
 }
+
+// ============================================================================
 
 inline Tensor softsign(const Tensor& input) {
   return input / (input.abs() + 1);
 }
 
+// ============================================================================
+
 inline Tensor tanhshrink(const Tensor& input) {
   return input - input.tanh();
 }
 
-inline Tensor threshold(Tensor& input, const ThresholdOptions& options) {
-  if (options.inplace()) {
-    return torch::threshold_(input, options.threshold(), options.value());
+// ============================================================================
+
+namespace detail {
+inline Tensor threshold(Tensor& input,
+                        double threshold,
+                        double value,
+                        bool inplace = false) {
+  if (inplace) {
+    return torch::threshold_(input, threshold, value);
   } else {
-    return torch::threshold(input, options.threshold(), options.value());
+    return torch::threshold(input, threshold, value);
   }
+}
+} // namespace detail
+
+inline Tensor threshold(Tensor& input, const ThresholdOptions& options) {
+  return detail::threshold(input, options.threshold(), options.value(), options.inplace());
 }
 
 } // namespace functional
