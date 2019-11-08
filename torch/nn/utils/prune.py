@@ -1,11 +1,16 @@
 r"""
 Pruning methods
 """
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections.abc import Iterable
 import numbers
 import torch
-
+# For Python 2 and 3 support
+try:
+    from abc import ABC
+except ImportError:
+    from abc import ABCMeta
+    ABC = ABCMeta('ABC', (), {})
 
 class BasePruningMethod(ABC):
     r"""Abstract base class for creation of new pruning techniques.
