@@ -564,6 +564,8 @@ struct DefContext {
   TypePtr merged_return_type_; // nullptr if a Return has not been seen yet
 };
 
+enum class LoopStatus { NOT_IN_LOOP, IN_LOOP, IN_UNROLLED_LOOP };
+
 struct to_ir {
   to_ir(
       const Def& def,
@@ -609,6 +611,7 @@ struct to_ir {
   std::unordered_map<double, Value*> fp_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
+  LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -817,12 +820,15 @@ struct to_ir {
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
+    auto prev_status = loop_status_;
+    loop_status_ = LoopStatus::NOT_IN_LOOP;
     {
       WithInsertPoint guard(block);
       pushFrame(block, /*starts_def=*/true);
       emit_body(block);
       popFrame(/*ends_def=*/true);
     }
+    loop_status_ = prev_status;
     return std::make_shared<ClosureValue>(closure_node->output());
   }
 
@@ -843,13 +849,28 @@ struct to_ir {
         /*annotated_type=*/nullptr);
   }
 
+  void checkBreakContinue(
+      const SourceRange& loc,
+      const std::string& stmt_name) {
+    if (loop_status_ == LoopStatus::NOT_IN_LOOP) {
+      throw ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
+                             << " outside loop";
+    } else if (loop_status_ == LoopStatus::IN_UNROLLED_LOOP) {
+      throw ErrorReport(loc)
+          << "Because we emit iteration over modulelists or tuples as "
+             "unrolled loops, we do not support break or continue inside the body of these loops";
+    }
+  }
+
   void emitBreak(const Break& stmt) {
+    checkBreakContinue(stmt.range(), "break");
     auto break_node =
         graph->create(prim::BreakStmt, {}, 0)->setSourceRange(stmt.range());
     graph->insertNode(break_node);
   }
 
   void emitContinue(const Continue& stmt) {
+    checkBreakContinue(stmt.range(), "continue");
     auto continue_node =
         graph->create(prim::ContinueStmt, {}, 0)->setSourceRange(stmt.range());
     graph->insertNode(continue_node);
@@ -1551,6 +1572,8 @@ struct to_ir {
     }
     n->addInput(max_trip_count_val);
 
+    LoopStatus prev_loop_status = loop_status_;
+    loop_status_ = LoopStatus::IN_LOOP;
     Value* trip_count =
         body_block->addInput()->setType(IntType::get()); // Iteration num
     {
@@ -1576,6 +1599,7 @@ struct to_ir {
       emit_body();
       popFrame();
     }
+    loop_status_ = prev_loop_status;
   }
 
   void emitUnrolledLoop(
@@ -1587,6 +1611,8 @@ struct to_ir {
     TORCH_INTERNAL_ASSERT(
         static_len, "Unrolled loop iter should have static length");
     int64_t len = *static_len;
+    auto prev_status = loop_status_;
+    loop_status_ = LoopStatus::IN_UNROLLED_LOOP;
 
     // In order to support ModuleLists which return different types,
     // as with an nn.Sequential which has a module that returns a Dict and then
@@ -1601,6 +1627,7 @@ struct to_ir {
           targets, {sugared_value}, targets.range(), /*n_binders=*/1);
       emit_body();
     }
+    loop_status_ = prev_status;
   }
 
   void emitFor(
