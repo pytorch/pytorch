@@ -8,4 +8,3 @@ if __name__ == '__main__':
         import test_jit_py3
         suite = unittest.findTestCases(test_jit_py3)
         unittest.TextTestRunner().run(suite)
-
