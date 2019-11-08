@@ -1574,7 +1574,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
   // Step (3): if input tensor has overlapping memory, divide scattered gradient
   //           at storage[i] by the number of times i shows up in input geometry
   if (inp_maybe_overlap) {
-    auto count = at::zeros_like(storage, at::MemoryFormat::Contiguous);
+    auto count = at::zeros_like(storage, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto inp_indices = flatten_full_indices->as_strided(inp_sizes_, inp_strides_, inp_effective_offset).reshape(-1);
     count.index_add_(0, inp_indices, at::ones({1}, grad.options()).expand_as(inp_indices));
     storage.div_(count); // this will give nan outside visible range
@@ -1604,9 +1604,9 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     auto weight = weight_.contiguous();
 
   // Zero-fill undefined grads (TODO: do this more efficiently)
-  auto ggI = grad_grad_input.defined() ? grad_grad_input.contiguous() : at::zeros_like(input, at::MemoryFormat::Contiguous);
-  auto ggW = grad_grad_weight.defined() ? grad_grad_weight.contiguous() : at::zeros_like(weight, at::MemoryFormat::Contiguous);
-  auto gO = grad_out.defined() ? grad_out.contiguous() : at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto ggI = grad_grad_input.defined() ? grad_grad_input.contiguous() : at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto ggW = grad_grad_weight.defined() ? grad_grad_weight.contiguous() : at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto gO = grad_out.defined() ? grad_out.contiguous() : at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   auto positive_mask = (input > 0).type_as(ggI);
   auto nonpositive_mask = (input <= 0).type_as(ggW);
@@ -1712,7 +1712,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   if (gsigma.defined()) {
     sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vt));
   } else {
-    sigma_term = at::zeros_like(self, at::MemoryFormat::Contiguous);
+    sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   // in case that there are no gu and gv, we can avoid the series of kernel
   // calls below
@@ -1742,7 +1742,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     u_term = at::matmul(u_term, vt);
   } else {
-    u_term = at::zeros_like(self, at::MemoryFormat::Contiguous);
+    u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (gv.defined()) {
@@ -1753,7 +1753,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     v_term = at::matmul(u, v_term);
   } else {
-    v_term = at::zeros_like(self, at::MemoryFormat::Contiguous);
+    v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   return u_term + sigma_term + v_term;
@@ -1788,7 +1788,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
       F.mul_(at::matmul(vt, gv));
       result = at::matmul(v, at::matmul(F, vt));
   } else {
-      result = at::zeros_like(self, at::MemoryFormat::Contiguous);
+      result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (glambda.defined()) {
@@ -1814,7 +1814,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     R_term = at::matmul(R, grad_R.transpose(-2, -1));
   } else {
     // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
-    R_term = at::zeros_like(R, at::MemoryFormat::Contiguous);
+    R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   // Compute Q^{T} Q'
@@ -1823,7 +1823,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
   } else {
     // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
-    Q_term = at::zeros_like(R, at::MemoryFormat::Contiguous);
+    Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   // We want to compute: (rhs_solve_1 . R^{-T})
@@ -2320,12 +2320,12 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
   }
 
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (output_mask[1] && !gG.defined()) {
     AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
-    gG = at::zeros_like(gamma, at::MemoryFormat::Contiguous);
+    gG = at::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 
