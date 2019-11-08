@@ -149,14 +149,19 @@ def multi_layer_nested_async_rpc(dst, world_size, ttl):
 
 
 def nested_rref(dst):
-    return (
+    print("=== dst is ", dst)
+    ret = (
         rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1)),
         rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 2)),
     )
+    print("=== dst is ", dst, ", done with nested_rref")
+    return ret
 
 
 def nested_remote(dst):
+    print("=== dst is ", dst)
     rref = rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 3))
+    print("=== dst is ", dst, ", done with remote")
     return rref.to_here()
 
 
@@ -830,27 +835,36 @@ class RpcTest(object):
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
 
+        print(self.rank, "=== before master remote")
         rref = rpc.remote(
             "worker{}".format(dst_rank1),
             nested_remote,
             args=("worker{}".format(dst_rank2),),
         )
+        print(self.rank, "=== after master remote")
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
+        print(self.rank, "=== after assert")
 
     @dist_init
-    def test_nested_rref(self):
+    def test_nested_rref_single(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
+        print(self.rank, "=== before master remote rref")
         rref_of_rrefs = rpc.remote(
             "worker{}".format(dst_rank1),
             nested_rref,
             args=("worker{}".format(dst_rank2),),
         )
+        print(self.rank, "=== after master remote rref")
         rrefs = rref_of_rrefs.to_here()
+        print(self.rank, "=== after master tohere")
         self.assertEqual(len(rrefs), 2)
+        print(self.rank, "=== after assert length")
         self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
+        print(self.rank, "=== after assert rrefs[0]")
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
+        print(self.rank, "=== after assert rrefs[1]")
 
     @dist_init
     def test_nested_rref_stress(self):
