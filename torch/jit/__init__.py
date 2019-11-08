@@ -26,7 +26,6 @@ import os
 import pickle
 import sys
 import textwrap
-import types
 import warnings
 
 from collections import OrderedDict
@@ -1442,28 +1441,6 @@ class OrderedBufferDict(OrderedDictWrapper):
         if k not in self:
             raise KeyError(k)
         return self.module._get_buffer(k)
-
-# base types that can be constants
-# in addition, tuples and lists of these base types are also considered constants
-# If you edit this list, then you also need to edit the handlers in
-# ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
-
-
-def _get_valid_constant(attr, v):
-    if isinstance(v, _constant_types):
-        return v
-    elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(attr, x) for x in v)
-    constants = ", ".join(typ.__name__ for typ in _constant_types)
-    raise TypeError(textwrap.dedent("""
-        '{}' object for attribute '{}' is not a valid constant.
-        Valid constants are:
-          1. a nn.ModuleList
-          2. a value of type {{{}}}
-          3. a list or tuple of (2)
-        """.format(type(v).__name__, attr, constants)))
-
 
 # For each user-defined class that subclasses ScriptModule, this meta-class:
 # (1) finds all the methods annotated with @script_method in a ScriptModule and
