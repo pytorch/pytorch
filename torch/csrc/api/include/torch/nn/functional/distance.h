@@ -10,8 +10,8 @@ namespace detail {
 inline Tensor cosine_similarity(
     const Tensor& x1,
     const Tensor& x2,
-    int64_t dim = 1,
-    double eps = 1e-8) {
+    int64_t dim,
+    double eps) {
   return torch::cosine_similarity(
       x1,
       x2,
@@ -34,8 +34,8 @@ inline Tensor pairwise_distance(
     const Tensor& x1,
     const Tensor& x2,
     double p,
-    double eps = 1e-6,
-    bool keepdim = false) {
+    double eps,
+    bool keepdim) {
   return torch::pairwise_distance(
       x1,
       x2,
