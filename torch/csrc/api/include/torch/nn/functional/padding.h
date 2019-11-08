@@ -30,8 +30,8 @@ inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
 namespace detail {
 inline Tensor pad(const Tensor& input,
                   IntArrayRef pad,
-                  PadOptions::mode_t mode = torch::kConstant,
-                  double value = 0) {
+                  PadOptions::mode_t mode,
+                  double value) {
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
   TORCH_CHECK(((int64_t)(pad.size() / 2)) <= input.dim(), "Padding length too large");
   if (c10::get_if<enumtype::kConstant>(&mode)) {

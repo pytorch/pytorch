@@ -12,10 +12,10 @@ namespace functional {
 namespace detail {
 inline Tensor interpolate(
   const Tensor& input,
-  std::vector<int64_t> size = {},
-  std::vector<double> scale_factor = {},
-  InterpolateOptions::mode_t mode = torch::kNearest,
-  c10::optional<bool> align_corners = c10::nullopt) {
+  std::vector<int64_t> size,
+  std::vector<double> scale_factor,
+  InterpolateOptions::mode_t mode,
+  c10::optional<bool> align_corners) {
   auto _check_size_scale_factor = [&](size_t dim) {
     if (size.empty() && scale_factor.empty()) {
       TORCH_CHECK(false, "either size or scale_factor should be defined");

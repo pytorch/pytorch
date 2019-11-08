@@ -53,9 +53,9 @@ namespace detail {
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,
-    std::string mode = "bilinear",
-    std::string padding_mode = "zeros",
-    c10::optional<bool> align_corners = c10::nullopt) {
+    std::string mode,
+    std::string padding_mode,
+    c10::optional<bool> align_corners) {
 
   if ((mode.compare("bilinear") != 0) && (mode.compare("nearest") != 0)) {
     TORCH_CHECK(false, "nn::functional::grid_sample(): expected mode to be ",
