@@ -133,7 +133,7 @@ def get_nightly_uploads():
     mylist = []
     for conf in configs:
         phase_dependency = "test" if predicate_exclude_nonlinux_and_libtorch(conf) else "build"
-        mylist.append(conf.gen_workflow_job("upload", phase_dependency))
+        mylist.append(conf.gen_workflow_job("upload", phase_dependency, nightly=True))
 
     return mylist
 
@@ -144,7 +144,7 @@ def get_nightly_tests():
 
     tests = []
     for conf_options in filtered_configs:
-        yaml_item = conf_options.gen_workflow_job("test")
+        yaml_item = conf_options.gen_workflow_job("test", nightly=True)
         tests.append(yaml_item)
 
     return tests
