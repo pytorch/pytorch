@@ -497,6 +497,37 @@ void initTorchFunctions(PyObject* module) {
   }
 }
 
+/*
+ *
+ * Calls __torch_function__ on the overloaded arguments to a torch API
+ * function in order of precedence, returning the first result that is
+ * not NotImplemented. If all arguments return NotImplemented, raises a
+ * TypeError.
+ *
+ * Assumes overloaded_args has at least one entry. All entries must have
+ * a __torch_function__ attribute that resolves to a callable that
+ * accepts a torch API function, arguments, and keyword arguments for
+ * the torch API function.
+ *
+ * It is sufficient to call PythonArgs::has_torch_function before
+ * calling this function to verify that there are valid arguments
+ * present. If that is not done then special care must be taken to
+ * ensure there are arguments that are overloaded with
+ * __torch_function__.
+ *
+ * 'r' is a parsed PythonArgs instance, returned from
+ * PythonArgParser::parse.
+ *
+ * 'args' is a reference to the python tuple of arguments to the torch
+ * API function.
+ *
+ * 'kwargs' is a reference to the python dict of keyword arguments to
+ * the torch API function.
+ *
+ * 'torch_api' is a reference to python torch API namespace.
+ *
+ */
+
 PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyTypeObject &torch_api) {
   PyObject* torch_api_function =
     PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
