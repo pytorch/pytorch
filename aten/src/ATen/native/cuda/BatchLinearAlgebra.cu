@@ -577,7 +577,6 @@ AT_ERROR("solve: MAGMA library not found in "
       infos[i] = info_array[i];
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -663,7 +662,6 @@ AT_ERROR("inverse: MAGMA library not found in "
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -688,7 +686,6 @@ AT_ERROR("inverse: MAGMA library not found in "
   magmaGetri<scalar_t>(
     n, self_data, n, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, &info_tmp);
   info = info_tmp;
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -779,7 +776,6 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
 
     info = info_tmp;
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -854,7 +850,6 @@ AT_ERROR("cholesky: MAGMA library not found in "
       infos[i] = info_array[i];
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -943,7 +938,6 @@ AT_ERROR("lu: MAGMA library not found in "
         batch_size, magma_queue);
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1075,7 +1069,6 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
           n, &b_array[mini_idx], n, batch_size % batch_limit, magma_queue);
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1146,7 +1139,6 @@ AT_ERROR("qr: MAGMA library not found in "
       return;
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1240,7 +1232,6 @@ AT_ERROR("symeig: MAGMA library not found in "
       return;
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1333,7 +1324,6 @@ AT_ERROR("svd: MAGMA library not found in "
       return;
     }
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1464,7 +1454,6 @@ AT_ERROR("lu_solve: MAGMA library not found in "
 
     info = info_tmp;
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
