@@ -778,34 +778,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_frac_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: frac
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: _th_frac
-  cname: frac
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_var
   types:
     - floating_point
