@@ -27,6 +27,7 @@ from itertools import product
 from copy import deepcopy
 from numbers import Number
 import tempfile
+import xmlrunner
 
 import __main__
 import errno
@@ -131,7 +132,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
-        unittest.main(argv=argv)
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output='test-reports'))
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)

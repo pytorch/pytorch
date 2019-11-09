@@ -11,7 +11,7 @@ import sys
 default_set = set([
     # PyTorch CPU
     # Selected oldest Python 2 version to ensure Python 2 coverage
-    'pytorch-linux-xenial-py2.7.9',
+    'pytorch-linux-xenial-py3.5',
     # PyTorch CUDA
     'pytorch-linux-xenial-cuda9-cudnn7-py3',
     # PyTorch ASAN
