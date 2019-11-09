@@ -312,6 +312,11 @@ ${statements}
 #endif
 """)
 
+# Generate a file that lists all functions and their schema string. Used for XLA
+REGISTRATION_DECLARATION = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
+""")
+
 
 FACTORY_FUNCTION_NAMES = None
 
@@ -502,6 +507,17 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
+    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
+    registration_declarations = []
+
+    for declaration in aten_declarations:
+        if dispatch_strategy(declaration) == 'use_derived':
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
+
+    env = {
+        'registration_declarations': registration_declarations,
+    }
+    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
