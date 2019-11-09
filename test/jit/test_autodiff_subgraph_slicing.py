@@ -1,8 +1,7 @@
 import os
 import sys
 import unittest
-from common_utils import GRAPH_EXECUTOR, ProfilingMode
-from jit_utils import enable_profiling_mode
+from common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode
 import torch
 
 # Make the helper files in test/ importable

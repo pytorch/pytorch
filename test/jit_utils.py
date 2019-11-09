@@ -35,18 +35,6 @@ import textwrap
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
-@contextmanager
-def enable_profiling_mode():
-    if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-        old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
-    try:
-        yield
-    finally:
-        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            torch._C._jit_set_profiling_executor(old_prof_exec_state)
-            torch._C._jit_set_profiling_mode(old_prof_mode_state)
-
 def execWrapper(code, glob, loc):
     if PY2:
         exec(code) in glob, loc

@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from jit_utils import enable_profiling_mode
+from common_utils import enable_profiling_mode
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
