@@ -27,7 +27,6 @@ from itertools import product
 from copy import deepcopy
 from numbers import Number
 import tempfile
-import xmlrunner
 
 import __main__
 import errno
@@ -135,6 +134,7 @@ def run_tests(argv=UNITTEST_ARGS):
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
         if IS_PYTORCH_CI:
+            import xmlrunner
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output='test-reports'))
         else:
             unittest.main(argv=argv)

@@ -110,7 +110,8 @@ test_python_nn() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --jit --verbose
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
+  assert_git_not_dirty
 }
 
 test_aten() {
@@ -230,11 +231,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_libtorch
   test_custom_script_ops
 else
-  pip_install unittest-xml-reporting
-  # test_torchvision
-  # test_python_nn
+  test_torchvision
+  test_python_nn
   test_python_all_except_nn
-  # test_aten
-  # test_libtorch
-  # test_custom_script_ops
+  test_aten
+  test_libtorch
+  test_custom_script_ops
 fi
