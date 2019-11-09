@@ -415,7 +415,7 @@ jobs:
             docker cp $id:/var/lib/jenkins/workspace/test-reports ./
           }
 
-          trap "retreive_test_reports" ERR
+          trap "retrieve_test_reports" ERR
 
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'

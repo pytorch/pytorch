@@ -111,7 +111,6 @@ test_python_nn() {
 
 test_python_all_except_nn() {
   time python test/run_test.py --jit --verbose
-  assert_git_not_dirty
 }
 
 test_aten() {
