@@ -39,6 +39,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.quantization import QConfig
 from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
+from torch.quantization._quantize_script import script_qconfig
+from torch.quantization import default_observer
+from torch.quantization import default_per_channel_weight_observer
 
 # Testing utils
 import jit_utils
@@ -1109,34 +1112,36 @@ graph(%x : Tensor,
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
-        qconfig_dict = {
-            '':
-            QConfig(
-                activation=observer._c,
-                weight=observer._c)
-        }
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+        for is_per_channel in [True, False]:
+            observer = default_per_channel_weight_observer.with_args(ch_axis=1) if is_per_channel \
+                else default_observer
+            qconfig = QConfig(activation=observer, weight=observer)
+            qconfig_dict = {
+                '': script_qconfig(qconfig)
+            }
+            torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+            data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
-        get_forward(m._c)(data)
-        # right now the result will have extra observer modules
-        # will fix later when we figure out how to remove modules
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
+            get_forward(m._c)(data)
+            # right now the result will have extra observer modules
+            # will fix later when we figure out how to remove modules
+            torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
-        get_forward(m._c)(data)
-        FileCheck().check_not("aten::quantize_per_tensor") \
-                   .check("prim::CallMethod[name=\"forward\"]") \
-                   .check_not("aten::quantize_per_tensor") \
-                   .check("return") \
-                   .run(str(get_forward_graph(m._c)))
-        FileCheck().check("aten::quantize_per_tensor") \
-                   .check_next("aten::dequantize") \
-                   .check("aten::conv2d") \
-                   .check("aten::quantize_per_tensor") \
-                   .check_next("aten::dequantize") \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
+            get_forward(m._c)(data)
+            quant_func = "aten::quantize_per_channel" if is_per_channel \
+                else "aten::quantize_per_tensor"
+            FileCheck().check_not(quant_func) \
+                       .check("prim::CallMethod[name=\"forward\"]") \
+                       .check_not(quant_func) \
+                       .check("return") \
+                       .run(str(get_forward_graph(m._c)))
+            FileCheck().check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("aten::conv2d") \
+                       .check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("return") \
+                       .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_prepack_unpack(self):
