@@ -8,7 +8,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-/// Options for a Grid Sample module.
+/// Options for a Grid Sample functional.
 struct TORCH_API GridSampleFuncOptions {
   /// interpolation mode to calculate output values. Default: Bilinear
   TORCH_ARG(std::string, mode) = "bilinear";
