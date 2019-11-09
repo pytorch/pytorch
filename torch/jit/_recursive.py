@@ -338,10 +338,6 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
 
             script_module._modules[name] = scripted
 
-        # make _modules available in script
-        if not isinstance(nn_module, torch.nn.ModuleDict):
-            script_module._modules_dict = recursive_script(torch.nn.ModuleDict(script_module._modules.items()))
-
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
 
