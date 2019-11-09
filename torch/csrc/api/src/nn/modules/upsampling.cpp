@@ -36,13 +36,12 @@ Tensor UpsampleImpl::forward(const Tensor& input) {
     mode = torch::kTrilinear;
   }
 
-  return F::interpolate(
+  return F::detail::interpolate(
       input,
-      InterpolateOptions()
-          .size(options.size())
-          .scale_factor(options.scale_factor())
-          .mode(mode)
-          .align_corners(options.align_corners()));
+      options.size(),
+      options.scale_factor(),
+      mode,
+      options.align_corners());
 }
 
 } // namespace nn
