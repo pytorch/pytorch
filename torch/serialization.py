@@ -103,7 +103,7 @@ def _cpu_deserialize(obj, location):
 
 
 def validate_cuda_device(location):
-    device = torch.cuda._utils._get_device_index(location)
+    device = torch.cuda._utils._get_device_index(location, True)
 
     if not torch.cuda.is_available():
         raise RuntimeError('Attempting to deserialize object on a CUDA '
