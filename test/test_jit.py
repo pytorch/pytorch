@@ -447,6 +447,18 @@ class TestJit(JitTestCase):
         jit_f2 = torch.jit.trace(f2, x)
         assert f2(x) == jit_f2(x)  # fails
 
+    def test_trace_namedtuple(self):
+        Point = namedtuple('point', ['x', 'y'])
+
+        def f(p):
+            if type(p) is tuple:
+                p = Point(*p)
+            return p.x + p.y
+
+        p = Point(torch.randn(1), torch.randn(1))
+        traced = torch.jit.trace(f, (p,))
+        self.assertEqual(f(p), traced(p))
+
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
         class MyModule(torch.jit.ScriptModule):
