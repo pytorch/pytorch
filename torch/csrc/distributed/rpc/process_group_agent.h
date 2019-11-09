@@ -51,9 +51,6 @@ class ProcessGroupAgent : public RpcAgent {
 
   void start() override;
 
-  // retrieves the timeout for all RPCs
-  const std::chrono::milliseconds& getRpcTimeout() const;
-
  protected:
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
@@ -148,7 +145,6 @@ class ProcessGroupAgent : public RpcAgent {
   std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
-  std::chrono::milliseconds rpcTimeout_;
 };
 
 } // namespace rpc
