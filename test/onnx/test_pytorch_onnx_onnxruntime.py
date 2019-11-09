@@ -741,7 +741,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, affine=True)
         self.run_test(model, x)
-        
+
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
@@ -749,7 +749,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, affine=False)
         self.run_test(model, x)
-        
+
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
