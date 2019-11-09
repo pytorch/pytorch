@@ -171,7 +171,7 @@ Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double
   Tensor w1 = at::sum(x1 * x1, dim);
   Tensor w2 = at::sum(x2 * x2, dim);
   Tensor n12 = (w1 * w2).clamp_min_(eps * eps).sqrt_();
-  return w12.div_(n12);
+  return w12.div_(n12).clamp_max_(1.0);
 }
 
 }}  // namespace at::native
