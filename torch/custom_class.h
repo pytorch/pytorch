@@ -9,9 +9,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
@@ -19,11 +17,11 @@
 #include <sstream>
 
 
-namespace py = pybind11;
 namespace torch {
 namespace jit {
 
-static std::vector<c10::RegisterOperators> registeredOps;
+TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
+TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
 
 namespace detail {
 template <class R, class...>
@@ -65,8 +63,6 @@ class class_ {
 
   std::string className;
   std::string qualClassName;
-  c10::optional<py::class_<CurClass>> pyClass = c10::nullopt;
-  std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
@@ -80,41 +76,25 @@ class class_ {
     // (I think)?
     qualClassName = topModule + "." + parentModule + "." + className;
 
-    auto obj = py::module::import("torch").attr(parentModule.c_str());
-    pyClass = py::class_<CurClass>(obj, className.c_str());
-    pyClass->attr("qualified_name") = py::str(qualClassName);
-    auto newClass =
-        py::module::import("torch.jit")
-            .attr("_add_script_class")(*pyClass, qualClassName.c_str());
-
-    auto castToPython = [](void* objPtr) -> PyObject* {
-      CurClass x = *static_cast<CurClass*>(objPtr);
-      auto py_object = py::cast(x);
-      PyObject* rawPyObj = py_object.release().ptr();
-      return rawPyObj;
-    };
-    at::getClassConverter()[qualClassName] = castToPython;
-
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
-    classCu = torch::jit::get_python_cu();
     classTypePtr =
-        ClassType::create(c10::QualifiedName(qualClassName), classCu);
+        ClassType::create(c10::QualifiedName(qualClassName), classCU());
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
-                              c10::StrongTypePtr(classCu, classTypePtr)});
+                              c10::StrongTypePtr(classCU(), classTypePtr)});
     c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
-                              c10::StrongTypePtr(classCu, classTypePtr)});
+                              c10::StrongTypePtr(classCU(), classTypePtr)});
 
-    classCu->register_type(classTypePtr);
+    classCU()->register_type(classTypePtr);
+
+    std::cout << "making class " << className << std::endl;
   }
 
   template <typename... Types>
   class_& def(detail::types<void, Types...>) { // Used in combination with
                                                // torch::jit::init<...>()
-    pyClass->def(py::init<Types...>());
-
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
       auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(classObj);
@@ -175,7 +155,7 @@ class class_ {
   void defineMethod(std::string name, Func func, bool hasRet) {
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
-    registeredOps.push_back(
+    registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
 
 
@@ -191,13 +171,11 @@ class class_ {
     }
     graph->registerOutput(res);
 
-    auto method = classCu->create_function(qualClassName + "." + name, graph);
+    auto method = classCU()->create_function(qualClassName + "." + name, graph);
     classTypePtr->addMethod(method);
   }
   template <typename Func, typename R, typename... Types>
   class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
-    pyClass->def(name.c_str(), f);
-
     auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
       return at::guts::invoke(f, *cur, args...);
     };

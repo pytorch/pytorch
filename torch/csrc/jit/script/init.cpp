@@ -588,7 +588,10 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "name", [](const Object& self) { return self.name().name(); })
       .def("__getattr__", [](Object& self, const std::string& name) {
-        return self.attr(name);
+        if (auto method = self.find_method(name)) {
+          return py::cast(*method);
+        }
+        return toPyObject(self.attr(name));
       });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.

@@ -77,6 +77,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/scalar_type_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python_custom_class.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
