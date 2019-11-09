@@ -87,6 +87,7 @@ qunary_ops_list = op_bench.op_list(
         # ['log2', torch.log2],
         # ['log2_', torch.log2_],
         # ['log_', torch.log_],
+        ['mean', torch.mean],
         # ['neg', torch.neg],
         # ['neg_', torch.neg_],
         # ['reciprocal', torch.reciprocal],
