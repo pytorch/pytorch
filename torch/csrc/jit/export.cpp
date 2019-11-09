@@ -545,7 +545,7 @@ class ScriptModuleSerializer {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
     // Serialize the model object
-    writeArchive("data", module.module_object());
+    writeArchive("data", module.object_value());
     // Then we werialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive

@@ -14,7 +14,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-static ModulePtr create_module_object(
+static ObjectPtr create_object_value(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
@@ -33,14 +33,14 @@ static ModulePtr create_module_object(
 }
 
 Module::Module(c10::QualifiedName class_name)
-    : module_value_(create_module_object(
+    : Object(create_object_value(
           std::move(class_name),
           std::make_shared<CompilationUnit>())) {}
 
 Module::Module(
     std::shared_ptr<CompilationUnit> cu,
     const c10::ClassTypePtr& type)
-    : module_value_(c10::ivalue::Object::create(
+    : Object(c10::ivalue::Object::create(
           c10::StrongTypePtr(std::move(cu), type),
           type->numAttributes())) {}
 
@@ -48,19 +48,19 @@ Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle)
-    : module_value_(create_module_object(
+    : Object(create_object_value(
           std::move(class_name),
           std::move(cu),
           shouldMangle)) {}
 
-ModulePtr Module::module_object() const {
-  if (!module_value_) {
+ObjectPtr Object::object_value() const {
+  if (!object_value_) {
     // User has created a Model without assigning it to something already
     // loaded. This is done in tests, and when using the .define method.
-    module_value_ =
-        create_module_object("Module", std::make_shared<CompilationUnit>());
+    object_value_ =
+        create_object_value("Object", std::make_shared<CompilationUnit>());
   }
-  return module_value_;
+  return object_value_;
 }
 
 // first class mode runs models as first class objects,
@@ -145,23 +145,23 @@ void Module::to_impl(
   }
 }
 
-Method::Method(ModulePtr owner, Function* function)
+Method::Method(ObjectPtr owner, Function* function)
     : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
 }
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner().module_object());
+  stack.insert(stack.begin(), owner().object_value());
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
-  stack.insert(stack.begin(), owner().module_object());
+  stack.insert(stack.begin(), owner().object_value());
   return (*function_)(std::move(stack), kwargs);
 }
 
-void Module::define(const std::string& src, const ResolverPtr& resolver) {
+void Object::define(const std::string& src, const ResolverPtr& resolver) {
   const auto self = SimpleSelf(type());
   class_compilation_unit()->define(
       name(), src, resolver ? resolver : script::nativeResolver(), &self);
@@ -203,8 +203,8 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   while (!to_scan.empty()) {
     auto entry = to_scan.back();
     to_scan.pop_back();
-    type_remap[entry.first.module_object()->type()] =
-        entry.second.module_object()->type();
+    type_remap[entry.first.object_value()->type()] =
+        entry.second.object_value()->type();
     for (const NameModule& s : entry.first.named_children()) {
       to_scan.emplace_back(
           s.value, Module(entry.second.attr(s.name).toObject()));
@@ -220,7 +220,7 @@ Module Module::clone() const {
 
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap) const {
-  // Create a new module_object in the same compilation unit.
+  // Create a new object_value in the same compilation unit.
   // The name is the same as for the original module, but it'll be mangled.
   // The class type is also created from scratch.
   Module r(name(), class_compilation_unit(), true);
@@ -229,7 +229,7 @@ Module Module::clone_impl(
   // Copy slots. If a slot is a module - recursively clone it.
   size_t N = type()->numAttributes();
   for (size_t i = 0; i < N; ++i) {
-    IValue s = module_object()->getSlot(i);
+    IValue s = object_value()->getSlot(i);
     if (type()->getAttribute(i)->is_module()) {
       const Module& orig = Module(s.toObject());
       Module cloned = orig.clone_impl(type_remap);
@@ -250,15 +250,15 @@ Module Module::clone_impl(
 
 void Module::train(bool on) {
   for (Module m : modules()) {
-    if (auto slot = m.module_object()->type()->findAttributeSlot("training")) {
-      m.module_object()->setSlot(*slot, on);
+    if (auto slot = m.object_value()->type()->findAttributeSlot("training")) {
+      m.object_value()->setSlot(*slot, on);
     } else {
       TORCH_INTERNAL_ASSERT("'training' attribute not found");
     }
   }
 }
 
-IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
+IValue Object::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Look up the class
   const auto classType =
       class_compilation_unit()->get_class(c10::QualifiedName(name));
@@ -313,10 +313,10 @@ named_parameter_list Module::named_parameters(bool recurse) const {
   return named_parameter_list(*this, recurse, /*return_module=*/false);
 }
 
-c10::optional<Method> Module::find_method(const std::string& basename) const {
+c10::optional<Method> Object::find_method(const std::string& basename) const {
   for (Function* fn : type()->methods()) {
     if (fn->name() == basename) {
-      return Method(module_object(), fn);
+      return Method(object_value(), fn);
     }
   }
   return c10::nullopt;

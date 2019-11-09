@@ -40,6 +40,7 @@ using ::c10::QualifiedName;
 // Map which stores filename to content.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
+using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
 struct Module;
@@ -93,7 +94,7 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 struct TORCH_API Method {
-  Method(ModulePtr owner, Function* function);
+  Method(ObjectPtr owner, Function* function);
 
   // the module that contains this method.
   Module owner() const;
@@ -125,9 +126,9 @@ struct TORCH_API Method {
   }
 
  private:
-  // Methods are uniqued onwed by a single module. This raw pointer allows
-  // looking up the module.
-  ModulePtr owner_;
+  // Methods are uniqued onwed by a single object. This raw pointer allows
+  // looking up the object.
+  ObjectPtr owner_;
 
   // Underlying unbound function
   // This is the _lowered_ function and is different than the
@@ -135,7 +136,107 @@ struct TORCH_API Method {
   Function* function_;
 };
 
-struct TORCH_API Module {
+struct TORCH_API Object {
+  Object() {}
+  Object(ObjectPtr object_value) : object_value_(std::move(object_value)) {}
+
+  const c10::QualifiedName& name() const {
+    return *object_value()->type()->name();
+  }
+
+  void setattr(const std::string& name, IValue v) {
+    size_t slot = object_value()->type()->getAttributeSlot(name);
+    const TypePtr& expected = object_value()->type()->getAttribute(slot);
+    TORCH_CHECK(
+        v.type()->isSubtypeOf(expected),
+        "Expected a value of type '",
+        expected->python_str(),
+        "' for field '",
+        name,
+        "', but found '",
+        v.type()->python_str(),
+        "'");
+    object_value()->setSlot(slot, std::move(v));
+  }
+
+  ObjectPtr object_value() const;
+
+  IValue attr(const std::string& name) const {
+    return object_value()->getAttr(name);
+  }
+
+  IValue attr(const std::string& name, IValue or_else) const {
+    if (auto r = object_value()->type()->findAttributeSlot(name)) {
+      return object_value()->getSlot(*r);
+    }
+    return or_else;
+  }
+
+  bool hasattr(const std::string& name) const {
+    return object_value()->type()->findAttributeSlot(name).has_value();
+  }
+
+  // each module owns its method. The reference returned here
+  // is guarenteed to stay valid until this module has been destroyed
+  Method get_method(const std::string& name) const {
+    if (auto method = find_method(name)) {
+      return *method;
+    }
+    AT_ERROR("Method '", name, "' is not defined.");
+  }
+
+  c10::optional<Method> find_method(const std::string& basename) const;
+
+  const std::vector<Method> get_methods() const {
+    return fmap(type()->methods(), [&](Function* func) {
+      return Method(object_value(), func);
+    });
+  }
+
+  /// Run a method from this module.
+  ///
+  /// For example:
+  /// @code
+  ///   IValue output = module->run("relu_script", a, b);
+  /// @endcode
+  ///
+  /// To get a compile a module from a source string, see torch::jit::compile
+  ///
+  /// @param method_name The name of the method to run
+  /// @param args Arguments to be passed to the method
+  /// @return An IValue containing the return value (or values if it is a tuple)
+  /// from the method
+  template <typename... Types>
+  IValue run_method(const std::string& method_name, Types&&... args) {
+    return get_method(method_name)({IValue(std::forward<Types>(args))...});
+  }
+
+  ClassTypePtr type() const {
+    return object_value()->type();
+  }
+  std::shared_ptr<CompilationUnit> class_compilation_unit() const {
+    return object_value()->compilation_unit();
+  }
+
+  // so that C++ users can easily add methods
+  void define(const std::string& src, const ResolverPtr& resolver = nullptr);
+
+  template <typename... Types>
+  IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
+    return create_class(name, {IValue(std::forward<Types>(args))...});
+  }
+
+  IValue create_class(const c10::QualifiedName& name, Stack stack) const;
+
+  size_t num_slots() const {
+    return object_value()->slots().size();
+  }
+
+ private:
+  mutable ObjectPtr object_value_;
+};
+
+struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Module(
@@ -144,12 +245,8 @@ struct TORCH_API Module {
       bool shouldMangle = false);
   // module_value_ null and will be lazily initialized if is needed
   Module() {}
-  Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
+  Module(ObjectPtr module_value) : Object(std::move(module_value)) {}
   ~Module() {}
-
-  const c10::QualifiedName& name() const {
-    return *module_object()->type()->name();
-  }
 
   void set_optimized(bool o) {
     AT_WARN(
@@ -174,14 +271,14 @@ struct TORCH_API Module {
   // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, at::Tensor v) {
     type()->addOrCheckAttribute(name, TensorType::get());
-    module_object()->setAttr(name, std::move(v));
+    object_value()->setAttr(name, std::move(v));
   }
   void register_parameter(
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
     type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer);
-    module_object()->setAttr(name, std::move(v));
+    object_value()->setAttr(name, std::move(v));
   }
   void register_attribute(
       const std::string& name,
@@ -189,52 +286,14 @@ struct TORCH_API Module {
       IValue v,
       bool is_param = false) {
     type()->addOrCheckAttribute(name, t, is_param);
-    module_object()->setAttr(name, std::move(v));
+    object_value()->setAttr(name, std::move(v));
   }
   void register_module(const std::string& name, const Module& module) {
     type()->addOrCheckAttribute(name, module.type());
-    module_object()->setAttr(name, module.module_object());
+    object_value()->setAttr(name, module.object_value());
   }
 
-  void setattr(const std::string& name, IValue v) {
-    size_t slot = module_object()->type()->getAttributeSlot(name);
-    const TypePtr& expected = module_object()->type()->getAttribute(slot);
-    TORCH_CHECK(
-        v.type()->isSubtypeOf(expected),
-        "Expected a value of type '",
-        expected->python_str(),
-        "' for field '",
-        name,
-        "', but found '",
-        v.type()->python_str(),
-        "'");
-    module_object()->setSlot(slot, std::move(v));
-  }
-
-  IValue attr(const std::string& name) const {
-    return module_object()->getAttr(name);
-  }
-
-  IValue attr(const std::string& name, IValue or_else) const {
-    if (auto r = module_object()->type()->findAttributeSlot(name)) {
-      return module_object()->getSlot(*r);
-    }
-    return or_else;
-  }
-
-  bool hasattr(const std::string& name) const {
-    return module_object()->type()->findAttributeSlot(name).has_value();
-  }
-
-  // each module owns its method. The reference returned here
-  // is guarenteed to stay valid until this module has been destroyed
-  Method get_method(const std::string& name) const {
-    if (auto method = find_method(name)) {
-      return *method;
-    }
-    AT_ERROR("Method '", name, "' is not defined.");
-  }
-
+  // TODO
   void apply(const std::function<void(Module&)>& fn);
 
   buffer_list buffers(bool recurse = true) const;
@@ -264,16 +323,6 @@ struct TORCH_API Module {
       bool print_param_values,
       int level) const;
 
-  const std::vector<Method> get_methods() const {
-    return fmap(
-        type()->methods(),
-        [&](Function* func) {
-          return Method(module_object(), func);
-        });
-  }
-
-  c10::optional<Method> find_method(const std::string& basename) const;
-
   /// Enables "training" mode.
   void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
@@ -285,6 +334,22 @@ struct TORCH_API Module {
   bool is_training() {
     return attr("training", true).toBool();
   }
+
+  void save(
+      std::ostream& out,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  void save(
+      const std::string& filename,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  void _save_for_mobile(
+      std::ostream& out,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+
+  void _save_for_mobile(
+      const std::string& filename,
+      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
   /// Recursively casts all parameters to the given `dtype` and `device`.
   ///
@@ -310,87 +375,27 @@ struct TORCH_API Module {
   /// effect.
   void to(at::Device device, bool non_blocking = false);
 
-  /// Run a method from this module.
-  ///
-  /// For example:
-  /// @code
-  ///   IValue output = module->run("relu_script", a, b);
-  /// @endcode
-  ///
-  /// To get a compile a module from a source string, see torch::jit::compile
-  ///
-  /// @param method_name The name of the method to run
-  /// @param args Arguments to be passed to the method
-  /// @return An IValue containing the return value (or values if it is a tuple)
-  /// from the method
-  template <typename... Types>
-  IValue run_method(const std::string& method_name, Types&&... args) {
-    return get_method(method_name)({IValue(std::forward<Types>(args))...});
-  }
-
-  void save(
-      std::ostream& out,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
-
-  void save(
-      const std::string& filename,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
-
-  void _save_for_mobile(
-      std::ostream& out,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
-
-  void _save_for_mobile(
-      const std::string& filename,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+  void clone_method(const Module& orig, const std::string& name);
 
   // Create a deep copy of this module.
   Module clone() const;
 
-  void clone_method(const Module& orig, const std::string& name);
-
-  ModulePtr module_object() const;
-
-  ClassTypePtr type() const {
-    return module_object()->type();
-  }
-  std::shared_ptr<CompilationUnit> class_compilation_unit() const {
-    return module_object()->compilation_unit();
-  }
-
-  // so that C++ users can easily add methods
-  void define(const std::string& src, const ResolverPtr& resolver = nullptr);
-
-  template <typename... Types>
-  IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
-    return create_class(name, {IValue(std::forward<Types>(args))...});
-  }
-
-  IValue create_class(const c10::QualifiedName& name, Stack stack) const;
-
-  size_t num_slots() const {
-    return module_object()->slots().size();
-  }
-
  private:
-  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
+  void to_impl(
+      const c10::optional<at::Device>& device,
+      const c10::optional<at::ScalarType>& dtype,
+      bool non_blocking);
+
+  c10::QualifiedName getNameForMethod(std::string basename) const {
+    return QualifiedName(name(), basename);
+  }
 
   void clone_method(
       const Module& orig,
       const Function& method,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
-  c10::QualifiedName getNameForMethod(std::string basename) const {
-    return QualifiedName(name(), basename);
-  }
-
-  void to_impl(
-      const c10::optional<at::Device>& device,
-      const c10::optional<at::ScalarType>& dtype,
-      bool non_blocking);
-
-  // mutable be we lazily initialize in module_object.
-  mutable ModulePtr module_value_;
+  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
 };
 
 namespace detail {
@@ -459,8 +464,8 @@ struct slot_iterator_impl {
     return cursors_.back();
   }
   IValue cur() const {
-    return return_module() ? top().module_.module_object()
-                           : top().module_.module_object()->getSlot(top().i_);
+    return return_module() ? top().module_.object_value()
+                           : top().module_.object_value()->getSlot(top().i_);
   }
 
   // advance to the next slot in a depth first pre-order traversal of the
@@ -487,7 +492,7 @@ struct slot_iterator_impl {
     // traversals. We do this by adding a new SlotCursor to track the traversal.
     if (recurse_ &&
         top()
-            .module_.module_object()
+            .module_.object_value()
             ->type()
             ->getAttribute(top().i_)
             ->is_module()) {
@@ -501,7 +506,7 @@ struct slot_iterator_impl {
   // otherwise, we have to continue advancing.
   bool valid() const {
     return top().i_ < int64_t(top().module_.num_slots()) &&
-        Policy::valid(top().module_.module_object()->type(), top().i_);
+        Policy::valid(top().module_.object_value()->type(), top().i_);
   }
   void while_not_valid_next() {
     // advance iteration until we are either at the end (cursors_.empty())

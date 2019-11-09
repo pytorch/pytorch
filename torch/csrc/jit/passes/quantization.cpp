@@ -30,7 +30,7 @@ void fillQConfigMap(
   } else {
     qconfig = parent_qconfig;
   }
-  map[module.module_object()] = qconfig;
+  map[module.object_value()] = qconfig;
 
   for (const script::NameModule& s : module.named_children()) {
     std::string child_key;
@@ -40,7 +40,7 @@ void fillQConfigMap(
       child_key = key + "." + s.name;
     }
     fillQConfigMap(
-        s.value.module_object(), qconfig_dict, map, child_key, qconfig);
+        s.value.object_value(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
@@ -267,7 +267,7 @@ void InsertObserversHelper::propagateValues(
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
-  if (!module_qconfig_map_.count(module.module_object())) {
+  if (!module_qconfig_map_.count(module.object_value())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -296,7 +296,7 @@ void InsertObserversHelper::insertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      auto qconfig = module_qconfig_map_.at(module.module_object());
+      auto qconfig = module_qconfig_map_.at(module.object_value());
       if (qconfig) {
         auto observer_node =
             insertObserverFor(v, v->owningGraph(), module, qconfig.value());
@@ -365,7 +365,7 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    auto qconfig = module_qconfig_map_.at(module.module_object());
+    auto qconfig = module_qconfig_map_.at(module.object_value());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
       insertObserverFor(v, v->owningGraph(), module, qconfig.value());

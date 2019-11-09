@@ -360,7 +360,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
   auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
-  v->setType(module.module_object()->type());
+  v->setType(module.object_value()->type());
   const auto name = QualifiedName(module.name(), "forward");
   auto method = module.class_compilation_unit()->create_function(name, graph);
   module.type()->addMethod(method);
@@ -373,7 +373,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     IValue b;
   };
   std::unordered_set<const void*> visited;
-  std::vector<Work> work = {{lhs.module_object(), rhs.module_object()}};
+  std::vector<Work> work = {{lhs.object_value(), rhs.object_value()}};
   while (!work.empty()) {
     Work item = work.back();
     work.pop_back();
@@ -487,7 +487,7 @@ static void set_generic(
     Module& self,
     const std::string& name,
     py::object value) {
-  slot_dict_impl<Policy>(self.module_object()).setattr(name, std::move(value));
+  slot_dict_impl<Policy>(self.object_value()).setattr(name, std::move(value));
 }
 
 static py::object get_generic(Module& self, const std::string& name) {
@@ -497,7 +497,7 @@ static py::object get_generic(Module& self, const std::string& name) {
 template <typename Policy>
 static py::tuple get_generic_list(Module& self) {
   auto the_list = script::slot_list_impl<script::detail::NamedPolicy<Policy>>(
-      self.module_object(), false, false);
+      self.object_value(), false, false);
   py::tuple result(the_list.size());
   auto i = 0;
   for (const auto& e : the_list) {
@@ -509,7 +509,7 @@ static py::tuple get_generic_list(Module& self) {
 
 template <typename Policy>
 static bool has_generic(Module& self, const std::string& name) {
-  return slot_dict_impl<Policy>(self.module_object()).contains(name);
+  return slot_dict_impl<Policy>(self.object_value()).contains(name);
 }
 
 template <typename T>
@@ -562,10 +562,39 @@ void initJitScriptBindings(PyObject* module) {
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
 
+  py::class_<Object>(m, "ScriptObject")
+      .def("_type", [](Object& m) { return m.type(); })
+      .def(
+          "_get_method",
+          [](Object& self, const std::string& name) -> Method {
+            return self.get_method(name);
+          },
+          py::keep_alive<0, 1>())
+      .def(
+          "_set_attribute",
+          [](Object& self, const std::string& name, py::object value) {
+            auto ivalue =
+                toIValue(std::move(value), self.type()->getAttribute(name));
+            self.setattr(name, ivalue);
+          })
+      .def("_has_attribute", has_generic<LegacyAttributePolicy>)
+      .def(
+          "_method_names",
+          [](Object& self) {
+            return fmap(self.get_methods(), [](const Method& method) {
+              return method.name();
+            });
+          })
+      .def_property_readonly(
+          "name", [](const Object& self) { return self.name().name(); })
+      .def("__getattr__", [](Object& self, const std::string& name) {
+        return self.attr(name);
+      });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
-  py::class_<Module>(m, "ScriptModule")
+  py::class_<Module, Object>(m, "ScriptModule")
       .def(py::init<std::string, std::shared_ptr<CompilationUnit>, bool>())
       .def(
           "save",
@@ -609,13 +638,7 @@ void initJitScriptBindings(PyObject* module) {
                 m.name(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
           })
-      .def("_type", [](Module& m) { return m.type(); })
-      .def(
-          "_get_method",
-          [](Module& self, const std::string& name) -> Method {
-            return self.get_method(name);
-          },
-          py::keep_alive<0, 1>())
+
       .def("_register_parameter", &Module::register_parameter)
       .def(
           "_register_attribute",
@@ -626,13 +649,7 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("_register_module", &Module::register_module)
       .def("_register_buffer", &Module::register_buffer)
-      .def(
-          "_set_attribute",
-          [](Module& self, const std::string& name, py::object value) {
-            auto ivalue =
-                toIValue(std::move(value), self.type()->getAttribute(name));
-            self.setattr(name, ivalue);
-          })
+
       .def("_set_parameter", &set_generic<detail::ParameterPolicy>)
       .def("_get_parameter", &get_generic)
       .def("_get_buffer", &get_generic)
@@ -653,22 +670,21 @@ void initJitScriptBindings(PyObject* module) {
           "_replicate_for_data_parallel",
           [](Module& module) {
             Module replica(
-                *module.module_object()->type()->name(),
-                module.module_object()->compilation_unit(),
+                *module.object_value()->type()->name(),
+                module.object_value()->compilation_unit(),
                 /*should_mangle*/ true);
-            ClassTypePtr module_cls = module.module_object()->type();
+            ClassTypePtr module_cls = module.object_value()->type();
             for (size_t i = 0, N = module_cls->numAttributes(); i < N; ++i) {
               if (LegacyAttributePolicy::valid(module_cls, i) &&
                   !detail::BufferPolicy::valid(module_cls, i)) {
                 replica.register_attribute(
                     module_cls->getAttributeName(i),
                     module_cls->getAttribute(i),
-                    module.module_object()->getSlot(i));
+                    module.object_value()->getSlot(i));
               }
             }
             return replica;
           })
-      .def("_has_attribute", has_generic<LegacyAttributePolicy>)
       .def("_has_parameter", has_generic<script::detail::ParameterPolicy>)
       .def("_has_buffer", has_generic<script::detail::BufferPolicy>)
       .def("_has_module", has_generic<script::detail::ModulePolicy>)
@@ -676,33 +692,6 @@ void initJitScriptBindings(PyObject* module) {
           "_has_method",
           [](Module& self, const std::string& name) {
             return bool(self.find_method(name));
-          })
-      .def(
-          "_method_names",
-          [](Module& self) {
-            return fmap(self.get_methods(), [](const Method& method) {
-              return method.name();
-            });
-          })
-      .def(
-          "_create_method_from_trace",
-          [](Module& self,
-             const std::string& name,
-             py::function func,
-             py::tuple input_tuple,
-             py::function var_lookup_fn,
-             bool force_outplace) {
-            // prereq: Module's buffers and parameters are unique
-            // this was ensured in python before calling this function
-            auto typed_inputs = toTraceableStack(input_tuple);
-
-            std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
-                func, typed_inputs, var_lookup_fn, force_outplace, &self));
-            const auto method_name = QualifiedName(self.name(), name);
-            auto fn = self.class_compilation_unit()->create_function(
-                method_name, graph);
-            self.type()->addMethod(fn);
-            didFinishEmitModule(self);
           })
       .def(
           "get_debug_state",
@@ -724,11 +713,31 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
-      .def_property_readonly(
-          "name", [](const Module& self) { return self.name().name(); })
       .def(
-          "clone_method", [](Module& m, Module& orig, const std::string& name) {
+          "clone_method",
+          [](Module& m, Module& orig, const std::string& name) {
             m.clone_method(orig, name);
+          })
+      .def(
+          "_create_method_from_trace",
+          [](Module& self,
+             const std::string& name,
+             py::function func,
+             py::tuple input_tuple,
+             py::function var_lookup_fn,
+             bool force_outplace) {
+            // prereq: Module's buffers and parameters are unique
+            // this was ensured in python before calling this function
+            auto typed_inputs = toTraceableStack(input_tuple);
+
+            std::shared_ptr<Graph> graph =
+                std::get<0>(tracer::createGraphByTracing(
+                    func, typed_inputs, var_lookup_fn, force_outplace, &self));
+            const auto method_name = QualifiedName(self.name(), name);
+            auto fn = self.class_compilation_unit()->create_function(
+                method_name, graph);
+            self.type()->addMethod(fn);
+            didFinishEmitModule(self);
           });
 
   py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(m, "ErrorReport")

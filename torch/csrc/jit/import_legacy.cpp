@@ -257,9 +257,9 @@ void ScriptModuleDeserializer::LEGACY_moduleSetState(
   // TODO: once modules are first class in the interpreter and methods are not
   // lowered, change this to `module->run_method("__setstate__", {state});`
   if (setstate->num_inputs() == 1) {
-    setstate->run({module.module_object()});
+    setstate->run({module.object_value()});
   } else if (setstate->num_inputs() == 2) {
-    setstate->run({module.module_object(), state});
+    setstate->run({module.object_value(), state});
   } else {
     AT_ERROR("Unexpected schema on '__setstate__'");
   }
@@ -348,11 +348,11 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
         LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
-  const ClassTypePtr& module_type = module.module_object()->type();
+  const ClassTypePtr& module_type = module.object_value()->type();
   for (size_t i = 0, N = module_type->numAttributes(); i < N; ++i) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    const IValue& v = module.module_object()->getSlot(i);
+    const IValue& v = module.object_value()->getSlot(i);
     if (module_type->getAttribute(i)->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
           !v.isNone(),

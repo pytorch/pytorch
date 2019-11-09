@@ -75,7 +75,7 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
       function.getSchema(),
       std::move(args),
       std::move(kwargs),
-      model_.module_object());
+      model_.object_value());
   return function(std::move(stack));
 }
 
@@ -100,7 +100,7 @@ void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
       model_.get_method("forward").function().getSchema(),
       std::move(args),
       std::move(kwargs),
-      model_.module_object());
+      model_.object_value());
   inputs_.emplace_back(std::move(stack));
 }
 
