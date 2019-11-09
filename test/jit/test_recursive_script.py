@@ -575,5 +575,5 @@ class TestRecursiveScript(JitTestCase):
                 self.x = new_x
                 return self.x_and_1
 
-        with self.assertRaisesRegex(RuntimeError, "property"):
+        with self.assertRaisesRegex(RuntimeError, "foobarbaz"):
             torch.jit.script(M())
