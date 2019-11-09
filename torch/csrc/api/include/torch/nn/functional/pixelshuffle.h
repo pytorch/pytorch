@@ -19,7 +19,7 @@ inline Tensor pixel_shuffle(
 
 inline Tensor pixel_shuffle(
     const Tensor& input,
-    const PixelShuffleOptions& options) {
+    PixelShuffleFuncOptions options) {
   return detail::pixel_shuffle(input, options.upscale_factor());
 }
 
