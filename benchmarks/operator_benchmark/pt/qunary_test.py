@@ -8,7 +8,7 @@ import operator_benchmark as op_bench
 import torch
 
 
-"""Microbenchmarks for point-wise unary operator."""
+"""Microbenchmarks for quantized unary operators (point-wise and reduction)."""
 
 
 # Configs for pointwise unary ops
