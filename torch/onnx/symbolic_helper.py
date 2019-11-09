@@ -301,7 +301,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     if isinstance(align_corners, bool) and align_corners:
         return _unimplemented("interpolate", "align_corners == True")
 
-    if not input.isCompleteTensor():
+    if not input.type().dim():
         return _unimplemented("interpolate", "missing input shape")
     dim = input.type().dim()
 

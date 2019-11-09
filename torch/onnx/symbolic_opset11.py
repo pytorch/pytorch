@@ -102,11 +102,12 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
         try:
             is_scalar = not sym_help._is_packed_list(size) and ((sym_help._maybe_get_const(size, 't').dim() == 0))
         except AttributeError:
-            warnings.warn("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
             is_scalar = not sym_help._is_packed_list(size)
+            if not is_scalar:
+                warnings.warn("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
 
         if is_scalar:
-            if not input.isCompleteTensor():
+            if not input.type().dim():
                 return sym_help._unimplemented("interpolate (with a scalar output_size)", "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
@@ -123,7 +124,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
                     mode_s=mode,  # nearest, linear, or cubic
                     nearest_mode_s="floor")
     else:  # if not sym_help._is_none(scales)
-        if not input.isCompleteTensor():
+        if not input.type().dim():
             return sym_help._unimplemented("interpolate (with scales)", "missing input shape")
         scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
         return g.op("Resize",
