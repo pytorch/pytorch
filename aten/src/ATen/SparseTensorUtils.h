@@ -75,7 +75,7 @@ inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, 
   int64_t sparse_dim = indices.size(0);
   if (sparse_dim == 1) {
     if (force_clone) {
-      return indices.squeeze(0).clone();
+      return indices.squeeze(0).clone(at::MemoryFormat::Contiguous);
     } else {
       return indices.squeeze(0);
     }
