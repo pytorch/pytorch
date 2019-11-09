@@ -53,11 +53,11 @@ TESTS = [
     'type_hints',
     'utils',
     'namedtuple_return_api',
-    'jit_fuser',
+    # 'jit_fuser',
     'tensorboard',
     'namedtensor',
     'type_promotion',
-    'jit_disabled',
+    # 'jit_disabled',
     'function_schema',
 ]
 
