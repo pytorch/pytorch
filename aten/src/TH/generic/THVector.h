@@ -32,7 +32,6 @@ TH_API void THVector_(exp)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erf)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erfc)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cos)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(acos)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cosh)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(tan)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(atan)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
