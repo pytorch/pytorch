@@ -2415,6 +2415,10 @@ class _TestTorchMixin(object):
         x = torch.Tensor([1, nan, 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
+    def test_dtype_is_signed(self):
+        for dtype in torch.testing.get_all_dtypes():
+            self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
+
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
