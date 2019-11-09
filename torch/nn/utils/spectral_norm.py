@@ -79,8 +79,8 @@ class SpectralNorm(object):
                     u = normalize(torch.mv(weight_mat, v), dim=0, eps=self.eps, out=u)
                 if self.n_power_iterations > 0:
                     # See above on why we need to clone
-                    u = u.clone()
-                    v = v.clone()
+                    u = u.clone(memory_format=torch.contiguous_format)
+                    v = v.clone(memory_format=torch.contiguous_format)
 
         sigma = torch.dot(u, torch.mv(weight_mat, v))
         weight = weight / sigma

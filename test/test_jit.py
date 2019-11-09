@@ -20,6 +20,7 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
+from jit.test_builtins import TestBuiltins  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -57,6 +58,8 @@ from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+from hypothesis import given
+from hypothesis import strategies as st
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -356,6 +359,13 @@ class TestJit(JitTestCase):
         input = input.cuda()
 
         traced_rec = torch.jit.trace(rec, (input))
+
+    def test_trace_legacy_ctor(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return (x + 1, torch.FloatTensor([0]))
+
+        traced_rec = torch.jit.trace(MyModule(), torch.randn(2, 2))
 
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -1413,8 +1423,14 @@ graph(%input, %weight):
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
-    @_tmp_donotuse_dont_inline_everything
-    def test_fold_prepack(self):
+    @given(
+        is_per_channel=st.booleans()
+    )
+    def test_fold_prepack(self, is_per_channel):
+        # NB: Initially I plan to put quantize_per_channel/quantize_per_tensor in branches
+        # but it turns out we won't match the quantize function calls inside branch
+        # That's why I'm copying here, maybe we can dedup the code if we can match the
+        # quantize calls in branch in the future
         class QLinear(torch.nn.Module):
             def __init__(self):
                 super(QLinear, self).__init__()
@@ -1424,6 +1440,23 @@ graph(%input, %weight):
             def forward(self, x):
                 xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
                 wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                packed = torch.ops.quantized.linear_prepack(wq, self.bias)
+                w_unpacked, b_unpacked = torch.ops.quantized.linear_unpack(packed)
+                r = torch.nn.functional.linear(xq.dequantize(), w_unpacked.dequantize(), b_unpacked)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+
+        class QLinearPerChannel(QLinear):
+            def __init__(self):
+                super(QLinearPerChannel, self).__init__()
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_channel(self.weight,
+                                                torch.tensor([0.2, 0.2, 0.2, 0.2, 0.2], dtype=torch.float),
+                                                torch.tensor([0, 0, 0, 0, 0], dtype=torch.int),
+                                                0,
+                                                torch.qint8)
                 packed = torch.ops.quantized.linear_prepack(wq, self.bias)
                 w_unpacked, b_unpacked = torch.ops.quantized.linear_unpack(packed)
                 r = torch.nn.functional.linear(xq.dequantize(), w_unpacked.dequantize(), b_unpacked)
@@ -1452,16 +1485,49 @@ graph(%input, %weight):
                 rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
                 return rq
 
-        for name, M, data in [('linear', QLinear, torch.randn((5, 5), dtype=torch.float)),
-                              ('conv', QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
+        class QConvPerChannel(QConv):
+            def __init__(self):
+                super(QConvPerChannel, self).__init__()
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
+                wq = torch.quantize_per_channel(self.weight,
+                                                torch.tensor([0.5] * 5, dtype=torch.float),
+                                                torch.tensor([0] * 5, dtype=torch.int),
+                                                0,
+                                                torch.qint8)
+                stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
+                packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
+                w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
+                r = torch.nn.functional.conv2d(xq.dequantize(),
+                                               w_unpacked.dequantize(),
+                                               b_unpacked,
+                                               stride,
+                                               padding,
+                                               dilation,
+                                               groups)
+                rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
+                return rq
+
+        for name, M, data in [
+                ('linear',
+                 QLinearPerChannel if is_per_channel else QLinear,
+                 torch.randn((5, 5), dtype=torch.float)),
+                ('conv',
+                 QConvPerChannel if is_per_channel else QConv,
+                 torch.randn((1, 3, 24, 24), dtype=torch.float))]:
+            print('folding: ', name)
             m = torch.jit.script(M())
             ref_res = get_forward(m._c)(data)
             linear_packed_params = torch.jit.script(LinearPackedParams())._c
             conv_packed_params = torch.jit.script(ConvPackedParams())._c
+            torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
+            print(get_forward(m._c).graph)
             torch._C._jit_pass_fold_prepack(m._c,
                                             linear_packed_params,
                                             conv_packed_params)
             res = get_forward(m._c)(data)
+            print(get_forward(m._c).graph)
             # check attribute and graph
             packed_module_list = [x for x, _ in m._c._get_modules()
                                   if x.startswith('_' + name + '_packed_params_module')]
@@ -4044,7 +4110,6 @@ def foo(x):
             # type: (List[int]) -> int
             return fn(x)
 
-    @unittest.skip('Currently borken https://github.com/pytorch/pytorch/issues/29367')
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -7563,6 +7628,16 @@ a")
                     def foo():
                         break
                 ''')
+
+        with self.assertRaisesRegex(RuntimeError, "do not support break or continue inside"):
+            @torch.jit.script
+            def foo(x):
+                i = 0
+                for a in (1, "2", 1.5):
+                    b = a
+                    if x:
+                        break
+                return b
 
     def test_python_call(self):
         def pyfunc(a):
@@ -13959,8 +14034,8 @@ a")
 
     def test_string_index(self):
         def fn(x):
-            # type: (str) -> str
-            return x[2]
+            # type: (str)
+            return x[2], x[-1]
 
         self.checkScript(fn, ("abcde",))
 
@@ -15942,6 +16017,7 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
             foo(1)
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
