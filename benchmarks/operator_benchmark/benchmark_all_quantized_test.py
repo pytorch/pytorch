@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import operator_benchmark as op_bench
 from pt import ( # noqa
-    qconv_test, qlinear_test # noqa
+    qactivation_test, qarithmetic_test, qconv_test, qlinear_test # noqa
 )
 
 
