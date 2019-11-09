@@ -88,8 +88,6 @@ class class_ {
                               c10::StrongTypePtr(classCU(), classTypePtr)});
 
     classCU()->register_type(classTypePtr);
-
-    std::cout << "making class " << className << std::endl;
   }
 
   template <typename... Types>
