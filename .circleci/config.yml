@@ -425,6 +425,9 @@ jobs:
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           retrieve_test_reports
+    - store_test_results:
+        path: test-reports
+
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
