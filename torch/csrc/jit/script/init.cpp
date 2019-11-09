@@ -586,15 +586,6 @@ void initJitScriptBindings(PyObject* module) {
             return self.get_method(name);
           },
           py::keep_alive<0, 1>())
-      .def("_register_parameter", &Module::register_parameter)
-      .def(
-          "_register_attribute",
-          [](Module& self, std::string name, TypePtr type, py::object value) {
-            auto unshaped = unshapedType(type);
-            self.register_attribute(
-                name, unshaped, toIValue(std::move(value), type));
-          })
-      .def("_register_module", &Module::register_module)
       .def(
           "setattr",
           [](Module& self, const std::string& name, py::object value) {
@@ -616,22 +607,14 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_replicate_for_data_parallel",
           [](Module& module) {
-            Module replica(
-                *module.module_object()->type()->name(),
-                module.module_object()->compilation_unit(),
-                /*should_mangle*/ true);
-            ClassTypePtr module_cls = module.module_object()->type();
-            for (size_t i = 0, N = module_cls->numAttributes(); i < N; ++i) {
-              if (!detail::ModulePolicy::valid(module_cls, i) &&
-                  !detail::ParameterPolicy::valid(module_cls, i) &&
-                  !detail::BufferPolicy::valid(module_cls, i)) {
-                replica.register_attribute(
-                    module_cls->getAttributeName(i),
-                    module_cls->getAttribute(i),
-                    module.module_object()->getSlot(i));
-              }
+            const ModulePtr& obj = module.module_object();
+            auto copy = c10::ivalue::Object::create(
+                c10::StrongTypePtr(obj->compilation_unit(), obj->type()),
+                obj->slots().size());
+            for (size_t i = 0; i < obj->slots().size(); ++i) {
+              copy->setSlot(i, obj->getSlot(i));
             }
-            return replica;
+            return Module(std::move(copy));
           })
       .def(
           "_has_method",
@@ -686,11 +669,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
       .def_property_readonly(
-          "name", [](const Module& self) { return self.name().name(); })
-      .def(
-          "clone_method", [](Module& m, Module& orig, const std::string& name) {
-            m.clone_method(orig, name);
-          });
+          "name", [](const Module& self) { return self.name().name(); });
 
   slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
