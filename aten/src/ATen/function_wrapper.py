@@ -137,6 +137,11 @@ BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
+# Generate a file that lists all functions and their schema string. Used for XLA
+REGISTRATION_DECLARATION = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
+""")
+
 # add non-virtual declaration to TensorBody.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
@@ -489,6 +494,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'function_definitions': List[str],
     'type_ids': List[str],
     'native_function_declarations': List[str],
+    'registration_declarations': List[str],
 })
 
 # A Declarations.cwrap formal argument
@@ -1310,6 +1316,16 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
+        # RegistrationDeclarations.h is used downstream in XLA, where XLA uses
+        # it as the "source of truth" for pytorch ops and generates code based
+        # on it. We don't pass named tensor only functions there because XLA
+        # doesn't support them.
+        if not is_named_tensor_only:
+            top_env['registration_declarations'].append(
+                REGISTRATION_DECLARATION.substitute(option))
+        top_env['list_of_aten_ops'].append(
+            check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+        )
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
