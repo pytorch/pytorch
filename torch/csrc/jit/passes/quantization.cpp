@@ -379,8 +379,14 @@ Node* insertQuantDeQuantCall(
     const IValue& scalar_type,
     bool insert_after = true) {
   Graph* g = v->node()->owningGraph();
+  auto tp = qparams.toTuple();
+  at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
+  at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
 
-  Node* quant = g->create(at::Symbol::aten("quantize_per_tensor"));
+  bool is_per_channel = scale.numel() > 1;
+  const std::string quantize_func = is_per_channel ? "quantize_per_channel" : "quantize_per_tensor";
+
+  Node* quant = g->create(at::Symbol::aten(quantize_func));
   quant->output()->setDebugName(v->debugName() + ".quant");
 
   Node* dequant = g->create(at::Symbol::aten("dequantize"));
@@ -391,13 +397,18 @@ Node* insertQuantDeQuantCall(
       *insert_point->owningGraph(), insert_point->scope());
   WithInsertPoint ins(insert_point);
 
-  // Add quant-dequant nodes and replace for all uses of Value
-  // Create qparam constant nodes
-  auto tp = qparams.toTuple();
-  IValue scale = tp->elements()[0].toTensor().item().toFloat();
-  IValue zero_point = tp->elements()[1].toTensor().item().toInt();
-  Value* scale_val = g->insertConstant(scale);
-  Value* zero_point_val = g->insertConstant(zero_point);
+  Value* scale_val;
+  Value* zero_point_val;
+  Value* axis_val;
+  if (is_per_channel) {
+    scale_val = g->insertConstant(scale);
+    zero_point_val = g->insertConstant(zero_point);
+    // TODO: get axis from qparam
+    axis_val = g->insertConstant(0);
+  } else {
+    scale_val = g->insertConstant(scale.item<double>());
+    zero_point_val = g->insertConstant(zero_point.item<long>());
+  }
 
   // Insert quant/dequant nodes
   if (insert_after) {
@@ -410,10 +421,15 @@ Node* insertQuantDeQuantCall(
 
   // Attach inputs to quantize node
   quant->addInput(v);
-  quant->addInput(scale_val);
-  quant->addInput(zero_point_val);
+  if (is_per_channel) {
+    quant->addInput(scale_val);
+    quant->addInput(zero_point_val);
+    quant->addInput(axis_val);
+  } else {
+    quant->addInput(scale_val);
+    quant->addInput(zero_point_val);
+  }
   Value* scalar_type_val = insertScalarType(quant, scalar_type.toScalarType());
-  TORCH_INTERNAL_ASSERT(scalar_type_val != nullptr);
   quant->addInput(scalar_type_val);
 
   dequant->addInput(quant->output());
@@ -957,6 +973,11 @@ void InsertPrepackUnpack(script::Module& module) {
   }
 }
 
+static IValue getIValue(const std::string& name,
+                        const std::unordered_map<const Value*, Value*>& match_vmap,
+                        const std::unordered_map<std::string, Value*>& vmap) {
+  return toIValue(match_vmap.at(vmap.at(name))).value();
+}
 void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const std::string& method_name,
@@ -964,9 +985,15 @@ void FoldPrepackedWeightIntoModule(
     const script::Module& conv_params_module) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
-  std::string linear_prepack = R"(
+  std::string linear_prepack_per_tensor = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        return (%packed_params) )";
+
+  std::string linear_prepack_per_channel = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype):
+        %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         return (%packed_params) )";
 
@@ -976,14 +1003,23 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params))";
 
-  // (is_conv, pattern, packed_params_module)
+  std::string conv2d_prepack_per_channel = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
+        %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
+        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        return (%packed_params))";
+
+  // (is_conv, is_per_channel, pattern, packed_params_module)
   auto pattern_and_modules = {
-      std::make_tuple(false, linear_prepack, linear_params_module),
-      std::make_tuple(true, conv2d_prepack, conv_params_module)};
+    std::make_tuple(false, false, linear_prepack_per_tensor, linear_params_module),
+    std::make_tuple(false, true, linear_prepack_per_channel, linear_params_module),
+    std::make_tuple(true, false, conv2d_prepack, conv_params_module),
+    std::make_tuple(true, true, conv2d_prepack, conv_params_module)};
   for (const auto& item : pattern_and_modules) {
     bool is_conv = std::get<0>(item);
-    const std::string& pattern = std::get<1>(item);
-    const script::Module& packed_params_module = std::get<2>(item);
+    bool is_per_channel = std::get<1>(item);
+    const std::string& pattern = std::get<2>(item);
+    const script::Module& packed_params_module = std::get<3>(item);
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
     script::parseIR(pattern, &pattern_graph, vmap);
@@ -992,14 +1028,21 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         matches.size() <= 1, "We only support at most one match right now");
     for (const auto& match : matches) {
       const auto& match_vmap = match.values_map;
-      auto w_scale =
-          toIValue(match_vmap.at(vmap.at("w_scale"))).value().toDouble();
-      auto w_zero_point =
-          toIValue(match_vmap.at(vmap.at("w_zero_point"))).value().toInt();
-      auto w_dtype =
-          toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
+      auto w_dtype = getIValue("w_dtype", match_vmap, vmap).toScalarType();
       auto w = module.attr("weight").toTensor().data();
-      auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
+      at::Tensor w_quant;
+      if (is_per_channel) {
+        auto w_scale = getIValue("w_scale", match_vmap, vmap).toTensor().to(at::kFloat);
+        auto w_zero_point = getIValue("w_zero_point", match_vmap, vmap).toTensor().to(at::kInt);
+        TORCH_CHECK(w_scale.sizes() == w_zero_point.sizes(),
+                    "scale and zero_point must have the same size");
+        int w_axis = toIValue(match_vmap.at(vmap.at("w_axis"))).value().toInt();
+        w_quant = at::quantize_per_channel(w, w_scale, w_zero_point, w_axis, w_dtype);
+      } else {
+        auto w_scale = getIValue("w_scale", match_vmap, vmap).toDouble();
+        auto w_zero_point = getIValue("w_zero_point", match_vmap, vmap).toInt();
+        w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
+      }
       c10::optional<at::Tensor> b = c10::nullopt;
       if (hastensor(module, "bias")) {
         b = module.attr("bias").toTensor().data();
