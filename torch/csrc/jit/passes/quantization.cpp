@@ -403,8 +403,8 @@ Node* insertQuantDeQuantCall(
   if (is_per_channel) {
     scale_val = g->insertConstant(scale);
     zero_point_val = g->insertConstant(zero_point);
-    // TODO: get axis from qparam
-    axis_val = g->insertConstant(0);
+    int axis = tp->elements()[2].toInt();
+    axis_val = g->insertConstant(axis);
   } else {
     scale_val = g->insertConstant(scale.item<double>());
     zero_point_val = g->insertConstant(zero_point.item<long>());
@@ -504,17 +504,27 @@ void checkCalculateQParamsResult(const IValue& qparams) {
       qparams.tagKind());
   auto tp = qparams.toTuple();
   TORCH_CHECK(
-      tp->elements().size() == 2,
+      tp->elements().size() == 2 || tp->elements().size() == 3,
       "`calculate_qparams` function is expected to reutrn a "
-      "Tuple of size 2, got Tuple of size ",
+      "Tuple of size 2 or 3, got Tuple of size ",
       tp->elements().size());
-  for (size_t i = 0; i < tp->elements().size(); ++i) {
+  // Expect first two elements of the tuple to be Tensor
+  for (size_t i = 0; i < 2; ++i) {
     TORCH_CHECK(
         tp->elements()[i].isTensor(),
         "Element of Tuple is expected to be Tensor, but element ",
         i,
         " has type: ",
         tp->elements()[i].tagKind());
+  }
+  // Expect the third elements of the tuple to be int
+  if (tp->elements().size() == 3) {
+    TORCH_CHECK(
+        tp->elements()[2].isInt(),
+        "Element of Tuple is expected to be int, but element ",
+        2,
+        " has type: ",
+        tp->elements()[2].tagKind());
   }
 }
 

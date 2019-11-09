@@ -117,7 +117,7 @@ class _ObserverBase(ObserverBase):
         ), "Default Observer only works for qint8 and quint8 data type"
 
     def _calculate_per_channel_qparams(self, min_vals, max_vals):
-        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor, int]
         r"""Calculates the per channel quantization parameters, given min and max
         value tensors.
 
@@ -134,7 +134,7 @@ class _ObserverBase(ObserverBase):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0]), torch.tensor([0]), self.ch_axis
 
         for i in range(len(min_vals)):
             assert (
@@ -151,7 +151,7 @@ class _ObserverBase(ObserverBase):
             scales[i] = float(qparam[0])
             zero_points[i] = int(qparam[1])
 
-        return scales, zero_points
+        return scales, zero_points, self.ch_axis
 
     @torch.jit.export
     def _calculate_qparams(self, min_val, max_val):
