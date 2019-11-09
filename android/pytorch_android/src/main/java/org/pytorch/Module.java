@@ -3,6 +3,8 @@
 package org.pytorch;
 
 import com.facebook.jni.HybridData;
+import com.facebook.soloader.nativeloader.NativeLoader;
+import com.facebook.soloader.nativeloader.SystemDelegate;
 
 /**
  * Java wrapper for torch::jit::script::Module.
@@ -22,6 +24,9 @@ public class Module {
   }
 
   private Module(final String moduleAbsolutePath) {
+    if (!NativeLoader.isInitialized()) {
+      NativeLoader.init(new SystemDelegate());
+    }
     this.mNativePeer = new NativePeer(moduleAbsolutePath);
   }
 
@@ -59,7 +64,7 @@ public class Module {
 
   private static class NativePeer {
     static {
-      System.loadLibrary("pytorch");
+      NativeLoader.loadLibrary("pytorch_jni");
     }
 
     private final HybridData mHybridData;
