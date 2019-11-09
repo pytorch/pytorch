@@ -97,17 +97,6 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const Tenso
   return torch::arange(start, end, step, options);
 }
 
-// Temporarily duplicated across c++ / python layer until PR
-// https://github.com/pytorch/pytorch/pull/29399 lands
-static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
-  for (Scalar& s : l) {
-    if (!s.isIntegral(true)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -123,7 +112,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
     if (r.isNone(1)) {
       auto end = r.scalar(0);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(2) && allIntegral({end}) ? at::ScalarType::Long : r.scalartype(2);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(2);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(4))
@@ -143,7 +132,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       auto end = r.scalar(1);
       auto step = r.scalar(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(4) && allIntegral({start, end, step}) ? at::ScalarType::Long : r.scalartype(4);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(4);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(6))
