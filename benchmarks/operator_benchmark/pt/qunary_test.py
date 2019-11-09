@@ -12,7 +12,7 @@ import torch
 
 
 # Configs for pointwise unary ops
-unary_ops_configs_short = op_bench.config_list(
+qunary_ops_configs_short = op_bench.config_list(
     attr_names=['M', 'N'],
     attrs=[
         [512, 512],
@@ -23,7 +23,7 @@ unary_ops_configs_short = op_bench.config_list(
     tags=['short']
 )
 
-unary_ops_configs_long = op_bench.cross_product_configs(
+qunary_ops_configs_long = op_bench.cross_product_configs(
     M=[256, 1024],
     N=[256, 1024],
     device=[torch.quint8, torch.qint8, torch.qint32],
@@ -45,7 +45,7 @@ class QUnaryOpBenchmark(op_bench.TorchBenchmarkBase):
 
 
 # TODO: Uncomment the ops whenever they are implemented for quantized tensor.
-unary_ops_list = op_bench.op_list(
+qunary_ops_list = op_bench.op_list(
     attr_names=['op_name', 'op_func'],
     attrs=[
         # ['abs', torch.abs],
@@ -128,9 +128,9 @@ unary_ops_list = op_bench.op_list(
 )
 
 
-op_bench.generate_pt_tests_from_op_list(unary_ops_list,
-                                        unary_ops_configs_short + unary_ops_configs_long,
-                                        UnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(qunary_ops_list,
+                                        qunary_ops_configs_short + qunary_ops_configs_long,
+                                        QUnaryOpBenchmark)
 
 
 if __name__ == "__main__":
