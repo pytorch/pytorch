@@ -35,7 +35,7 @@ class AddBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device):
         self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
         self.input_two = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
-        self.set_module_name("add_")
+        self.set_module_name("add")
 
     def forward(self):
         return torch.add(self.input_one, self.input_two)
