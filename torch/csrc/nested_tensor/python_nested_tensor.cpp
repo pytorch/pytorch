@@ -31,14 +31,56 @@ using namespace at;
 using namespace torch::autograd;
 namespace py = pybind11;
 
-// void _ListNestedTensor::backward(_ListNestedTensor gradient, bool retain_graph,
-//                                  bool create_graph) {
-//   apply2_method(
-//       unbind(), gradient.unbind(),
-//       [retain_graph, create_graph](at::Tensor tensor1, at::Tensor tensor2) {
-//         tensor1.backward(tensor2, retain_graph, create_graph);
-//       });
-// }
+std::vector<_ListNestedTensor> _ListNestedTensor::unbind_nested() {
+  std::vector<_ListNestedTensor> result;
+  size_t i = 0;
+  for (_MetaNode child : _structure._children) {
+    result.push_back(_ListNestedTensor(
+        std::vector<at::Tensor>(_flat_tensors.begin() + i,
+                                _flat_tensors.begin() + i +
+                                    _num_tensor(child)),
+        child));
+    i += _num_tensor(child);
+  }
+  return result;
+}
+
+std::vector<py::object> _ListNestedTensor::unbind() {
+  std::vector<py::object> result;
+  if (nested_dim() == 1) {
+    for (at::Tensor tensor : _flat_tensors) {
+      result.push_back(py::reinterpret_borrow<py::object>(
+          torch::autograd::utils::wrap(tensor)));
+    }
+  } else {
+    std::vector<_ListNestedTensor> nts = unbind_nested();
+    for (_ListNestedTensor nt : nts) {
+      result.push_back(py::cast(nt));
+    }
+  }
+  return result;
+}
+
+std::string _ListNestedTensor::__str__() {
+  std::stringstream result;
+  if (nested_dim() == 1) {
+    for (auto tensor : _flat_tensors) {
+      result << "  ";
+      result << tensor;
+      result << ",";
+      result << std::endl;
+    }
+  } else {
+      for(_ListNestedTensor nt : unbind_nested()) {
+      result << "  ";
+      result << nt.__str__();
+      result << ",";
+      result << std::endl;
+    }
+  }
+  result << "])";
+  return result.str();
+}
 
 void initialize_python_bindings() {
   auto obj = py::module::import("torch");
@@ -58,7 +100,10 @@ void initialize_python_bindings() {
       .def("unbind", &_ListNestedTensor::unbind)
       .def("nested_size", &_ListNestedTensor::nested_size)
       .def("nested_stride", &_ListNestedTensor::nested_stride)
+      .def("is_pinned", &_ListNestedTensor::is_contiguous)
+      .def("is_contiguous", &_ListNestedTensor::is_contiguous)
       .def("__len__", &_ListNestedTensor::__len__)
+      .def("__str__", &_ListNestedTensor::__str__)
       .def("dim", &_ListNestedTensor::dim)
       .def("nested_dim", &_ListNestedTensor::nested_dim);
 }
