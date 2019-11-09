@@ -8,7 +8,7 @@ import warnings
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
-from torch.nn import Module, Sequential
+from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
 
 
@@ -338,6 +338,10 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
 
             script_module._modules[name] = scripted
 
+        # make _modules available in script
+        if not isinstance(nn_module, torch.nn.ModuleDict):
+            script_module._modules_dict = recursive_script(torch.nn.ModuleDict(script_module._modules.items()))
+
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
 
@@ -382,9 +386,6 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
             add_python_attr_to_scripted_model(script_module, nn_module, name)
 
-    if isinstance(nn_module, Sequential):
-        add_sequential_forward(script_module, nn_module)
-
     return script_module
 
 
@@ -403,18 +404,6 @@ def script_model_defines_attr(script_model, attr):
 def add_python_attr_to_scripted_model(script_model, orig, attr):
     if hasattr(orig, attr) and script_model_defines_attr(script_model, attr):
         setattr(script_model, attr, getattr(orig, attr))
-
-def add_sequential_forward(script_module, nn_module):
-    forward_func = getattr(nn_module.forward, "__func__", None)
-    # we aren't currently able to support compiling Sequential.forward
-    # so if we encounter it, use this forward instead. support for self._modules.values() is blocking
-    if forward_func == get_function_from_type(Sequential, "forward"):
-        script_module.define("""
-        def forward(self, input):
-            for m in self:
-                input = m(input)
-            return input
-        """)
 
 def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
@@ -478,8 +467,7 @@ def infer_methods_to_compile(nn_module):
     if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
         forward_func = getattr(nn_module.forward, "__func__", None)
         module_forward = get_function_from_type(torch.nn.Module, "forward")
-        sequential_forward = get_function_from_type(Sequential, "forward")
-        if forward_func != module_forward and forward_func != sequential_forward:
+        if forward_func != module_forward:
             methods = ['forward']
 
     exported = []

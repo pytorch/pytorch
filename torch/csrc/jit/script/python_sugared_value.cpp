@@ -208,9 +208,7 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
-SugaredValuePtr ModuleValue::desugarModuleContainer(
-    bool get_keys,
-    bool get_values,
+std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
     const SourceRange& loc,
     Function& m) {
   std::vector<std::string> submoduleNames;
@@ -235,28 +233,13 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
     auto mod_v = std::make_shared<ModuleValue>(
         module_v, concreteType_->findSubmoduleConcreteType(name));
 
-    if (get_keys) {
-      keys.push_back(name_v);
-    }
-    if (get_values) {
-      values.push_back(mod_v);
-    }
+    keys.push_back(name_v);
+    values.push_back(mod_v);
   }
 
-  if (get_keys && !get_values) {
-    return std::make_shared<SugaredTupleValue>(keys);
-  } else if (get_values && !get_keys) {
-    return std::make_shared<SugaredTupleValue>(values);
-  } else if (get_values && get_keys) {
-    auto key_list = std::make_shared<SugaredTupleValue>(keys);
-    auto value_list = std::make_shared<SugaredTupleValue>(values);
-    auto iterator = std::make_shared<IterableTree>();
-    iterator->addChild(loc, m, key_list);
-    iterator->addChild(loc, m, value_list);
-    return iterator->iter(loc, m);
-  } else {
-    TORCH_INTERNAL_ASSERT(false);
-  }
+  return std::make_shared<SugaredModuleDict>(
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
 }
 
 // This method controls how we desugar attribute lookups on ScriptModules.
@@ -295,19 +278,12 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // TODO: These could be represented as first class methods probably.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (field == "items" || field == "keys" || field == "values") {
-      bool get_keys = false;
-      bool get_values = false;
-      if (field == "items") {
-        get_keys = true;
-        get_values = true;
-      } else if (field == "values") {
-        get_values = true;
-      } else {
-        get_keys = true;
-      }
-      return std::make_shared<ModuleDictMethod>(
-          desugarModuleContainer(get_keys, get_values, loc, m), field);
+      return getSugaredModuleDict(loc, m)->attr(loc, m, field);
     }
+  }
+
+  if (field == "_modules") {
+    return getSugaredModuleDict(loc, m);
   }
 
   // 4. Check if this is the name of an overloaded method.
@@ -376,11 +352,16 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
         << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
 
+  auto module_dict = getSugaredModuleDict(loc, m);
   // iterating over a dictionary returns the keys, iterating over a
   // list returns the values
-  const bool get_keys = iterableModuleKind == IterableModuleKind::DICT;
-  const bool get_values = iterableModuleKind == IterableModuleKind::LIST;
-  return desugarModuleContainer(get_keys, get_values, loc, m);
+  if (iterableModuleKind == IterableModuleKind::DICT) {
+    return module_dict->keys_;
+  } else if (iterableModuleKind == IterableModuleKind::LIST) {
+    return module_dict->modules_;
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
 std::shared_ptr<SugaredValue> PythonClassValue::attr(

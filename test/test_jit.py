@@ -8765,6 +8765,29 @@ a")
             with self.assertRaisesRegex(Exception, "object is not iterable"):
                 print([val for val in m])
 
+    def test_underscore_modules(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.mod = nn.ReLU()
+                self.mod2 = nn.ReLU()
+
+            def forward(self, x):
+                li = torch.jit.annotate(List[str], [])
+                for mod_name in self._modules:
+                    li.append(mod_name)
+
+                for mod in self._modules.values():
+                    x = mod(x)
+
+                for mod_name, mod in self._modules.items():
+                    x = mod(x)
+                    li.append(mod_name)
+
+                return li, x
+
+        self.checkModule(MyMod(), (torch.tensor(1.),))
+
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
             def __init__(self):
