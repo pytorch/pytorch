@@ -84,7 +84,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto options = self.options().dtype(kLong);
-  Tensor output = self.clone().reshape(-1);
+  Tensor output = self.clone(at::MemoryFormat::Contiguous).reshape(-1);
   int64_t num_inp = output.numel();
   scalar_t* output_data = output.data_ptr<scalar_t>();
 

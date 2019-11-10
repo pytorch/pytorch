@@ -18,7 +18,7 @@ linear_configs_short = op_bench.config_list(
         [16, 1024, 256],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"]
 )
@@ -28,7 +28,7 @@ linear_configs_long = op_bench.cross_product_configs(
     N=[32, 64],
     IN=[128, 512],
     OUT=[64, 128],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
