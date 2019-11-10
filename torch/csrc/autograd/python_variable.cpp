@@ -497,6 +497,20 @@ static PyObject * THPVariable_device(THPVariable* self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_nbytes(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  return PyInt_FromLong(self->cdata.nbytes());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_itemsize(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  return PyInt_FromLong(self->cdata.itemsize());
+  END_HANDLE_TH_ERRORS
+}
+
 static struct PyGetSetDef THPVariable_properties[] = {
   {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
@@ -522,6 +536,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
+  {"nbytes", (getter)THPVariable_nbytes, nullptr, nullptr, nullptr},
+  {"itemsize", (getter)THPVariable_itemsize, nullptr, nullptr, nullptr},
 #ifdef BUILD_NAMEDTENSOR
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
 #endif
