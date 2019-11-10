@@ -2480,6 +2480,21 @@ class _TestTorchMixin(object):
         self.assertEqual(b.nelement(), 3 * 100 * 100)
         self.assertEqual(b.numel(), 3 * 100 * 100)
 
+    def test_nbytes(self):
+        self.assertEqual(torch.randn(3, dtype=torch.float32).nbytes, 12)
+        self.assertEqual(torch.randn(3, dtype=torch.float64).nbytes, 24)
+
+    def test_itemsize(self):
+        self.assertEqual(torch.zeros(2, dtype=torch.float16).itemsize, 2)
+        self.assertEqual(torch.zeros(2, dtype=torch.float32).itemsize, 4)
+        self.assertEqual(torch.zeros(2, dtype=torch.float64).itemsize, 8)
+        self.assertEqual(torch.zeros(2, dtype=torch.int8).itemsize, 1)
+        self.assertEqual(torch.zeros(2, dtype=torch.int16).itemsize, 2)
+        self.assertEqual(torch.zeros(2, dtype=torch.int32).itemsize, 4)
+        self.assertEqual(torch.zeros(2, dtype=torch.int64).itemsize, 8)
+        self.assertEqual(torch.zeros(2, dtype=torch.uint8).itemsize, 1)
+        self.assertEqual(torch.zeros(2, dtype=torch.bool).itemsize, 1)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_empty_storage_view(self):
         # we should be able to "modify" slices of a 0-element
