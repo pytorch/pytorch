@@ -22,12 +22,10 @@ __global__ void upsample_nearest1d_out_frame(
     size_t src_dim_w,
     size_t dst_dim_w,
     scalar_t* output,
-    double scales_1) {
+    float scale_factor) {
   int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
-
-  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_w / dst_dim_w;
 
   int c = (dst_idx / dst_dim_w) % dim_c;
 
@@ -55,13 +53,11 @@ __global__ void upsample_nearest1d_backward_out_frame(
     size_t src_dim_w,
     size_t dst_dim_w,
     scalar_t* grad_i,
-    double scales_1) {
+    float scale_factor) {
 
   int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
-
-  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_w / dst_dim_w;
 
   int c = (dst_idx / (dst_dim_w)) % dim_c;
 
@@ -123,8 +119,10 @@ static void upsample_nearest1d_out_cuda_template(
         auto idata = input.data_ptr<scalar_t>();
         auto odata = output.data_ptr<scalar_t>();
 
+        float scale_factor = compute_scales_value<float>(scales_1, input_width, output_width);
+
         upsample_nearest1d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
-            idata, nbatch, channels, input_width, output_width, odata, scales_1);
+            idata, nbatch, channels, input_width, output_width, odata, scale_factor);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -180,9 +178,11 @@ static void upsample_nearest1d_backward_out_cuda_template(
         auto idata = grad_input.data_ptr<scalar_t>();
         auto odata = grad_output.data_ptr<scalar_t>();
 
+        float scale_factor = compute_scales_value<float>(scales_1, input_width, output_width);
+
         upsample_nearest1d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(
-                odata, nbatch, channels, output_width, input_width, idata, scales_1);
+                odata, nbatch, channels, output_width, input_width, idata, scale_factor);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());

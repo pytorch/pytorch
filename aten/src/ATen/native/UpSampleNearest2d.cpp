@@ -18,8 +18,8 @@ static void upsample_nearest2d_out_frame(
     int64_t channels,
     double scales_1,
     double scales_2) {
-  float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
+  const float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
+  const float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
 
   channels = channels * nbatch;
 
@@ -76,8 +76,8 @@ static void upsample_nearest2d_backward_out_frame(
     double scales_1,
     double scales_2) {
 
-  float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
+  const float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
+  const float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
 
   channels = channels * nbatch;
 

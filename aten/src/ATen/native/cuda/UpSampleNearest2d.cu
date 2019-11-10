@@ -24,8 +24,8 @@ __global__ void upsample_nearest2d_out_frame(
     const size_t width1,
     const size_t height2,
     const size_t width2,
-    double scales_1,
-    double scales_2) {
+    const float height_scale,
+    const float width_scale) {
   size_t nc_iter = threadIdx.z + blockIdx.z * blockDim.z;
   int w2 = threadIdx.x + blockIdx.x * blockDim.x;
   int h2 = threadIdx.y + blockIdx.y * blockDim.y;
@@ -34,8 +34,6 @@ __global__ void upsample_nearest2d_out_frame(
     return;
   }
 
-  const float height_scale = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)height1 / height2;
-  const float width_scale = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)width1 / width2;
   int nc_stride = blockDim.z * gridDim.z;
 
   const size_t h1 = height1 == height2
@@ -70,8 +68,8 @@ __global__ void upsample_nearest2d_backward_out_frame(
     size_t dst_dim_h,
     size_t dst_dim_w,
     scalar_t* grad_i,
-    double scales_1,
-    double scales_2) {
+    const float height_scale,
+    const float width_scale) {
   int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
     return;
@@ -81,19 +79,17 @@ __global__ void upsample_nearest2d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y =
-      nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
+      nearest_neighbor_compute_source_index(height_scale, dst_y, src_dim_h);
   int src_y_up = nearest_neighbor_compute_source_index(
-      scale_factor, dst_y + 1, src_dim_h + 1);
+      height_scale, dst_y + 1, src_dim_h + 1);
 
-  scale_factor = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x =
-      nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+      nearest_neighbor_compute_source_index(width_scale, dst_x, src_dim_w);
   int src_x_up = nearest_neighbor_compute_source_index(
-      scale_factor, dst_x + 1, src_dim_w + 1);
+      width_scale, dst_x + 1, src_dim_w + 1);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -189,6 +185,9 @@ static void upsample_nearest2d_out_cuda_template(
         auto idata = input.data_ptr<scalar_t>();
         auto odata = output.data_ptr<scalar_t>();
 
+        const float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
+        const float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
+
         upsample_nearest2d_out_frame<scalar_t, accscalar_t>
             <<<grid, block, 0, stream>>>(
                 idata,
@@ -198,8 +197,8 @@ static void upsample_nearest2d_out_cuda_template(
                 input_width,
                 output_height,
                 output_width,
-                scales_1,
-                scales_2);
+                height_scale,
+                width_scale);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -265,6 +264,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
         auto idata = grad_input.data_ptr<scalar_t>();
         auto odata = grad_output.data_ptr<scalar_t>();
 
+        const float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
+        const float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
+
         upsample_nearest2d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(
                 odata,
@@ -275,8 +277,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
                 input_height,
                 input_width,
                 idata,
-                scales_1,
-                scales_2);
+                height_scale,
+                width_scale);
       });
   AT_CUDA_CHECK(cudaGetLastError());
 }
