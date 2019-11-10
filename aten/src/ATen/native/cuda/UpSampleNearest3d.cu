@@ -40,15 +40,15 @@ __global__ void upsample_nearest3d_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (scales_1 > 0.) ? (float)scales_1 : (float)src_dim_d / dst_dim_d;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_d / dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
   int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
 
-  scale_factor = (scales_2 > 0.) ? (float)scales_2 : (float)src_dim_h / dst_dim_h;
+  scale_factor = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
 
-  scale_factor = (scales_3 > 0.) ? (float)scales_3 : (float)src_dim_w / dst_dim_w;
+  scale_factor = (scales_3 > 0.) ? (float)(1. / (float)(scales_3)) : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 

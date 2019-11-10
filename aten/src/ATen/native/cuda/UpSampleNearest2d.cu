@@ -34,8 +34,8 @@ __global__ void upsample_nearest2d_out_frame(
     return;
   }
 
-  const float height_scale = (scales_1 > 0.) ? (float)scales_1 : (float)height1 / height2;
-  const float width_scale = (scales_2 > 0.) ? (float)scales_2 : (float)width1 / width2;
+  const float height_scale = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)height1 / height2;
+  const float width_scale = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)width1 / width2;
   int nc_stride = blockDim.z * gridDim.z;
 
   const size_t h1 = height1 == height2

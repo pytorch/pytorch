@@ -27,7 +27,7 @@ __global__ void upsample_nearest1d_out_frame(
   if (dst_idx >= dim_c * dst_dim_w)
     return;
 
-  float scale_factor = (scales_1 > 0.) ? (float)scales_1 : (float)src_dim_w / dst_dim_w;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_w / dst_dim_w;
 
   int c = (dst_idx / dst_dim_w) % dim_c;
 
