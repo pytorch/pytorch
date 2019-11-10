@@ -114,8 +114,9 @@ class QAvgPool2dBenchmark(_QPool2dBenchmarkBase):
 class QAdaptiveAvgPool2dBenchmark(_QPool2dBenchmarkBase):
     def init(self, N, C, input_size, output_size, contig, dtype):
         self.pool_op = torch.nn.AdaptiveAvgPool2d(output_size=output_size)
-        super(QAdaptiveAvgPool2dBenchmark, self).setup(N, C, *input_size, dtype,
-                                                       contig)
+        super(QAdaptiveAvgPool2dBenchmark, self).setup(N, C, *input_size,
+                                                       dtype=dtype,
+                                                       contig=contig)
 
 
 op_bench.generate_pt_test(qadaptive_avgpool2d_short_configs + qadaptive_avgpool2d_long_configs,
