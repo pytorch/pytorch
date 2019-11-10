@@ -75,11 +75,11 @@ class FunctionalAPITest(QuantizationTestCase):
 
             b = torch.randn(oC, dtype=torch.float32) if use_bias else None
             q_filters_ref = torch.ops.quantized.conv2d_prepack(qw,
-                                                             b,
-                                                             stride,
-                                                             i_padding,
-                                                             dilation,
-                                                             g)
+                                                               b,
+                                                               stride,
+                                                               i_padding,
+                                                               dilation,
+                                                               g)
 
 
             ref_result = torch.ops.quantized.conv2d(qX, q_filters_ref,
