@@ -8,7 +8,7 @@ import torch
 import operator_benchmark as op_bench
 
 # 2D pooling will have input matrix of rank 3 or 4
-qmaxpool2d_configs = op_bench.config_list(
+qmaxpool2d_long_configs = op_bench.config_list(
     attrs=(
        #  C    H    W   k       s       p       d
        (  1,   3,   3, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy        # noqa
@@ -21,9 +21,8 @@ qmaxpool2d_configs = op_bench.config_list(
        (512,  28,  28, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-23 # noqa
        (512,  14,  14, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-30 # noqa
     ),
-    attr_names=('C', 'H', 'W',  # Input layout
-                'k', 's', 'p', 'd',  # Pooling parameters
-                            ),
+    attr_names=('C', 'H', 'W',        # Input layout
+                'k', 's', 'p', 'd'),  # Pooling parameters
     cross_product_configs={
         'N': range(5),  # if N==0, use rank=3
         'ceil': (False, True),
@@ -31,6 +30,21 @@ qmaxpool2d_configs = op_bench.config_list(
         'dtype': (torch.qint32, torch.qint8, torch.quint8),
     },
     tags=('long',)
+)
+
+qmaxpool2d_short_configs = op_bench.config_list(
+    attrs=(
+       (1, 3, 3, (3, 3), (1, 1), (0, 0)),  # dummy  # noqa
+    ),
+    attr_names=('C', 'H', 'W',        # Input layout
+                'k', 's', 'p', 'd'),  # Pooling parameters
+    cross_product_configs={
+        'N': (2,),
+        'ceil': (False,),
+        'contig': (True,),
+        'dtype': (torch.qint32, torch.qint8, torch.quint8),
+    },
+    tags=('short',)
 )
 
 
@@ -44,6 +58,7 @@ class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
             f_input = (torch.rand(C, H, W) - 0.5) * 256
         else:
             f_input = (torch.rand(N, C, H, W) - 0.5) * 256
+
         scale = 1.0
         zero_point = 0
 
@@ -64,7 +79,8 @@ class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.pool_op(self.q_input)
 
 
-op_bench.generate_pt_test(qmaxpool2d_configs, QMaxPool2dBenchmark)
+op_bench.generate_pt_test(qmaxpool2d_short_configs + qmaxpool2d_long_configs,
+                          QMaxPool2dBenchmark)
 
 
 if __name__ == "__main__":
