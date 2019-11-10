@@ -146,15 +146,32 @@ void LayerNormBackwardKernelImplInternal(
     std::memset(dbeta_data, 0, N * sizeof(T));
   }
   const T scale = T(1) / static_cast<T>(N);
+  constexpr int64_t kVecSize = vec256::Vec256<T>::size();
+  std::array<T, kVecSize> ds_arr;
+  std::array<T, kVecSize> db_arr;
   const bool gamma_null = gamma_data == nullptr;
   for (int64_t i = 0; i < M; ++i) {
     const T* dY_ptr = dY_data + i * N;
     const T* X_ptr = X_data + i * N;
     if (dX_data != nullptr) {
       T* dX_ptr = dX_data + i * N;
-      T ds = 0;
-      T db = 0;
-      for (int64_t j = 0; j < N; ++j) {
+      vec256::Vec256<T> ds_vec(0);
+      vec256::Vec256<T> db_vec(0);
+      int64_t j = 0;
+      for (j = 0; j < N / kVecSize * kVecSize; j += kVecSize) {
+        const vec256::Vec256<T> dy_vec = vec256::Vec256<T>::loadu(dY_ptr + j);
+        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
+        const vec256::Vec256<T> gamma_vec = gamma_null
+            ? vec256::Vec256<T>(1)
+            : vec256::Vec256<T>::loadu(gamma_data + j);
+        ds_vec = ds_vec + dy_vec * x_vec * gamma_vec;
+        db_vec = db_vec + dy_vec * gamma_vec;
+      }
+      ds_vec.store(ds_arr.data());
+      db_vec.store(db_arr.data());
+      T ds = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
+      T db = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
+      for (; j < N; ++j) {
         const T gamma_v = gamma_null ? T(1) : gamma_data[j];
         ds += dY_ptr[j] * X_ptr[j] * gamma_v;
         db += dY_ptr[j] * gamma_v;
