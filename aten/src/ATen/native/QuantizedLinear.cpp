@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/Parallel.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
 #include "ATen/cpp_custom_type_hack.h"
