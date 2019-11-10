@@ -34,6 +34,7 @@ struct CAFFE2_API TensorName {
       origin_idx_(origin_idx),
       name_(origin[maybe_wrap_dim(origin_idx, origin.size())]) {}
 
+  // op_name is only used for error reporting.
   const TensorName& unify(const TensorName& other, const char* op_name) const;
   Dimname toDimname() const;
 
@@ -41,6 +42,9 @@ struct CAFFE2_API TensorName {
   ArrayRef<Dimname> origin_;
   int origin_idx_;
   Dimname name_;
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const TensorName& tensorname);
 };
 
 using TensorNameVec = SmallVector<TensorName, 10>;
@@ -52,7 +56,9 @@ struct CAFFE2_API TensorNames {
   // `names`, NOT names[start:end], because the original tensor's names are `names`.
   explicit TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end);
 
+  // op_name is only used for error reporting.
   TensorNames unifyFromRight(const TensorNames& other, const char* op_name) const;
+  void checkUnique(const char* op_name) const;
 
   void append(TensorName&& name);
   std::vector<Dimname> toDimnameVec() const;
@@ -62,6 +68,7 @@ struct CAFFE2_API TensorNames {
 
   TensorNameVec names_;
 };
+
 #endif
 
 }} // namespace at::namedinference
