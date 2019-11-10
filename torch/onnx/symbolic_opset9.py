@@ -1651,18 +1651,28 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
 
 def randn(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
 def rand(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, *others):
-    return g.op('RandomNormalLike', self)
+def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    return g.op('RandomNormalLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+
+
+def rand_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    return g.op('RandomUniformLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
 
 
 @parse_args('v', 'f', 'f', 'i', 'none')

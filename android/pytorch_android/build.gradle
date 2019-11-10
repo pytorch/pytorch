@@ -42,6 +42,9 @@ android {
         } else {
             pickFirst '**/libfbjni.so'
         }
+        if (nativeLibsDoNotStrip) {
+            doNotStrip "**/*.so"
+        }
     }
 
     useLibrary 'android.test.runner'
