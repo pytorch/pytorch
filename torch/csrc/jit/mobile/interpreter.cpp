@@ -25,15 +25,15 @@ void listConstruct(Stack& stack, int num_inputs) {
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
-//    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-//    std::cout << std::endl;
-//    for (auto val : stack) {
-//      if (val.isTensor()) {
-//        std::cout << val.toTensor().sizes() << std::endl;
-//      } else {
-//        std::cout << val << std::endl;
-//      }
-//    }
+    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    std::cout << std::endl;
+    for (auto val : stack) {
+      if (val.isTensor()) {
+        std::cout << val.toTensor().sizes() << std::endl;
+      } else {
+        std::cout << val << std::endl;
+      }
+    }
     Instruction inst = code_->instructions_[pc];
     switch (inst.op) {
       case OP: {

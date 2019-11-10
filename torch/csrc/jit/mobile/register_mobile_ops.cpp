@@ -20,6 +20,15 @@ at::Tensor toOptionalTensor(const c10::IValue& v) {
 at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
 }
+
+template <typename T>
+void listAppend(Stack& stack) {
+  T el = pop(stack).to<T>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+
+  list.push_back(std::move(el));
+  push(stack, std::move(list));
+}
 }
 
 static auto registry0 = torch::RegisterOperators().op(
@@ -397,7 +406,7 @@ static auto registry0 = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  torch::RegisterOperators::options().catchAllKernel(
   [](c10::OperatorKernel* kernel, Stack* stack) {
       c10::IValue self, obj;
       pop(*stack, self, obj);
@@ -428,12 +437,18 @@ static auto registry0 = torch::RegisterOperators().op(
      pack(*stack, std::move(result_));
   })
 ).op(
-  "_prim::DictConstruct",
+  "_aten::append.Tensor(Tensor self) -> void",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+    listAppend<at::Tensor>(*stack);
+  })
+).op(
+  "_prim::TupleConstruct",
   torch::RegisterOperators::options().catchAllKernel(
   []() {
   })
 ).op(
-  "_prim::TupleConstruct",
+  "_prim::TupleUnpack",
   torch::RegisterOperators::options().catchAllKernel(
   []() {
   })
@@ -443,9 +458,11 @@ static auto registry0 = torch::RegisterOperators().op(
   []() {
   })
 ).op(
-  "_aten::warn",
+  "_aten::warn() -> void",
   torch::RegisterOperators::options().catchAllKernel(
-  []() {
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+    drop(*stack, 1);
+    pop(*stack);
   })
 ).op(
   "_prim::unchecked_cast",
@@ -500,11 +517,5 @@ static auto registry0 = torch::RegisterOperators().op(
   torch::RegisterOperators::options().catchAllKernel(
   []() {
     AT_WARN("aten::_set_item is called.");
-  })
-).op(
-  "_aten::append",
-  torch::RegisterOperators::options().catchAllKernel(
-  []() {
-    AT_WARN("aten::append is called.");
   })
 );

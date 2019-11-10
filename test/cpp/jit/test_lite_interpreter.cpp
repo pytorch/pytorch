@@ -140,7 +140,7 @@ void testLiteInterpreterModel() {
   auto stensor = length * torch::ones({1}, options);
   inputs.push_back(stensor);
 
-  auto m = load("/Users/myuan/data/pytext/BI/model_1107.pt1");
+  auto m = load("/Users/myuan/data/pytext/BI/model_1108.pt1");
 
   std::unordered_set<std::string> opnames;
   dump_opnames(m, opnames);
@@ -154,7 +154,7 @@ void testLiteInterpreterModel() {
 
   std::stringstream ss;
   m._save_for_mobile(ss);
-  m._save_for_mobile("/Users/myuan/data/pytext/BI/model_1107.bc");
+  m._save_for_mobile("/Users/myuan/data/pytext/BI/model_1108.bc");
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
