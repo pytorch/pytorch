@@ -656,8 +656,8 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
   std::string conv_with_quant_prepack = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_unpack(%packed_params)
+        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
         return (%r) )";
@@ -973,7 +973,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   std::string conv2d_prepack = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params))";
 
   // (is_conv, pattern, packed_params_module)
