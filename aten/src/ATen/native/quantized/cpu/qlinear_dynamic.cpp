@@ -106,7 +106,8 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
       // This operation does the following:
       // 1) Quantizes the input matrix given the statistics we've calculated
-      // above 2) Creates a "row buffer" vector with offset values that must be
+      // above
+      // 2) Creates a "row buffer" vector with offset values that must be
       // added
       //    to the integer matrix multiplication operation to ensure
       //    correctness. This "row buffer" is also called the row offset, and it
