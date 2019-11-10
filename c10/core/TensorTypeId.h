@@ -49,6 +49,10 @@ enum class TensorTypeId : uint8_t {
 
   VariableTensorId,
 
+  // Autocasting must precede routing through VariableType functions,
+  // to ensure inputs are saved for backward in the post-autocast type.
+  AutocastTensorId,
+
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptible use is within a single
   // process test.  Use it by creating a TensorImpl with this TensorTypeId, and
