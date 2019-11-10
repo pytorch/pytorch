@@ -138,7 +138,8 @@ public:
   }
   __m256 abs_2_() const {
     auto val_2 = _mm256_mul_ps(values, values);     // a*a     b*b
-    return _mm256_hadd_ps(val_2, val_2);            // a*a+b*b a*a+b*b
+    auto ret = _mm256_hadd_ps(val_2, val_2);        // a*a+b*b a*a+b*b
+    return _mm256_permute_ps(ret, 0xD8);
   }
   __m256 abs_() const {
     return _mm256_sqrt_ps(abs_2_());                // abs     abs
@@ -150,13 +151,13 @@ public:
   }
   __m256 angle_() const {
     //angle = atan2(b/a)
-    auto b_a = _mm256_permute_ps(values, 0x55);     // b        a
+    auto b_a = _mm256_permute_ps(values, 0xB1);     // b        a
     return Sleef_atan2f8_u10(values, b_a);          // 90-angle angle
   }
   Vec256<std::complex<float>> angle() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
                                                                    0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));
-    auto angle = _mm256_permute_ps(angle_(), 0x55); // angle    90-angle
+    auto angle = _mm256_permute_ps(angle_(), 0xB1); // angle    90-angle
     return _mm256_and_ps(angle, real_mask);         // angle    0
   }
   __m256 real_() const {
@@ -173,7 +174,7 @@ public:
     return _mm256_and_ps(values, imag_mask);
   }
   Vec256<std::complex<float>> imag() const {
-    return _mm256_permute_ps(imag_(), 0x55);        //b        a
+    return _mm256_permute_ps(imag_(), 0xB1);        //b        a
   }
   __m256 conj_() const {
     const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
@@ -205,17 +206,18 @@ public:
     const __m256 one = _mm256_set1_ps(1);
 
     auto conj = conj_();
-    auto b_a = _mm256_permute_ps(conj, 0x55);                         //-b        a
+    auto b_a = _mm256_permute_ps(conj, 0xB1);                         //-b        a
     auto ab = _mm256_mul_ps(conj, b_a);                               //-ab       -ab
     auto im = _mm256_add_ps(ab, ab);                                  //-2ab      -2ab
 
     auto val_2 = _mm256_mul_ps(values, values);                       // a*a      b*b
-    auto re = _mm256_hsub_ps(val_2, _mm256_permute_ps(val_2, 0x55));  // a*a-b*b  b*b-a*a
+    auto re = _mm256_hsub_ps(val_2, _mm256_permute_ps(val_2, 0xB1));  // a*a-b*b  b*b-a*a
+    re = _mm256_permute_ps(re, 0xD8);
     re = _mm256_sub_ps(one, re);
 
     auto root = Vec256(_mm256_blend_ps(re, im, 0xAA)).sqrt();         //sqrt(re + i*im)
     auto ln = Vec256(_mm256_add_ps(b_a, root)).log();                 //ln(iz + sqrt())
-    return Vec256(_mm256_permute_ps(ln.values, 0x55)).conj();         //-i*ln()
+    return Vec256(_mm256_permute_ps(ln.values, 0xB1)).conj();         //-i*ln()
   }
   Vec256<std::complex<float>> acos() const {
     // acos(x) = pi/2 - asin(x)
@@ -336,11 +338,12 @@ template <> Vec256<std::complex<float>> inline operator*(const Vec256<std::compl
   const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
   auto ac_bd = _mm256_mul_ps(a, b);         //ac       bd
 
-  auto d_c = _mm256_permute_ps(b, 0x55);    //d        c
+  auto d_c = _mm256_permute_ps(b, 0xB1);    //d        c
   d_c = _mm256_xor_ps(sign_mask, d_c);      //d       -c
   auto ad_bc = _mm256_mul_ps(a, d_c);       //ad      -bc
 
   auto ret = _mm256_hsub_ps(ac_bd, ad_bc);  //ac - bd  ad + bc
+  ret = _mm256_permute_ps(ret, 0xD8);
   return ret;
 }
 
@@ -348,14 +351,15 @@ template <> Vec256<std::complex<float>> inline operator/(const Vec256<std::compl
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2()
   //im = (bc - ad)/abs_2()
-  const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+  const __m256 sign_mask = _mm256_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
   auto ac_bd = _mm256_mul_ps(a, b);         //ac       bd
 
-  auto d_c = _mm256_permute_ps(b, 0x55);    //d        c
+  auto d_c = _mm256_permute_ps(b, 0xB1);    //d        c
   d_c = _mm256_xor_ps(sign_mask, d_c);      //-d       c
   auto ad_bc = _mm256_mul_ps(a, d_c);       //-ad      bc
 
   auto re_im = _mm256_hadd_ps(ac_bd, ad_bc);//ac + bd  bc - ad
+  re_im = _mm256_permute_ps(re_im, 0xD8);
   return _mm256_div_ps(re_im, b.abs_2_());
 }
 
