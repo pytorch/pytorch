@@ -31,16 +31,17 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Ten
   auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
   int64_t n_input = self.size(1);
   auto input_options = self.options();
-  Tensor save_mean_, save_invstd_;
+  Tensor save_mean, save_invstd;
   if (train) {
-    save_mean_ = at::empty({n_input}, input_options);
-    save_invstd_ = at::empty({n_input}, input_options);
+    save_mean = at::empty({n_input}, input_options);
+    save_invstd = at::empty({n_input}, input_options);
   } else {
-    save_mean_ = at::empty({0}, input_options);
-    save_invstd_ = at::empty({0}, input_options);
+    save_mean = at::empty({0}, input_options);
+    save_invstd = at::empty({0}, input_options);
   }
 
-  return batch_norm_cuda_out(output, save_mean_, save_invstd_, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+  batch_norm_cuda_out(output, save_mean, save_invstd, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+  return std::make_tuple(output, save_mean, save_invstd);
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& self, const Tensor& weight, const Tensor& running_mean, const Tensor& running_var,
