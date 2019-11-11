@@ -80,6 +80,8 @@ class Reducer {
   // marked and allreduced at the end of forward for figuring out the globally
   // unused parameters.
   std::vector<at::Tensor> local_used_maps_;
+  // Work handle for allreduce on local_used_maps_
+  std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   void mark_variable_ready_dense(VariableIndex index);
 
