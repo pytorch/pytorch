@@ -213,6 +213,9 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 
+# TODO move this to docker
+pip_install unittest-xml-reporting
+
 if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
