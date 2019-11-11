@@ -6,14 +6,14 @@ from __future__ import unicode_literals
 import operator_benchmark as op_bench
 import torch
 
-"""Microbenchmarks for element-wise Add operator. Supports both Caffe2/PyTorch."""
+"""Microbenchmarks for add_ operator. Supports both Caffe2/PyTorch."""
 
 # Configs for PT add operator
 add_long_configs = op_bench.cross_product_configs(
     M=[8, 64, 128],
     N=range(2, 128, 64),
     K=[8 ** x for x in range(0, 3)],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
@@ -25,7 +25,7 @@ add_short_configs = op_bench.config_list(
         [64, 64, 128],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"],
 )

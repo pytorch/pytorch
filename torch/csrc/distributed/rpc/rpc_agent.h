@@ -66,7 +66,10 @@ class TORCH_API RpcAgent {
   // NB: RpcAgent implementations should not start serving requests until
   // ``start()`` is called, as there could be other contexts that have not been
   // initialized yet at this time.
-  RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
+  RpcAgent(
+      WorkerInfo id,
+      std::unique_ptr<RequestCallback> cb,
+      std::chrono::milliseconds rpcTimeout);
 
   virtual ~RpcAgent();
 
@@ -93,6 +96,11 @@ class TORCH_API RpcAgent {
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
+  // Retrieve the timeout for all RPCs.
+  inline const std::chrono::milliseconds& getRpcTimeout() const {
+    return rpcTimeout_;
+  }
+
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
   virtual void join() = 0;
@@ -114,6 +122,7 @@ class TORCH_API RpcAgent {
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
+  const std::chrono::milliseconds rpcTimeout_;
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;
