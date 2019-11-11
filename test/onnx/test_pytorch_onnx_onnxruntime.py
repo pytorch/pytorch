@@ -1528,6 +1528,20 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
 
+    def test_trace_script(self):
+        @torch.jit.script
+        def center_slice_helper(input, h_offset, w_offset):
+            return input[:, h_offset:, w_offset:]
+
+        class CenterCrop(torch.nn.Module):
+            def forward(self, input):
+                height, width = x.shape[1] - 2, x.shape[2] - 2
+                height, width = torch.tensor(height).to(input.device), torch.tensor(width).to(input.device)
+                return center_slice_helper(input, height, width)
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(CenterCrop(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
