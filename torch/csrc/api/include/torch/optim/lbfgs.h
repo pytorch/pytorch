@@ -24,6 +24,10 @@ struct TORCH_API LBFGSOptions {
   TORCH_ARG(size_t, history_size) = 100;
 };
 
+struct TORCH_API LBFGSParamGroup {};
+
+struct TORCH_API LBFGSParamState {};
+
 class TORCH_API LBFGS : public LossClosureOptimizer {
  public:
   template <typename ParameterContainer>

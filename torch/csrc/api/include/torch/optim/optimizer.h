@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <set>
 
 using c10::Dict;
 
@@ -38,52 +39,53 @@ namespace detail {
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
 /// shall have, such as `zero_grad`.
+
+struct dummy_placeholder_t {};
+
+// TODO: remove `dummy_placeholder_t` when all optimizers are templatized
+template <typename OptimizerParamState = dummy_placeholder_t, typename OptimizerParamGroup = dummy_placeholder_t, typename OptimizerOptions = dummy_placeholder_t>
 class TORCH_API OptimizerBase {
  public:
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
 
   //todo
-  template <typename OptimizerOptions>
-  explicit OptimizerBase(std::vector<std::vector<Tensor>> params, OptimizerOptions options) {
-    for(size_t i=0; i<params.size(); i++) {
-      c10::impl::GenericDict param_group(c10::StringType::get(), c10::AnyType::get());
-      param_group.insert("options", options.convert_options_to_ivalue());
-      param_group.insert("params", c10::IValue());
-      std::vector<Tensor> param_list;
-      for(size_t j=0; j<params[i].size(); j++) {
-        param_groups[i].at("params").toTensorList().push_back(params[i][j]);
-      }
-      param_groups.push_back(param_group);
-    }
-    for (auto& group : param_groups) {
-      for (auto& p : group.at("params").toTensorListRef()) {
-          //at::TensorImpl* index = p.unsafeGetTensorImpl();
-          state.insert(p, c10::impl::GenericDict(c10::StringType::get(), c10::AnyType::get()));
-          state.at(p).insert("step", 0);// at::IValue, can be converted to int64_t using .toInt()
-          state.at(p).insert("sum", Tensor());// at::IValue, can be converted to Tensor using .toTensor()
-      }
+  explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, OptimizerOptions defaults) : defaults_(std::move(defaults)) {
+    for (auto& param_group : param_groups) {
+      add_param_group(param_group);
     }
   }
 
-  explicit OptimizerBase(std::vector<c10::impl::GenericDict> param_groups_): param_groups(param_groups_) {}
+  void add_param_group(OptimizerParamGroup param_group) {
+    for (const auto& param : param_group.params()) {
+      TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
+    }
+    if (!param_group.has_options()) {
+      param_group.set_options(*defaults_);
+    }
+    // TODO: check "some parameters appear in more than one parameter group"
+    param_groups_.push_back(param_group);
+  }
 
   virtual ~OptimizerBase() = default;
 
+  // TODO: when all optimizers use the new design, we can devirtualize some of the following methods
+  // such as add_parameters() / parameters() / size()
+
   /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters);
+  virtual void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
 
   /// Provides a const reference to the parameters this optimizer holds.
-  const std::vector<Tensor>& parameters() const noexcept;
+  virtual const std::vector<Tensor>& parameters() const noexcept;
 
   /// Provides a reference to the parameters this optimizer holds.
-  std::vector<Tensor>& parameters() noexcept;
+  virtual std::vector<Tensor>& parameters() noexcept;
 
   /// Returns the number of parameters referenced by the optimizer.
-  size_t size() const noexcept;
+  virtual size_t size() const noexcept;
 
   /// Serializes the optimizer state into the given `archive`.
   virtual void save(serialize::OutputArchive& archive) const;
@@ -114,27 +116,29 @@ class TORCH_API OptimizerBase {
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
   //to do-description
-  std::vector<c10::impl::GenericDict> param_groups;
-  c10::Dict<at::Tensor, c10::impl::GenericDict> state;
+  c10::optional<OptimizerOptions> defaults_; // TODO: this is only optional because some optimizers don't store defaults yet. In the end state this should be non-optional.
+  std::vector<OptimizerParamGroup> param_groups_;
+  ska::flat_hash_map<at::TensorImpl*, OptimizerParamState> state_;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
 TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const OptimizerBase& optimizer);
+    const OptimizerBase<>& optimizer);
 
 /// Deserializes a `Tensor` from an `InputArchive`.
 TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    OptimizerBase& optimizer);
+    OptimizerBase<>& optimizer);
 } // namespace detail
 
 /// Optimizer that defines a required `step()` method that takes no arguments
 /// and produces no values. The only side effect is that parameters are updated
 /// according to the concrete optimization algorithm.
-class Optimizer : public detail::OptimizerBase {
+template <typename OptimizerParamState = detail::dummy_placeholder_t, typename OptimizerParamGroup = detail::dummy_placeholder_t, typename OptimizerOptions = detail::dummy_placeholder_t>
+class Optimizer : public detail::OptimizerBase<OptimizerParamState, OptimizerParamGroup, OptimizerOptions> {
  public:
-  using detail::OptimizerBase::OptimizerBase;
+  using detail::OptimizerBase<OptimizerParamState, OptimizerParamGroup, OptimizerOptions>::OptimizerBase;
   virtual void step() = 0;
 };
 
@@ -142,11 +146,11 @@ class Optimizer : public detail::OptimizerBase {
 /// function, as it may evaluate the loss function multiple times per step.
 /// Examples of such algorithms are conjugate gradient and LBFGS. The `step()`
 /// function also returns the loss value.
-class LossClosureOptimizer : public detail::OptimizerBase {
+class LossClosureOptimizer : public detail::OptimizerBase<> {
  public:
   /// A loss function closure, which is expected to return the loss value.
   using LossClosure = std::function<Tensor()>;
-  using detail::OptimizerBase::OptimizerBase;
+  using detail::OptimizerBase<>::OptimizerBase;
   virtual Tensor step(LossClosure closure) = 0;
 };
 

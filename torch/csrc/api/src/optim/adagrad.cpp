@@ -15,39 +15,80 @@ using c10::Dict;
 namespace torch {
 namespace optim {
 
-AdagradOptions convert_ivalue_to_options(at::IValue ivalue) {
-    c10::Dict<at::IValue, at::IValue> dict = ivalue.toGenericDict();
-    AdagradOptions options(0);
-    options.learning_rate(dict.at("learning_rate").toDouble());
-    options.lr_decay(dict.at("lr_decay").toDouble());
-    options.weight_decay(dict.at("weight_decay").toDouble());
-    options.initial_accumulator_value(dict.at("initial_accumulator_value").toDouble());
-    options.eps(dict.at("eps").toDouble());
-    return options;
-}
-
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
+
+/*
+def step(self, closure=None):
+    """Performs a single optimization step.
+
+    Arguments:
+        closure (callable, optional): A closure that reevaluates the model
+            and returns the loss.
+    """
+    loss = None
+    if closure is not None:
+        loss = closure()
+
+    for group in self.param_groups:
+        for p in group['params']:
+            if p.grad is None:
+                continue
+
+            grad = p.grad.data
+            state = self.state[p]
+
+            state['step'] += 1
+
+            if group['weight_decay'] != 0:
+                if p.grad.data.is_sparse:
+                    raise RuntimeError("weight_decay option is not compatible with sparse gradients")
+                grad = grad.add(group['weight_decay'], p.data)
+
+            clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
+
+            if grad.is_sparse:
+                grad = grad.coalesce()  # the update is non-linear so indices must be unique
+                grad_indices = grad._indices()
+                grad_values = grad._values()
+                size = grad.size()
+
+                def make_sparse(values):
+                    constructor = grad.new
+                    if grad_indices.dim() == 0 or values.dim() == 0:
+                        return constructor().resize_as_(grad)
+                    return constructor(grad_indices, values, size)
+                state['sum'].add_(make_sparse(grad_values.pow(2)))
+                std = state['sum'].sparse_mask(grad)
+                std_values = std._values().sqrt_().add_(group['eps'])
+                p.data.add_(-clr, make_sparse(grad_values / std_values))
+            else:
+                state['sum'].addcmul_(1, grad, grad)
+                std = state['sum'].sqrt().add_(group['eps'])
+                p.data.addcdiv_(-clr, grad, std)
+
+    return loss
+*/
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
-  for (auto& group : param_groups) {
-    AdagradOptions options = convert_ivalue_to_options(group.at("options"));
-    for (auto& p : group.at("params").toTensorListRef()) {
+  for (auto& group : param_groups_) {
+    for (auto& p : group.params()) {
       if (!p.grad().defined()) {
         continue;
       }
       auto grad = p.grad().data();
+      auto& state = state_[p.unsafeGetTensorImpl()];
 
-      state.at(p).insert_or_assign("step", state.at(p).at("step").toInt()+1);
-      if(options.weight_decay() != 0) {
+      state.step_++;
+
+      if(group.options().weight_decay() != 0) {
         TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
-        NoGradGuard guard;
-        grad += options.weight_decay() * p.data();
+        grad = grad.add(p.data(), group.options().weight_decay());
       }
-      const auto clr =  options.learning_rate() /
-          (1.0 + (state.at(p).at("step").toInt() - 1.0) * options.lr_decay());
+      const auto clr = group.options().learning_rate() /
+          (1 + (state.step_ - 1) * group.options().lr_decay());
 
       if(grad.is_sparse()) {
         grad = grad.coalesce();
@@ -61,20 +102,39 @@ void Adagrad::step() {
           }
           return torch::sparse_coo_tensor(grad_indices, values, size, grad.options());
         };
-        state.at(p).at("sum").toTensor().add_(make_sparse(grad_values.pow(2)));
-        auto std = state.at(p).at("sum").toTensor().sparse_mask(grad);
-        const auto std_values = std.sqrt().add_(options.eps());
+        state.sum_.add_(make_sparse(grad_values.pow(2)));
+        auto std = state.sum_.sparse_mask(grad);
+        const auto std_values = std._values().sqrt_().add_(group.options().eps());
 
         p.data().add_(make_sparse(grad_values / std_values), -clr);
       }
       else {
-        state.at(p).at("sum").toTensor().addcmul_(grad, grad, 1.0);
-        const auto std = state.at(p).at("sum").toTensor().sqrt().add_(options.eps());
+        state.sum_.addcmul_(grad, grad, 1.0);
+        const auto std = state.sum_.sqrt().add_(group.options().eps());
         p.data().addcdiv_(grad, std, -clr);
       }
     }
-    group.insert_or_assign("options", options.convert_options_to_ivalue());
   }
+}
+
+void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
+  param_groups_.push_back(AdagradParamGroup(parameters, *defaults_));
+}
+
+const std::vector<Tensor>& Adagrad::parameters() const noexcept {
+  return param_groups_[0].params();
+}
+
+std::vector<Tensor>& Adagrad::parameters() noexcept {
+  return param_groups_[0].params();
+}
+
+size_t Adagrad::size() const noexcept {
+  size_t count = 0;
+  for (const auto& group : param_groups_) {
+    count += group.params().size();
+  }
+  return count;
 }
 
 void Adagrad::save(serialize::OutputArchive& archive) const {
