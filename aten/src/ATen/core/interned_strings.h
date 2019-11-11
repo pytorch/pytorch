@@ -112,6 +112,7 @@ namespace c10 {
   _(prim, CreateObject)              \
   _(prim, SetAttr)                   \
   _(prim, GetAttr)                   \
+  _(prim, HasAttr)                   \
   _(prim, profile)                   \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \

@@ -94,34 +94,38 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
 
         return_value = old_test_method(self, *arg, **kwargs)
 
-        if setup_model_parallel and clean_shutdown:
-            # Follower reports done.
-            if self.rank == MASTER_RANK:
-                on_master_follower_report_done("worker{}".format(MASTER_RANK))
-            else:
-                rpc.rpc_async(
-                    "worker{}".format(MASTER_RANK),
-                    on_master_follower_report_done,
-                    args=("worker{}".format(self.rank),),
-                )
+        if setup_model_parallel:
+            if clean_shutdown:
+                # Follower reports done.
+                if self.rank == MASTER_RANK:
+                    on_master_follower_report_done("worker{}".format(MASTER_RANK))
+                else:
+                    rpc.rpc_async(
+                        "worker{}".format(MASTER_RANK),
+                        on_master_follower_report_done,
+                        args=("worker{}".format(self.rank),),
+                    )
 
-            # Master waits for followers to report done.
-            # Follower waits for master's termination command.
-            _TERMINATION_SIGNAL.wait()
-            if self.rank == MASTER_RANK:
-                # Master sends termination command.
-                futs = []
-                for dst_rank in range(self.world_size):
-                    # torch.distributed.rpc module does not support sending to self.
-                    if dst_rank == MASTER_RANK:
-                        continue
-                    dst_name = "worker{}".format(dst_rank)
-                    fut = rpc.rpc_async(dst_name, set_termination_signal, args=())
-                    futs.append(fut)
-                for fut in futs:
-                    assert fut.wait() is None, "Sending termination signal failed."
+                # Master waits for followers to report done.
+                # Follower waits for master's termination command.
+                _TERMINATION_SIGNAL.wait()
+                if self.rank == MASTER_RANK:
+                    # Master sends termination command.
+                    futs = []
+                    for dst_rank in range(self.world_size):
+                        # torch.distributed.rpc module does not support sending to self.
+                        if dst_rank == MASTER_RANK:
+                            continue
+                        dst_name = "worker{}".format(dst_rank)
+                        fut = rpc.rpc_async(dst_name, set_termination_signal, args=())
+                        futs.append(fut)
+                    for fut in futs:
+                        assert fut.wait() is None, "Sending termination signal failed."
 
-            # Close RPC.
+            # Close RPC. Need to do this even if we don't have a clean shutdown
+            # since we need to shutdown the RPC agent. If we don't shutdown the
+            # RPC agent, tests would fail since RPC agent threads, locks and
+            # condition variables are not properly terminated.
             rpc.join_rpc()
 
         return return_value
