@@ -61,5 +61,17 @@ inline int count_substr_occurrences(const std::string& str, const std::string& s
   return count;
 }
 
+// A RAII, thread local (!) guard that changes default dtype upon
+// construction, and sets it back to the original dtype upon destruction.
+struct AutoDefaultDtypeMode {
+  AutoDefaultDtypeMode(c10::ScalarType default_dtype) : prev_default_dtype(torch::typeMetaToScalarType(torch::get_default_dtype())) {
+    torch::set_default_dtype(torch::scalarTypeToTypeMeta(default_dtype));
+  }
+  ~AutoDefaultDtypeMode() {
+    torch::set_default_dtype(torch::scalarTypeToTypeMeta(prev_default_dtype));
+  }
+  c10::ScalarType prev_default_dtype;
+};
+
 } // namespace test
 } // namespace torch
