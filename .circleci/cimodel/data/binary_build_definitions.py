@@ -3,7 +3,6 @@ from collections import OrderedDict
 import cimodel.data.binary_build_data as binary_build_data
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-import cimodel.lib.visualization as visualization
 
 
 class Conf(object):
@@ -42,9 +41,12 @@ class Conf(object):
     def get_name_prefix(self):
         return "smoke" if self.smoke else "binary"
 
-    def gen_build_name(self, build_or_test):
+    def gen_build_name(self, build_or_test, nightly):
 
         parts = [self.get_name_prefix(), self.os] + self.gen_build_env_parms()
+
+        if nightly:
+            parts.append("nightly")
 
         if self.libtorch_variant:
             parts.append(self.libtorch_variant)
@@ -55,12 +57,14 @@ class Conf(object):
         joined = "_".join(parts)
         return joined.replace(".", "_")
 
-    def gen_workflow_job(self, phase, upload_phase_dependency=None):
+    def gen_workflow_job(self, phase, upload_phase_dependency=None, nightly=False):
         job_def = OrderedDict()
-        job_def["name"] = self.gen_build_name(phase)
+        job_def["name"] = self.gen_build_name(phase, nightly)
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
         job_def["requires"] = ["setup"]
         if self.smoke:
+            job_def["requires"].append("update_s3_htmls_for_nightlies")
+            job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
             job_def["filters"] = {"branches": {"only": "nightly"}}
@@ -68,7 +72,7 @@ class Conf(object):
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
             if not self.smoke:
-                job_def["requires"].append(self.gen_build_name("build"))
+                job_def["requires"].append(self.gen_build_name("build", nightly))
             if not (self.smoke and self.os == "macos"):
                 job_def["docker_image"] = self.gen_docker_image()
 
@@ -83,7 +87,7 @@ class Conf(object):
                 job_def["resource_class"] = "gpu.medium"
         if phase == "upload":
             job_def["context"] = "org-member"
-            job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency)]
+            job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency, nightly)]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
@@ -128,7 +132,7 @@ def get_nightly_uploads():
     mylist = []
     for conf in configs:
         phase_dependency = "test" if predicate_exclude_nonlinux_and_libtorch(conf) else "build"
-        mylist.append(conf.gen_workflow_job("upload", phase_dependency))
+        mylist.append(conf.gen_workflow_job("upload", phase_dependency, nightly=True))
 
     return mylist
 
@@ -139,32 +143,25 @@ def get_nightly_tests():
 
     tests = []
     for conf_options in filtered_configs:
-        yaml_item = conf_options.gen_workflow_job("test")
+        yaml_item = conf_options.gen_workflow_job("test", nightly=True)
         tests.append(yaml_item)
 
     return tests
 
 
-def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
-
-    jobs_list = ["setup"]
-
+def get_jobs(toplevel_key, smoke):
+    jobs_list = []
     configs = gen_build_env_list(smoke)
     phase = "build" if toplevel_key == "binarybuilds" else "test"
     for build_config in configs:
-        jobs_list.append(build_config.gen_workflow_job(phase))
+        jobs_list.append(build_config.gen_workflow_job(phase, nightly=True))
 
-    jobs_dict[toplevel_key] = OrderedDict(
-        jobs=jobs_list,
-    )
-
-    graph = visualization.generate_graph(get_root(smoke, toplevel_key))
-    graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")
+    return jobs_list
 
 
-def add_binary_build_jobs(jobs_dict):
-    add_jobs_and_render(jobs_dict, "binarybuilds", False, "5 5 * * *")
+def get_binary_build_jobs():
+    return get_jobs("binarybuilds", False)
 
 
-def add_binary_smoke_test_jobs(jobs_dict):
-    add_jobs_and_render(jobs_dict, "binarysmoketests", True, "15 16 * * *")
+def get_binary_smoke_test_jobs():
+    return get_jobs("binarysmoketests", True)

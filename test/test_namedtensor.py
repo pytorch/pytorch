@@ -279,7 +279,7 @@ class TestNamedTensor(TestCase):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
             names_tag = 'names={}'.format(named_tensor.names)
-            self.assertTrue(names_tag in repr(named_tensor))
+            self.assertIn(names_tag, repr(named_tensor))
 
         check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
 
