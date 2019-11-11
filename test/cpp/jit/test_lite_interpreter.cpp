@@ -74,5 +74,25 @@ void testLiteInterpreterConv() {
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
+
+void testLiteInterpreterInline() {
+  script::Module m("m");
+  m.define(R"JIT(
+  def foo1(self, x):
+      return x + 1
+
+  def foo2(self, x):
+      return self.foo1(x) + 2
+
+  def foo3(self, x):
+      return self.foo2(x) + 3
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.run_method("foo3", inputs);
+  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+}
 } // namespace torch
 } // namespace jit

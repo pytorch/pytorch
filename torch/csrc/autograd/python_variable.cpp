@@ -541,18 +541,18 @@ static PyMethodDef extra_methods[] = {
 
 PyTypeObject THPVariableType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._TensorBase",                /* tp_name */
-  sizeof(THPVariable),                   /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPVariable_dealloc,       /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  "torch._C._TensorBase",                      /* tp_name */
+  sizeof(THPVariable),                         /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  (destructor)THPVariable_dealloc,             /* tp_dealloc */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
   nullptr,                                     /* tp_repr */
   nullptr,                                     /* tp_as_number */
   nullptr,                                     /* tp_as_sequence */
-  &THPVariable_as_mapping,               /* tp_as_mapping */
+  &THPVariable_as_mapping,                     /* tp_as_mapping */
   nullptr,                                     /* tp_hash  */
   nullptr,                                     /* tp_call */
   nullptr,                                     /* tp_str */
@@ -560,24 +560,24 @@ PyTypeObject THPVariableType = {
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
-  nullptr,                               /* tp_doc */
-  (traverseproc)THPVariable_traverse,    /* tp_traverse */
-  (inquiry)THPVariable_clear,            /* tp_clear */
+  nullptr,                                     /* tp_doc */
+  (traverseproc)THPVariable_traverse,          /* tp_traverse */
+  (inquiry)THPVariable_clear,                  /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
   nullptr,                                     /* tp_methods */
   nullptr,                                     /* tp_members */
-  THPVariable_properties,                /* tp_getset */
+  THPVariable_properties,                      /* tp_getset */
   nullptr,                                     /* tp_base */
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPVariable_pynew                      /* tp_new */
+  THPVariable_pynew                            /* tp_new */
 };
 
 namespace torch { namespace autograd {
