@@ -688,7 +688,6 @@ class RpcTest(object):
             )
         )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29150")
     @dist_init
     def test_stress_light_rpc(self):
         self._stress_test_rpc(light_rpc)
