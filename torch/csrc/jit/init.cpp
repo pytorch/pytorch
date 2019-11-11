@@ -56,6 +56,7 @@
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/func_adapter.h>
 
 #include <ATen/core/function_schema.h>
 
@@ -437,16 +438,19 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def(py::init<
-           std::function<size_t(void*, size_t)>,
-           std::function<size_t(size_t)>,
-           size_t>())
-      .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
+      .def(py::init([](caffe2::serialize::ReaderFunc in,
+                      caffe2::serialize::SeekerFunc seeker, size_t size) {
+        auto adapter =
+            caffe2::make_unique<caffe2::serialize::FuncAdapter>(in, seeker, size);
+        return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
+      }))
+      .def("get_record", [](PyTorchStreamReader &self, const std::string &key) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecord(key);
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+        return py::bytes(reinterpret_cast<const char *>(data.get()), size);
       });
+
 
   m.def(
       "_jit_get_operation",
