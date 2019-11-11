@@ -6,6 +6,47 @@ import pprint
 import functools
 
 from common_utils import TestCase
+from torch._overrides import torch_function_dispatch
+
+# The functions below simulate the pure-python torch functions in the
+# torch.functional namespace. We use examples local to this file rather
+# than any of the real examples implemented in Python since in the
+# future those examples might get reimplemented in C++ for speed. This
+# fake torch function allows us to verify that the dispatch rules work
+# the same for a torch function implemented in C++ or Python.
+
+def foo_dispatcher(a, b, c=None):
+    return (a, b, c)
+
+@torch_function_dispatch(foo_dispatcher)
+def foo(a, b, c=None):
+    """A function multiple arguments and an optional argument"""
+    if c:
+        return a + b + c
+    return a + b
+
+def bar_dispatcher(a):
+    return (a,)
+
+@torch_function_dispatch(bar_dispatcher)
+def bar(a):
+    """A function with one argument"""
+    return a
+
+def baz_dispatcher(a, b):
+    return (a, b)
+
+@torch_function_dispatch(baz_dispatcher)
+def baz(a, b):
+    """A function with multiple arguments"""
+    return a + b
+
+def quux_dispatcher(a):
+    return (a,)
+
+@torch_function_dispatch(quux_dispatcher)
+def quux(a):
+    return a
 
 # HANDLED_FUNCTIONS_DIAGONAL is a dispatch table that
 # DiagonalTensor.__torch_function__ uses to determine which override
@@ -114,10 +155,22 @@ def diagonal_mm(mat1, mat2):
 
 @implements_diagonal(torch.div)
 def diagonal_div(input, other, out=None):
-    return 1
+    return -1
 
 @implements_diagonal(torch.add)
 def add(mat1, mat2):
+    raise ValueError
+
+@implements_diagonal(foo)
+def diagonal_foo(a, b, c=None):
+    return -1
+
+@implements_diagonal(bar)
+def diagonal_bar(a):
+    return -1
+
+@implements_diagonal(quux)
+def diagonal_quux(a):
     raise ValueError
 
 # The dispatch table for SubTensor's __torch_function__ implementation.
@@ -161,10 +214,13 @@ class SubTensor(torch.Tensor):
         # __torch_function__ to handle DiagonalTensor objects.
         return HANDLED_FUNCTIONS_SUB[func](*args, **kwargs)
 
+@implements_sub(torch.mean)
+def sub_mean(mat):
+    return 0
 
 @implements_sub(torch.mm)
 def sub_mm(mat1, mat2):
-    return 0
+    return -1
 
 @implements_sub(torch.div)
 def sub_div(input, other, out=None):
@@ -201,12 +257,20 @@ class SubDiagonalTensor(DiagonalTensor):
 def sub_diagonal_mean(mat):
     return 10 * float(mat._i) / mat._N
 
+@implements_sub_diagonal(bar)
+def sub_diagonal_bar(mat):
+    return 0
+
 @implements_sub_diagonal(torch.mm)
 def sub_diagonal_mm(mat1, mat2):
     return 1
 
 @implements_sub_diagonal(torch.div)
 def sub_diagonal_div(input, other, out=None):
+    return NotImplemented
+
+@implements_sub_diagonal(foo)
+def sub_diagonal_foo(a, b, c=None):
     return NotImplemented
 
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
@@ -716,49 +780,85 @@ class TensorLike(object):
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestTorchFunctionOverride(TestCase):
-    def test_diagonal_mean(self):
+    def test_mean(self):
+        """Test that a function with one argument can be overrided"""
+        t1 = DiagonalTensor(5, 2)
+        t2 = SubTensor([[1, 2], [1, 2]])
+        t3 = SubDiagonalTensor(5, 2)
+        self.assertEqual(torch.mean(t1), 12.5)
+        self.assertEqual(bar(t1), -1)
+        self.assertEqual(torch.mean(t2), 0)
+        self.assertEqual(bar(t2), t2)
+        self.assertEqual(torch.mean(t3), 125)
+        self.assertEqual(bar(t3), 0)
+
+    def test_mm(self):
+        """Test that a function with multiple arguments can be overrided"""
         t1 = DiagonalTensor(5, 2)
         t2 = torch.eye(5) * 2
-        self.assertEqual(t1.tensor(), t2)
-        self.assertEqual(torch.mean(t1), torch.mean(t2))
-
-    def test_subtensor_mm(self):
-        t = SubTensor([[1, 2], [1, 2]])
-        self.assertEqual(torch.mm(t, t), 0)
-
-    def test_subdiagonal_mean(self):
-        t1 = SubDiagonalTensor(5, 2)
-        t2 = 10 * torch.eye(5) * 2
-        self.assertEqual(t1.tensor() * 10, t2)
-        self.assertEqual(torch.mean(t1), torch.mean(t2))
-
-    def test_subdiagonal_mm(self):
-        t1 = DiagonalTensor(5, 2)
-        t2 = SubDiagonalTensor(5, 2)
-        t3 = torch.eye(5) * 2
-        self.assertEqual(torch.mm(t1, t2), 1)
-        self.assertEqual(torch.mm(t2, t1), 1)
-        self.assertEqual(torch.mm(t3, t1), 0)
+        t3 = SubTensor([[1, 2], [1, 2]])
+        t4 = SubDiagonalTensor(5, 2)
+        # only DiagonalTensor so should always get DiagonalTensor result
+        self.assertEqual(torch.mm(t1, t1), 0)
+        # tensor and DiagonalTensor, always return DiagonalTensor result
+        self.assertEqual(torch.mm(t1, t2), 0)
+        self.assertEqual(torch.mm(t2, t1), 0)
+        # only SubTensor so should always get SubTensor result
+        self.assertEqual(torch.mm(t3, t3), -1)
+        # tensor and SubTensor so should always get SubTensor result
+        self.assertEqual(torch.mm(t3, t2), -1)
+        self.assertEqual(torch.mm(t2, t3), -1)
+        # DiagonalTensor and SubTensor are unrelated classes so the result
+        # depends on which argument appears first
+        self.assertEqual(torch.mm(t3, t1), -1)
         self.assertEqual(torch.mm(t1, t3), 0)
-        self.assertEqual(torch.mm(t3, t2), 1)
-        self.assertEqual(torch.mm(t2, t3), 1)
+        # SubDiagonalTensor should take precedence over DiagonalTensor
+        # but should behave otherwise the same as DiagonalTensor
+        self.assertEqual(torch.mm(t4, t4), 1)
+        self.assertEqual(torch.mm(t4, t1), 1)
+        self.assertEqual(torch.mm(t1, t4), 1)
+        self.assertEqual(torch.mm(t4, t2), 1)
+        self.assertEqual(torch.mm(t2, t4), 1)
+        self.assertEqual(torch.mm(t3, t4), -1)
+        self.assertEqual(torch.mm(t4, t3), 0)
 
-    def test_subclass_notimplemented_return(self):
-        # DiagonalTensor has a valid override for torch.div and
-        # SubDiagonal has an override that returns NotImplemented so
-        # torch.div on t1 and t2 below should call the DiagonalTensor
-        # implementation, returning 1
+    def test_precedence_semantics(self):
+        """Test semantics for __torch_function__ for functions that take
+        multiple arugments
+
+        For functions that take multiple arguments, the appropriate
+        __torch_function__ implementation to call is determined by
+        examining the types of the arguments. The precedence order is
+        left-to-right in the argument list, except subclasses are always
+        checked before superclasses. The __torch_function__
+        implementations are called in order of precedence, with the
+        first result that is not NotImplemented returned to the user. If
+        all implementations return NotImplemented, a TypeError is
+        raised.
+
+        All cases are tested with functions implemented in C++ and
+        either foo or baz, which are python functions defined above that
+        are instrumented to obey the same dispatch rules as the
+        functions in torch.functional.
+        """
+        # DiagonalTensor has a valid override and SubDiagonal has an
+        # override that returns NotImplemented so we should call the
+        # DiagonalTensor implementation, returning -1
         t1 = DiagonalTensor(5, 2)
         t2 = SubDiagonalTensor(5, 2)
-        self.assertEqual(torch.div(t1, t2), 1)
-        self.assertEqual(torch.div(t2, t1), 1)
+        self.assertEqual(torch.div(t1, t2), -1)
+        self.assertEqual(torch.div(t2, t1), -1)
+        self.assertEqual(foo(t1, t2), -1)
+        self.assertEqual(foo(t2, t1), -1)
 
         # SubTensor has an implementation that returns NotImplemented as
         # well so it should behave exactly like SubDiagonalTensor in the
         # test above
         t3 = SubTensor([[1, 2], [1, 2]])
-        self.assertEqual(torch.div(t1, t3), 1)
-        self.assertEqual(torch.div(t3, t1), 1)
+        self.assertEqual(torch.div(t1, t3), -1)
+        self.assertEqual(torch.div(t3, t1), -1)
+        self.assertEqual(foo(t1, t3), -1)
+        self.assertEqual(foo(t3, t1), -1)
 
         # div between SubTensor and SubDiagonalTensor should raise
         # TypeError since both have an implementation that
@@ -767,9 +867,13 @@ class TestTorchFunctionOverride(TestCase):
             torch.div(t2, t3)
         with self.assertRaises(TypeError):
             torch.div(t3, t2)
+        with self.assertRaises(TypeError):
+            foo(t2, t3)
+        with self.assertRaises(TypeError):
+            foo(t3, t2)
 
         # none of DiagonalTensor, SubdiagonalTensor, or SubTensor have a
-        # mul implmentation so all ops should raise TypeError
+        # mul or a baz implementation so all ops should raise TypeError
         with self.assertRaises(TypeError):
             torch.mul(t1, t1)
         with self.assertRaises(TypeError):
@@ -788,12 +892,33 @@ class TestTorchFunctionOverride(TestCase):
             torch.mul(t3, t2)
         with self.assertRaises(TypeError):
             torch.mul(t3, t3)
+        with self.assertRaises(TypeError):
+            baz(t1, t1)
+        with self.assertRaises(TypeError):
+            baz(t1, t2)
+        with self.assertRaises(TypeError):
+            baz(t1, t3)
+        with self.assertRaises(TypeError):
+            baz(t2, t1)
+        with self.assertRaises(TypeError):
+            baz(t2, t2)
+        with self.assertRaises(TypeError):
+            baz(t2, t3)
+        with self.assertRaises(TypeError):
+            baz(t3, t1)
+        with self.assertRaises(TypeError):
+            baz(t3, t2)
+        with self.assertRaises(TypeError):
+            baz(t3, t3)
 
-    def test_diagonal_add_raises(self):
+    def test_user_implementation_raises(self):
+        """Test that errors raised in user implementations propagate correctly"""
         t1 = DiagonalTensor(5, 2)
         t2 = DiagonalTensor(5, 2)
         with self.assertRaises(ValueError):
             torch.add(t1, t2)
+        with self.assertRaises(ValueError):
+            quux(t1)
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
