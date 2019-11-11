@@ -11,11 +11,11 @@ namespace detail {
 inline Tensor batch_norm(const Tensor& input,
                          const Tensor& running_mean,
                          const Tensor& running_var,
-                         Tensor weight = {},
-                         Tensor bias = {},
-                         bool training = false,
-                         c10::optional<double> momentum = 0.1,
-                         double eps = 1e-5) {
+                         Tensor weight,
+                         Tensor bias,
+                         bool training,
+                         c10::optional<double> momentum,
+                         double eps) {
   if (training) {
     auto size = input.sizes();
     int64_t size_prods = size[0];
@@ -40,7 +40,7 @@ inline Tensor batch_norm(const Tensor& input,
 } // namespace detail
 
 inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
-                         const Tensor& running_var, const BatchNormOptions& options = {}, bool training = false) {
+                         const Tensor& running_var, BatchNormFuncOptions options = {}, bool training = false) {
   return detail::batch_norm(
     input,
     running_mean,
