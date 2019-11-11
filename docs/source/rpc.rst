@@ -20,7 +20,7 @@ Before using RPC and distributed autograd primitives, initialization must take p
 RRef
 ------
 
-An RRef (Remote REFerence) is a reference to a value of some type T (e.g. Tensor) on a remote worker. This handle keeps the referenced remote tensor value alive on the owner, but there is no implication that the value will be transferred to the local worker in the future. RRefs can be used in multi-machine training through holding references to `nn.Modules` that exist on other workers, and calling the appropriate functions to retrieve or modify their parameters during training.
+An RRef (Remote REFerence) is a reference to a value of some type T (e.g. Tensor) on a remote worker. This handle keeps the referenced remote value alive on the owner, but there is no implication that the value will be transferred to the local worker in the future. RRefs can be used in multi-machine training through holding references to `nn.Modules` that exist on other workers, and calling the appropriate functions to retrieve or modify their parameters during training.
 
 .. autoclass:: RRef
     :members:

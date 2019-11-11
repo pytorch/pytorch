@@ -53,7 +53,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
                           py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
-      shared_ptr_class_<PyRRef>(module, "RRef", R"(Test docs)")
+      shared_ptr_class_<PyRRef>(module, "RRef", R"(
+          A class encapsulating a reference to a value of some type on a remote worker. This handle will keep the referenced remote value alive on the worker.
+      )")
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
