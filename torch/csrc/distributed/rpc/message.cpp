@@ -113,6 +113,22 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
+Message createException(const Message& request, const std::exception& e) {
+  std::string exceptionMsg = e.what();
+  return createException(request, exceptionMsg);
+}
+
+Message createException(
+    const Message& request,
+    const std::string& exceptionStr) {
+  std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
+  return Message(
+      std::move(payload),
+      std::vector<torch::Tensor>(),
+      MessageType::EXCEPTION,
+      request.id());
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
