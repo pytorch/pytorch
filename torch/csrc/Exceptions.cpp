@@ -109,7 +109,7 @@ static std::string formatMessage(const char *format, va_list fmt_args) {
   static const size_t ERROR_BUF_SIZE = 1024;
   char error_buf[ERROR_BUF_SIZE];
   vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
-  
+
   // Ensure that the string is null terminated
   error_buf[sizeof(error_buf) / sizeof(*error_buf) - 1] = 0;
 
@@ -136,6 +136,73 @@ ValueError::ValueError(const char *format, ...) {
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
+
+void PyWarningHandler::process(
+    const c10::SourceLocation& source_location,
+    const std::string& msg) {
+  warning_buffer_.push_back({source_location, msg});
+};
+
+PyWarningHandler::PyWarningHandler() noexcept(true):
+      prev_handler_(c10::Warning::get_warning_handler()) {
+  c10::Warning::set_warning_handler(this);
+}
+
+/// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+/// NOLINTNEXTLINE(bugprone-exception-escape)
+PyWarningHandler::~PyWarningHandler() noexcept(false) {
+  c10::Warning::set_warning_handler(prev_handler_);
+
+  if(warning_buffer_.size() > 0) {
+    AutoGIL gil;
+
+    PyObject *ptype, *pvalue, *ptraceback;
+    PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+
+    if(ptype) {
+      // A python error happened after the warning
+      // Simply handle with the previous handler
+      for(const auto& warning: warning_buffer_) {
+        auto source_location = warning.first;
+        const auto& msg = processErrorMsg(warning.second);
+        c10::Warning::warn(source_location, msg);
+      }
+      warning_buffer_.clear();
+      // The parent function already returns an error
+      // We only restore the error and exit the
+      // destructor normally
+      PyErr_Restore(ptype, pvalue, ptraceback);
+    } else {
+      auto result = 0;
+      for(const auto& warning: warning_buffer_) {
+        auto source_location = warning.first;
+        const auto& msg = processErrorMsg(warning.second);
+        if (source_location.file == nullptr) {
+          result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
+        } else {
+          result = PyErr_WarnExplicit(
+              /*category=*/PyExc_UserWarning,
+              /*message=*/msg.c_str(),
+              /*filename=*/source_location.file,
+              /*lineno=*/source_location.line,
+              /*module=*/nullptr,
+              /*registry=*/nullptr);
+        }
+        if (result < 0) {
+          break;
+        }
+      }
+      warning_buffer_.clear();
+      if (result < 0) {
+        /// A warning raised an error, we need to force the parent
+        /// function to return an error code.
+        throw python_error();
+      }
+    }
+  }
+}
+
+
 
 } // namespace torch
 
