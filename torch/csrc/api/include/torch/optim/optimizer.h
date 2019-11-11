@@ -58,7 +58,7 @@ class TORCH_API OptimizerCloneableOptions : public OptimizerOptions {
 class TORCH_API OptimizerParamGroup {
  public:
   // NOTE: In order to store `OptimizerParamGroup` in a `std::vector`, it has to be copy-constructible.
-  OptimizerParamGroup(const OptimizerParamGroup& param_group) : params_(param_group.params()), options_(param_group.has_options() ? param_group.options()->clone() : nullptr) {}
+  OptimizerParamGroup(const OptimizerParamGroup& param_group) : params_(param_group.params()), options_(param_group.has_options() ? param_group.options().clone() : nullptr) {}
   OptimizerParamGroup(std::vector<Tensor> params) : params_(params) {}
   OptimizerParamGroup(std::vector<Tensor> params, std::unique_ptr<OptimizerOptions> options) : params_(params), options_(std::move(options)) {}
 
@@ -66,14 +66,14 @@ class TORCH_API OptimizerParamGroup {
     return options_ != nullptr;
   }
 
-  OptimizerOptions* options() {
+  OptimizerOptions& options() {
     TORCH_CHECK(has_options());
-    return options_.get();
+    return *options_.get();
   }
 
-  const OptimizerOptions* options() const {
+  const OptimizerOptions& options() const {
     TORCH_CHECK(has_options());
-    return options_.get();
+    return *options_.get();
   }
 
   void set_options(std::unique_ptr<OptimizerOptions> options) {
@@ -125,7 +125,7 @@ class TORCH_API OptimizerBase {
     if (!param_group.has_options()) {
       param_group_.set_options(defaults_->clone());
     } else {
-      param_group_.set_options(param_group.options()->clone());
+      param_group_.set_options(param_group.options().clone());
     }
     // TODO: check "some parameters appear in more than one parameter group"
     param_groups_.push_back(std::move(param_group_));
