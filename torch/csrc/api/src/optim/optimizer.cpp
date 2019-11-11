@@ -26,8 +26,8 @@ void OptimizerBase::zero_grad() {
       parameter.grad().zero_();
     }
   }
-  for(size_t i=0; i<param_groups.size(); i++) {
-    for(auto p: param_groups[i]) {
+  for (auto& group : param_groups) {
+    for (auto& p : group.at("params").toTensorListRef()) {
       if(p.grad().defined()) {
         p.grad().detach_();
         p.grad().zero_();
