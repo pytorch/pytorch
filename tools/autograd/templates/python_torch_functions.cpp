@@ -535,7 +535,7 @@ void initTorchFunctions(PyObject* module) {
 PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyTypeObject &torch_api) {
   py::object torch_api_function = PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != NULL, "torch API function must exist");
-  py::object ret = py::object();
+  py::object ret;
   for (auto &arg : r.overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
     ret = py::reinterpret_borrow<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
