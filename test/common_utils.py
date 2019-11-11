@@ -107,8 +107,6 @@ def repeat_test_for_types(dtypes):
         return call_helper
     return repeat_helper
 
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
@@ -133,11 +131,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
-        if IS_PYTORCH_CI:
-            import xmlrunner
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output='test-reports'))
-        else:
-            unittest.main(argv=argv)
+        unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
@@ -145,6 +139,9 @@ PY34 = sys.version_info >= (3, 4)
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
+
+# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
 
 if IS_WINDOWS:
     @contextmanager
