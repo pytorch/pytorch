@@ -20,6 +20,7 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
+from jit.test_builtins import TestBuiltins  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -353,6 +354,13 @@ class TestJit(JitTestCase):
         input = input.cuda()
 
         traced_rec = torch.jit.trace(rec, (input))
+
+    def test_trace_legacy_ctor(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return (x + 1, torch.FloatTensor([0]))
+
+        traced_rec = torch.jit.trace(MyModule(), torch.randn(2, 2))
 
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -3879,6 +3887,76 @@ def foo(x):
             with freeze_rng_state():
                 o2 = cu.f()
             self.assertEqual(o1, o2)
+
+    def test_cpp_module_iterator(self):
+        a = nn.Module()
+        a.name = 'a'
+        a.p = nn.Parameter(torch.rand(3, 4))
+        a.foo = nn.Module()
+        a.foo.name = 'foo'
+        a.foo.register_buffer('b', torch.rand(1, 1))
+        a.foo.bar = nn.Module()
+        a.foo.bar.name = 'bar'
+        a.foo.bar.an_int = 4
+        a.another = nn.Module()
+        a.another.name = 'another'
+        sa = torch.jit.script(a)
+        result = torch._C._jit_debug_module_iterators(sa._c)
+
+        def replace(e):
+            if e is a.p:
+                return 'P'
+            elif e is a.foo.b:
+                return 'B'
+            elif isinstance(e, torch._C.ScriptModule):
+                return e._get_attribute('name')
+
+            return e
+        for k, v in result.items():
+            for i in range(len(v)):
+                if isinstance(v[i], tuple):
+                    n, v2 = v[i]
+                    v[i] = (n, replace(v2))
+                else:
+                    v[i] = replace(v[i])
+            # module type creation is not deterministic, so we have to sort
+            # the result
+            v.sort()
+        expected = {'buffers': [],
+                    'buffers_r': ['B'],
+                    'children': ['another', 'foo'],
+                    'modules': ['a', 'another', 'bar', 'foo'],
+                    'named_attributes': [('another', 'another'),
+                                         ('foo', 'foo'),
+                                         ('name', 'a'),
+                                         ('p', 'P'),
+                                         ('training', True)],
+                    'named_attributes_r': [('another', 'another'),
+                                           ('another.name', 'another'),
+                                           ('another.training', True),
+                                           ('foo', 'foo'),
+                                           ('foo.b', 'B'),
+                                           ('foo.bar', 'bar'),
+                                           ('foo.bar.an_int', 4),
+                                           ('foo.bar.name', 'bar'),
+                                           ('foo.bar.training', True),
+                                           ('foo.name', 'foo'),
+                                           ('foo.training', True),
+                                           ('name', 'a'),
+                                           ('p', 'P'),
+                                           ('training', True)],
+                    'named_buffers': [],
+                    'named_buffers_r': [('foo.b', 'B')],
+                    'named_children': [('another', 'another'), ('foo', 'foo')],
+                    'named_modules': [('', 'a'),
+                                      ('another', 'another'),
+                                      ('foo', 'foo'),
+                                      ('foo.bar', 'bar')],
+                    'named_parameters': [('p', 'P')],
+                    'named_parameters_r': [('p', 'P')],
+                    'parameters': ['P'],
+                    'parameters_r': ['P']}
+        self.assertEqual(expected, result)
 
     def test_tracing_hooks(self):
         class Net(nn.Module):
@@ -7488,6 +7566,16 @@ a")
                         break
                 ''')
 
+        with self.assertRaisesRegex(RuntimeError, "do not support break or continue inside"):
+            @torch.jit.script
+            def foo(x):
+                i = 0
+                for a in (1, "2", 1.5):
+                    b = a
+                    if x:
+                        break
+                return b
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
@@ -9326,6 +9414,28 @@ a")
             return b
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+    def test_script_copy(self):
+        class M(torch.nn.Module):
+            __annotations__ = {
+                "val": Optional[torch.Tensor]
+            }
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.val = None
+
+            def some_method(self):
+                return 3
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                self.val = x + self.some_method()
+                return x
+
+        m = torch.jit.script(M())
+        # test copy
+        m_c = m.copy()
 
     @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
@@ -13861,8 +13971,8 @@ a")
 
     def test_string_index(self):
         def fn(x):
-            # type: (str) -> str
-            return x[2]
+            # type: (str)
+            return x[2], x[-1]
 
         self.checkScript(fn, ("abcde",))
 
@@ -15844,6 +15954,7 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
             foo(1)
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
