@@ -1411,7 +1411,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.ones(2, 3, 4)
         y = torch.ones(2, 3, 4) * 2
-        self.run_model_test(Arithmetic(), train=False, input=(), batch_size=BATCH_SIZE, use_gpu=False, example_outputs=(x+3, y*(x+3)))
+        self.run_model_test(Arithmetic(), train=False, input=(), batch_size=BATCH_SIZE, use_gpu=False, example_outputs=(x + 3, y * (x + 3)))
 
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
