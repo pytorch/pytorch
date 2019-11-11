@@ -27,7 +27,7 @@ qactivation_long_configs = op_bench.cross_product_configs(
         (16, 512,  28,  28),  # ReLU-18  # noqa
         (16, 512,  14,  14),  # ReLU-25  # noqa
     ),
-    permute_dims=(False, True),
+    contig=(False, True),
     inplace=(False, True),
     dtype=(torch.quint8,),
     tags=('long',)
@@ -36,7 +36,7 @@ qactivation_long_configs = op_bench.cross_product_configs(
 qactivation_short_configs = op_bench.cross_product_configs(
     dims=((3, 4, 5),      # Rank=3
           (2, 3, 4, 5)),  # Rank=4,
-    permute_dims=(False,),
+    contig=(False,),
     inplace=(False,),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
     tags=('short',)
@@ -53,7 +53,7 @@ qactivation_ops = op_bench.op_list(
 
 class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
     r"""Base class for all the activations."""
-    def __setup(self, dims, permute_dims, dtype):
+    def _setup(self, dims, contig, dtype):
         # Input
         f_input = (torch.rand(*dims) - 0.5) * 256
         scale = 1.0
@@ -63,14 +63,13 @@ class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
                                                  zero_point=zero_point,
                                                  dtype=dtype)
-        if permute_dims:
+        if not contig:
             # Make non-contiguous
-            new_shape = list(range(len(self.q_input.shape)))
-            random.shuffle(new_shape)
+            new_shape = list(range(self.q_input.ndim))[::-1]
             self.q_input = self.q_input.permute(new_shape)
 
-    def init(self, dims, permute_dims, inplace, dtype, op_func):
-        self.__setup(dims, permute_dims, dtype)
+    def init(self, dims, contig, inplace, dtype, op_func):
+        self._setup(dims, contig, dtype)
         self.qop = op_func
 
     def forward(self):
