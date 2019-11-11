@@ -53,14 +53,14 @@ class TORCH_API OptimizerBase {
       }
       param_groups.push_back(param_group);
     }
-    for (const auto& group : param_groups) {
-      for (const Tensor& p : group.at("params").toTensorList()) {
-          at::TensorImpl* index = p.unsafeGetTensorImpl();
-          auto& state_ = state.at(index);
-          state_["step"] = 0;// at::IValue, can be converted to int64_t using .toInt()
-          state_["sum"] = 0;// at::IValue, can be converted to Tensor using .toTensor()
-      }
-    }
+    // for (const auto& group : param_groups) {
+    //   for (const Tensor& p : group.at("params").toTensorList()) {
+    //       at::TensorImpl* index = p.unsafeGetTensorImpl();
+    //       auto& state_ = state.at(index);
+    //       state_["step"] = 0;// at::IValue, can be converted to int64_t using .toInt()
+    //       state_["sum"] = 0;// at::IValue, can be converted to Tensor using .toTensor()
+    //   }
+    // }
   }
 
   explicit OptimizerBase(std::vector<c10::Dict<std::string, at::IValue>> param_groups_): param_groups(param_groups_) {}
@@ -112,7 +112,7 @@ class TORCH_API OptimizerBase {
   std::vector<Tensor> parameters_;
   //to do-description
   std::vector<c10::Dict<std::string, at::IValue>> param_groups;
-  c10::Dict<at::TensorImpl*, c10::Dict<std::string, at::IValue>> state;
+  //c10::Dict<at::TensorImpl*, c10::Dict<std::string, at::IValue>> state;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
