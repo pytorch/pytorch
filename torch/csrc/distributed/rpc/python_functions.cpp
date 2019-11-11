@@ -1,13 +1,12 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
+
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/python_udf_call.h>
-#include <torch/csrc/distributed/rpc/python_udf_resp.h>
-#include <torch/csrc/distributed/rpc/utils.h>
-
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
+#include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -15,7 +14,7 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-
+#include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
@@ -86,7 +85,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
     }
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
-      auto& resp = static_cast<PythonUDFResp&>(rpc);
+      auto& resp = static_cast<PythonResp&>(rpc);
 
       return PythonRpcHandler::getInstance().loadPythonUDFResult(
           resp.pickledPayload(), resp.tensors());
@@ -159,11 +158,11 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
-  auto pythonUDFCall = c10::guts::make_unique<PythonUDFCall>(
+  auto pythonCall = c10::guts::make_unique<PythonCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
   return sendMessageWithAutograd(
-      agent, dst, std::move(*pythonUDFCall).toMessage());
+      agent, dst, std::move(*pythonCall).toMessage());
 }
 
 PyRRef pyRemotePythonUdf(

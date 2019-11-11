@@ -123,16 +123,10 @@ def replicate(network, devices, detach=False):
             if _is_script_module(module):
                 # we have to initialize ScriptModule properly so that
                 # it works with pybind11
-                cpp_replica = torch._C.ScriptModule(torch._jit_internal._qualified_name(type(module)), torch.jit._python_cu, True)
-                for name, the_type, value in module._c._get_attributes():
-                    if name in module._buffers.keys():
-                        continue
-                    cpp_replica._register_attribute(name, the_type, value)
-
                 def init_fn(script_module):
                     # Don't do anything here, we'll initialize the ScriptModule below
                     return
-                replica = torch.jit.RecursiveScriptModule._construct(cpp_replica, init_fn)
+                replica = torch.jit.RecursiveScriptModule._construct(module._c._replicate_for_data_parallel(), init_fn)
             else:
                 replica = module._replicate_for_data_parallel()
 
