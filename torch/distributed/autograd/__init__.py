@@ -22,10 +22,11 @@ class context(object):
 
     This is only needed in the "FAST" mode (as described in
     https://github.com/pytorch/pytorch/issues/23110) for distributed autograd,
-    where we assume all RPC communication is would also be part of the backward
+    where we assume all RPC communication in the forward pass would also be part of the backward
     pass.
 
     Example::
+
         >> import torch.distributed.autograd as dist_autograd
         >> with dist_autograd.context() as context_id:
         >>      forward pass...
