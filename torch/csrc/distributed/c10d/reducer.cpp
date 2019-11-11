@@ -264,7 +264,7 @@ void Reducer::autograd_hook(VariableIndex index) {
   // output, they won't be part of the autograd graph, and won't receive
   // gradients. These parameters are discovered in the `prepare_for_backward`
   // function and their indexes stored in the `unused_parameters_` vector.
-  if (!has_marked_unused_parameters_ && !unused_parameters_.empty()) {
+  if (!has_marked_unused_parameters_) {
     has_marked_unused_parameters_ = true;
 
     // Allreduce locally used param maps to get the global consensus
