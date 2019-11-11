@@ -1528,18 +1528,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
 
+    # This test checks output scalar type in the ONNX graph should not be null
+    # https://github.com/pytorch/pytorch/issues/28607
     def test_trace_script(self):
         @torch.jit.script
-        def center_slice_helper(input, h_offset, w_offset):
-            return input[:, h_offset:, w_offset:]
+        def center_slice_helper(input, h_offset):
+            return input[:, h_offset:]
 
         class CenterCrop(torch.nn.Module):
             def forward(self, input):
-                height, width = x.shape[1] - 2, x.shape[2] - 2
-                height, width = torch.tensor(height).to(input.device), torch.tensor(width).to(input.device)
-                return center_slice_helper(input, height, width)
+                return center_slice_helper(input, torch.tensor(x.shape[1] - 1))
 
-        x = torch.randn(3, 4, 5)
+        x = torch.randn(3, 4)
         self.run_test(CenterCrop(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
