@@ -103,9 +103,9 @@ void TensorNames::checkUnique(const char* op_name) const {
         [&](const TensorName& other) { return other.toDimname() == name; });
     TORCH_CHECK(dup == names_.end(),
         op_name, ": ",
-        "Attempted to propagate dims ", *it, " and ", dup, " to the output, ",
-        "but that would create a tensor with duplicate names ", toDimnameVec(),
-        ". Please rename your inputs with Tensor.rename to prevent this.");
+        "Attempted to propagate dims ", *it, " and ", *dup, " to the output, ",
+        "but that would create a tensor with duplicate names [", toDimnameVec(),
+        "]. Please rename your inputs with Tensor.rename to prevent this.");
   }
 }
 
@@ -114,7 +114,7 @@ void TensorNames::checkUnique(const char* op_name) const {
 // 'C' (index 1 of ['N', 'C', 'H', 'W'])
 std::ostream& operator<<(std::ostream& out, const TensorName& tensorname) {
   out << tensorname.name_ << " (index ";
-  out << static_cast<int>(tensorname.origin_idx_) << " of ";
+  out << tensorname.origin_idx_ << " of ";
   out << tensorname.origin_ << ")";
   return out;
 }
