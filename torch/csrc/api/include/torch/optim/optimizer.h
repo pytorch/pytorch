@@ -43,12 +43,20 @@ class TORCH_API OptimizerBase {
 
   //todo
   template <typename OptimizerOptions>
-  explicit OptimizerBase(std::vector<std::vector<Tensor>> params, OptimizerOptions options) {
+  explicit OptimizerBase(std::vector<Tensor> params, OptimizerOptions options) {
     for(size_t i=0; i<params.size(); i++) {
       c10::Dict<std::string, at::IValue> param_group;
       param_group.insert("params", params[i]);
       param_group.insert("options", options);
       param_groups.push_back(param_group);
+    }
+    for (const auto& group : param_groups) {
+      for (const Tensor& p : group.at("params").toTensorList()) {
+          at::TensorImpl* index = p.unsafeGetTensorImpl();
+          auto& state_ = state.at(index);
+          state_["step"] = 0;// at::IValue, can be converted to int64_t using .toInt()
+          state_["sum"] = 0;// at::IValue, can be converted to Tensor using .toTensor()
+      }
     }
   }
 
@@ -99,6 +107,7 @@ class TORCH_API OptimizerBase {
   std::vector<Tensor> parameters_;
   //to do-description
   std::vector<c10::Dict<std::string, at::IValue>> param_groups;
+  c10::Dict<at::TensorImpl*, c10::Dict<std::string, at::IValue>> state;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
