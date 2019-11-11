@@ -34,6 +34,38 @@ void copy_kernel_cast(TensorIterator& iter) {
     }
 }
 
+template <>
+void copy_kernel_cast<std::complex<float>>(TensorIterator& iter) {
+  // Specialization for inter-complex dtypes
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    ScalarType::Half,
+    ScalarType::Bool,
+    ScalarType::BFloat16,
+    iter.dtype(1),
+    "copy_kernel_cast",
+    [&] {
+      cpu_kernel(iter, [=](scalar_t a) -> std::complex<float> {
+        return c10::static_cast_with_inter_type<std::complex<float>>(a);
+      });
+    });
+}
+
+template <>
+void copy_kernel_cast<std::complex<double>>(TensorIterator& iter) {
+  // Specialization for inter-complex dtypes
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    ScalarType::Half,
+    ScalarType::Bool,
+    ScalarType::BFloat16,
+    iter.dtype(1),
+    "copy_kernel_cast",
+    [&] {
+      cpu_kernel(iter, [=](scalar_t a) -> std::complex<double> {
+        return c10::static_cast_with_inter_type<std::complex<double>>(a);
+      });
+    });
+}
+
 static void copy_kernel(TensorIterator& iter, bool non_blocking) {
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
