@@ -323,8 +323,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<FunctionValue>(*fnAttr);
   }
 
-  // 6. Check if it's a property of the original Python class that this
-  // ScriptModule was derived from. The only class properties we handle are
+  // 6. Check if it's an attribute of the original Python class that this
+  // ScriptModule was derived from. The only class attributes we handle are
   // methods.
   py::object unboundMethod = py::getattr(
       concreteType_->getPyClass(),
@@ -332,9 +332,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       pybind11::cast<pybind11::none>(Py_None));
   if (py::isinstance<py::function>(unboundMethod)) {
     // For Python methods that we're trying to call directly, we need to bind
-    // the method to a self. TODO say more about tis
-    //
-    // If the function is @ignored
+    // the method to a self. (see the documentation for lazy_bind in Python for
+    // more info).
     bool isIgnoredFn =
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_ignored_fn")(unboundMethod));
@@ -356,7 +355,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         py::module::import("torch.jit._recursive")
             .attr("compile_unbound_method")(concreteType_, unboundMethod);
     TORCH_INTERNAL_ASSERT(!stub.is_none());
-    return SimpleValue(self_).attr(loc, m, field);
+    // Look up the attribute again, it will be available as a compiled method.
+    return attr(loc, m, field);
   }
 
   // We've exhausted all possibilities. Bailout with a hint to the user.
