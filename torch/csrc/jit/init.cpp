@@ -535,7 +535,7 @@ void initJITBindings(PyObject* module) {
 
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
-      auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
+      auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
       auto body_block = fork_node->addBlock();
 
       Value* node_output;
@@ -557,9 +557,6 @@ void initJITBindings(PyObject* module) {
         body_block->registerOutput(out_val);
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));
-
-        // Lambda lift into a Subgraph attribute
-        torch::jit::script::lambdaLiftFork(fork_node);
       }
 
       auto retval =
