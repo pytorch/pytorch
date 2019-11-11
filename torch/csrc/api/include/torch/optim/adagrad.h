@@ -32,26 +32,36 @@ class TORCH_API Adagrad : public Optimizer {
   template <typename ParameterContainer>
   explicit Adagrad(
       ParameterContainer&& parameters,
-      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters), options_), defaultOptions(options_) {
-    TORCH_CHECK(defaultOptions.learning_rate() >= 0, "Invalid learning rate: ", defaultOptions.learning_rate());
-    TORCH_CHECK(defaultOptions.lr_decay() >= 0, "Invalid lr_decay value: ", defaultOptions.lr_decay());
-    TORCH_CHECK(defaultOptions.weight_decay() >= 0, "Invalid weight_decay value: ", defaultOptions.weight_decay());
-    TORCH_CHECK(defaultOptions.initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", defaultOptions.initial_accumulator_value());
-    TORCH_CHECK(defaultOptions.eps() >= 0, "Invalid epsilon value: ", defaultOptions.eps());
-  }
+      const AdagradOptions& options_)
+      : Optimizer(std::forward<ParameterContainer>(parameters)),
+        options(options_) {}
+  // explicit Adagrad(
+  //       std::vector<std::vector<Tensor>> parameters,
+  //       const AdagradOptions& options_) : Optimizer(std::forward<std::vector<std::vector<Tensor>>>(parameters), options_), options(options_) {
+  //     TORCH_CHECK(options.learning_rate() >= 0, "Invalid learning rate: ", options.learning_rate());
+  //     TORCH_CHECK(options.lr_decay() >= 0, "Invalid lr_decay value: ", options.lr_decay());
+  //     TORCH_CHECK(options.weight_decay() >= 0, "Invalid weight_decay value: ", options.weight_decay());
+  //     TORCH_CHECK(options.initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", options.initial_accumulator_value());
+  //     TORCH_CHECK(options.eps() >= 0, "Invalid epsilon value: ", options.eps());
+  //   }
 
   explicit Adagrad(std::vector<c10::Dict<std::string, at::IValue>> param_groups,
-      const AdagradOptions& options_) : Optimizer(param_groups), defaultOptions(options_) {}
+      const AdagradOptions& options_) : Optimizer(param_groups), options(options_) {
+      TORCH_CHECK(options.learning_rate() >= 0, "Invalid learning rate: ", options.learning_rate());
+      TORCH_CHECK(options.lr_decay() >= 0, "Invalid lr_decay value: ", options.lr_decay());
+      TORCH_CHECK(options.weight_decay() >= 0, "Invalid weight_decay value: ", options.weight_decay());
+      TORCH_CHECK(options.initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", options.initial_accumulator_value());
+      TORCH_CHECK(options.eps() >= 0, "Invalid epsilon value: ", options.eps());
+  }
 
   void step() override;
 
-  AdagradOptions defaultOptions;
-
+  AdagradOptions options;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
  private:
-  Adagrad() : defaultOptions(0) {}
+  Adagrad() : options(0) {}
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
