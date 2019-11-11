@@ -18,6 +18,7 @@ AdagradOptions::AdagradOptions(double learning_rate)
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
   for (auto& group : param_groups) {
+    AdagradOptions options = convert_ivalue_to_options(group.at("options"));
     for (auto p : group.at("params").toTensorList()) {
       if (!p.grad().defined()) {
         continue;
@@ -26,13 +27,13 @@ void Adagrad::step() {
       auto& state_ = state.at(p.unsafeGetTensorImpl());
       state_.at("step").toInt()+=1;
 
-      if(group.at("options").weight_decay() != 0) {
+      if(options.weight_decay() != 0) {
         TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
         NoGradGuard guard;
-        grad += group.at("options").weight_decay() * p.data();
+        grad += options.weight_decay() * p.data();
       }
 
-      const auto clr =  group.at("options").learning_rate() /
+      const auto clr =  options.learning_rate() /
           (1.0 + (state_.at("step").toInt() - 1.0) * group.at("options").lr_decay());
 
       auto& sum = state_.at("sum").toTensor();
@@ -52,15 +53,16 @@ void Adagrad::step() {
         }
         sum.add_(make_sparse(grad_values.pow(2)));
         auto std = state_.at("sum").toTensor().sparse_mask(grad);
-        const auto std_values = std.sqrt().add_(group.at("options").eps());
+        const auto std_values = std.sqrt().add_(options.eps());
         p.data().add_(-clr, make_sparse(grad_values / std_values));
       }
       else {
         sum.addcmul_(grad, grad, 1.0);
-        const auto std = state_.at("sum").toTensor().sqrt().add_(group.at("options").eps());
+        const auto std = state_.at("sum").toTensor().sqrt().add_(options.eps());
         p.data().addcdiv_(-clr, grad, std);
       }
     }
+    group.at("options") = convert_options_to_ivalue(options);
   }
 }
 
@@ -70,6 +72,35 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 
 void Adagrad::load(serialize::InputArchive& archive) {
   serialize(*this, archive);
+}
+
+typedef double (*fnPtr)(double);
+
+AdagradOptions convert_ivalue_to_options(at::IValue ivalue) {
+    c10::Dict<at::IValue, at::IValue> dict = ivalue.toGenericDict();
+    c10::Dict<std::string, fnPtr> optionsMap;
+    optionsMap.insert("learning_rate", learning_rate);
+    optionsMap.insert("lr_decay", lr_decay);
+    optionsMap.insert("weight_decay", weight_decay);
+    optionsMap.insert("initial_accumulator_value", initial_accumulator_value);
+    optionsMap.insert("eps", eps);
+
+    AdagradOptions options;
+    for(auto key : dict) {
+      auto fnPtr_ = optionsMap.at(key.toString())
+      options.fnPtr_(dict.at(key).toDouble());
+    }
+    return options;
+}
+
+at::IValue convert_options_to_ivalue(AdagradOptions options) {
+    c10::Dict<std::string, at::IValue> dict;
+    dict.insert("learning_rate", options.learning_rate());
+    dict.insert("lr_decay", options.lr_decay());
+    dict.insert("weight_decay", options.weight_decay());
+    dict.insert("initial_accumulator_value", options.initial_accumulator_value());
+    dict.insert("eps", options.eps());
+    return dict.toIvalue();
 }
 } // namespace optim
 } // namespace torch
