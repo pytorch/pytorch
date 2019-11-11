@@ -18,7 +18,9 @@ fi
 
 # Use ccache if available (this path is where Homebrew installs ccache symlinks)
 if [ "$(uname)" == 'Darwin' ]; then
-  CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+  if [ -n "${CCACHE_WRAPPER_PATH:-}"]; then
+    CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+  fi
   if [ -d "$CCACHE_WRAPPER_PATH" ]; then
     CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
     CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")

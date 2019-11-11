@@ -113,7 +113,6 @@ TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, 
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
-TH_API void THTensor_(neg)(THTensor *self, THTensor *src);
 TH_API void THTensor_(cinv)(THTensor *self, THTensor *src);
 
 TH_API void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value);
@@ -144,30 +143,17 @@ TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
 
-TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 TH_API void THTensor_(sigmoid)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(log1p)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(exp)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(cos)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(acos)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(cosh)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(sin)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(asin)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(sinh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(atan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfc)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(rsqrt)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(ceil)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(floor)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(round)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(trunc)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(frac)(THTensor *r_, THTensor *t);
 
 TH_API void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim);
 TH_API void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim);

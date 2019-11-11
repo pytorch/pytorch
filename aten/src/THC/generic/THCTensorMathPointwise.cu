@@ -200,25 +200,17 @@ static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor
 
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  exp, THCNumerics<scalar_t>::exp,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cos, THCNumerics<scalar_t>::cos,   Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  sin, THCNumerics<scalar_t>::sin,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( sqrt, THCNumerics<scalar_t>::sqrt,  Real)
 
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  acos, THCNumerics<scalar_t>::acos,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cosh, THCNumerics<scalar_t>::cosh,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  asin, THCNumerics<scalar_t>::asin,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  sinh, THCNumerics<scalar_t>::sinh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   tan, THCNumerics<scalar_t>::tan,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  atan, THCNumerics<scalar_t>::atan,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  tanh, THCNumerics<scalar_t>::tanh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   erf, THCNumerics<scalar_t>::erf,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  erfc, THCNumerics<scalar_t>::erfc,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  frac, THCNumerics<scalar_t>::frac,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cinv, THCNumerics<scalar_t>::cinv,  Real)
 
 #endif
-
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<scalar_t>::abs,   Real)
-
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
 

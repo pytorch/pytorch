@@ -9,7 +9,7 @@ namespace nn {
 ELUImpl::ELUImpl(const ELUOptions& options_) : options(options_) {}
 
 Tensor ELUImpl::forward(Tensor input) {
-  return F::elu(input, options);
+  return F::detail::elu(input, options.alpha(), options.inplace());
 }
 
 void ELUImpl::reset() {}
@@ -27,7 +27,7 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
 SELUImpl::SELUImpl(const SELUOptions& options_) : options(options_) {}
 
 Tensor SELUImpl::forward(Tensor input) {
-  return F::selu(input, options);
+  return F::detail::selu(input, options.inplace());
 }
 
 void SELUImpl::reset() {}
@@ -46,7 +46,7 @@ HardshrinkImpl::HardshrinkImpl(const HardshrinkOptions& options_)
     : options(options_) {}
 
 Tensor HardshrinkImpl::forward(const Tensor& input) {
-  return F::hardshrink(input, options);
+  return F::detail::hardshrink(input, options.lambda());
 }
 
 void HardshrinkImpl::reset() {}
@@ -64,7 +64,7 @@ HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
 }
 
 Tensor HardtanhImpl::forward(Tensor input) {
-  return F::hardtanh(input, options);
+  return F::detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
 }
 
 void HardtanhImpl::reset() {
@@ -88,7 +88,7 @@ LeakyReLUImpl::LeakyReLUImpl(const LeakyReLUOptions& options_)
     : options(options_) {}
 
 Tensor LeakyReLUImpl::forward(Tensor input) {
-  return F::leaky_relu(input, options);
+  return F::detail::leaky_relu(input, options.negative_slope(), options.inplace());
 }
 
 void LeakyReLUImpl::reset() {}
@@ -126,7 +126,7 @@ void SoftmaxImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor SoftmaxImpl::forward(const Tensor& input) {
-  return F::softmax(input, options);
+  return F::detail::softmax(input, options.dim(), c10::nullopt);
 }
 
 // ============================================================================
@@ -141,7 +141,7 @@ void SoftminImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor SoftminImpl::forward(const Tensor& input) {
-  return F::softmin(input, options);
+  return F::detail::softmin(input, options.dim(), c10::nullopt);
 }
 
 // ============================================================================
@@ -156,7 +156,7 @@ void LogSoftmaxImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor LogSoftmaxImpl::forward(const Tensor& input) {
-  return F::log_softmax(input, options);
+  return F::detail::log_softmax(input, options.dim(), c10::nullopt);
 }
 
 // ============================================================================
@@ -169,7 +169,7 @@ void Softmax2dImpl::pretty_print(std::ostream& stream) const {
 
 Tensor Softmax2dImpl::forward(const Tensor& input) {
   TORCH_CHECK(input.dim() == 4, "Softmax2d requires a 4D tensor as input");
-  return F::softmax(input, SoftmaxOptions(/*dim=*/1));
+  return F::detail::softmax(input, /*dim=*/1, c10::nullopt);
 }
 
 // ============================================================================
@@ -197,7 +197,7 @@ void PReLUImpl::pretty_print(std::ostream& stream) const {
 ReLUImpl::ReLUImpl(const ReLUOptions& options_) : options(options_) {}
 
 Tensor ReLUImpl::forward(Tensor input) {
-  return F::relu(input, options);
+  return F::detail::relu(input, options.inplace());
 }
 
 void ReLUImpl::reset() {}
@@ -215,7 +215,7 @@ void ReLUImpl::pretty_print(std::ostream& stream) const {
 ReLU6Impl::ReLU6Impl(const ReLU6Options& options_) : options(options_) {}
 
 Tensor ReLU6Impl::forward(Tensor input) {
-  return F::relu6(input, options);
+  return F::detail::relu6(input, options.inplace());
 }
 
 void ReLU6Impl::reset() {}
@@ -233,7 +233,7 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
 RReLUImpl::RReLUImpl(const RReLUOptions& options_) : options(options_) {}
 
 Tensor RReLUImpl::forward(Tensor input) {
-  return F::rrelu(input, options, is_training());
+  return F::detail::rrelu(input, options.lower(), options.upper(), options.inplace(), is_training());
 }
 
 void RReLUImpl::reset() {}
@@ -252,7 +252,7 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
 CELUImpl::CELUImpl(const CELUOptions& options_) : options(options_) {}
 
 Tensor CELUImpl::forward(Tensor input) {
-  return F::celu(input, options);
+  return F::detail::celu(input, options.alpha(), options.inplace());
 }
 
 void CELUImpl::reset() {}
@@ -263,6 +263,18 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
   stream << ")";
+}
+
+// ============================================================================
+
+Tensor GELUImpl::forward(const Tensor& input) {
+  return F::gelu(input);
+}
+
+void GELUImpl::reset() {}
+
+void GELUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::GELU()";
 }
 
 // ============================================================================
@@ -283,7 +295,7 @@ SoftplusImpl::SoftplusImpl(const SoftplusOptions& options_)
   : options(options_) {}
 
 Tensor SoftplusImpl::forward(const Tensor& input) {
-  return F::softplus(input, options);
+  return F::detail::softplus(input, options.beta(), options.threshold());
 }
 
 void SoftplusImpl::reset() {}
@@ -299,7 +311,7 @@ SoftshrinkImpl::SoftshrinkImpl(const SoftshrinkOptions& options_)
     : options(options_) {}
 
 Tensor SoftshrinkImpl::forward(const Tensor& input) {
-  return F::softshrink(input, options);
+  return F::detail::softshrink(input, options.lambda());
 }
 
 void SoftshrinkImpl::reset() {}
@@ -350,7 +362,7 @@ ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
     : options(options_) {}
 
 Tensor ThresholdImpl::forward(Tensor input) {
-  return F::threshold(input, options);
+  return F::detail::threshold(input, options.threshold(), options.value(), options.inplace());
 }
 
 void ThresholdImpl::reset() {}

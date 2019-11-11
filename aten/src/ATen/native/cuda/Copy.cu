@@ -15,7 +15,7 @@ namespace native {
 using namespace at::cuda;
 
 // device-to-device copy, does type conversion
-static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
+void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   int64_t numel = iter.numel();
 
   // We can memcpy the memory if both tensors have the same type AND both
@@ -132,7 +132,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     // Type conversions are performed on the CPU for CPU-GPU copies and on
     // the src device for GPU-GPU copies.
     if (iter.device_type(0) == kCUDA) {
-      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst);
+      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, at::MemoryFormat::Contiguous);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
