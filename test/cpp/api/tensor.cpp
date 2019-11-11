@@ -502,11 +502,11 @@ TEST(TensorTest, TorchTensorCtorMultiDimErrorChecks) {
   }
   {
     ASSERT_THROWS_WITH(torch::tensor({{{1, 2.0}, {1, 2.0}}}),
-      "Expected all elements of the tensor to have the same scalar type: Long, but got element of scalar type: Double");
+      "Expected all elements of the tensor to have the same scalar type: Long, but got element of scalar type: Float");
   }
   {
     ASSERT_THROWS_WITH(torch::tensor({{{true, 2.0, 3}, {true, 2.0, 3}}}),
-      "Expected all elements of the tensor to have the same scalar type: Bool, but got element of scalar type: Double");
+      "Expected all elements of the tensor to have the same scalar type: Bool, but got element of scalar type: Float");
   }
   {
     ASSERT_THROWS_WITH(torch::tensor({{{true}, {2}}}),
