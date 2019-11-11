@@ -62,6 +62,7 @@ void unpackQuantizedWeightsHelper(
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
   const auto& matches = findPatternMatches(pattern_graph, *graph);
+
   for (const auto& match : matches) {
     auto match_vmap = match.values_map;
     auto qlinear_node = match_vmap.at(vmap.at("r"))->node();
@@ -109,15 +110,15 @@ void UnpackQuantizedWeights(
     std::map<std::string, at::Tensor>& paramsDict) {
   std::string qlinear = R"(
   graph(%input, %packed_weight, %w_scale, %w_zero_point):
-        %r = _caffe2::Int8FC(%input, %packed_weight, %w_scale, %w_zero_point)
+        %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
         return (%r) )";
   std::string qconv = R"(
   graph(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
-        %r = _caffe2::Int8Conv(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+        %r = quantized::conv2d(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
         return (%r) )";
   std::string qconv_relu = R"(
   graph(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
-        %r = _caffe2::Int8ConvRelu(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+        %r = quantized::conv2d_relu(%input, %packed_weight, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
         return (%r) )";
   unpackQuantizedWeightsHelper(
       graph, paramsDict, qlinear, "quantized::linear_unpack");
