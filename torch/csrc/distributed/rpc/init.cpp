@@ -140,7 +140,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def(
-      "invoke_rpc_builtin",
+      "_invoke_rpc_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
@@ -150,7 +150,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_rpc_python_udf",
+      "_invoke_rpc_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
@@ -159,7 +159,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_remote_builtin",
+      "_invoke_remote_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
@@ -169,7 +169,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_remote_python_udf",
+      "_invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
