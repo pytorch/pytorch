@@ -21,17 +21,17 @@ namespace py = pybind11;
 struct _ListNestedTensor;
 
 // If is_leaf tensors are available, otherwise children.
-struct _MetaNode {
-  // _MetaNode() = delete;
-  // _MetaNode(const _MetaNode&) = delete;
-  // _MetaNode(_MetaNode&&) = delete;
+struct _NestedNode {
+  // _NestedNode() = delete;
+  // _NestedNode(const _NestedNode&) = delete;
+  // _NestedNode(_NestedNode&&) = delete;
 
-  _MetaNode() {}
-  _MetaNode(const std::vector<_MetaNode> children) : _children(children) {}
-  const std::vector<_MetaNode> _children;
+  _NestedNode() {}
+  _NestedNode(const std::vector<_NestedNode> children) : _children(children) {}
+  const std::vector<_NestedNode> _children;
 };
 
-static size_t _num_tensor(const _MetaNode &meta_node) {
+static size_t _num_tensor(const _NestedNode &meta_node) {
   size_t result = 0;
   for (size_t i = 0; i < meta_node._children.size(); i++) {
     result += _num_tensor(meta_node._children[i]);
@@ -39,12 +39,12 @@ static size_t _num_tensor(const _MetaNode &meta_node) {
   return result;
 }
 
-static _MetaNode _get_meta_node(std::vector<py::object> tensors) {
-  std::vector<_MetaNode> meta_nodes;
+static _NestedNode _get_meta_node(std::vector<py::object> tensors) {
+  std::vector<_NestedNode> meta_nodes;
   try {
     for (py::object item : tensors) {
       item.cast<at::Tensor>();
-      meta_nodes.push_back(_MetaNode());
+      meta_nodes.push_back(_NestedNode());
     }
   } catch (std::exception e) {
     for (py::object item : tensors) {
@@ -52,7 +52,7 @@ static _MetaNode _get_meta_node(std::vector<py::object> tensors) {
           _get_meta_node(item.cast<std::vector<py::object>>()));
     }
   }
-  return _MetaNode(meta_nodes);
+  return _NestedNode(meta_nodes);
 }
 
 static const std::vector<at::Tensor>
@@ -97,7 +97,7 @@ struct TORCH_API _ListNestedTensor {
       : _ListNestedTensor(_get_flat_tensors(tensors), _get_meta_node(tensors)) {
   }
   _ListNestedTensor(const std::vector<at::Tensor> flat_tensors,
-                    _MetaNode structure)
+                    _NestedNode structure)
       : _flat_tensors(flat_tensors), _structure(structure),
         _first_tensor(_flat_tensors[0]) {}
   size_t element_size() { return _flat_tensors[0].element_size(); }
@@ -134,35 +134,12 @@ struct TORCH_API _ListNestedTensor {
   // Only works if nested_dim() higher than 1.
   std::vector<_ListNestedTensor> unbind_nested();
   std::vector<py::object> unbind();
-  template <class F> std::vector<py::object> map_fn(F fn) {
-    std::vector<py::object> result;
-    if (nested_dim() == 1) {
-      for (at::Tensor tensor : get_flat_tensors()) {
-        result.push_back(fn(tensor));
-      }
-    } else {
-      for (_ListNestedTensor nti : unbind_nested()) {
-        result.push_back(py::cast(nti.map_fn(fn)));
-      }
-    }
-    return result;
-  }
-  std::vector<py::object> nested_size() {
-    return map_fn([](at::Tensor tensor) -> py::object {
-      return py::reinterpret_borrow<py::object>(
-          torch::autograd::utils::wrap(tensor.sizes()));
-    });
-  }
-  std::vector<py::object> nested_stride() {
-    return map_fn([](at::Tensor tensor) -> py::object {
-      return py::reinterpret_borrow<py::object>(
-          torch::autograd::utils::wrap(tensor.strides()));
-    });
-  }
+  std::vector<py::object> nested_size();
+  std::vector<py::object> nested_stride();
   int64_t __len__() { return _structure._children.size(); }
   int64_t nested_dim() {
-    const _MetaNode *start_structure = &_structure;
-    int64_t depth = 1;
+    const _NestedNode *start_structure = &_structure;
+    int64_t depth = 0;
     while (start_structure->_children.size()) {
       depth++;
       start_structure = &start_structure->_children[0];
@@ -185,13 +162,13 @@ struct TORCH_API _ListNestedTensor {
   int64_t dim() { return _first_tensor.dim() + nested_dim(); }
   bool is_pinned() { return _first_tensor.is_pinned(); }
   bool is_contiguous() { return true; }
-  const _MetaNode get_structure() { return _structure; }
+  const _NestedNode get_structure() { return _structure; }
   const std::vector<at::Tensor> &get_flat_tensors() { return _flat_tensors; }
   std::string __str__();
 
 private:
   const std::vector<at::Tensor> _flat_tensors;
-  const _MetaNode _structure;
+  const _NestedNode _structure;
   const at::Tensor _first_tensor;
 };
 

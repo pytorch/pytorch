@@ -34,15 +34,42 @@ namespace py = pybind11;
 std::vector<_ListNestedTensor> _ListNestedTensor::unbind_nested() {
   std::vector<_ListNestedTensor> result;
   size_t i = 0;
-  for (_MetaNode child : _structure._children) {
+  for (_NestedNode child : _structure._children) {
     result.push_back(_ListNestedTensor(
         std::vector<at::Tensor>(_flat_tensors.begin() + i,
-                                _flat_tensors.begin() + i +
-                                    _num_tensor(child)),
+                                _flat_tensors.begin() + i + _num_tensor(child)),
         child));
     i += _num_tensor(child);
   }
   return result;
+}
+
+template <class F> std::vector<py::object> map_fn(_ListNestedTensor nt, F fn) {
+  std::vector<py::object> result;
+  if (nt.nested_dim() == 1) {
+    for (at::Tensor tensor : nt.get_flat_tensors()) {
+      result.push_back(fn(tensor));
+    }
+  } else {
+    for (_ListNestedTensor nti : nt.unbind_nested()) {
+      result.push_back(py::cast(map_fn(nti, fn)));
+    }
+  }
+  return result;
+}
+
+std::vector<py::object> _ListNestedTensor::nested_size() {
+  return map_fn(*this, [](at::Tensor tensor) -> py::object {
+    return py::reinterpret_borrow<py::object>(
+        torch::autograd::utils::wrap(tensor.sizes()));
+  });
+}
+
+std::vector<py::object> _ListNestedTensor::nested_stride() {
+  return map_fn(*this, [](at::Tensor tensor) -> py::object {
+    return py::reinterpret_borrow<py::object>(
+        torch::autograd::utils::wrap(tensor.strides()));
+  });
 }
 
 std::vector<py::object> _ListNestedTensor::unbind() {
@@ -71,7 +98,7 @@ std::string _ListNestedTensor::__str__() {
       result << std::endl;
     }
   } else {
-      for(_ListNestedTensor nt : unbind_nested()) {
+    for (_ListNestedTensor nt : unbind_nested()) {
       result << "  ";
       result << nt.__str__();
       result << ",";
