@@ -9,7 +9,7 @@ import torch
 import torch.quantization.observer as obs
 
 
-observer_configs_short = op_bench.config_list(
+qobserver_configs_short = op_bench.config_list(
     # mode is used to show the direction of the benchmark:
     # if 'Q', benchmark quantization, else dequantization
     attr_names=['C', 'M', 'N', 'dtype', 'qscheme'],
@@ -19,7 +19,7 @@ observer_configs_short = op_bench.config_list(
     tags=['short']
 )
 
-observer_configs_long = op_bench.cross_product_configs(
+qobserver_configs_long = op_bench.cross_product_configs(
     C=[1, 3, 8],
     M=[256, 1024],
     N=[256, 1024],
@@ -29,7 +29,7 @@ observer_configs_long = op_bench.cross_product_configs(
     tags=['long']
 )
 
-observer_list = op_bench.op_list(
+qobserver_list = op_bench.op_list(
     attr_names=['op_name', 'op_func'],
     attrs=[
         ['MinMaxObserver', obs.MinMaxObserver],
@@ -41,7 +41,7 @@ observer_list = op_bench.op_list(
 )
 
 
-class ObserverBenchmark(op_bench.TorchBenchmarkBase):
+class QObserverBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, C, M, N, dtype, qscheme, op_func):
         self.f_input = torch.rand(C, M, N)
         self.op_func = op_func(dtype=dtype, qscheme=qscheme)
@@ -51,9 +51,9 @@ class ObserverBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_tests_from_op_list(
-    observer_list,
-    observer_configs_short + observer_configs_long,
-    ObserverBenchmark)
+    qobserver_list,
+    qobserver_configs_short + qobserver_configs_long,
+    QObserverBenchmark)
 
 
 if __name__ == "__main__":
