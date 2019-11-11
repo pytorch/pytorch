@@ -101,7 +101,7 @@ namespace detail {
 /// shall have, such as `zero_grad`.
 class TORCH_API OptimizerBase {
  public:
-  // The copy constructor is deleted, because the user should rely on the
+  // The copy constructor is deleted, because the user should use the
   // `state_dict` / `load_state_dict` API to copy an optimizer instead.
   OptimizerBase(const OptimizerBase& optimizer_base) = delete;
   OptimizerBase(OptimizerBase&& optimizer_base) = default;
@@ -109,7 +109,6 @@ class TORCH_API OptimizerBase {
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
 
-  //todo
   explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptions> defaults) : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
       add_param_group(param_group);
@@ -189,7 +188,7 @@ class TORCH_API OptimizerBase {
 TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const OptimizerBase& optimizer);
- 
+
 /// Deserializes a `Tensor` from an `InputArchive`.
 TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
