@@ -42,7 +42,7 @@ class QInterpolateBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, dtype, mode, scale):
         f_input = (torch.rand(1, M, N, K) - 0.5) * 256
         scale = 0.1
-        zero_point = 64
+        zero_point = 42
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
                                                  zero_point=zero_point,
                                                  dtype=dtype)
