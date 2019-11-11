@@ -451,6 +451,30 @@ class GLU(Module):
         return 'dim={}'.format(self.dim)
 
 
+class GELU(Module):
+    r"""Applies the Gaussian Error Linear Units function:
+
+    .. math::
+        \text{GELU}(x) = x * \Phi(x)
+    where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/GELU.png
+
+    Examples::
+
+        >>> m = nn.GELU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    def forward(self, input):
+        return F.gelu(input)
+
+
 class Hardshrink(Module):
     r"""Applies the hard shrinkage function element-wise:
 

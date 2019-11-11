@@ -70,6 +70,20 @@ variable_list PythonEngine::execute(
   }
 }
 
+variable_list PythonEngine::execute_with_graph_task(
+    std::shared_ptr<GraphTask> graph_task,
+    std::shared_ptr<Node> graph_root) {
+  try {
+    return Engine::execute_with_graph_task(graph_task, graph_root);
+  } catch (python_error& e) {
+    AutoGIL gil;
+    if (!PyErr_Occurred()) {
+      // Set the error indicator only if it is not set already.
+      e.restore();
+    }
+    throw;
+  }
+}
 }}} // namespace torch::autograd::python
 
 PyObject *THPEngineClass = nullptr;
@@ -241,11 +255,11 @@ static struct PyMethodDef THPEngine_methods[] = {
 
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._EngineBase",                /* tp_name */
-  sizeof(THPEngine),                     /* tp_basicsize */
-  0,                                     /* tp_itemsize */
+  "torch._C._EngineBase",                      /* tp_name */
+  sizeof(THPEngine),                           /* tp_basicsize */
+  0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -259,25 +273,25 @@ PyTypeObject THPEngineType = {
   nullptr,                                     /* tp_getattro */
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  nullptr,                               /* tp_doc */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
-  THPEngine_methods,                     /* tp_methods */
+  THPEngine_methods,                           /* tp_methods */
   nullptr,                                     /* tp_members */
   nullptr,                                     /* tp_getset */
   nullptr,                                     /* tp_base */
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPEngine_new                          /* tp_new */
+  THPEngine_new                                /* tp_new */
 };
 
 static void child_atfork() {

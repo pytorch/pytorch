@@ -82,7 +82,7 @@ fi
 EXTRA_TESTS=()
 
 # CUDA builds always include NCCL support
-if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *-rocm* ]]; then
   EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 
@@ -124,6 +124,7 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
   ${rocm_ignore_test[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
@@ -144,4 +145,3 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
-
