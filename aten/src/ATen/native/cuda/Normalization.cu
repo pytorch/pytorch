@@ -28,7 +28,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(Tensor& output, Tenosr
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                    const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
-  auto output = at::empty_like(self);
+  auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
   int64_t n_input = input_.size(1);
   auto input_options = self.options();
   Tensor save_mean_, save_invstd_;
