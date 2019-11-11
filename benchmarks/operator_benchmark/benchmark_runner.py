@@ -123,6 +123,11 @@ def main():
         default="Caffe2,PyTorch")
 
     parser.add_argument(
+        '--device',
+        help='Run tests on the provided architecture (cpu, cuda)',
+        default='None')
+
+    parser.add_argument(
         '--wipe_cache',
         help='Wipe cache before benchmarking each operator',
         action='store_true',
