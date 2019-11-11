@@ -89,7 +89,7 @@ void EliminateCommonSubexpression(
 }
 } // namespace
 
-void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
+void EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
   AliasDb aliasDb(graph);
   GRAPH_DUMP("Before CSE", graph);
   EliminateCommonSubexpression(

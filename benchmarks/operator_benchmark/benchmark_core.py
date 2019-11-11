@@ -8,6 +8,8 @@ import numpy as np
 import timeit
 import json
 import torch
+import copy
+import ast
 
 # needs to be imported after torch
 import cpp_extension # noqa
@@ -30,24 +32,128 @@ TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
 TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
 
 
-BENCHMARK_TESTER = {}
-
-
-def _register_test(test_case):
-    """ This method is used to register test. func_name is a global unique
-    string. For PyTorch add operator with M=8, N=2, K=1, tag = long, here
-    are the values for the members in test_case:
-    op.module_name: add
-    framework: PyTorch
-    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
-        tag='long', run_backward=False)
-    func_name: addPyTorchTestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
-                                    tag='long', run_backward=False)
+BENCHMARK_TESTER = []
+def _register_test(*test_metainfo):
+    """ save the metainfo needed to create a test. Currently test_metainfo
+        takes two different inputs:
+        1) This input when adds single op to the benchmark
+         _register_test(configs, pt_bench_op, create_pytorch_op_test_case,
+                          run_backward=True)
+        2) This input when addes a list of ops to the benchmark
+        _register_test(configs, pt_bench_op, create_pytorch_op_test_case,
+                          run_backward=False,
+                          op_name_function=op)
     """
-    test_config = test_case.test_config
-    op = test_case.op_bench
-    func_name = "{}{}{}".format(op.module_name(), test_case.framework, str(test_config))
-    BENCHMARK_TESTER[func_name] = test_case
+    BENCHMARK_TESTER.append(test_metainfo)
+
+
+def _create_test(bench_op_obj, orig_test_attrs, tags, OperatorTestCase, run_backward, bwd_input):
+    """ Create tests with the benchmark backend.
+        Args:
+            bench_op_obj: an object which instantiated from a subclass of
+                Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+                creation and operator execution.
+            test_attrs: a dictionary includes test configs.
+            tags: a attribute in test config to filter inputs
+            OperatorTestCase: a named tuple to save the metadata of an test
+            run_backward: a bool parameter indicating backward path
+    """
+    test_attrs = copy.deepcopy(orig_test_attrs)
+    test_attrs = {k: str(v) for k, v in test_attrs.items()}
+    ascii_test_attrs = ast.literal_eval(json.dumps(test_attrs))
+    input_config = str(ascii_test_attrs)[1:-1].replace('\'', '')
+    if bwd_input:
+        # When auto_set is used, the test name needs to include input.
+        test_attrs.update({'bwd': bwd_input})
+    test_name = bench_op_obj.test_name(**test_attrs)
+    test_config = TestConfig(test_name, input_config, tags, run_backward)
+    return OperatorTestCase(bench_op_obj, test_config)
+
+def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_function=None):
+    """Generate PyTorch/Caffe2 tests of operators with different inputs.
+       Args:
+           configs: a dictionary that has the input shapes
+           bench_op: a subclass of Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
+               creation and operator execution
+           OperatorTestCase: a named tuple to save the metadata of an test
+           run_backward: a bool parameter indicating backward path
+           op_name_function: a dictionary includes operator name and function
+    """
+    test_list = []
+    for config in configs:
+        test_attrs = {}
+        tags = None
+        keep_config = True
+        for attr in config:
+            # tags is only used in our benchmark backend to filter tests and
+            # it will be removed from config which is then passed to the init function
+            # an example of config and atrr is:
+            # config: [{'M': 16}, {'N': 16}, {'K': 64}, {'tags': 'short'}]
+            # attr: {'tags': 'short'}
+            if "tags" in attr:
+                tags = attr["tags"]
+                continue
+
+            # if 'cuda' is sepcified in input shape but the testing machines doesn't
+            # support, we will skip this input
+            if 'cuda' in attr.values():
+                if not torch.cuda.is_available():
+                    keep_config = False
+                    break
+
+            test_attrs.update(attr)
+
+        if not keep_config:
+            continue
+
+        if tags is None:
+            raise ValueError("Missing tags in configs")
+        input_config = str(test_attrs)[1:-1].replace('\'', '')
+        op = bench_op()
+        assert op is not None, "Can't create test"
+        tensor_error_info = None
+        # op_name_function is a dictionary which has op_name and op_function.
+        # an example of op_name_function is:
+        # {'op_name' : 'abs', 'op_function' : torch.abs}
+        # op_function is concatenated with the input dict then passed to the init function
+        # op_name is passed to the set_module_name function
+        init_dict = copy.deepcopy(test_attrs)
+        if op_name_function is not None:
+            op_name = op_name_function['op_name']
+            init_dict.update({'op_func' : op_name_function['op_func']})
+            op.set_module_name(op_name)
+
+        op._set_backward_test(run_backward)
+        try:
+            op.init(**init_dict)
+        except SkipInputShape:
+            print("Skipping: Config<{}> is not valid for op<{}>".format(input_config, op.module_name()))
+            continue
+
+        input_name = None
+
+        # _num_inputs_require_grads is used to track the number of tensors
+        # which use auto_set().
+        if op._num_inputs_require_grads > 0:
+            input_name = 'all'
+        test_list.append(_create_test(op, test_attrs, tags, OperatorTestCase, run_backward, input_name))
+
+        # This for loop is only used when auto_set is used.
+        # _pass_count counts how many times init has been called.
+        # _auto_set_counter is reset after init is called.
+        for i in range(op._num_inputs_require_grads):
+            op._pass_count += 1
+            op._auto_set_counter = 0
+
+            # TODO(mingzhe09088): remove this deepcopy when we encounter
+            # performance issue.
+            new_op = copy.deepcopy(op)
+            new_op.init(**init_dict)
+            # Input name index will start from input1
+            input_name = i + 1
+            test_list.append(_create_test(new_op, test_attrs, tags, OperatorTestCase, run_backward, input_name))
+
+    return test_list
 
 
 class BenchmarkRunner(object):
@@ -68,13 +174,13 @@ class BenchmarkRunner(object):
         self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.predefined_minimum_secs = 4
+        self.predefined_minimum_secs = 2
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
-        # 100 is the default warmup iterations 
-        if self.args.warmup_iterations == -1: 
+        # 100 is the default warmup iterations
+        if self.args.warmup_iterations == -1:
             self.args.warmup_iterations = 100
         if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
@@ -84,7 +190,6 @@ class BenchmarkRunner(object):
         if self.args.test_name is not None:
             self.args.tag_filter = None
 
-
     def _print_header(self):
         DASH_LINE = '-' * 40
         print("# {}\n"
@@ -93,16 +198,10 @@ class BenchmarkRunner(object):
               "# Tag : {}\n".format(DASH_LINE, DASH_LINE, self.args.tag_filter))
         if self.args.list_tests:
             print("# List of tests:")
-            for _, test_case in BENCHMARK_TESTER.items():
-                print("# {}".format(test_case.test_config.test_name))
         elif self.args.list_ops:
             print("# List of Operators to run:")
-            if self.args.operators is None:
-                ops = set(test_case.op_bench.module_name()
-                          for _, test_case in BENCHMARK_TESTER.items())
-                for op in ops:
-                    print("# {}".format(op))
-            else:
+            self.printed_ops_list = set()
+            if self.args.operators:
                 print("# {}".format(self.args.operators))
 
     def _print_perf_result(self, reported_run_time_us, test_case):
@@ -196,9 +295,10 @@ class BenchmarkRunner(object):
 
             report_run_time = 1e6 * run_time_sec / iters
             time_trace.append(report_run_time)
-            # Print out the time spent in each epoch in ms 
+            # Print out the time spent in each epoch in ms
             if self.args.ai_pep_format:
-                test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
+                mode = "JIT" if self.use_jit else "Eager"
+                test_name = '_'.join([test_case.framework, test_case.test_config.test_name, mode])
                 print("PyTorchObserver " + json.dumps(
                     {
                         "type": test_name,
@@ -240,7 +340,24 @@ class BenchmarkRunner(object):
             self._check_keep(op_test_config.tag, self.args.tag_filter) and
             self._check_keep_list(test_case.op_bench.module_name(), operators) and
             self._check_keep_list(test_case.framework, frameworks) and
-                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only)):
+                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only) and
+                (self.args.device == 'None' or self.args.device in op_test_config.test_name)):
+            return True
+
+        return False
+
+    def _print_test_case_info(self, test_case):
+        # Print out the test name and skip the real execution
+        if self.args.list_tests:
+            print("# {}".format(test_case.test_config.test_name))
+            return True
+        elif self.args.list_ops:
+            if self.args.operators is None:
+                op_name = test_case.op_bench.module_name()
+
+                if op_name not in self.printed_ops_list:
+                    print("# {}".format(op_name))
+                    self.printed_ops_list.add(op_name)
             return True
 
         return False
@@ -248,36 +365,41 @@ class BenchmarkRunner(object):
     def run(self):
         self._print_header()
 
-        if self.args.list_ops or self.args.list_tests:
-            return
+        for test_metainfo in BENCHMARK_TESTER:
+            # If auto_set is used, _build_test will return a list of tests including
+            # forward and backward ones
+            test_list = _build_test(*test_metainfo)
+            for test in test_list:
+                full_test_id, test_case = test
+                op_test_config = test_case.test_config
 
-        for full_test_id, test_case in BENCHMARK_TESTER.items():
-            op_test_config = test_case.test_config
+                if self._print_test_case_info(test_case):
+                    continue
 
-            if not self._keep_test(test_case):
-                continue
+                if not self._keep_test(test_case):
+                    continue
 
-            # To reduce variance, fix a numpy randseed to the test case,
-            # so that the randomly generated input tensors remain the
-            # same for each test case.
-            # The random seed is limited to 32-bit because of numpy
-            # requirement.
-            np.random.seed(seed=hash(full_test_id) & ((1 << 32) - 1))
+                # To reduce variance, fix a numpy randseed to the test case,
+                # so that the randomly generated input tensors remain the
+                # same for each test case.
+                # The random seed is limited to 32-bit because of numpy
+                # requirement.
+                np.random.seed(seed=hash(full_test_id) & ((1 << 32) - 1))
 
-            print("# Benchmarking {}: {}".format(
-                test_case.framework,
-                test_case.op_bench.module_name()))
+                print("# Benchmarking {}: {}".format(
+                    test_case.framework,
+                    test_case.op_bench.module_name()))
 
-            if op_test_config.run_backward:
-                launch_func = self._launch_backward
-            else:
-                launch_func = self._launch_forward
+                if op_test_config.run_backward:
+                    launch_func = self._launch_backward
+                else:
+                    launch_func = self._launch_forward
 
-            # Warmup
-            launch_func(test_case, self.args.warmup_iterations, print_per_iter=False)
-            # Actual Execution
-            reported_time = [self._measure_time(launch_func, test_case,
-                                                self.iters, self.print_per_iter)
-                             for _ in range(self.num_runs)]
+                # Warmup
+                launch_func(test_case, self.args.warmup_iterations, print_per_iter=False)
+                # Actual Execution
+                reported_time = [self._measure_time(launch_func, test_case,
+                                                    self.iters, self.print_per_iter)
+                                 for _ in range(self.num_runs)]
 
-            self._print_perf_result(reported_time, test_case)
+                self._print_perf_result(reported_time, test_case)

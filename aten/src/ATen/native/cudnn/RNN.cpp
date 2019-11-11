@@ -1064,9 +1064,9 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     std::array<bool, 4> output_mask
     ) {
 
-  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output);
-  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
-  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
+  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, at::MemoryFormat::Contiguous);
+  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, at::MemoryFormat::Contiguous);
+  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, at::MemoryFormat::Contiguous)) : grad_cy_r;
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
@@ -1153,14 +1153,12 @@ struct DropoutState {
 
 DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions options) {
   // Each state is slightly over 2MB and initialized lazily, so it's fine to cache them.
-  static std::vector<DropoutState> ten_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
-  static std::vector<DropoutState> var_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
+  static std::vector<DropoutState> dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
   int device = cuda::current_device();
   std::unique_lock<std::mutex> lock {state_cache_mut};
-  auto& state = options.is_variable() ? var_dropout_state_cache.at(device)
-                                      : ten_dropout_state_cache.at(device);
+  auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {
     std::unique_lock<std::mutex> lock {state.mutex};
     int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
