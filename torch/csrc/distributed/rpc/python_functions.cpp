@@ -162,7 +162,10 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
   return sendMessageWithAutograd(
-      agent, dst, std::move(*pythonCall).toMessage());
+      agent,
+      dst,
+      std::move(*pythonCall).toMessage(),
+      true /*forceGradRecording*/);
 }
 
 PyRRef pyRemotePythonUdf(

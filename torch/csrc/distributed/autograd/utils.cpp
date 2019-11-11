@@ -47,10 +47,7 @@ DistAutogradContext* addRecvRpcBackward(
   DistAutogradContext& autogradContext =
       autogradContainer.getOrCreateContext(autogradMetadata.autogradContextId);
 
-  if (!tensors.empty()) {
-    TORCH_INTERNAL_ASSERT(
-        torch::autograd::compute_requires_grad(tensors),
-        "Received tensors do not require grad, addRecvRpcBackward should not be called");
+  if (!tensors.empty() && torch::autograd::compute_requires_grad(tensors)) {
 
     // Attach the tensors as inputs to the autograd function.
     auto grad_fn = std::make_shared<RecvRpcBackward>(
