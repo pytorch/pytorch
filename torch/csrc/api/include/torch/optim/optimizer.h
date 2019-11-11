@@ -3,6 +3,8 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/ivalue.h>
 
+#include <c10/util/flat_hash_map.h>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
@@ -45,7 +47,7 @@ class TORCH_API OptimizerBase {
   template <typename OptimizerOptions>
   explicit OptimizerBase(std::vector<std::vector<Tensor>> params, OptimizerOptions options) {
     for(size_t i=0; i<params.size(); i++) {
-      c10::Dict<std::string, at::IValue> param_group;
+      c10::impl::GenericDict param_group(c10::StringType::get(), c10::AnyType::get());
       param_group.insert("options", options);
       param_group.insert("params", std::vector<Tensor>());
       for(size_t j=0; j<params[i].size(); j++) {
@@ -53,17 +55,17 @@ class TORCH_API OptimizerBase {
       }
       param_groups.push_back(param_group);
     }
-    // for (const auto& group : param_groups) {
-    //   for (const Tensor& p : group.at("params").toTensorList()) {
-    //       at::TensorImpl* index = p.unsafeGetTensorImpl();
-    //       auto& state_ = state.at(index);
-    //       state_["step"] = 0;// at::IValue, can be converted to int64_t using .toInt()
-    //       state_["sum"] = 0;// at::IValue, can be converted to Tensor using .toTensor()
-    //   }
-    // }
+    for (auto& group : param_groups) {
+      for (auto& p : group.at("params").toTensorListRef()) {
+          //at::TensorImpl* index = p.unsafeGetTensorImpl();
+          state.insert(p, c10::impl::GenericDict(c10::StringType::get(), c10::AnyType::get()));
+          state.at(p).insert("step", 0);// at::IValue, can be converted to int64_t using .toInt()
+          state.at(p).insert("sum", Tensor());// at::IValue, can be converted to Tensor using .toTensor()
+      }
+    }
   }
 
-  explicit OptimizerBase(std::vector<c10::Dict<std::string, at::IValue>> param_groups_): param_groups(param_groups_) {}
+  explicit OptimizerBase(std::vector<c10::impl::GenericDict> param_groups_): param_groups(param_groups_) {}
 
   virtual ~OptimizerBase() = default;
 
@@ -111,8 +113,8 @@ class TORCH_API OptimizerBase {
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
   //to do-description
-  std::vector<c10::Dict<std::string, at::IValue>> param_groups;
-  //c10::Dict<at::TensorImpl*, c10::Dict<std::string, at::IValue>> state;
+  std::vector<c10::impl::GenericDict> param_groups;
+  c10::Dict<at::Tensor, c10::impl::GenericDict> state;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
