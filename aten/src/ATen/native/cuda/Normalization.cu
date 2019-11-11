@@ -2,34 +2,45 @@
 
 namespace at { namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_out(Tensor& output, const Tensor& self, const Tensor& weight, const Tensor& bias,
-                                                   const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
-  std::tuple<Tensor, Tensor> res = AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_cuda", [&] {
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(Tensor& output, Tenosr& save_mean, Tensor& save_invstd, const Tensor& self, const Tensor& weight, const Tensor& bias,
+                                                   Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_cuda", [&] {
       auto mean_st = running_mean.dtype();
       auto var_st = running_var.dtype();
       TORCH_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
         if (is_half_float) {
-          return batch_norm_cuda_template<at::Half, float, int32_t>(output, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+          batch_norm_cuda_template<at::Half, float, int32_t>(output, save_mean, save_invstd, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         } else {
-          return batch_norm_cuda_template<scalar_t, scalar_t, int32_t>(output, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+          batch_norm_cuda_template<scalar_t, scalar_t, int32_t>(output, save_mean, save_invstd, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         }
       } else {
         if (is_half_float) {
-          return batch_norm_cuda_template<at::Half, float, int64_t>(output, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+          batch_norm_cuda_template<at::Half, float, int64_t>(output, save_mean, save_invstd, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         } else {
-          return batch_norm_cuda_template<scalar_t, scalar_t, int64_t>(output, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+          batch_norm_cuda_template<scalar_t, scalar_t, int64_t>(output, save_mean, save_invstd, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         }
       }
     });
-  return std::make_tuple(output, std::get<0>(res), std::get<1>(res));
+  return std::make_tuple(output, save_mean, save_invstd);
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                    const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
   auto output = at::empty_like(self);
-  return batch_norm_cuda_out(output, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+  int64_t n_input = input_.size(1);
+  auto input_options = self.options();
+  Tensor save_mean_, save_invstd_;
+  if (train) {
+    save_mean_ = at::empty({n_input}, input_options);
+    save_invstd_ = at::empty({n_input}, input_options);
+  } else {
+    save_mean_ = at::empty({0}, input_options);
+    save_invstd_ = at::empty({0}, input_options);
+  }
+
+  return batch_norm_cuda_out(output, save_mean_, save_invstd_, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& self, const Tensor& weight, const Tensor& running_mean, const Tensor& running_var,

@@ -511,23 +511,22 @@ static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> packed_acc
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-std::tuple<Tensor, Tensor> batch_norm_cuda_template(Tensor& output_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
+void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_invstd_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
                                                             const Tensor& running_mean_, const Tensor& running_var_,
                                                             bool train, double momentum, double epsilon) {
 
   TensorArg output_arg{ output_, "output", 1 },
-            input_arg{ input_, "input", 2 },
-            weight_arg{ weight_, "weight", 3 },
-            bias_arg{ bias_, "bias", 4 },
-            run_mean_arg{ running_mean_, "running_mean", 5 },
-            run_var_arg{ running_var_, "running_var", 6 };
+            save_mean_arg{ input_, "save_mean", 2 },
+            save_invstd_arg{ input_, "save_invstd", 3 },
+            input_arg{ input_, "input", 4 },
+            weight_arg{ weight_, "weight", 5 },
+            bias_arg{ bias_, "bias", 6 },
+            run_mean_arg{ running_mean_, "running_mean", 7 },
+            run_var_arg{ running_var_, "running_var", 8 };
   CheckedFrom c = "batch_norm_cuda";
-  checkAllSameGPU(c, {output_arg, input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
+  checkAllSameGPU(c, {output_arg, save_mean_arg, save_invstd_arg, input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
-  int64_t n_input = input_.size(1);
-  Tensor save_mean_;
-  Tensor save_invstd_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
   auto output_reshaped = output_.view({input_.size(0), input_.size(1), -1});
 
@@ -537,13 +536,6 @@ std::tuple<Tensor, Tensor> batch_norm_cuda_template(Tensor& output_, const Tenso
   auto input_options = input_.options();
   if (input_.scalar_type() == at::ScalarType::Half) {
     input_options = input_options.dtype(ScalarType::Float);
-  }
-  if (train) {
-    save_mean_ = at::empty({n_input}, input_options);
-    save_invstd_ = at::empty({n_input}, input_options);
-  } else {
-    save_mean_ = at::empty({0}, input_options);
-    save_invstd_ = at::empty({0}, input_options);
   }
   auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto weight = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(weight_);
@@ -580,7 +572,6 @@ std::tuple<Tensor, Tensor> batch_norm_cuda_template(Tensor& output_, const Tenso
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
   THCudaCheck(cudaGetLastError());
-  return std::make_tuple(save_mean_, save_invstd_);
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
