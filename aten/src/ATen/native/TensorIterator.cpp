@@ -295,6 +295,9 @@ void TensorIterator::allocate_outputs() {
         op.tensor = at::empty(tensor_shape, op.options());
         op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
             MemoryFormat::ChannelsLast);
+        // As we are allocating output after permutations is done, we need to
+        // make sure that operand's strides are matching element size and
+        // dimensions permutations which are stored in _perm
         op.stride_bytes = apply_perm_and_mul(op.tensor.strides(), element_size);
       } else {
         op.stride_bytes = compatible_stride(element_size);
