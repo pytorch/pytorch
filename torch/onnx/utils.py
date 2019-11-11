@@ -251,6 +251,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if isinstance(args, torch.Tensor):
         args = (args, )
 
+    example_outputs = []
     if isinstance(example_outputs, torch.Tensor):
         example_outputs = [example_outputs]
 
