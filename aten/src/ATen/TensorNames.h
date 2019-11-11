@@ -41,7 +41,7 @@ struct CAFFE2_API TensorName {
  private:
   ArrayRef<Dimname> origin_;
   Dimname name_;
-  uint8_t origin_idx_; // A named tensor can have at most 64 dims.
+  int origin_idx_; // A named tensor can have at most 64 dims.
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
