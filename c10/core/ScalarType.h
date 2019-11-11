@@ -316,19 +316,13 @@ static inline bool isSignedType(ScalarType t) {
     case ScalarType::name:                       \
       return std::numeric_limits<ctype>::is_signed;
 
-    switch (t) {
-      AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, CASE_SIGNED)
-      case ScalarType::BFloat16:
-        return true;
-      case ScalarType::QUInt8:
-        return false;
-      case ScalarType::QInt8:
-        return true;
-      case ScalarType::QInt32:
-        return true;
-      default:
-        AT_ERROR("Unknown ScalarType");
-    }
+  switch (toUnderlying(t)) {
+    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, CASE_SIGNED)
+    case ScalarType::BFloat16:
+      return true;
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
   #undef CASE_SIGNED
 }
 
