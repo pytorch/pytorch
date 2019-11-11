@@ -13,7 +13,7 @@ add_long_configs = op_bench.cross_product_configs(
     M=[8, 64, 128],
     N=range(2, 128, 64),
     K=[8 ** x for x in range(0, 3)],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
@@ -25,7 +25,7 @@ add_short_configs = op_bench.config_list(
         [64, 64, 128],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"],
 )
@@ -35,7 +35,7 @@ class AddBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device):
         self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
         self.input_two = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
-        self.set_module_name("add_")
+        self.set_module_name("add")
 
     def forward(self):
         return torch.add(self.input_one, self.input_two)
