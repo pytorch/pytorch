@@ -1383,6 +1383,36 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5)
         self.run_model_test(UnbindModel2(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_inplace_zero(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.zero_()
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_inplace_fill(self):
+        class Fill_(torch.nn.Module):
+            def forward(self, x):
+                return x.fill_(3)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_inplace_arithmetic(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                x = torch.ones(2, 3, 4)
+                y = torch.ones(2, 3, 4) * 2
+                x.add_(3)
+                y.mul_(x)
+                return x, y
+
+        x = torch.ones(2, 3, 4)
+        y = torch.ones(2, 3, 4) * 2
+        self.run_model_test(Arithmetic(), train=False, input=(), batch_size=BATCH_SIZE, use_gpu=False, example_outputs=(x+3, y*(x+3)))
+
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
             def forward(self, x):

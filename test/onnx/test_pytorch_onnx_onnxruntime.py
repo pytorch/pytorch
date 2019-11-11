@@ -1324,6 +1324,34 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
+    def test_inplace_zero(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.zero_(), x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Zero_(), x)
+
+    def test_inplace_fill(self):
+        class Fill_(torch.nn.Module):
+            def forward(self, x):
+                return x.fill_(3), x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Fill_(), x)
+
+    def test_inplace_arithmetic(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                x.add_(3)
+                y.mul_(x)
+                return x, y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(Arithmetic(), (x, y))
+
     def test_sort(self):
         class SortModel(torch.nn.Module):
             def __init__(self, dim):

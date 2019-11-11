@@ -227,6 +227,8 @@ struct Value {
   //          %5 = h(%6, %6)
   TORCH_API void replaceAllUsesWith(Value* newValue);
 
+  TORCH_API void replaceAllUsesAfterNodeWith(const Node* node, Value* newValue);
+
   TORCH_API Value* copyMetadata(Value* from);
 };
 

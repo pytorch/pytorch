@@ -7,7 +7,13 @@ static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::add_, aten::add},
     {aten::sub_, aten::sub},
     {aten::div_, aten::div},
-    {aten::mul_, aten::mul}};
+    {aten::mul_, aten::mul},
+    {aten::zero_, aten::zeros_like},
+    {aten::fill_, aten::full_like}};
+
+static const std::unordered_map<NodeKind, size_t> additionalNoneArgumentCount = {
+    {aten::zero_, 1},
+    {aten::fill_, 1}};
 
 bool isInplaceOp(const Node* node) {
   return inPlaceToOutOfPlace.count(node->kind()) != 0;
@@ -42,9 +48,21 @@ void RemoveInplaceOps(Block* block) {
         newNode->addInput(input);
       }
 
+      size_t additionalInputCount = 0;
+      if (additionalNoneArgumentCount.find(node->kind()) != additionalNoneArgumentCount.end()) {
+        additionalInputCount = additionalNoneArgumentCount.at(node->kind());
+      }
+
+      for (size_t i = 0; i < additionalInputCount; ++i) {
+        auto noneNode = graph->createNone();
+        noneNode->insertBefore(newNode);
+        newNode->addInput(noneNode->output());
+      }
+
       // Create a new output node and replace all uses of self with it
       newNode->output()->copyMetadata(node->output());
       node->replaceAllUsesWith(newNode);
+      node->inputs()[0]->replaceAllUsesAfterNodeWith(newNode, newNode->output());
       node->destroy();
     }
   }
