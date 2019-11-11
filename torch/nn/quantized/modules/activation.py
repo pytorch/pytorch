@@ -69,10 +69,10 @@ class ReLU6(torch.nn.ReLU):
     """
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(inplace)
-        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
+        self.inplace = inplace
 
     def forward(self, input):
-        return torch.ops.quantized.relu6(input)
+        return torch.ops.quantized.relu6(input, self.inplace)
 
     def _get_name(self):
         return 'QuantizedReLU6'
