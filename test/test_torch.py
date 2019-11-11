@@ -3904,14 +3904,15 @@ class _TestTorchMixin(object):
         }
 
         def test(name_or_buffer):
-            with torch.serialization._open_zipfile_writer(name_or_buffer, 'wb') as zip_file:
+            with torch.serialization._open_zipfile_writer(name_or_buffer) as zip_file:
                 for key in data:
                     zip_file.write_record(key, data[key], len(data[key]))
 
             if hasattr(name_or_buffer, 'seek'):
                 name_or_buffer.seek(0)
+            # torch.serialization._open_zipfile_reader(name_or_buffer)
 
-            with torch.serialization._open_zipfile_reader(name_or_buffer, 'rb') as zip_file:
+            with torch.serialization._open_zipfile_reader(name_or_buffer) as zip_file:
                 for key in data:
                     actual = zip_file.get_record(key)
                     expected = data[key]

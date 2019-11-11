@@ -171,64 +171,53 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-class _open_file_like(object):
-    def __init__(self, name_or_buffer, mode):
-        self.is_path = _open_file_like.is_path(name_or_buffer)
-        if self.is_path:
-            self.fname = name_or_buffer
-        else:
-            self.buffer = name_or_buffer
+def _is_path(name_or_buffer):
+    return isinstance(name_or_buffer, str) or \
+        (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
+        (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+
+
+class _open_file(object):
+    def __init__(self, name, mode):
+        self.name = name
         self.mode = mode
 
-    def open_path(self):
-        return open(self.fname, self.mode)
+    def __enter__(self):
+        self.file = open(self.name, self.mode)
+        return self.file
+    
+    def __exit__(self, *args):
+        self.file.close()
 
-    def open_handle(self):
+
+class _open_buffer(object):
+    def __init__(self, buffer, mode):
+        self.buffer = buffer
+    
+    def __enter__(self):
         return self.buffer
 
-    @staticmethod
-    def is_path(name_or_buffer):
-        return isinstance(name_or_buffer, str) or \
-            (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+    def __exit__(self, *args):
+        self.buffer.flush()
 
+
+def _open_file_like(name_or_buffer, mode):
+    if _is_path(name_or_buffer):
+        return _open_file(name_or_buffer, mode)
+    else:
+        return _open_buffer(name_or_buffer, mode)
+    
+
+class _open_zipfile_reader_file(_open_file):
     def __enter__(self):
-        if self.is_path:
-            file_like = self.open_path()
-        else:
-            file_like = self.open_handle()
-
-        self.file_like = file_like
-        return self.file_like
+        return torch._C.PyTorchFileReader(self.name)
 
     def __exit__(self, *args):
-        if self.is_path:
-            # Only close the `file_like` if it was opened by this object
-            self.file_like.close()
+        pass
 
 
-class _open_zipfile_writer(_open_file_like):
-    def open_path(self):
-        return torch._C.PyTorchFileWriter(self.fname)
-
-    def open_handle(self):
-        def write(capsule, size):
-            self.buffer.write(torch._C.make_bytes(capsule, size))
-            return size
-        return torch._C.PyTorchFileWriter(write)
-
-    def __exit__(self, *args):
-        self.file_like.write_end_of_file()
-        if not self.is_path:
-            # If this is writing to a buffer, flush it after everything is done
-            self.buffer.flush()
-
-
-class _open_zipfile_reader(_open_file_like):
-    def open_path(self):
-        return torch._C.PyTorchFileReader(self.fname)
-
-    def open_handle(self):
+class _open_zipfile_reader_buffer(_open_buffer):
+    def __enter__(self):
         def reader(capsule, size):
             the_bytes = self.buffer.read(size)
             torch._C.read_into(capsule, the_bytes)
@@ -241,14 +230,53 @@ class _open_zipfile_reader(_open_file_like):
             # Python 2's seek() methods return None
             return pos
 
+        # Get the size of the buffer
         current = self.buffer.tell()
         self.buffer.seek(current, os.SEEK_END)
         size = self.buffer.tell()
         self.buffer.seek(current)
-        return torch._C.PyTorchFileReader(reader, seeker, size)
-
+        self.file = torch._C.PyTorchFileReader(reader, seeker, size)
+        return self.file
+    
     def __exit__(self, *args):
         pass
+
+
+class _open_zipfile_writer_file(_open_file):
+    def __enter__(self):
+        self.file = torch._C.PyTorchFileWriter(self.name)
+        return self.file
+    
+    def __exit__(self, *args):
+        self.file.write_end_of_file()
+
+
+class _open_zipfile_writer_buffer(_open_buffer):
+    def __enter__(self):
+        def write(capsule, size):
+            self.buffer.write(torch._C.make_bytes(capsule, size))
+            return size
+        self.file = torch._C.PyTorchFileWriter(write)
+        return self.file
+
+    def __exit__(self, *args):
+        self.file.write_end_of_file()
+        super(_open_zipfile_writer_buffer, self).__exit__(self, *args)
+
+def _open_zipfile_writer(name_or_buffer):
+    if _is_path(name_or_buffer):
+        container = _open_zipfile_writer_file
+    else:
+        container = _open_zipfile_writer_buffer
+    return container(name_or_buffer, 'wb')
+
+
+def _open_zipfile_reader(name_or_buffer):
+    if _is_path(name_or_buffer):
+        container = _open_zipfile_reader_file
+    else:
+        container = _open_zipfile_reader_buffer
+    return container(name_or_buffer, 'rb')
 
 
 def _is_compressed_file(f):
