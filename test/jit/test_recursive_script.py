@@ -113,12 +113,12 @@ class TestRecursiveScript(JitTestCase):
 
         # sm1 was created while m had training = True
         self.assertTrue(sm1.training)
-        self.assertEqual(sm1.training, sm1._c._get_attribute('training'))
+        self.assertEqual(sm1.training, sm1._c.getattr('training'))
         self.assertEqual(sm1(), 2)
 
         # sm2 was created after m was eval'ed
         self.assertFalse(sm2.training)
-        self.assertEqual(sm2.training, sm2._c._get_attribute('training'))
+        self.assertEqual(sm2.training, sm2._c.getattr('training'))
         self.assertEqual(sm2(), 0)
 
     def test_module_name(self):
