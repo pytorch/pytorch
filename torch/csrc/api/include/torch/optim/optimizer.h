@@ -41,6 +41,17 @@ class TORCH_API OptimizerBase {
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
 
+  //todo
+  template <typename OptimizerOptions>
+  explicit OptimizerBase(std::vector<std::vector<Tensor>> params, OptimizerOptions options) {
+    for(size_t i=0; i<params.size(); i++) {
+      c10::Dict<std::string, at::IValue> param_group;
+      param_group.insert("params", params[i]);
+      param_group.insert("options", options);
+      param_groups.push_back(param_group);
+    }
+  }
+
   virtual ~OptimizerBase() = default;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
@@ -87,8 +98,7 @@ class TORCH_API OptimizerBase {
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
   //to do-description
-  // c10::Dict<std::string, at::IValue> param_groups;
-  // c10::Dict<std::string, at::IValue> state;
+  std::vector<c10::Dict<std::string, at::IValue>> param_groups;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
