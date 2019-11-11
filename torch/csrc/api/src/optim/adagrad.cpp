@@ -75,18 +75,18 @@ void Adagrad::step() {
         continue;
       }
       auto grad = p.grad().data();
-      // TODO: check that both pointers are not null
-      AdagradParamState* state = static_cast<AdagradParamState*>(state_[p.unsafeGetTensorImpl()].get());
-      AdagradOptions* options = static_cast<AdagradOptions*>(group.options());
+      // TODO: assert that both pointers are not null before dereferencing
+      auto& state = static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
+      auto& options = static_cast<AdagradOptions&>(group.options());
 
-      state->step(state->step() + 1);
+      state.step(state.step() + 1);
 
-      if(options->weight_decay() != 0) {
+      if(options.weight_decay() != 0) {
         TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
-        grad = grad.add(p.data(), options->weight_decay());
+        grad = grad.add(p.data(), options.weight_decay());
       }
-      const auto clr = options->learning_rate() /
-          (1 + (state->step() - 1) * options->lr_decay());
+      const auto clr = options.learning_rate() /
+          (1 + (state.step() - 1) * options.lr_decay());
 
       if(grad.is_sparse()) {
         grad = grad.coalesce();
@@ -100,15 +100,15 @@ void Adagrad::step() {
           }
           return torch::sparse_coo_tensor(grad_indices, values, size, grad.options());
         };
-        state->sum(state->sum().add_(make_sparse(grad_values.pow(2))));
-        auto std = state->sum().sparse_mask(grad);
-        const auto std_values = std._values().sqrt_().add_(options->eps());
+        state.sum(state.sum().add_(make_sparse(grad_values.pow(2))));
+        auto std = state.sum().sparse_mask(grad);
+        const auto std_values = std._values().sqrt_().add_(options.eps());
 
         p.data().add_(make_sparse(grad_values / std_values), -clr);
       }
       else {
-        state->sum(state->sum().addcmul_(grad, grad, 1.0));
-        const auto std = state->sum().sqrt().add_(options->eps());
+        state.sum(state.sum().addcmul_(grad, grad, 1.0));
+        const auto std = state.sum().sqrt().add_(options.eps());
         p.data().addcdiv_(grad, std, -clr);
       }
     }
