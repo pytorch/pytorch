@@ -286,7 +286,7 @@ TEST_F(ModulesTest, LPPool2d) {
 
 TEST_F(ModulesTest, Identity) {
   Identity identity;
-  auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
+  auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = identity->forward(input);
   auto expected = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::kFloat);
   auto s = output.sum();
@@ -298,7 +298,7 @@ TEST_F(ModulesTest, Identity) {
 
 TEST_F(ModulesTest, Flatten) {
   Flatten flatten;
-  auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::requires_grad());
+  auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = flatten->forward(input);
   auto expected = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::kFloat);
   auto s = output.sum();
@@ -312,7 +312,7 @@ TEST_F(ModulesTest, Flatten) {
   input = torch::tensor({
     {{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}},
     {{{9, 10}, {11, 12}}, {{13, 14}, {15, 16}}}
-   }, torch::requires_grad()); // Tensor with sizes (2, 2, 2, 2)
+   }, torch::dtype(torch::kFloat).requires_grad(true)); // Tensor with sizes (2, 2, 2, 2)
 
   output = flatten_optional_dims->forward(input);
   expected = torch::tensor({
@@ -328,7 +328,7 @@ TEST_F(ModulesTest, Flatten) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   AdaptiveMaxPool1d model(3);
-  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = model(x);
   torch::Tensor s = y.sum();
 
@@ -341,7 +341,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool1d) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
   AdaptiveMaxPool1d model(3);
-  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
 
@@ -354,7 +354,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
   AdaptiveMaxPool2d model(3);
-  auto x = torch::arange(0, 50);
+  auto x = torch::arange(0., 50);
   x.resize_({2, 5, 5}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -375,7 +375,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
   AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
-  auto x = torch::arange(0, 40);
+  auto x = torch::arange(0., 40);
   x.resize_({2, 5, 4}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -396,7 +396,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
   AdaptiveMaxPool2d model(3);
-  auto x = torch::arange(0, 50);
+  auto x = torch::arange(0., 50);
   x.resize_({2, 5, 5}).set_requires_grad(true);
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -430,7 +430,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
   AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
-  auto x = torch::arange(0, 40);
+  auto x = torch::arange(0., 40);
   x.resize_({2, 5, 4}).set_requires_grad(true);
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -464,7 +464,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool3d) {
   AdaptiveMaxPool3d model(3);
-  auto x = torch::arange(0, 64);
+  auto x = torch::arange(0., 64);
   x.resize_({1, 4, 4, 4}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -489,7 +489,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool3d) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
   AdaptiveMaxPool3d model(3);
-  auto x = torch::arange(0, 64);
+  auto x = torch::arange(0., 64);
   x.resize_({1, 4, 4, 4}).set_requires_grad(true);
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
@@ -529,7 +529,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
 
 TEST_F(ModulesTest, AdaptiveAvgPool1d) {
   AdaptiveAvgPool1d model(3);
-  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = model(x);
   torch::Tensor s = y.sum();
 
@@ -543,7 +543,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool1d) {
 
 TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
   AdaptiveAvgPool2d model(3);
-  auto x = torch::arange(0, 50);
+  auto x = torch::arange(0., 50);
   x.resize_({2, 5, 5}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -565,7 +565,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
 
 TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
   AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
-  auto x = torch::arange(0, 40);
+  auto x = torch::arange(0., 40);
   x.resize_({2, 5, 4}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -587,7 +587,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
 
 TEST_F(ModulesTest, AdaptiveAvgPool3d) {
   AdaptiveAvgPool3d model(3);
-  auto x = torch::arange(0, 64);
+  auto x = torch::arange(0., 64);
   x.resize_({1, 4, 4, 4}).set_requires_grad(true);
   auto y = model(x);
   torch::Tensor s = y.sum();
@@ -612,7 +612,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool3d) {
 
 TEST_F(ModulesTest, MaxUnpool1d) {
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool1d{3};
   auto y = model->forward(x, indices);
 
@@ -622,7 +622,7 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   model = MaxUnpool1d{MaxUnpool1dOptions(3).stride(2).padding(1)};
   y = model->forward(x, indices, std::vector<int64_t>({1, 1, 5}));
 
@@ -667,7 +667,7 @@ TEST_F(ModulesTest, MaxUnpool2d) {
     {21, 23, 24}}},
   {{{31, 33, 34},
     {41, 43, 44},
-    {46, 48, 49}}}}, torch::requires_grad());
+    {46, 48, 49}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool2d{MaxUnpool2dOptions(3).stride(2).padding(1)};
   auto y = model->forward(x, indices);
 
@@ -713,7 +713,7 @@ TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
 
 TEST_F(ModulesTest, MaxUnpool3d) {
   auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
-  auto x = torch::tensor({{{{{26}}}}}, torch::requires_grad());
+  auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool3d{3};
   auto y = model->forward(x, indices);
 
@@ -741,7 +741,7 @@ TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
     {{{{{21, 23},
         {29, 31}},
        {{53, 55},
-        {61, 63}}}}}, torch::requires_grad());
+        {61, 63}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool3d{MaxUnpool3dOptions(3).stride(2).padding(1)};
   auto y = model->forward(x, indices, std::vector<int64_t>({1, 1, 4, 4, 4}));
 
@@ -813,6 +813,47 @@ TEST_F(ModulesTest, Linear) {
   }
 }
 
+TEST_F(ModulesTest, LocalResponseNorm) {
+  {
+    LocalResponseNorm model(LocalResponseNormOptions(2));
+    const auto x = torch::arange(100., 136, torch::requires_grad()).reshape({2, 3, 3, 2});
+    auto y = model(x);
+    const auto y_exp = torch::tensor(
+      {{{{73.7788, 74.1462},
+          {74.5031, 74.8572},
+          {75.2010, 75.5420}},
+
+         {{61.6057, 61.7227},
+          {61.8347, 61.9418},
+          {62.0441, 62.1418}},
+
+         {{62.2349, 62.3235},
+          {62.4077, 62.4877},
+          {62.5635, 62.6353}}},
+
+        {{{79.3915, 79.6491},
+          {79.8978, 80.1446},
+          {80.3827, 80.6190}},
+
+         {{63.0317, 63.0742},
+          {63.1135, 63.1496},
+          {63.1826, 63.2126}},
+
+         {{63.2396, 63.2637},
+          {63.2850, 63.3036},
+          {63.3195, 63.3328}}}},
+      torch::kFloat
+    );
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 4);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.sizes(), x.sizes());
+    ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+  }
+}
+
 TEST_F(ModulesTest, LayerNorm) {
   LayerNorm model(LayerNormOptions({2, 2}).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
@@ -848,31 +889,52 @@ TEST_F(ModulesTest, Bilinear) {
 }
 
 TEST_F(ModulesTest, Fold) {
-  Fold model(FoldOptions({4, 5}, {2, 2}));
-  auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
-  auto y = model(x);
-  torch::Tensor s = y.sum();
+  {
+    Fold model(FoldOptions({3, 2}, {2, 2}));
+    auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::requires_grad());
+    auto output = model(input);
+    auto expected = torch::tensor(
+        {{{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}}}},
+        torch::kFloat);
+    auto s = output.sum();
+    s.backward();
 
-  s.backward();
-  ASSERT_EQ(y.ndimension(), 4);
-  ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.size(0), 1);
-  ASSERT_EQ(y.size(1), 3);
-  ASSERT_EQ(y.size(2), 4);
-  ASSERT_EQ(y.size(3), 5);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 3, 3, 2}));
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    // input wrong dimension
+    Fold model(FoldOptions({8, 8}, {3, 3}));
+    ASSERT_THROWS_WITH(
+        model(torch::randn({1, 3, 16, 16})),
+        "Input Error: Only 3D input Tensors are supported (got 4D)");
+  }
 }
 
 TEST_F(ModulesTest, Unfold) {
   {
-    Unfold model(UnfoldOptions({2, 4}));
-    auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+    Unfold model(UnfoldOptions({2, 2}).padding(1).stride(2));
+    auto input = torch::arange(2., 14, torch::requires_grad()).view({1, 2, 2, 3});
     auto output = model(input);
-    auto expected_sizes = std::vector<int64_t>({2, 16, 3});
+    auto expected = torch::tensor(
+        {{{0.0, 0.0, 0.0, 6.0},
+          {0.0, 0.0, 5.0, 7.0},
+          {0.0, 3.0, 0.0, 0.0},
+          {2.0, 4.0, 0.0, 0.0},
+          {0.0, 0.0, 0.0, 12.0},
+          {0.0, 0.0, 11.0, 13.0},
+          {0.0, 9.0, 0.0, 0.0},
+          {8.0, 10.0, 0.0, 0.0}}},
+        torch::kFloat);
     auto s = output.sum();
     s.backward();
 
-    ASSERT_EQ(output.sizes(), expected_sizes);
     ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 8, 4}));
+    ASSERT_TRUE(output.allclose(expected));
   }
   {
     // input wrong dimension
@@ -1109,8 +1171,7 @@ TEST_F(ModulesTest, BatchNorm1dStateful) {
   ASSERT_EQ(bn->running_var.size(0), 5);
 
   ASSERT_TRUE(bn->num_batches_tracked.defined());
-  ASSERT_EQ(bn->num_batches_tracked.dim(), 1);
-  ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
 
   ASSERT_TRUE(bn->options.affine());
 
@@ -1141,9 +1202,109 @@ TEST_F(ModulesTest, BatchNorm1d) {
   auto output = bn->forward(input);
   auto s = output.sum();
   s.backward();
-  
+
   ASSERT_EQ(input.sizes(), input.grad().sizes());
   ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5})));
+}
+
+TEST_F(ModulesTest, BatchNorm2dStateful) {
+  BatchNorm2d bn(BatchNorm2dOptions(5));
+
+  ASSERT_TRUE(bn->options.track_running_stats());
+
+  ASSERT_TRUE(bn->running_mean.defined());
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
+
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
+
+  ASSERT_TRUE(bn->num_batches_tracked.defined());
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
+
+  ASSERT_TRUE(bn->options.affine());
+
+  ASSERT_TRUE(bn->weight.defined());
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
+
+  ASSERT_TRUE(bn->bias.defined());
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, BatchNorm2dStateless) {
+  BatchNorm2d bn(BatchNorm2dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_var.defined());
+  ASSERT_FALSE(bn->num_batches_tracked.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
+}
+
+TEST_F(ModulesTest, BatchNorm2d) {
+  BatchNorm2d bn(BatchNorm2dOptions(5));
+  bn->eval();
+
+  auto input = torch::randn({2, 5, 4, 4}, torch::requires_grad());
+  auto output = bn->forward(input);
+  auto s = output.sum();
+  s.backward();
+  
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4})));
+}
+
+TEST_F(ModulesTest, BatchNorm3dStateful) {
+  BatchNorm3d bn(BatchNorm3dOptions(5));
+
+  ASSERT_TRUE(bn->options.track_running_stats());
+
+  ASSERT_TRUE(bn->running_mean.defined());
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
+
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
+
+  ASSERT_TRUE(bn->num_batches_tracked.defined());
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
+
+  ASSERT_TRUE(bn->options.affine());
+
+  ASSERT_TRUE(bn->weight.defined());
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
+
+  ASSERT_TRUE(bn->bias.defined());
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, BatchNorm3dStateless) {
+  BatchNorm3d bn(BatchNorm3dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_var.defined());
+  ASSERT_FALSE(bn->num_batches_tracked.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
+}
+
+TEST_F(ModulesTest, BatchNorm3d) {
+  BatchNorm3d bn(BatchNorm3dOptions(5));
+  bn->eval();
+
+  auto input = torch::randn({2, 5, 4, 4, 4}, torch::requires_grad());
+  auto output = bn->forward(input);
+  auto s = output.sum();
+  s.backward();
+  
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4, 4})));
 }
 
 TEST_F(ModulesTest, Linear_CUDA) {
@@ -1230,7 +1391,7 @@ TEST_F(ModulesTest, KLDivLoss) {
 
 TEST_F(ModulesTest, HingeEmbeddingLoss) {
   HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
-  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::requires_grad());
+  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({10}, torch::kFloat);
@@ -1244,7 +1405,7 @@ TEST_F(ModulesTest, HingeEmbeddingLoss) {
 TEST_F(ModulesTest, MultiMarginLoss) {
   auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
   MultiMarginLoss loss(MultiMarginLossOptions().margin(2).weight(weight));
-  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
+  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({2, 1, 0}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.305556}, torch::kFloat);
@@ -1257,8 +1418,8 @@ TEST_F(ModulesTest, MultiMarginLoss) {
 
 TEST_F(ModulesTest, CosineEmbeddingLoss) {
   CosineEmbeddingLoss cos(CosineEmbeddingLossOptions().margin(0.5));
-  auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::requires_grad());
-  auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}}, torch::requires_grad());
+  auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({1, -1});
   auto output = cos(input1, input2, target);
   auto expected = torch::tensor({0.1004}, torch::kFloat);
@@ -1270,9 +1431,22 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
+  SmoothL1Loss loss;
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   MultiLabelMarginLoss loss;
-  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
@@ -1283,9 +1457,22 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, SmoothL1LossNoReduction) {
+  SmoothL1Loss loss(/*reduction=*/torch::Reduction::None);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
   MultiLabelMarginLoss loss(torch::kNone);
-  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
@@ -1298,9 +1485,9 @@ TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
 
 TEST_F(ModulesTest, TripletMarginLoss) {
   TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
-  auto anchor = torch::tensor({{3., 3.}}, torch::requires_grad());
-  auto positive = torch::tensor({{2., 2.}}, torch::requires_grad());
-  auto negative = torch::tensor({{0., 0.}}, torch::requires_grad());
+  auto anchor = torch::tensor({{3., 3.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto positive = torch::tensor({{2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto negative = torch::tensor({{0., 0.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = loss->forward(anchor, positive, negative);
   auto expected = torch::tensor({0.}, torch::kFloat);
   auto s = output.sum();
@@ -1312,8 +1499,8 @@ TEST_F(ModulesTest, TripletMarginLoss) {
 
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
-  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
-  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = cos->forward(input1, input2);
   auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   auto s = output.sum();
@@ -1325,7 +1512,7 @@ TEST_F(ModulesTest, CosineSimilarity) {
 
 TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
   SoftMarginLoss loss;
-  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({1.3767317}, torch::kFloat);
@@ -1338,7 +1525,7 @@ TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
 
 TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
   MultiLabelSoftMarginLoss loss;
-  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.7608436}, torch::kFloat);
@@ -1351,7 +1538,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
 
 TEST_F(ModulesTest, SoftMarginLossNoReduction) {
   SoftMarginLoss loss(torch::kNone);
-  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
@@ -1363,7 +1550,7 @@ TEST_F(ModulesTest, SoftMarginLossNoReduction) {
 }
 
 TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
-  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
   auto options = MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight);
@@ -1378,9 +1565,9 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
 }
 
 TEST_F(ModulesTest, PairwiseDistance) {
-  PairwiseDistance dist(PairwiseDistanceOptions(1));
-  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
-  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
+  PairwiseDistance dist(PairwiseDistanceOptions().p(1));
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = dist->forward(input1, input2);
   auto expected = torch::tensor({6, 6}, torch::kFloat);
   auto s = output.sum();
@@ -1671,6 +1858,14 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
+TEST_F(ModulesTest, GELU) {
+  GELU model;
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, Sigmoid) {
   Sigmoid model;
   auto x = torch::randn(100) * 10;
@@ -1927,6 +2122,83 @@ TEST_F(ModulesTest, Upsampling3D) {
         ASSERT_TRUE(output.allclose(expected));
       }
     }
+  }
+}
+
+TEST_F(ModulesTest, CTCLoss) {
+  CTCLoss loss {CTCLossOptions().reduction(torch::kNone)};
+  const auto target_lengths = torch::tensor({0, 0, 0});
+  const auto input_lengths = torch::tensor({50, 50, 50});
+  const auto targets =
+    torch::randint(1, 15, at::IntArrayRef({0}), torch::kLong);
+  const auto log_probs =
+    torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
+  const auto output =
+    loss->forward(log_probs, targets, input_lengths, target_lengths);
+  ASSERT_TRUE(output.ge(0).all().item<bool>());
+  ASSERT_TRUE(torch::allclose(
+    -log_probs.sum(0).slice(1, 0, 1).view_as(output), output));
+}
+
+TEST_F(ModulesTest, PoissonNLLLoss) {
+  const auto input = torch::tensor({0.5, 1.5, 2.5});
+  const auto target = torch::tensor({1., 2., 3.});
+  const auto component_wise_loss = torch::exp(input) - target * input;
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kNone)};
+    ASSERT_TRUE(torch::allclose(
+      component_wise_loss,
+      loss->forward(input, target)
+    ));
+  }
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kSum)};
+    ASSERT_TRUE(torch::allclose(
+      torch::sum(component_wise_loss),
+      loss->forward(input, target)
+    ));
+  }
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kMean)};
+    ASSERT_TRUE(torch::allclose(
+      torch::mean(component_wise_loss),
+      loss->forward(input, target)
+    ));
+  }
+}
+
+TEST_F(ModulesTest, MarginRankingLoss) {
+  {
+    MarginRankingLoss loss;
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2)).clamp(0).mean()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kSum)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).sum()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kMean)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).mean()
+    ));
   }
 }
 
@@ -2215,6 +2487,55 @@ TEST_F(ModulesTest, ConstantPad3d) {
   }
 }
 
+TEST_F(ModulesTest, CrossMapLRN2d) {
+  /// size 3, default options
+  auto input = torch::arange(9, torch::kFloat32).view({1, 1, 3, 3}).requires_grad_(true);
+  auto expected = torch::tensor({{{{0.00000000, 0.99997497, 1.99980010},
+                                   {2.99932500, 3.99840070, 4.99687700},
+                                   {5.99460600, 6.99143740, 7.98722360}}}}, torch::kFloat32);
+  auto grad_expected = torch::tensor({{{{1.00000000, 0.99992496, 0.99970007},
+                                        {0.99932520, 0.99880093, 0.99812720},
+                                        {0.99730474, 0.99633380, 0.99521490}}}}, torch::kFloat32);
+  auto crossmaplrn2d = CrossMapLRN2d(3);
+  auto output = crossmaplrn2d(input);
+  output.sum().backward();
+  
+  ASSERT_TRUE(input.grad().allclose(grad_expected));
+  ASSERT_TRUE(output.allclose(expected));
+  
+  /// size change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(4).alpha(1e-4).beta(0.75).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99998120, 1.99985000},
+                              {2.99949400, 3.99880050, 4.99765800},
+                              {5.99595300, 6.99357600, 7.99041300}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// alpha change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-3).beta(0.75).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99975010, 1.99800230},
+                              {2.99326750, 3.98407440, 4.96897600},
+                              {5.94656100, 6.91545720, 7.87434340}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// beta change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.95).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99996830, 1.99974680},
+                              {2.99914500, 3.99797440, 4.99604460},
+                              {5.99316840, 6.98915600, 7.98382000}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// k change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.75).k(2));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.59459610, 1.18914770},
+                              {1.78361000, 2.37793870, 2.97208900},
+                              {3.56601700, 4.15967700, 4.75302650}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
@@ -2252,6 +2573,15 @@ TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().scale_factor({0.5, 1.5}).mode(torch::kBilinear))),
       "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFold) {
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({2, 2}, {5, 5}))),
+      "torch::nn::Fold(output_size=[2, 2], kernel_size=[5, 5], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2))),
+      "torch::nn::Fold(output_size=[8, 8], kernel_size=[3, 3], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintUnfold) {
@@ -2416,6 +2746,22 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
       "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
+TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
+  ASSERT_EQ(
+      c10::str(BatchNorm2d(
+          BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::BatchNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
+  ASSERT_EQ(
+      c10::str(BatchNorm3d(
+          BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::BatchNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
   ASSERT_EQ(
     c10::str(LayerNorm(LayerNormOptions({2, 2}))),
@@ -2423,6 +2769,15 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
       ASSERT_EQ(
         c10::str(LayerNorm(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
+  ASSERT_EQ(
+    c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
+      "torch::nn::LocalResponseNorm(2, alpha=0.0001, beta=0.75, k=1)");
+  ASSERT_EQ(
+    c10::str(LocalResponseNorm(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.))),
+      "torch::nn::LocalResponseNorm(2, alpha=0.0002, beta=0.85, k=2)");
 }
 
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
@@ -2516,7 +2871,7 @@ TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
       c10::str(PairwiseDistance()),
       "torch::nn::PairwiseDistance(p=2, eps=1e-06, keepdim=false)");
   ASSERT_EQ(
-      c10::str(PairwiseDistance(PairwiseDistanceOptions(3).eps(0.5).keepdim(true))),
+      c10::str(PairwiseDistance(PairwiseDistanceOptions().p(3).eps(0.5).keepdim(true))),
       "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
@@ -2754,4 +3109,33 @@ TEST_F(ModulesTest, PrettyPrintThreshold) {
   ASSERT_EQ(c10::str(Threshold(
       ThresholdOptions(42.42, 24.24).inplace(true))),
     "torch::nn::Threshold(threshold=42.42, value=24.24, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintCTCLoss) {
+  ASSERT_EQ(c10::str(CTCLoss()), "torch::nn::CTCLoss()");
+  ASSERT_EQ(c10::str(CTCLoss(
+    CTCLossOptions().blank(42).zero_infinity(false)
+      .reduction(torch::kSum))), "torch::nn::CTCLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
+  ASSERT_EQ(c10::str(PoissonNLLLoss()), "torch::nn::PoissonNLLLoss()");
+  ASSERT_EQ(c10::str(PoissonNLLLoss(
+    PoissonNLLLossOptions().log_input(false).full(true).eps(0.42)
+    .reduction(torch::kSum))),
+    "torch::nn::PoissonNLLLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
+  ASSERT_EQ(c10::str(MarginRankingLoss()), "torch::nn::MarginRankingLoss()");
+  ASSERT_EQ(c10::str(MarginRankingLoss(
+    MarginRankingLossOptions().margin(0.5).reduction(torch::kSum))),
+    "torch::nn::MarginRankingLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
+  ASSERT_EQ(c10::str(CrossMapLRN2d(4)),
+    "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
+  ASSERT_EQ(c10::str(CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10))),
+    "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
 }

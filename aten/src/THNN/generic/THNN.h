@@ -6,18 +6,6 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/DistributionsHelper.h>
 
-TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-
 TH_API void THNN_(VolumetricConvolutionMM_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -31,20 +19,6 @@ TH_API void THNN_(VolumetricConvolutionMM_updateOutput)(
           int pT, int pW, int pH);
 
 #if !defined(TH_REAL_IS_LONG)
-
-TH_API void THNN_(AbsCriterion_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *target,            // tensor with target values
-          THTensor *output,            // [OUT] a one-element tensor with loss
-          int64_t reduction);
-TH_API void THNN_(AbsCriterion_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *target,            // tensor with target values
-          THTensor *gradOutput,
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          int64_t reduction);
 
 TH_API void THNN_(BCECriterion_updateOutput)(
           THNNState *state,
@@ -61,26 +35,6 @@ TH_API void THNN_(BCECriterion_updateGradInput)(
           THTensor *gradInput,
           int64_t reduction,
           THTensor *weights);          // [OPTIONAL]
-
-TH_API void THNN_(ClassNLLCriterion_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor (1D/2D)
-          THIndexTensor *target,       // tensor containing indexes of target classes
-          THTensor *output,            // [OUT] a one-element tensor with loss
-          int64_t reduction,
-          THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
-TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor (1D/2D)
-          THIndexTensor *target,       // tensor containing indexes of target classes
-          THTensor *gradOutput,
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          int64_t reduction,
-          THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
 TH_API void THNN_(ELU_updateOutput)(
           THNNState *state,            // library's state
@@ -169,20 +123,6 @@ TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
           THTensor *gradInput,
           int64_t reduction);
 
-TH_API void THNN_(MSECriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *output,
-          int64_t reduction);
-TH_API void THNN_(MSECriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction);
-
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -240,49 +180,6 @@ TH_API void THNN_(SoftShrink_updateGradInput)(
           THTensor *gradInput,
           accreal lambda);
 
-TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-TH_API void THNN_(SpatialConvolutionMM_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,     // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          accreal scale);
-
-TH_API void THNN_(unfolded_acc)(
-          THTensor *finput,
-          THTensor *input,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int nInputPlane,
-          int inputWidth, int inputHeight,
-          int osizeW, int outputHeight);
-TH_API void THNN_(unfolded_copy)(
-          THTensor *finput,
-          THTensor *input,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int nInputPlane,
-          int inputWidth, int inputHeight,
-          int outputWidth, int outputHeight);
-
 TH_API void THNN_(Tanh_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -316,27 +213,6 @@ TH_API void THNN_(VolumetricConvolutionMM_accGradParameters)(
           int dT, int dW, int dH,
           int pT, int pW, int pH,
           accreal scale);
-
-TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor (4D)
-          THIndexTensor *target,       // tensor containing indexes of target classes (3D)
-          THTensor *output,            // [OUT] a one-element tensor with loss
-          int64_t reduction,
-          THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
-
-TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor (4D)
-          THIndexTensor *target,       // tensor containing indexes of target classes (3D)
-          THTensor *gradOutput,
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          int64_t reduction,
-          THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
 #endif
 #endif
