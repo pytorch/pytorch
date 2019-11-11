@@ -16,7 +16,6 @@ observer_configs_short = op_bench.config_list(
     attrs=[
         [3, 512, 512, torch.quint8, torch.per_tensor_affine],
     ],
-
     tags=['short']
 )
 

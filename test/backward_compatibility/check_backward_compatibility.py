@@ -14,6 +14,7 @@ white_list = [
     ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 15)),
     ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
     ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
+    ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
 ]
 
 
