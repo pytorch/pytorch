@@ -304,32 +304,9 @@ constexpr const char* _typeName(const char* literalName) noexcept {
 }
 #endif
 
-// CollisionChecker is a safeguard to make sure none of our types generate
-// the same type id. Since we use crc64 of the string type name, there's a
-// (very) slight possibility of collisions and we want to be sure that doesn't
-// happen.
-class CollisionChecker final {
-public:
-  // Check that there is no type registered with this id and a different name
-  void check(TypeIdentifier id, const std::string& name) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto find = typeids_.find(id);
-    if (find != typeids_.end()) {
-      AT_ASSERT(find->second == name, "Typeid collision detected for ", find->second, " and ", name, ".");
-    } else {
-      typeids_.emplace(id, name);
-    }
-  }
-private:
-  std::mutex mutex_;
-  ska::flat_hash_map<TypeIdentifier, std::string> typeids_;
-};
-C10_API CollisionChecker& collisionChecker_();
-
 template <class T>
 inline TypeMetaData _makeTypeMetaDataInstance(const char* typeName) {
   C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
-  collisionChecker_().check(typeId, typeName);
   return {sizeof(T),
           _PickNew<T>(),
           _PickPlacementNew<T>(),
