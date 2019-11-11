@@ -227,7 +227,7 @@ struct TORCH_API SmoothL1LossOptions {
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
-  TORCH_ARG(reduction_t, reduction);
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SmoothL1Loss, SmoothL1LossFuncOptions)
