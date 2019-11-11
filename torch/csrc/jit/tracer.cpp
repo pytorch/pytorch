@@ -293,7 +293,7 @@ static void gatherParametersAndBuffers(
   state->setValue(self.module_object(), self_value);
 
   auto self_ty = self.type();
-  for (const script::NameValue& s : self.get_slots()) {
+  for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
     auto qualname = prefix + "." + s.name;
     Value* trace_get_attr = g.insertNode(g.create(prim::TracedAttr))
                                 ->s_(attr::scope, qualname)
@@ -624,8 +624,13 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto& tracing_state = getTracingState();
   auto& graph = tracing_state->graph;
 
-  auto size_var =
-      autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+  Variable size_var;
+  {
+    // Make sure this scalar to tensor isn't traced!
+    at::AutoNonVariableTypeMode guard;
+    size_var =
+        autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+  }
   auto* value = getValueTrace(var);
   auto dim_val = graph->insertConstant(dim);
   recordSourceLocation(dim_val->node());

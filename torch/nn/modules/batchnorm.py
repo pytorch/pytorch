@@ -497,8 +497,8 @@ class SyncBatchNorm(_BatchNorm):
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
-                module_output.weight.data = module.weight.data.clone().detach()
-                module_output.bias.data = module.bias.data.clone().detach()
+                module_output.weight.data = module.weight.data.clone(memory_format=torch.preserve_format).detach()
+                module_output.bias.data = module.bias.data.clone(memory_format=torch.preserve_format).detach()
                 # keep reuqires_grad unchanged
                 module_output.weight.requires_grad = module.weight.requires_grad
                 module_output.bias.requires_grad = module.bias.requires_grad

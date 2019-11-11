@@ -47,14 +47,42 @@ struct Module;
 template <typename T>
 struct slot_list_impl;
 
-struct NameModule;
-struct NameValue;
+template <typename T>
+struct Named {
+  std::string name;
+  T value;
+};
 
-using module_list = slot_list_impl<NameModule>;
-using ivalue_list = slot_list_impl<NameValue>;
+using NameModule = Named<Module>;
+using NameValue = Named<IValue>;
+using NameTensor = Named<at::Tensor>;
+
+namespace detail {
+struct TORCH_API ModulePolicy;
+struct TORCH_API ParameterPolicy;
+struct TORCH_API AttributePolicy;
+struct TORCH_API BufferPolicy;
+template <typename P>
+struct NamedPolicy;
+} // namespace detail
+
+using module_list = slot_list_impl<detail::ModulePolicy>;
+using named_module_list =
+    slot_list_impl<detail::NamedPolicy<detail::ModulePolicy>>;
+
+using parameter_list = slot_list_impl<detail::ParameterPolicy>;
+using named_parameter_list =
+    slot_list_impl<detail::NamedPolicy<detail::ParameterPolicy>>;
+
+using attribute_list = slot_list_impl<detail::AttributePolicy>;
+using named_attribute_list =
+    slot_list_impl<detail::NamedPolicy<detail::AttributePolicy>>;
+
+using buffer_list = slot_list_impl<detail::BufferPolicy>;
+using named_buffer_list =
+    slot_list_impl<detail::NamedPolicy<detail::BufferPolicy>>;
+
 using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
-
-enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
 // A method in a module, e.g. f in:
 //
@@ -144,16 +172,16 @@ struct TORCH_API Module {
   // as parameters. This is different than in nn.Module where there is a special
   // register_buffer method. With this simplification, we only need to track
   // whether a slot is a parameter to be able to classify it.
-  void register_buffer(const std::string& name, autograd::Variable v) {
+  void register_buffer(const std::string& name, at::Tensor v) {
     type()->addOrCheckAttribute(name, TensorType::get());
-    module_object()->setAttr(name, v);
+    module_object()->setAttr(name, std::move(v));
   }
   void register_parameter(
       const std::string& name,
-      autograd::Variable v,
+      at::Tensor v,
       bool is_buffer) {
     type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer);
-    module_object()->setAttr(name, v);
+    module_object()->setAttr(name, std::move(v));
   }
   void register_attribute(
       const std::string& name,
@@ -161,30 +189,16 @@ struct TORCH_API Module {
       IValue v,
       bool is_param = false) {
     type()->addOrCheckAttribute(name, t, is_param);
-    module_object()->setAttr(name, v);
+    module_object()->setAttr(name, std::move(v));
   }
   void register_module(const std::string& name, const Module& module) {
     type()->addOrCheckAttribute(name, module.type());
     module_object()->setAttr(name, module.module_object());
   }
 
-  void set_parameter(const std::string& name, at::Tensor v) {
-    module_object()->setAttr(name, v);
-  }
-
-  autograd::Variable get_parameter(const std::string& name) const {
-    return autograd::as_variable_ref(module_object()->getAttr(name).toTensor());
-  }
-
-  IValue get_attribute(const std::string& name) const {
-    return module_object()->getAttr(name);
-  }
-
-  void set_attribute(const std::string& name, IValue v) const {
+  void setattr(const std::string& name, IValue v) {
     size_t slot = module_object()->type()->getAttributeSlot(name);
     const TypePtr& expected = module_object()->type()->getAttribute(slot);
-    // TODO: give better error message when subtyping check fails, and python_str
-    // of expected and v.type() are just mangled names of the same nn.module.
     TORCH_CHECK(
         v.type()->isSubtypeOf(expected),
         "Expected a value of type '",
@@ -194,11 +208,22 @@ struct TORCH_API Module {
         "', but found '",
         v.type()->python_str(),
         "'");
-    return module_object()->setSlot(slot, std::move(v));
+    module_object()->setSlot(slot, std::move(v));
   }
 
-  autograd::Variable get_buffer(const std::string& name) const {
-    return autograd::as_variable_ref(get_attribute(name).toTensor());
+  IValue attr(const std::string& name) const {
+    return module_object()->getAttr(name);
+  }
+
+  IValue attr(const std::string& name, IValue or_else) const {
+    if (auto r = module_object()->type()->findAttributeSlot(name)) {
+      return module_object()->getSlot(*r);
+    }
+    return or_else;
+  }
+
+  bool hasattr(const std::string& name) const {
+    return module_object()->type()->findAttributeSlot(name).has_value();
   }
 
   // each module owns its method. The reference returned here
@@ -210,18 +235,23 @@ struct TORCH_API Module {
     AT_ERROR("Method '", name, "' is not defined.");
   }
 
-  Module get_module(const std::string& name) const {
-    auto obj = module_object()->getAttr(name).toObject();
-    return Module(obj);
-  }
+  void apply(const std::function<void(Module&)>& fn);
 
-  ivalue_list get_slots() const;
+  buffer_list buffers(bool recurse = true) const;
+  named_buffer_list named_buffers(bool recurse = true) const;
 
-  module_list get_modules() const;
+  module_list children() const; // direct modules
+  named_module_list named_children() const;
+  module_list modules() const; // all modules, including this one, recursively
+  named_module_list named_modules() const;
 
-  ivalue_list get_parameters() const;
+  // all tensors involved in gradient optimization
+  parameter_list parameters(bool recurse = true) const;
+  named_parameter_list named_parameters(bool recurse = true) const;
 
-  ivalue_list get_attributes() const;
+  // all members of the object, similar to iterating over dir(obj) in python
+  attribute_list attributes(bool recurse = true) const;
+  named_attribute_list named_attributes(bool recurse = true) const;
 
   void dump(
       bool print_method_bodies,
@@ -242,14 +272,7 @@ struct TORCH_API Module {
         });
   }
 
-  c10::optional<autograd::Variable> find_parameter(
-      const std::string& name) const;
-  c10::optional<IValue> find_attribute(const std::string& name) const;
-  c10::optional<autograd::Variable> find_buffer(const std::string& name) const;
-  c10::optional<Module> find_module(const std::string& name) const;
   c10::optional<Method> find_method(const std::string& basename) const;
-
-  void apply(const std::function<void(Module&)>& fn);
 
   /// Enables "training" mode.
   void train(bool on = true);
@@ -260,12 +283,7 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_attribute("training")) {
-      return p->toBool();
-    }
-
-    // We are in training mode by default
-    return true;
+    return attr("training", true).toBool();
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.
@@ -353,23 +371,6 @@ struct TORCH_API Module {
   size_t num_slots() const {
     return module_object()->slots().size();
   }
-  c10::optional<EntityType> entity_type(const std::string& name) const {
-    if (auto slot_idx = type()->findAttributeSlot(name)) {
-      return entity_type(*slot_idx);
-    }
-    return c10::nullopt;
-  }
-  EntityType entity_type(size_t offset_) const {
-    TORCH_CHECK(offset_ < type()->numAttributes());
-    if (type()->is_parameter(offset_)) {
-      return EntityType::PARAMETER;
-    }
-    at::TypePtr t = type()->getAttribute(offset_);
-    if (t->is_module()) {
-      return EntityType::MODULE;
-    }
-    return EntityType::ATTRIBUTE;
-  }
 
  private:
   Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
@@ -392,119 +393,294 @@ struct TORCH_API Module {
   mutable ModulePtr module_value_;
 };
 
-struct NameModule {
-  std::string name;
-  Module module;
+namespace detail {
+
+struct TORCH_API SlotCursor {
+  Module module_;
+  int64_t i_; // slot offset, -1 indicates the module itself
 };
 
-struct NameValue {
-  std::string name;
-  IValue value;
-};
+} // namespace detail
 
-// this iterator for the slot list defined below has a position in the list i_
-// and an optional field type_ that if present
-// restricts iteration to only the slots of module_ that
-// have EntityType *type_. This allows it to return, e.g.
-// only the parameter slots.
-// The template parameter allows us to use the same implementation for a list
-// that returns Module via template specialization of the operator* method.
-template <typename T>
-struct TORCH_API slot_iterator_impl {
-  slot_iterator_impl(Module module, c10::optional<EntityType> type, size_t i)
-      : module_(module), type_(type), i_(i) {
-    advance_to_valid();
+// This iterator allows the (optionally recursive) enumeration of
+// the  members of a Module. It performs a depth-first pre-order
+// traversal of the module. The Policy template parameter determines
+// which slots of the object should be included. For instance,
+// when iterating parameters, we return the parameter tensors,
+// but skip modules, buffers, and other attributes.
+// See ModulePolicy for comments about Policy object's API.
+template <typename Policy>
+struct slot_iterator_impl {
+  using SlotCursor = detail::SlotCursor;
+  using value_type = typename Policy::value_type;
+  slot_iterator_impl(
+      Module root,
+      bool recurse, // if true, do a depth-first search, otherwise, just look at
+                    // slots of root
+      bool return_module) // if true include root itself as the first thing
+                          // visited (used in modules())
+      : cursors_({SlotCursor{root, return_module ? -1 : 0}}),
+        recurse_(recurse) {
+    // advance iterator to first valid element (or the end, if empty)
+    while_not_valid_next();
   }
-  T operator*() const;
-  T operator->() const {
+  // empty cursors_, represents end of iteration
+  slot_iterator_impl() : recurse_(false) {}
+  value_type operator*() const {
+    return Policy::create(cursors_, cur());
+  }
+  value_type operator->() const {
     return **this;
   }
   slot_iterator_impl& operator++() {
-    ++i_;
-    advance_to_valid();
+    next_valid();
     return *this;
   }
   slot_iterator_impl operator++(int) {
+    // this is really expensive, should we delete it so people don't use it
+    // instead of prefix?
     slot_iterator_impl old = *this;
     ++(*this);
     return old;
   }
 
  private:
-  void advance_to_valid() {
-    while (i_ < module_.num_slots() &&
-           (type_ && module_.entity_type(i_) != *type_)) {
-      ++i_;
+  // return_module() is a corner case where instead of returning a submodule
+  // of root, we are returning root itself, because we are iterating modules(),
+  // which contains the root module itself.
+  // It is represented with a single SlotCursor whose index is -1.
+  bool return_module() const {
+    return top().i_ == -1;
+  }
+  const SlotCursor& top() const {
+    return cursors_.back();
+  }
+  SlotCursor& top() {
+    return cursors_.back();
+  }
+  IValue cur() const {
+    return return_module() ? top().module_.module_object()
+                           : top().module_.module_object()->getSlot(top().i_);
+  }
+
+  // advance to the next slot in a depth first pre-order traversal of the
+  // modules slots. This function does not guarentee the next slot is a
+  // valid element of the iteration. That is done by valid().
+  // invariant: !cursors_.empty()
+  void next() {
+    // we just returned the module itself, advance i_ to 0 so we are now
+    // at the first slot of the module.
+    if (return_module()) {
+      ++top().i_;
+      return;
+    }
+    // the last traversal action advanced beyond the number of slots in the
+    // module so continue the iteration in the parent.
+    if (top().i_ >= int64_t(top().module_.num_slots())) {
+      cursors_.pop_back();
+      if (!cursors_.empty()) {
+        ++top().i_;
+      }
+      return;
+    }
+    // if the current thing is a module, we have to scan it for recursive
+    // traversals. We do this by adding a new SlotCursor to track the traversal.
+    if (recurse_ &&
+        top()
+            .module_.module_object()
+            ->type()
+            ->getAttribute(top().i_)
+            ->is_module()) {
+      cursors_.emplace_back(SlotCursor{cur().toModule(), 0});
+      return;
+    }
+    // common case: advance to the next slot.
+    ++top().i_;
+  }
+  // is the current position of the iterator a valid one?
+  // otherwise, we have to continue advancing.
+  bool valid() const {
+    return top().i_ < int64_t(top().module_.num_slots()) &&
+        Policy::valid(top().module_.module_object()->type(), top().i_);
+  }
+  void while_not_valid_next() {
+    // advance iteration until we are either at the end (cursors_.empty())
+    // or in a valid state. return_module() is a special case,
+    // and is always considered valid, regardless of Policy, because it is
+    // it is only true when we are iterating modules.
+    while (!cursors_.empty() && !return_module() && !valid()) {
+      next();
     }
   }
-  Module module_;
-  c10::optional<EntityType> type_;
-  size_t i_;
+  void next_valid() {
+    // avoid crashing if this is empty
+    if (cursors_.empty()) {
+      return;
+    }
+    // advance to next element, which is maybe not valid
+    next();
+    while_not_valid_next();
+  }
 
-  template <typename TT>
+  std::vector<SlotCursor> cursors_;
+  bool recurse_;
+
   friend inline bool operator!=(
-      const slot_iterator_impl<TT>& a,
-      const slot_iterator_impl<TT>& b);
+      const slot_iterator_impl<Policy>& a,
+      const slot_iterator_impl<Policy>& b) {
+    // we are finished iteration when we have no more iteration SlotCursors.
+    // end is always an empty iterator with no cursors.
+    return (a.cursors_.empty() != b.cursors_.empty());
+  }
 };
-
-template <>
-inline NameModule slot_iterator_impl<NameModule>::operator*() const {
-  return {module_.type()->getAttributeName(i_),
-          module_.module_object()->getSlot(i_).toObject()};
-}
-
-template <>
-inline NameValue slot_iterator_impl<NameValue>::operator*() const {
-  return {module_.type()->getAttributeName(i_),
-          module_.module_object()->getSlot(i_)};
-}
-
-template <typename T>
-inline bool operator!=(
-    const slot_iterator_impl<T>& a,
-    const slot_iterator_impl<T>& b) {
-  return a.i_ != b.i_;
-}
 
 // This type represents lists of parameters, attributes, and
 // submodules contained in the module. It is abstract because
 // they are not stored directly in std::vectors but inside the
 // module's IValue object itself.
-template <typename T>
-struct TORCH_API slot_list_impl {
-  using iterator = slot_iterator_impl<T>;
-  using const_iterator = slot_iterator_impl<T>;
-  slot_iterator_impl<T> begin() const {
-    return slot_iterator_impl<T>(module_, type_, 0);
+template <typename Policy>
+struct slot_list_impl {
+  using iterator = slot_iterator_impl<Policy>;
+  using const_iterator = slot_iterator_impl<Policy>;
+  using value_type = typename iterator::value_type;
+  slot_iterator_impl<Policy> begin() const {
+    return slot_iterator_impl<Policy>(module_, recurse_, return_module_);
   }
-  slot_iterator_impl<T> end() const {
-    return slot_iterator_impl<T>(module_, type_, module_.num_slots());
+  slot_iterator_impl<Policy> end() const {
+    return slot_iterator_impl<Policy>();
   }
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
-      for (T s : *(this)) {
+      for (const value_type& s : *(this)) {
         ++*size_;
       }
     }
     return *size_;
   }
 
- private:
-  slot_list_impl(Module module, c10::optional<EntityType> type)
-      : module_(std::move(module)), type_(type) {
-    if (!type_) {
+  slot_list_impl(Module module, bool recurse, bool return_module)
+      : module_(std::move(module)),
+        recurse_(recurse),
+        return_module_(return_module),
+        size_(c10::nullopt) {
+    if (!recurse && !return_module && Policy::all_slots) {
       size_ = module_.num_slots();
     }
   }
+
+ private:
   Module module_;
-  // only include Slots of the following type
-  c10::optional<EntityType> type_;
+  bool recurse_;
+  bool return_module_;
   // size of this list, cached on first request
   // when we need to filter the slot list
   mutable c10::optional<size_t> size_;
   friend struct Module;
 };
+
+namespace detail {
+
+// slot_iterator_impl always iterate over all the slots in a module,
+// the Policy template argument determines slots should be returned and their
+// types
+struct TORCH_API ModulePolicy {
+  // the type of the value being returned
+  using value_type = Module;
+
+  // the logic for creating the type being returned, given the raw IValue
+  // of that object.
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
+    return Module(std::move(v).toObject());
+  }
+  // is slot i in typ something that this iterator should return, otherwise,
+  // we skip it.
+  static bool valid(const ClassTypePtr& typ, size_t i) {
+    return typ->getAttribute(i)->is_module();
+  }
+  // are we going to return everything? If so, we can optimize the calculate
+  // of the size of the list.
+  static constexpr bool all_slots = false;
+};
+
+struct TORCH_API ParameterPolicy {
+  using value_type = at::Tensor;
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
+    return std::move(v).toTensor();
+  }
+  static bool valid(const ClassTypePtr& typ, size_t i) {
+    return typ->is_parameter(i);
+  }
+  static constexpr bool all_slots = false;
+};
+
+struct TORCH_API BufferPolicy {
+  using value_type = at::Tensor;
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
+    return std::move(v).toTensor();
+  }
+  static bool valid(const ClassTypePtr& typ, size_t i) {
+    return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
+        !typ->is_parameter(i);
+  }
+  static constexpr bool all_slots = false;
+};
+
+struct TORCH_API AttributePolicy {
+  using value_type = IValue;
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
+    return v;
+  }
+  static bool valid(const ClassTypePtr& typ, size_t i) {
+    return true;
+  }
+  static constexpr bool all_slots = true;
+};
+
+// take a Policy object, and make a version of it that returns the slot.
+// along with the fully qualified name of that slot. This is used for the named_
+// variants like named_parameters().
+template <typename Policy>
+struct NamedPolicy {
+  using value_type = Named<typename Policy::value_type>;
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
+    std::string name;
+    if (cursors.size() == 1) {
+      name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
+    } else {
+      std::ostringstream ss;
+      for (size_t i = 0; i < cursors.size(); ++i) {
+        if (i > 0) {
+          ss << ".";
+        }
+        ss << nameFragment(cursors[i]);
+      }
+      name = ss.str();
+    }
+    return value_type{std::move(name), Policy::create(cursors, v)};
+  }
+  static bool valid(const ClassTypePtr& t, size_t i) {
+    return Policy::valid(t, i);
+  }
+  static constexpr bool all_slots = Policy::all_slots;
+
+ private:
+  static std::string nameFragment(const detail::SlotCursor& f) {
+    return f.module_.type()->getAttributeName(f.i_);
+  }
+};
+
+} // namespace detail
 
 TORCH_API bool& getInlineEverythingMode();
 
