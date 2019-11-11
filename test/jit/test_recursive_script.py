@@ -577,3 +577,24 @@ class TestRecursiveScript(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "property"):
             torch.jit.script(M())
+
+    def test_inner_traced_module(self):
+        class Dummy(nn.Module):
+            def forward(self, x):
+                return x
+
+        class Model(nn.Module):
+            def __init__(self, dummies):
+                super().__init__()
+                self._dummies = dummies
+
+            def forward(self, x):
+                out = []
+                for dummy in self._dummies:
+                    out.append(dummy(x))
+                return out
+
+        dummy = torch.jit.trace(Dummy(), torch.randn(1, 2))
+        dummies = nn.ModuleList([dummy])
+        model = Model(dummies)
+        self.checkModule(model, (torch.rand(5, 5), ))
