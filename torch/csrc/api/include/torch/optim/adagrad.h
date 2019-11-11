@@ -36,12 +36,12 @@ class TORCH_API Adagrad : public Optimizer {
  public:
   explicit Adagrad(std::vector<OptimizerParamGroup> param_groups,
       AdagradOptions defaults) : Optimizer(std::move(param_groups), c10::guts::make_unique<AdagradOptions>(std::move(defaults))) {
-    AdagradOptions* default_derived = static_cast<AdagradOptions*>(defaults_.get());
-    TORCH_CHECK(default_derived->learning_rate() >= 0, "Invalid learning rate: ", default_derived->learning_rate());
-    TORCH_CHECK(default_derived->lr_decay() >= 0, "Invalid lr_decay value: ", default_derived->lr_decay());
-    TORCH_CHECK(default_derived->weight_decay() >= 0, "Invalid weight_decay value: ", default_derived->weight_decay());
-    TORCH_CHECK(default_derived->initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", default_derived->initial_accumulator_value());
-    TORCH_CHECK(default_derived->eps() >= 0, "Invalid epsilon value: ", default_derived->eps());
+    const auto& default_derived = static_cast<const AdagradOptions&>(*defaults_.get());
+    TORCH_CHECK(default_derived.learning_rate() >= 0, "Invalid learning rate: ", default_derived.learning_rate());
+    TORCH_CHECK(default_derived.lr_decay() >= 0, "Invalid lr_decay value: ", default_derived.lr_decay());
+    TORCH_CHECK(default_derived.weight_decay() >= 0, "Invalid weight_decay value: ", default_derived.weight_decay());
+    TORCH_CHECK(default_derived.initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", default_derived.initial_accumulator_value());
+    TORCH_CHECK(default_derived.eps() >= 0, "Invalid epsilon value: ", default_derived.eps());
 
     for (const auto& group : param_groups_) {
       for (const auto& p : group.params()) {
