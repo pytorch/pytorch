@@ -75,7 +75,7 @@ void Adagrad::step() {
         continue;
       }
       auto grad = p.grad().data();
-      // TODO: assert that both pointers are not null before dereferencing
+      // TODO: assert that `state_[p.unsafeGetTensorImpl()]` exists and is not a null pointer, before dereferencing it
       auto& state = static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
