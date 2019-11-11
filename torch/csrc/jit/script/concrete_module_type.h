@@ -112,6 +112,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   friend bool operator==(
       const ConcreteModuleType& lhs,
       const ConcreteModuleType& rhs) {
+    if (lhs.jitType_ == rhs.jitType_) {
+      // If the computed types are the same, these modules can (obviously) share
+      // a type.
+      return true;
+    }
+
     if (lhs.isPoisoned_ || rhs.isPoisoned_) {
       return false;
     }
