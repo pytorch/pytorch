@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -135,8 +135,14 @@ class TestQuantizedOps(TestCase):
         }
 
         for name, op in ops_under_test.items():
-            qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+            for inplace in (True, False):
+                if hasattr(op, 'inplace'):
+                    op.inplace = inplace
+                    qY_hat = op(qX)
+                else:
+                    qY_hat = op(qX, inplace=inplace)
+                self.assertEqual(qY, qY_hat,
+                                 message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
     @no_deadline
@@ -656,6 +662,7 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
@@ -1121,7 +1128,8 @@ class TestQuantizedLinear(unittest.TestCase):
             return
         decimal_val = 4
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK qlinear is flaky on MACOS. Issue #27326
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
             use_multi_dim_input = False
@@ -1488,7 +1496,8 @@ class TestQuantizedConv(unittest.TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK qconv is flaky on MACOS. Issue #27326
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
 
@@ -1688,6 +1697,7 @@ class TestQuantizedConv(unittest.TestCase):
 @unittest.skipIf(TEST_WITH_UBSAN,
                  "QNNPACK does not play well with UBSAN at the moment,"
                  " so we skip the test if we are in a UBSAN environment.")
+@unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),

@@ -542,7 +542,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
              "equal number of batches expected");
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
+  auto maybe_outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
   {
     at::NoNamesGuard guard;
 #endif
@@ -821,7 +821,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   }
 #ifdef BUILD_NAMEDTENSOR
   }
-  at::namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  at::namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
 
 #else
