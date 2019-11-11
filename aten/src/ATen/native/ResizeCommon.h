@@ -9,7 +9,7 @@ namespace at { namespace native {
 inline Tensor& resize_named_tensor_(
     Tensor& self,
     IntArrayRef size,
-    MemoryFormat memory_format) {
+    c10::optional<MemoryFormat> optional_memory_format) {
   TORCH_INTERNAL_ASSERT(self.has_names());
   TORCH_CHECK(
       self.sizes() == size,
@@ -23,9 +23,10 @@ inline Tensor& resize_named_tensor_(
       "). This may be caused by passing a named tensor ",
       "as an `out=` argument; please ensure that the sizes are the same. ");
   TORCH_CHECK(
-      memory_format == MemoryFormat::Contiguous,
+      optional_memory_format.value_or(MemoryFormat::Contiguous) ==
+          MemoryFormat::Contiguous,
       "Unsupported memory format for named tensor resize ",
-      memory_format);
+      optional_memory_format.value_or(MemoryFormat::Contiguous));
   return self;
 }
 #endif
