@@ -186,7 +186,7 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.resize_(size, optional_memory_format);
+    self_.resize_(size, std::move(optional_memory_format));
   }
   return self;
 }
