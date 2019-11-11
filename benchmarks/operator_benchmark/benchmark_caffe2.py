@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 from caffe2.python import workspace
 from caffe2.python import core
 from caffe2.proto import caffe2_pb2
-import benchmark_core
 import benchmark_utils
 from collections import namedtuple
 from benchmark_test_generator import _generate_test
@@ -133,9 +132,12 @@ class Caffe2OperatorTestCase(object):
         pass
 
 
-def register_caffe2_op_test_case(op_bench, test_config):
+def create_caffe2_op_test_case(op_bench, test_config):
     test_case = Caffe2OperatorTestCase(op_bench, test_config)
-    benchmark_core._register_test(test_case)
+    test_config = test_case.test_config
+    op = test_case.op_bench
+    func_name = "{}{}{}".format(op.module_name(), test_case.framework, str(test_config))
+    return (func_name, test_case)
 
 
 OpMeta = namedtuple("OpMeta", "op_type num_inputs input_dims input_types \
@@ -180,7 +182,7 @@ def generate_c2_test_from_ops(ops_metadata, bench_op, tags):
             str(op_metadata.args))
         test_config = TestConfig(test_name, input_config, tags, run_backward=False)
         if op is not None:
-            register_caffe2_op_test_case(
+            create_caffe2_op_test_case(
                 op,
                 test_config)
 
@@ -188,12 +190,12 @@ def generate_c2_test_from_ops(ops_metadata, bench_op, tags):
 def generate_c2_test(configs, c2_bench_op):
     """ This function creates Caffe2 op test based on the given operator
     """
-    _generate_test(configs, c2_bench_op, register_caffe2_op_test_case,
-                   run_backward=False)
+    return _generate_test(configs, c2_bench_op, create_caffe2_op_test_case,
+                          run_backward=False)
 
 
 def generate_c2_gradient_test(configs, c2_bench_op):
     """ This function creates Caffe2 op test based on the given operator
     """
-    _generate_test(configs, c2_bench_op, register_caffe2_op_test_case,
-                   run_backward=True)
+    return _generate_test(configs, c2_bench_op, create_caffe2_op_test_case,
+                          run_backward=True)

@@ -364,7 +364,7 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE
     )
 
-target_compile_definitions(torch_python PUBLIC _THP_CORE)
+target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
