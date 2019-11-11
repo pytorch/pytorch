@@ -584,7 +584,7 @@ def wrap_cpp_module(cpp_module):
     Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules
     """
     def init_fn(script_module):
-        for name, cpp_module in script_module._c._get_modules():
+        for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 

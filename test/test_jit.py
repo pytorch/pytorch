@@ -940,7 +940,7 @@ graph(%x : Tensor,
                 weight=observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        assert len([x for x, _ in m._c._get_modules()
+        assert len([x for x, _ in m._modules._c.items()
                     if x.startswith('_observer_')]) == 0, \
             'Expected to have 0 observer submodules'
         FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
@@ -948,7 +948,7 @@ graph(%x : Tensor,
                    .check_next('Tensor = prim::CallMethod[name="forward"]') \
                    .check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
                    .run(str(get_forward_graph(m._c)))
-        assert len([x for x, _ in m._c._get_module('conv')._get_modules()
+        assert len([x for x, _ in m.conv._modules._c.items()
                     if x.startswith('_observer_')]) == 3, \
             'Expected to have 3 observer submodules'
         FileCheck().check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
@@ -958,7 +958,7 @@ graph(%x : Tensor,
                    .check('Tensor = aten::conv2d') \
                    .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                   .run(str(m._c._get_module("conv")._get_method('conv2d_forward').graph))
+                   .run(str(m._c.getattr("conv")._get_method('conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_child_qconfig(self):
@@ -1010,13 +1010,13 @@ graph(%x : Tensor,
         # check m is not observed
         check_not_observed(get_forward_graph(m._c))
         # check conv.forward is observed
-        check_not_observed(get_forward_graph(m._c._get_module('conv')))
+        check_not_observed(get_forward_graph(m._c.getattr('conv')))
         # check conv.conv2d_forward is observed
         check_observed(get_module_method(m, 'conv', 'conv2d_forward').graph)
         # check sub is not observed
         check_not_observed(get_module_method(m, 'sub', 'forward'))
         # check forward of sub.linear is observed
-        check_observed(get_forward(m._c._get_module('sub')._get_module('linear')).graph)
+        check_observed(get_forward(m._c.getattr('sub').getattr('linear')).graph)
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_skip_values(self):
@@ -1053,7 +1053,7 @@ graph(%x : Tensor,
                     weight=observer._c)
             }
             torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-            assert len([x for x, _ in m._c._get_modules()
+            assert len([x for x, _ in m._modules._c.items()
                         if x.startswith('_observer_')]) == num_observers, \
                 'Expected to have ' + str(num_observers) + ' observer submodules'
             c = FileCheck().check('ClassType<Conv2d> = prim::GetAttr[name="conv"]') \
@@ -1089,7 +1089,8 @@ graph(%x : Tensor,
                 weight=weight_observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        dtypes = set([obs._get_attribute('dtype') for x, obs in m._c._get_module('conv')._get_modules()
+        print()
+        dtypes = set([obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
                       if x.startswith('_observer_')])
         assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
 
@@ -1393,7 +1394,7 @@ graph(%input, %weight):
 
         m = torch.jit.script(M())
         torch._C._jit_pass_fold_quantize(m._c, 'forward')
-        self.assertTrue(m._c._has_attribute('_quantized_weight'))
+        self.assertTrue(m._c.hasattr('_quantized_weight'))
         FileCheck().check_not('GetAttr[name="weight"]') \
                    .check('GetAttr[name="_quantized_weight"]') \
                    .run(m._c._get_method('forward').graph)
@@ -1453,16 +1454,16 @@ graph(%input, %weight):
                                             conv_packed_params)
             res = get_forward(m._c)(data)
             # check attribute and graph
-            packed_module_list = [x for x, _ in m._c._get_modules()
+            packed_module_list = [x for x, _ in m._modules._c.items()
                                   if x.startswith('_' + name + '_packed_params_module')]
             assert len(packed_module_list) == 1, \
                 'Expected to have one packed_params_module'
             packed_module_name = packed_module_list[0]
             # check values
-            original_w = m._c._get_parameter('weight')
+            original_w = m.weight
             ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
-            ref_b = m._c._get_parameter('bias')
-            w, b = m._c._get_module(packed_module_name)._get_method('_weight_bias')()
+            ref_b = m.bias
+            w, b = m._c.getattr(packed_module_name)._get_method('_weight_bias')()
             self.assertEqual(ref_w, w.dequantize())
             self.assertEqual(ref_b, b)
             self.assertEqual(ref_res, res)
@@ -3618,12 +3619,12 @@ def foo(x):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))
             self.assertTrue(m.training)
-            self.assertTrue(m._c._get_attribute('training'))
+            self.assertTrue(m._c.getattr('training'))
 
             m.eval()
 
             self.assertFalse(m.training)
-            self.assertFalse(m._c._get_attribute('training'))
+            self.assertFalse(m._c.getattr('training'))
             self.assertFalse(m(torch.ones(2, 2)))
 
             if not PY2:
@@ -3634,7 +3635,7 @@ def foo(x):
                 loaded = torch.jit.load(buffer)
 
                 self.assertFalse(loaded.training)
-                self.assertFalse(loaded._c._get_attribute('training'))
+                self.assertFalse(loaded._c.getattr('training'))
 
         class M(nn.Module):
             def __init__(self):
@@ -3898,7 +3899,7 @@ def foo(x):
             elif e is a.foo.b:
                 return 'B'
             elif isinstance(e, torch._C.ScriptModule):
-                return e._get_attribute('name')
+                return e.getattr('name')
 
             return e
         for k, v in result.items():
@@ -12124,7 +12125,6 @@ a")
         self.assertTrue(imported.ssm.asm._c._has_method('bar'))
         self.assertTrue(hasattr(imported.ssm.asm, 'bar'))
 
-        self.assertTrue(imported.ssm.asm._c._has_parameter('param'))
         self.assertTrue(hasattr(imported.ssm.asm, 'param'))
 
     def test_trace_parameter(self):
