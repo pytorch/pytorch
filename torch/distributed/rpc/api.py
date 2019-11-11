@@ -223,9 +223,10 @@ def rpc_sync(to, func, args=None, kwargs=None):
                        invocation.
 
     Returns:
-        Returns the result of running ``func``on ``args`` and ``kwargs``.
+        Returns the result of running ``func`` on ``args`` and ``kwargs``.
 
     Example::
+
         On worker 0:
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
