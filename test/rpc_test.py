@@ -802,7 +802,6 @@ class RpcTest(object):
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29212")
     @dist_init
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
