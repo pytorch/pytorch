@@ -30,16 +30,29 @@ class InputArchive;
 
 namespace torch {
 namespace optim {
-namespace detail {
 
-class TORCH_API OptimizerParamStateBase {
+class TORCH_API OptimizerParamState {
  public:
-  virtual std::unique_ptr<OptimizerParamStateBase> clone() const = 0;
+  virtual std::unique_ptr<OptimizerParamState> clone() const;
 };
 
-class TORCH_API OptimizerOptionsBase {
+template <typename Derived>
+class TORCH_API OptimizerCloneableParamState : public OptimizerParamState {
+  std::unique_ptr<OptimizerParamState> clone() const override {
+    return c10::guts::make_unique<Derived>(static_cast<const Derived&>(*this));
+  }
+};
+
+class TORCH_API OptimizerOptions {
  public:
-  virtual std::unique_ptr<OptimizerOptionsBase> clone() const = 0;
+  virtual std::unique_ptr<OptimizerOptions> clone() const;
+};
+
+template <typename Derived>
+class TORCH_API OptimizerCloneableOptions : public OptimizerOptions {
+  std::unique_ptr<OptimizerOptions> clone() const override {
+    return c10::guts::make_unique<Derived>(static_cast<const Derived&>(*this));
+  }
 };
 
 class TORCH_API OptimizerParamGroup {
@@ -47,23 +60,23 @@ class TORCH_API OptimizerParamGroup {
   // NOTE: In order to store `OptimizerParamGroup` in a `std::vector`, it has to be copy-constructible.
   OptimizerParamGroup(const OptimizerParamGroup& param_group) : params_(param_group.params()), options_(param_group.has_options() ? param_group.options()->clone() : nullptr) {}
   OptimizerParamGroup(std::vector<Tensor> params) : params_(params) {}
-  OptimizerParamGroup(std::vector<Tensor> params, std::unique_ptr<OptimizerOptionsBase> options) : params_(params), options_(std::move(options)) {}
+  OptimizerParamGroup(std::vector<Tensor> params, std::unique_ptr<OptimizerOptions> options) : params_(params), options_(std::move(options)) {}
 
   bool has_options() const {
     return options_ != nullptr;
   }
 
-  OptimizerOptionsBase* options() {
+  OptimizerOptions* options() {
     TORCH_CHECK(has_options());
     return options_.get();
   }
 
-  const OptimizerOptionsBase* options() const {
+  const OptimizerOptions* options() const {
     TORCH_CHECK(has_options());
     return options_.get();
   }
 
-  void set_options(std::unique_ptr<OptimizerOptionsBase> options) {
+  void set_options(std::unique_ptr<OptimizerOptions> options) {
     options_ = std::move(options);
   }
 
@@ -77,8 +90,10 @@ class TORCH_API OptimizerParamGroup {
 
  protected:
   std::vector<Tensor> params_;
-  std::unique_ptr<OptimizerOptionsBase> options_;
+  std::unique_ptr<OptimizerOptions> options_;
 };
+
+namespace detail {
 
 /// Base class for all optimizers, that does not yet define a `step()`
 /// mechanism. All it specifies is that optimizers must be supplied with a
@@ -95,7 +110,7 @@ class TORCH_API OptimizerBase {
   explicit OptimizerBase(std::vector<Tensor> parameters);
 
   //todo
-  explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptionsBase> defaults) : defaults_(std::move(defaults)) {
+  explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, std::unique_ptr<OptimizerOptions> defaults) : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
       add_param_group(param_group);
     }
@@ -165,9 +180,9 @@ class TORCH_API OptimizerBase {
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
   //to do-description
-  std::unique_ptr<OptimizerOptionsBase> defaults_;
+  std::unique_ptr<OptimizerOptions> defaults_;
   std::vector<OptimizerParamGroup> param_groups_;
-  ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamStateBase>> state_;
+  ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>> state_;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.

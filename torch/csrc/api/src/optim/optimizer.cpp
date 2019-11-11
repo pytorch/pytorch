@@ -11,7 +11,23 @@
 
 namespace torch {
 namespace optim {
+
+std::unique_ptr<OptimizerParamState> OptimizerParamState::clone() const {
+  TORCH_CHECK(false,
+      "clone() has not been implemented for torch::optim::OptimizerParamState. ",
+      "Subclass torch::optim::OptimizerCloneableParamState<YourOptimizerParamState> ",
+      "instead of torch::optim::OptimizerParamState to inherit the ability to clone.");
+}
+
+std::unique_ptr<OptimizerOptions> OptimizerOptions::clone() const {
+  TORCH_CHECK(false,
+      "clone() has not been implemented for torch::optim::OptimizerOptions. ",
+      "Subclass torch::optim::OptimizerCloneableOptions<YourOptimizerOptions> ",
+      "instead of torch::optim::OptimizerOptions to inherit the ability to clone.");
+}
+
 namespace detail {
+
 OptimizerBase::OptimizerBase(std::vector<Tensor> parameters)
     : parameters_(std::move(parameters)) {}
 
