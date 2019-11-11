@@ -71,7 +71,7 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
-  AT_ASSERT(!options.is_variable());  // TODO: remove this when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(impl::variable_is_excluded());
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
@@ -323,12 +323,12 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   Tensor values;
   if (self.dim() > 0) {
     std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
-    values = self.index(ix).squeeze(0).clone();
+    values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
   } else {
     AT_ASSERT(nz.sizes().equals({0, 1}));
     // In this cases, indices is a clone of nz, which is a tensor of shape (0, 1).
     // Given sparse tensor invariants, values should be shape (1,)
-    values = self.unsqueeze(0).clone();
+    values = self.unsqueeze(0).clone(at::MemoryFormat::Preserve);
   }
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
