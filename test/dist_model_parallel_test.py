@@ -131,8 +131,11 @@ class DistModelParallelTest(object):
         #    rnn.remote_parameters(),
         #    lr=0.05,
         #)
-        with dist_autograd.context() as ctx_id:
-            inp = torch.LongTensor(batch, nindices) % ntoken
-            output, hidden = rnn(inp, hidden)
-            dist_autograd.backward([output.sum()])
-            #opt.step()
+        for _ in range(2):
+            with dist_autograd.context() as ctx_id:
+                inp = torch.LongTensor(batch, nindices) % ntoken
+                hidden[0].detach_()
+                hidden[1].detach_()
+                output, hidden = rnn(inp, hidden)
+                dist_autograd.backward([output.sum()])
+                #opt.step()
