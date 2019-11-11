@@ -44,7 +44,7 @@ def _strong_wolfe(obj_func,
                   max_ls=25):
     # ported from https://github.com/torch/optim/blob/master/lswolfe.lua
     d_norm = d.abs().max()
-    g = g.clone()
+    g = g.clone(memory_format=torch.contiguous_format)
     # evaluate objective and gradient using initial step
     f_new, g_new = obj_func(x, t, d)
     ls_func_evals = 1
@@ -59,7 +59,7 @@ def _strong_wolfe(obj_func,
         if f_new > (f + c1 * t * gtd) or (ls_iter > 1 and f_new >= f_prev):
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
-            bracket_g = [g_prev, g_new.clone()]
+            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
@@ -73,7 +73,7 @@ def _strong_wolfe(obj_func,
         if gtd_new >= 0:
             bracket = [t_prev, t]
             bracket_f = [f_prev, f_new]
-            bracket_g = [g_prev, g_new.clone()]
+            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
             bracket_gtd = [gtd_prev, gtd_new]
             break
 
@@ -93,7 +93,7 @@ def _strong_wolfe(obj_func,
         # next step
         t_prev = tmp
         f_prev = f_new
-        g_prev = g_new.clone()
+        g_prev = g_new.clone(memory_format=torch.contiguous_format)
         gtd_prev = gtd_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
@@ -149,7 +149,7 @@ def _strong_wolfe(obj_func,
             # Armijo condition not satisfied or not lower than lowest point
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
-            bracket_g[high_pos] = g_new.clone()
+            bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)
             bracket_gtd[high_pos] = gtd_new
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
@@ -166,7 +166,7 @@ def _strong_wolfe(obj_func,
             # new point becomes new low
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
-            bracket_g[low_pos] = g_new.clone()
+            bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
             bracket_gtd[low_pos] = gtd_new
 
         # line-search bracket is so small
@@ -266,7 +266,7 @@ class LBFGS(Optimizer):
         assert offset == self._numel()
 
     def _clone_param(self):
-        return [p.clone() for p in self._params]
+        return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
@@ -385,7 +385,7 @@ class LBFGS(Optimizer):
                     r.add_(al[i] - be_i, old_stps[i])
 
             if prev_flat_grad is None:
-                prev_flat_grad = flat_grad.clone()
+                prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)
             else:
                 prev_flat_grad.copy_(flat_grad)
             prev_loss = loss

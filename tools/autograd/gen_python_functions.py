@@ -881,7 +881,7 @@ def sort_declarations(grouped_decls):
                 del larger_than[i2]
                 sorted_deps.append((i2, grouped_decls[i2]))
 
-    return [decl for i, decl in reversed(sorted_deps)]
+    return [decl for i, decl in sorted_deps]
 
 
 def get_python_signature(declaration, include_out):
