@@ -14,20 +14,12 @@ static inline double TH_sigmoid(double value) {
   return 1.0 / (1.0 + exp(-value));
 }
 
-static inline double TH_frac(double x) {
-  return x - trunc(x);
-}
-
 static inline double TH_rsqrt(double x) {
   return 1.0 / sqrt(x);
 }
 
 static inline float TH_sigmoidf(float value) {
   return 1.0f / (1.0f + expf(-value));
-}
-
-static inline float TH_fracf(float x) {
-  return x - truncf(x);
 }
 
 static inline float TH_rsqrtf(float x) {

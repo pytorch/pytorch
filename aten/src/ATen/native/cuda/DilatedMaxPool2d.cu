@@ -91,7 +91,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
   // use shared memory to store temporary output value. This is simply to
   // reduce register usage.
   for (int i = thread_id; i < channels*blockDim.y*blockDim.z; i+= block_size) {
-    out_cached[i] = scalar_t(0.0);
+    out_cached[i] = at::numeric_limits<scalar_t>::lower_bound();
     out_mask_cached[i] = 0;
   }
 
@@ -138,7 +138,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
       for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
         ptr_output_data[c] = out_cached[c];
         ptr_output_mask[c] = out_mask_cached[c];
-        out_cached[c] = scalar_t(0.0);
+        out_cached[c] = at::numeric_limits<scalar_t>::lower_bound();
         out_mask_cached[c] = 0;
       }
     }
@@ -365,8 +365,12 @@ void max_pool2d_with_indices_out_cuda_template(
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
           const dim3 block(block_x, block_y, block_z);
           int grid_x = nbatch;
-          int grid_y = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE);
-          int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE);
+          int grid_y = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
+          int grid_z = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           max_pool_forward_nhwc<scalar_t, scalar_t>
@@ -513,8 +517,12 @@ void max_pool2d_with_indices_backward_out_cuda_template(
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
           const dim3 block(block_x, block_y, block_z);
           int grid_x = nbatch;
-          int grid_y = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE);
-          int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE);
+          int grid_y = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
+          int grid_z = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           max_pool_backward_nhwc<scalar_t, accscalar_t>
@@ -643,7 +651,7 @@ Tensor max_pool2d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
   max_pool2d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput_,

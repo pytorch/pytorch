@@ -1565,7 +1565,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
 }
 
 TEST_F(ModulesTest, PairwiseDistance) {
-  PairwiseDistance dist(PairwiseDistanceOptions(1));
+  PairwiseDistance dist(PairwiseDistanceOptions().p(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = dist->forward(input1, input2);
@@ -1856,6 +1856,14 @@ TEST_F(ModulesTest, CELU) {
         torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
+}
+
+TEST_F(ModulesTest, GELU) {
+  GELU model;
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(ModulesTest, Sigmoid) {
@@ -2159,6 +2167,41 @@ TEST_F(ModulesTest, PoissonNLLLoss) {
   }
 }
 
+TEST_F(ModulesTest, MarginRankingLoss) {
+  {
+    MarginRankingLoss loss;
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2)).clamp(0).mean()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kSum)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).sum()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kMean)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).mean()
+    ));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -2442,6 +2485,55 @@ TEST_F(ModulesTest, ConstantPad3d) {
                                       {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}}}}}, torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
+}
+
+TEST_F(ModulesTest, CrossMapLRN2d) {
+  /// size 3, default options
+  auto input = torch::arange(9, torch::kFloat32).view({1, 1, 3, 3}).requires_grad_(true);
+  auto expected = torch::tensor({{{{0.00000000, 0.99997497, 1.99980010},
+                                   {2.99932500, 3.99840070, 4.99687700},
+                                   {5.99460600, 6.99143740, 7.98722360}}}}, torch::kFloat32);
+  auto grad_expected = torch::tensor({{{{1.00000000, 0.99992496, 0.99970007},
+                                        {0.99932520, 0.99880093, 0.99812720},
+                                        {0.99730474, 0.99633380, 0.99521490}}}}, torch::kFloat32);
+  auto crossmaplrn2d = CrossMapLRN2d(3);
+  auto output = crossmaplrn2d(input);
+  output.sum().backward();
+  
+  ASSERT_TRUE(input.grad().allclose(grad_expected));
+  ASSERT_TRUE(output.allclose(expected));
+  
+  /// size change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(4).alpha(1e-4).beta(0.75).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99998120, 1.99985000},
+                              {2.99949400, 3.99880050, 4.99765800},
+                              {5.99595300, 6.99357600, 7.99041300}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// alpha change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-3).beta(0.75).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99975010, 1.99800230},
+                              {2.99326750, 3.98407440, 4.96897600},
+                              {5.94656100, 6.91545720, 7.87434340}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// beta change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.95).k(1));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.99996830, 1.99974680},
+                              {2.99914500, 3.99797440, 4.99604460},
+                              {5.99316840, 6.98915600, 7.98382000}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
+
+  /// k change
+  crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-4).beta(0.75).k(2));
+  output = crossmaplrn2d(input);
+  expected = torch::tensor({{{{0.00000000, 0.59459610, 1.18914770},
+                              {1.78361000, 2.37793870, 2.97208900},
+                              {3.56601700, 4.15967700, 4.75302650}}}}, torch::kFloat32);
+  ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
@@ -2779,7 +2871,7 @@ TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
       c10::str(PairwiseDistance()),
       "torch::nn::PairwiseDistance(p=2, eps=1e-06, keepdim=false)");
   ASSERT_EQ(
-      c10::str(PairwiseDistance(PairwiseDistanceOptions(3).eps(0.5).keepdim(true))),
+      c10::str(PairwiseDistance(PairwiseDistanceOptions().p(3).eps(0.5).keepdim(true))),
       "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
@@ -3032,4 +3124,18 @@ TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
     PoissonNLLLossOptions().log_input(false).full(true).eps(0.42)
     .reduction(torch::kSum))),
     "torch::nn::PoissonNLLLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
+  ASSERT_EQ(c10::str(MarginRankingLoss()), "torch::nn::MarginRankingLoss()");
+  ASSERT_EQ(c10::str(MarginRankingLoss(
+    MarginRankingLossOptions().margin(0.5).reduction(torch::kSum))),
+    "torch::nn::MarginRankingLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
+  ASSERT_EQ(c10::str(CrossMapLRN2d(4)),
+    "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
+  ASSERT_EQ(c10::str(CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10))),
+    "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
 }
