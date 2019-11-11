@@ -32,7 +32,7 @@ class TORCH_API Adagrad : public Optimizer {
   template <typename ParameterContainer>
   explicit Adagrad(
       ParameterContainer&& parameters,
-      const AdagradOptions& options_);
+      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters)), options(options_) {}
 
   void step() override;
 
@@ -41,18 +41,18 @@ class TORCH_API Adagrad : public Optimizer {
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
-  // std::vector<Tensor> sum_buffers;
-  // std::vector<int64_t> step_buffers;
+  std::vector<Tensor> sum_buffers;
+  std::vector<int64_t> step_buffers;
   //to do - add a param initialization in the constructor similar to python implementation
-  // c10::Dict<std::string, at::IValue> param_groups;
-  c10::Dict<std::string, at::IValue> state;
 
  private:
   Adagrad() : options(0) {}
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    _TORCH_OPTIM_SERIALIZE(state);
+    _TORCH_OPTIM_SERIALIZE(sum_buffers);
+    _TORCH_OPTIM_SERIALIZE(step_buffers);
+    // _TORCH_OPTIM_SERIALIZE(state);
   }
 };
 } // namespace optim

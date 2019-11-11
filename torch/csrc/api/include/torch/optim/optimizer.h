@@ -1,5 +1,8 @@
 #pragma once
 
+#include <ATen/core/TensorBody.h>
+#include <ATen/core/ivalue.h>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
@@ -8,6 +11,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+using c10::Dict;
 
 // Forward declarations confuse Doxygen
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -81,6 +86,9 @@ class TORCH_API OptimizerBase {
 
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
+  //to do-description
+  // c10::Dict<std::string, at::IValue> param_groups;
+  // c10::Dict<std::string, at::IValue> state;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
