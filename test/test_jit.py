@@ -4704,6 +4704,14 @@ a")
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
 
+    def test_trace_optioanl_dtype(self):
+        class Test(torch.nn.Module):
+            def forward(self):
+                return torch.arange(5)
+
+        traced = torch.jit.trace(Test(), ())
+        torch.allclose(traced(), Test()())
+
     def test_mul(self):
         def func(a, b):
             return a * b
@@ -12007,8 +12015,28 @@ a")
         FileCheck().check_not("value=<Tensor>").check("aten::mm")\
             .check("prim::CallMethod[name=\"forward\"]").check("aten::add") \
             .run(str(tm.graph))
-
         FileCheck().check("aten::mm").run(str(tm.mod.graph))
+
+    def test_op_dtype(self):
+
+        def check_equal_and_dtype(a, b):
+            self.assertEqual(a, b)
+            self.assertEqual(a.dtype, b.dtype)
+
+        def fn():
+            a = torch.arange(10)
+            b = torch.arange(10, dtype=torch.float)
+            c = torch.arange(1, 10, 2)
+            d = torch.arange(1, 10, 2, dtype=torch.float)
+            e = torch.arange(1, 10., 2)
+            f = torch.arange(1, 10., 2, dtype=torch.float)
+            return a, b, c, d, e, f
+
+        scripted_fn = torch.jit.script(fn)
+        eager_out = fn()
+        script_out = scripted_fn()
+        for a, b in zip(eager_out, script_out):
+            check_equal_and_dtype(a, b)
 
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_traced_module(self):
