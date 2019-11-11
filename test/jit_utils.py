@@ -15,8 +15,7 @@ import functools
 
 # Testing utils
 from common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName, GRAPH_EXECUTOR, ProfilingMode, \
-    enable_profiling_mode
+    freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode
 
 # Standard library
 from contextlib import contextmanager
