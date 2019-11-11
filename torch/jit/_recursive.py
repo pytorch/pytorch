@@ -1,7 +1,6 @@
 import inspect
 import torch
 import collections
-import types
 import textwrap
 import functools
 import warnings
@@ -44,7 +43,7 @@ def make_stub_from_method(nn_module, method):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
+_constant_types = (bool, float, int, str, type(None), torch.device, torch.layout, torch.dtype)
 
 def _get_valid_constant(attr, v):
     if isinstance(v, _constant_types):
@@ -348,15 +347,6 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
                 scripted = recursive_script(orig_value)
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
-
-        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
-        #    This ensures we can access these Python methods on the ScriptModule.
-        for name in dir(nn_module):
-            item = getattr(nn_module, name, None)
-            if not inspect.ismethod(item):
-                continue
-            if _jit_internal.is_ignored_fn(item):
-                setattr(script_module, name, item)
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
