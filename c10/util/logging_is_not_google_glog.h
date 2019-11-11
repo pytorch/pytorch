@@ -127,7 +127,7 @@ static_assert(
 #define CHECK_OP(val1, val2, op)                      \
   FATAL_IF(((val1) op (val2)))                        \
     << "Check failed: " #val1 " " #op " " #val2 " ("  \
-    << (val1) << " vs. " << (val2) << ")"
+    << (val1) << " vs. " << (val2) << ") "
 
 // Check_op macro definitions
 #define CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
