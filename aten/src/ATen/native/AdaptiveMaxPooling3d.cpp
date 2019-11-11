@@ -440,7 +440,7 @@ Tensor adaptive_max_pool3d_backward_cpu(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
   adaptive_max_pool3d_backward_out_cpu_template(
     gradInput,
     gradOutput_,

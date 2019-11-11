@@ -978,11 +978,6 @@ def unfold(g, input, dimension, size, step):
         return _unimplemented("Unfold", "input size not accessible")
 
 
-@parse_args('v', 'v', 'i')
-def _weight_norm(graph, v, g, dim):
-    return graph.op("ATen", v, g, dim_i=dim, operator_s="_weight_norm")
-
-
 @parse_args('v', 't', 't', 't')
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.:
@@ -1633,18 +1628,28 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
 
 def randn(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
 def rand(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, *others):
-    return g.op('RandomNormalLike', self)
+def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    return g.op('RandomNormalLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+
+
+def rand_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    return g.op('RandomUniformLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
 
 
 @parse_args('v', 'f', 'f', 'i', 'none')
@@ -2052,3 +2057,25 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
     axes = [i for i in range(1, len(input_sizes) - 1)]
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
+
+
+@parse_args('v', 'v', 'i')
+def _weight_norm(g, weight_v, weight_g, dim):
+    rank = weight_v.type().dim()
+    if rank:
+        # W = g * ((v) / ||v||)
+        # Compute norm_except_dim for l2 norm. dim = None means over all dims
+        # torch's weight_norm module sets dim = -1 if it's None.
+        # This conflicts the logic for negative axes to access dims backwards 
+        # TODO: Might need a fix in torch group_norm module
+        axes = list(range(rank))
+        if dim:
+            if dim < -1:
+                dim += rank
+            if dim != -1:
+                axes.remove(dim)
+        norm_v = norm(g, weight_v, 2, axes, 1)
+        div = g.op("Div", weight_v, norm_v)
+        return g.op("Mul", div, weight_g)
+    else:
+        return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")

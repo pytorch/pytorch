@@ -62,7 +62,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -91,10 +91,10 @@ public:
   RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
   template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
+  Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
   template<class Return, class... Args>
-  Return callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
+  Return callUnboxedOnly(const OperatorHandle& op, Args... args) const;
 
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
@@ -147,33 +147,16 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
-class CAFFE2_API SchemaRegistrationHandleRAII final {
-public:
-  const OperatorHandle& opHandle() const {
-    return opHandle_;
-  }
-
-private:
-  friend class Dispatcher;
-  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle)
-    : opHandle_(std::move(opHandle)), registrationHandle_(std::move(registrationHandle)) {}
-
-  OperatorHandle opHandle_;
-  RegistrationHandleRAII registrationHandle_;
-};
-
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
+inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-  return op.operatorIterator_->op.callUnboxed<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
+  return op.operatorIterator_->op.callUnboxed<Return, Args...>(std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
+inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-  return op.operatorIterator_->op.callUnboxedOnly<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
+  return op.operatorIterator_->op.callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
