@@ -1018,7 +1018,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
       if (output.is_sparse()) {
-        outputs.push_back(output.clone(at::MemoryFormat::Preserve));
+        outputs.push_back(output.clone());
       } else {
         outputs.push_back(output.clone(at::MemoryFormat::Contiguous));
       }
