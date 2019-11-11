@@ -26,6 +26,14 @@ void OptimizerBase::zero_grad() {
       parameter.grad().zero_();
     }
   }
+  for(size_t i=0; i<param_groups.size(); i++) {
+    for(auto p: param_groups[i]) {
+      if(p.grad().defined()) {
+        p.grad().detach_();
+        p.grad().zero_();
+      }
+    }
+  }
 }
 
 const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {

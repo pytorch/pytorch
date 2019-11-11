@@ -22,7 +22,7 @@ void Adagrad::step() {
     if (!p.grad().defined()) {
       continue;
     }
-    //auto grad = p.grad().data();
+    auto grad = p.grad().data();
     // at::IValue curr_state = state[""]
     // state = self.state[p]
     // state['step'] += 1

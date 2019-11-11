@@ -32,8 +32,21 @@ class TORCH_API Adagrad : public Optimizer {
   template <typename ParameterContainer>
   explicit Adagrad(
       ParameterContainer&& parameters,
-      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters)), options(options_) {}
+      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters)), options(options_) {
+    TORCH_CHECK(options.learning_rate() >= 0, "Invalid learning rate: ", options.learning_rate());
+    TORCH_CHECK(options.lr_decay() >= 0, "Invalid lr_decay value: ", options.lr_decay());
+    TORCH_CHECK(options.weight_decay() >= 0, "Invalid weight_decay value: ", options.weight_decay());
+    TORCH_CHECK(options.initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", options.initial_accumulator_value());
+    TORCH_CHECK(options.eps() >= 0, "Invalid epsilon value: ", options.eps());
+  }
 
+  //cross check
+  template <typename ParameterContainer>
+  explicit Adagrad(
+      ParameterContainer parameters,
+      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters), options_), options(options_) {
+
+  }
   void step() override;
 
   AdagradOptions options;
@@ -43,7 +56,6 @@ class TORCH_API Adagrad : public Optimizer {
 
   std::vector<Tensor> sum_buffers;
   std::vector<int64_t> step_buffers;
-  //to do - add a param initialization in the constructor similar to python implementation
 
  private:
   Adagrad() : options(0) {}
@@ -52,7 +64,6 @@ class TORCH_API Adagrad : public Optimizer {
   static void serialize(Self& self, Archive& archive) {
     _TORCH_OPTIM_SERIALIZE(sum_buffers);
     _TORCH_OPTIM_SERIALIZE(step_buffers);
-    // _TORCH_OPTIM_SERIALIZE(state);
   }
 };
 } // namespace optim
