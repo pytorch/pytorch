@@ -143,8 +143,11 @@ UserRRef<T>::~UserRRef() {
         ctx.agent()->getWorkerInfo(ownerId_),
         RRefUserDelete(rrefId_, forkId_).toMessage());
 
-    fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
+    fm->addCallback([](const Message& /* unused */,
+                       bool hasError,
+                       const utils::FutureError& futErr) {
+      RRefContext::handleException(hasError, futErr);
+    });
   }
 }
 
@@ -167,7 +170,6 @@ IValue UserRRef<IValue>::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  RRefContext::handleException(message);
   auto response = deserializeResponse(message);
   auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
   return rfr.values().front();
@@ -187,7 +189,6 @@ py::object UserRRef<py::object>::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  RRefContext::handleException(message);
   auto response = deserializeResponse(message);
   auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
   return PythonRpcHandler::getInstance().deserialize(

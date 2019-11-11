@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/utils/future.h>
 
 #include <algorithm>
 #include <cctype>
@@ -74,13 +75,13 @@ class TORCH_API RpcAgent {
   virtual ~RpcAgent();
 
   // Send a message to the ``RpcAgent`` of id ``to`` and returns a
-  // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
+  // ``Future<Message>`` ptr. The implementation must be asynchronous, i.e., it
   // cannot block until it receives the response.
   //
-  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
-  // when the response arrives. For other message types, the Future should be
-  // ignored by the caller.
-  virtual std::shared_ptr<FutureMessage> send(
+  // If ``message.isRequest()`` is true, the ``Future<Message>`` will be
+  // completed when the response arrives. For other message types, the Future
+  // should be ignored by the caller.
+  virtual std::shared_ptr<torch::utils::Future<Message>> send(
       const WorkerInfo& to,
       Message&& message) = 0;
 

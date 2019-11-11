@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/utils/future.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
@@ -80,10 +81,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // is cleaned up in join_rpc(), after join_rpc(), python objects returned
   // from rpc python call can not be resolved.
   auto futureMessage =
-      shared_ptr_class_<FutureMessage>(module, "FutureMessage")
+      shared_ptr_class_<torch::utils::Future<Message>>(module, "FutureMessage")
           .def(
               "wait",
-              [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+              [&](torch::utils::Future<Message>& fut) {
+                return toPyObj(fut.wait());
+              },
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)

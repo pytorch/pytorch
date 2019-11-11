@@ -59,8 +59,11 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ") to a builtin operator");
 }
 
-void finishAcceptUserRRef(const Message& message) {
-  RRefContext::handleException(message);
+void finishAcceptUserRRef(
+    const rpc::Message& message,
+    bool hasError,
+    const utils::FutureError& futErr) {
+  RRefContext::handleException(hasError, futErr);
   auto rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
   ctx.delPendingUser(rr->forkId());
@@ -113,7 +116,7 @@ py::object toPyObj(const Message& message) {
   return toPyObjInternal(*deserializeResponse(message), message.type());
 }
 
-std::shared_ptr<FutureMessage> pyRpcBuiltin(
+std::shared_ptr<torch::utils::Future<Message>> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
@@ -153,7 +156,7 @@ PyRRef pyRemoteBuiltin(
   return PyRRef(userRRef);
 }
 
-std::shared_ptr<FutureMessage> pyRpcPythonUdf(
+std::shared_ptr<torch::utils::Future<Message>> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,

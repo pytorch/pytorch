@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/utils/future.h>
 
 #include <thread>
 
@@ -55,8 +56,9 @@ class ProcessGroupAgent : public RpcAgent {
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
-  std::shared_ptr<FutureMessage> send(const WorkerInfo& to, Message&& message)
-      override;
+  std::shared_ptr<torch::utils::Future<Message>> send(
+      const WorkerInfo& to,
+      Message&& message) override;
 
  private:
   class MessageCounter {
@@ -135,7 +137,9 @@ class ProcessGroupAgent : public RpcAgent {
   // timeout for efficient lookups into the futureTimeouts_ map.
   std::unordered_map<
       int64_t,
-      std::pair<std::shared_ptr<FutureMessage>, std::chrono::milliseconds>>
+      std::pair<
+          std::shared_ptr<torch::utils::Future<Message>>,
+          std::chrono::milliseconds>>
       futures_;
   // A map to keep track of when futures time out. The map is keyed by the time
   // (millisecond level precision) the future started, and the values correspond

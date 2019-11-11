@@ -262,7 +262,7 @@ void ProcessGroupAgent::start() {
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
+std::shared_ptr<torch::utils::Future<Message>> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
   TORCH_CHECK(
@@ -273,7 +273,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       pg_->getRank());
 
   auto requestId = nextId();
-  auto future = std::make_shared<FutureMessage>();
+  auto future = std::make_shared<torch::utils::Future<Message>>();
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime =
@@ -388,7 +388,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
           auto id = message.id();
-          std::shared_ptr<FutureMessage> fm = nullptr;
+          std::shared_ptr<torch::utils::Future<Message>> fm = nullptr;
           std::chrono::milliseconds futureStartTime;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
@@ -396,7 +396,13 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           }
           // Not holding lock on markCompleted as this could run callbacks that
           // call agent_->send
-          fm->markCompleted(std::move(message));
+          if (message.type() == MessageType::EXCEPTION) {
+            torch::utils::FutureError err(std::string(
+                message.payload().begin(), message.payload().end()));
+            fm->markCompleted(std::move(err));
+          } else {
+            fm->markCompleted(std::move(message));
+          }
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
             futures_.erase(id);
