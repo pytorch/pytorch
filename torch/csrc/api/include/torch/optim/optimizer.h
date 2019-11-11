@@ -48,8 +48,9 @@ class TORCH_API OptimizerBase {
   explicit OptimizerBase(std::vector<std::vector<Tensor>> params, OptimizerOptions options) {
     for(size_t i=0; i<params.size(); i++) {
       c10::impl::GenericDict param_group(c10::StringType::get(), c10::AnyType::get());
-      param_group.insert("options", options);
-      param_group.insert("params", std::vector<Tensor>());
+      param_group.insert("options", options.convert_options_to_ivalue());
+      param_group.insert("params", c10::IValue());
+      std::vector<Tensor> param_list;
       for(size_t j=0; j<params[i].size(); j++) {
         param_groups[i].at("params").toTensorList().push_back(params[i][j]);
       }
@@ -59,8 +60,8 @@ class TORCH_API OptimizerBase {
       for (auto& p : group.at("params").toTensorListRef()) {
           //at::TensorImpl* index = p.unsafeGetTensorImpl();
           state.insert(p, c10::impl::GenericDict(c10::StringType::get(), c10::AnyType::get()));
-          state.at(p).insert("step", 0);// at::IValue, can be converted to int64_t using .toInt()
-          state.at(p).insert("sum", Tensor());// at::IValue, can be converted to Tensor using .toTensor()
+          //state.at(p).insert("step", 0);// at::IValue, can be converted to int64_t using .toInt()
+          //state.at(p).insert("sum", Tensor());// at::IValue, can be converted to Tensor using .toTensor()
       }
     }
   }
