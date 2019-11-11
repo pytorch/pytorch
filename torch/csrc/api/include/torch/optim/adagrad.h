@@ -40,6 +40,9 @@ class TORCH_API Adagrad : public Optimizer {
     TORCH_CHECK(defaultOptions.eps() >= 0, "Invalid epsilon value: ", defaultOptions.eps());
   }
 
+  explicit Adagrad(std::vector<c10::Dict<std::string, at::IValue>> param_groups,
+      const AdagradOptions& options_) : Optimizer(param_groups), defaultOptions(options_) {}
+
   void step() override;
 
   AdagradOptions defaultOptions;
