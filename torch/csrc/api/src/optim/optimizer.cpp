@@ -12,17 +12,14 @@
 namespace torch {
 namespace optim {
 namespace detail {
-template <typename S, typename G, typename O>
-OptimizerBase<S, G, O>::OptimizerBase(std::vector<Tensor> parameters)
+OptimizerBase::OptimizerBase(std::vector<Tensor> parameters)
     : parameters_(std::move(parameters)) {}
 
-template <typename S, typename G, typename O>
-void OptimizerBase<S, G, O>::add_parameters(const std::vector<Tensor>& parameters) {
+void OptimizerBase::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }
 
-template <typename S, typename G, typename O>
-void OptimizerBase<S, G, O>::zero_grad() {
+void OptimizerBase::zero_grad() {
   for (auto& parameter : parameters_) {
     if (parameter.grad().defined()) {
       parameter.grad().detach_();
@@ -39,23 +36,19 @@ void OptimizerBase<S, G, O>::zero_grad() {
   }
 }
 
-template <typename S, typename G, typename O>
-const std::vector<Tensor>& OptimizerBase<S, G, O>::parameters() const noexcept {
+const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {
   return parameters_;
 }
 
-template <typename S, typename G, typename O>
-std::vector<Tensor>& OptimizerBase<S, G, O>::parameters() noexcept {
+std::vector<Tensor>& OptimizerBase::parameters() noexcept {
   return parameters_;
 }
 
-template <typename S, typename G, typename O>
-size_t OptimizerBase<S, G, O>::size() const noexcept {
+size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
 }
 
-template <typename S, typename G, typename O>
-Tensor& OptimizerBase<S, G, O>::buffer_at(std::vector<Tensor>& buffers, size_t index) {
+Tensor& OptimizerBase::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   if (buffers.size() <= index) {
     buffers.reserve(index);
     for (auto i = buffers.size(); i <= index; ++i) {
@@ -72,25 +65,21 @@ Tensor& OptimizerBase<S, G, O>::buffer_at(std::vector<Tensor>& buffers, size_t i
   return buffers[index];
 }
 
-template <typename S, typename G, typename O>
-void OptimizerBase<S, G, O>::save(serialize::OutputArchive& archive) const {}
-template <typename S, typename G, typename O>
-void OptimizerBase<S, G, O>::load(serialize::InputArchive& archive) {}
+void OptimizerBase::save(serialize::OutputArchive& archive) const {}
+void OptimizerBase::load(serialize::InputArchive& archive) {}
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
-template <typename S, typename G, typename O>
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const OptimizerBase<S, G, O>& optimizer) {
+    const OptimizerBase& optimizer) {
   optimizer.save(archive);
   return archive;
 }
 
 /// Deserializes a `Tensor` from an `InputArchive`.
-template <typename S, typename G, typename O>
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    OptimizerBase<S, G, O>& optimizer) {
+    OptimizerBase& optimizer) {
   optimizer.load(archive);
   return archive;
 }

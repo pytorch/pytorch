@@ -425,7 +425,6 @@ template<> \
 inline type IValue::to<type>() const & { \
   return this->method_name(); \
 }
-
 DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)

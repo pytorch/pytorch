@@ -4,13 +4,9 @@
 #include <torch/serialize/archive.h>
 #include <torch/utils.h>
 
-#include <c10/util/flat_hash_map.h>
-
 #include <ATen/ATen.h>
 
 #include <functional>
-
-using c10::Dict;
 
 namespace torch {
 namespace optim {
@@ -79,16 +75,19 @@ void Adagrad::step() {
         continue;
       }
       auto grad = p.grad().data();
-      auto& state = state_[p.unsafeGetTensorImpl()];
+      // TODO: check that both pointers are not null
+      auto state = std::static_pointer_cast<AdagradParamState>(state_[p.unsafeGetTensorImpl()]);
+      auto options = std::static_pointer_cast<AdagradOptions>(group.options());
 
-      state.step_++;
 
-      if(group.options().weight_decay() != 0) {
+      state->step_++;
+
+      if(options->weight_decay() != 0) {
         TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
-        grad = grad.add(p.data(), group.options().weight_decay());
+        grad = grad.add(p.data(), options->weight_decay());
       }
-      const auto clr = group.options().learning_rate() /
-          (1 + (state.step_ - 1) * group.options().lr_decay());
+      const auto clr = options->learning_rate() /
+          (1 + (state->step_ - 1) * options->lr_decay());
 
       if(grad.is_sparse()) {
         grad = grad.coalesce();
@@ -102,15 +101,15 @@ void Adagrad::step() {
           }
           return torch::sparse_coo_tensor(grad_indices, values, size, grad.options());
         };
-        state.sum_.add_(make_sparse(grad_values.pow(2)));
-        auto std = state.sum_.sparse_mask(grad);
-        const auto std_values = std._values().sqrt_().add_(group.options().eps());
+        state->sum_.add_(make_sparse(grad_values.pow(2)));
+        auto std = state->sum_.sparse_mask(grad);
+        const auto std_values = std._values().sqrt_().add_(options->eps());
 
         p.data().add_(make_sparse(grad_values / std_values), -clr);
       }
       else {
-        state.sum_.addcmul_(grad, grad, 1.0);
-        const auto std = state.sum_.sqrt().add_(group.options().eps());
+        state->sum_.addcmul_(grad, grad, 1.0);
+        const auto std = state->sum_.sqrt().add_(options->eps());
         p.data().addcdiv_(grad, std, -clr);
       }
     }
@@ -118,7 +117,7 @@ void Adagrad::step() {
 }
 
 void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.push_back(AdagradParamGroup(parameters, *defaults_));
+  param_groups_.push_back(detail::OptimizerParamGroup(parameters, defaults_));
 }
 
 const std::vector<Tensor>& Adagrad::parameters() const noexcept {

@@ -1,9 +1,8 @@
 #pragma once
 
-#include <ATen/core/TensorBody.h>
-#include <ATen/core/ivalue.h>
-
+#include <ATen/Tensor.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/Exception.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -13,9 +12,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <set>
-
-using c10::Dict;
 
 // Forward declarations confuse Doxygen
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -35,22 +31,53 @@ class InputArchive;
 namespace torch {
 namespace optim {
 namespace detail {
+
+class TORCH_API OptimizerParamStateBase {};
+
+class TORCH_API OptimizerOptionsBase {};
+
+class TORCH_API OptimizerParamGroup {
+ public:
+  OptimizerParamGroup(std::vector<Tensor> params) : params_(params) {}
+  OptimizerParamGroup(std::vector<Tensor> params, std::shared_ptr<OptimizerOptionsBase> options) : params_(params), options_(options) {}
+
+  bool has_options() const {
+    return options_ != nullptr;
+  }
+
+  std::shared_ptr<OptimizerOptionsBase> options() const {
+    TORCH_CHECK(has_options());
+    return options_;
+  }
+
+  void set_options(std::shared_ptr<OptimizerOptionsBase> options) {
+    options_ = options;
+  }
+
+  std::vector<Tensor>& params() {
+    return params_;
+  }
+
+  const std::vector<Tensor>& params() const {
+    return params_;
+  }
+
+ protected:
+  std::vector<Tensor> params_;
+  std::shared_ptr<OptimizerOptionsBase> options_;
+};
+
 /// Base class for all optimizers, that does not yet define a `step()`
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
 /// shall have, such as `zero_grad`.
-
-struct dummy_placeholder_t {};
-
-// TODO: remove `dummy_placeholder_t` when all optimizers are templatized
-template <typename OptimizerParamState = dummy_placeholder_t, typename OptimizerParamGroup = dummy_placeholder_t, typename OptimizerOptions = dummy_placeholder_t>
 class TORCH_API OptimizerBase {
  public:
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
 
   //todo
-  explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, OptimizerOptions defaults) : defaults_(std::move(defaults)) {
+  explicit OptimizerBase(std::vector<OptimizerParamGroup> param_groups, std::shared_ptr<OptimizerOptionsBase> defaults) : defaults_(defaults) {
     for (auto& param_group : param_groups) {
       add_param_group(param_group);
     }
@@ -61,7 +88,7 @@ class TORCH_API OptimizerBase {
       TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
     }
     if (!param_group.has_options()) {
-      param_group.set_options(*defaults_);
+      param_group.set_options(defaults_);
     }
     // TODO: check "some parameters appear in more than one parameter group"
     param_groups_.push_back(param_group);
@@ -116,29 +143,28 @@ class TORCH_API OptimizerBase {
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
   //to do-description
-  c10::optional<OptimizerOptions> defaults_; // TODO: this is only optional because some optimizers don't store defaults yet. In the end state this should be non-optional.
+  std::shared_ptr<OptimizerOptionsBase> defaults_;
   std::vector<OptimizerParamGroup> param_groups_;
-  ska::flat_hash_map<at::TensorImpl*, OptimizerParamState> state_;
+  ska::flat_hash_map<at::TensorImpl*, std::shared_ptr<OptimizerParamStateBase>> state_;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
 TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
-    const OptimizerBase<>& optimizer);
-
+    const OptimizerBase& optimizer);
+ 
 /// Deserializes a `Tensor` from an `InputArchive`.
 TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
-    OptimizerBase<>& optimizer);
+    OptimizerBase& optimizer);
 } // namespace detail
 
 /// Optimizer that defines a required `step()` method that takes no arguments
 /// and produces no values. The only side effect is that parameters are updated
 /// according to the concrete optimization algorithm.
-template <typename OptimizerParamState = detail::dummy_placeholder_t, typename OptimizerParamGroup = detail::dummy_placeholder_t, typename OptimizerOptions = detail::dummy_placeholder_t>
-class Optimizer : public detail::OptimizerBase<OptimizerParamState, OptimizerParamGroup, OptimizerOptions> {
+class Optimizer : public detail::OptimizerBase {
  public:
-  using detail::OptimizerBase<OptimizerParamState, OptimizerParamGroup, OptimizerOptions>::OptimizerBase;
+  using detail::OptimizerBase::OptimizerBase;
   virtual void step() = 0;
 };
 
@@ -146,11 +172,11 @@ class Optimizer : public detail::OptimizerBase<OptimizerParamState, OptimizerPar
 /// function, as it may evaluate the loss function multiple times per step.
 /// Examples of such algorithms are conjugate gradient and LBFGS. The `step()`
 /// function also returns the loss value.
-class LossClosureOptimizer : public detail::OptimizerBase<> {
+class LossClosureOptimizer : public detail::OptimizerBase {
  public:
   /// A loss function closure, which is expected to return the loss value.
   using LossClosure = std::function<Tensor()>;
-  using detail::OptimizerBase<>::OptimizerBase;
+  using detail::OptimizerBase::OptimizerBase;
   virtual Tensor step(LossClosure closure) = 0;
 };
 

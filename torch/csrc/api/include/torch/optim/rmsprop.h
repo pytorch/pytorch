@@ -31,11 +31,7 @@ struct TORCH_API RMSpropOptions {
   TORCH_ARG(bool, centered) = false;
 };
 
-struct TORCH_API RMSpropParamGroup {};
-
-struct TORCH_API RMSpropParamState {};
-
-class TORCH_API RMSprop : public Optimizer<> {
+class TORCH_API RMSprop : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit RMSprop(
