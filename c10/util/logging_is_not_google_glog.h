@@ -222,6 +222,12 @@ inline std::ostream& operator<<(
   out << '(' << p.first << ", " << p.second << ')';
   return out;
 }
+
+inline std::ostream& operator<<(
+    std::ostream& out, const std::nullptr_t&) {
+  out << "(null)";
+  return out;
+}
 } // namespace std
 
 namespace c10 {
