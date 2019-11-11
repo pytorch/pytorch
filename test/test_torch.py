@@ -11995,7 +11995,9 @@ class TestTorchDeviceType(TestCase):
             # lambda x, y: x.acos(), # https://github.com/pytorch/pytorch/issues/24532
             lambda x, y: x.add(y, alpha=3),
             lambda x, y: x.addcdiv(2, y, y),
+            lambda x, y: y.addcdiv(2, x, y),
             lambda x, y: x.addcmul(2, y, y),
+            lambda x, y: y.addcmul(2, x, y),
             lambda x, y: x.asin(),
             # lambda x, y: x.atan(), # https://github.com/pytorch/pytorch/issues/24538
             lambda x, y: x.atan2(y),
@@ -12041,7 +12043,11 @@ class TestTorchDeviceType(TestCase):
             # unsqueeze_op_clone,
         ]
         for fn in fns:
+            x_c = x.contiguous()
+            y_c = y.contiguous()
+            result_c = fn(x_c, y_c)
             result = fn(x, y)
+            self.assertEqual(result, result_c)
             self.assertTrue(
                 result.is_contiguous(memory_format=torch.channels_last),
                 "result of the '{}' is not in channels_last format".format(inspect.getsource(fn).strip()))
