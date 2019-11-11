@@ -584,7 +584,7 @@ class TestRecursiveScript(JitTestCase):
                 return x
 
         class Model(nn.Module):
-            def __init__(self, dummies: nn.ModuleList):
+            def __init__(self, dummies):
                 super().__init__()
                 self._dummies = dummies
 
