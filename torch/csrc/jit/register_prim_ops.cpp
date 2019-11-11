@@ -662,11 +662,11 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
          [](Stack& stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
-           auto keep_graph = pop(stack).toOptional<bool>();
+           auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_outputs = pop(stack);
            auto inputs = pop(stack).toTensorList();
            auto outputs = pop(stack).toTensorList();
@@ -685,7 +685,7 @@ RegisterOperators reg(
                output_vars,
                input_vars,
                gradients,
-               keep_graph,
+               retain_graph,
                create_graph,
                allow_unused);
 
