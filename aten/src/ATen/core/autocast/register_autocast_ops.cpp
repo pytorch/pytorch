@@ -6,14 +6,14 @@ namespace at {
 namespace autocast {
 
 namespace {
-// Establish the same cast-caching policy as Apex (cache FP16 casts of FP32 leaves).
+// Imitate Apex and cache some of the casts for performance (see caching_caster below).
 // The key type is a proxy for a Tensor uuid.
 // The value type is Tensor to make sure cached Tensors stay alive.
-thread_local std::unordered_map<TensorImpl*, Tensor> cached_leaf_casts;
+thread_local std::unordered_map<TensorImpl*, Tensor> cached_casts;
 }
 
 std::unordered_map<TensorImpl*, Tensor> & get_cache() {
-  return cached_leaf_casts;
+  return cached_casts;
 }
 
 enum class CastPolicy : uint8_t {
@@ -24,13 +24,14 @@ enum class CastPolicy : uint8_t {
 
 // feels good to be writing C++ again
 
-// If nextTensor is a floating-point Tensor, compare its scalar_type with our
+// Overload to catch Tensor args.
+// If nextArg is floating-point, compare its scalar_type with our
 // current best guess for the promote type, and update if necessary.
-at::ScalarType prioritize(at::ScalarType current, const Tensor & nextTensor) {
-  if (!nextTensor.is_floating_point()) {
+at::ScalarType prioritize(at::ScalarType current, const Tensor & nextArg) {
+  if (!nextArg.is_floating_point()) {
     return current;
   } else {
-    auto next = nextTensor.scalar_type();
+    auto next = nextArg.scalar_type();
     // For promotion purposes, prioritize double, then float, then half.
     if (current == at::kDouble || next == at::kDouble) {
       return at::kDouble;
@@ -45,13 +46,13 @@ at::ScalarType prioritize(at::ScalarType current, const Tensor & nextTensor) {
   }
 }
 
-// Catchall:: If an arg is not a Tensor, don't bother trying to read its type.
+// Template to catch non-Tensor args (no-op that returns current best guess)
 template<typename T>
 at::ScalarType prioritize(at::ScalarType current, T nextArg) {
   return current;
 }
 
-// Simple overload for the tail case.
+// Overload for the tail case.
 at::ScalarType promote_type(at::ScalarType current) {
   return current;
 }
@@ -64,20 +65,23 @@ at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
   return promote_type(new_current, args...);
 }
 
-// Cast Tensor arg if appropriate.
+// Overload to catch Tensor args, and cast if necessary.
 Tensor caching_caster(at::ScalarType to_type, const Tensor & arg) {
   if (arg.is_floating_point() && arg.scalar_type() != to_type) {
-    bool can_try_cache = (arg.scalar_type() == at::kFloat && to_type == at::kHalf);
+    // Heuristic:  Do what Apex does, and cache FP16 casts of FP32 leaves.
+    bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat);
+    // If arg is a variable, explicitly check is_leaf().  Non-variable Tensors do not permit an is_leaf() call,
+    // so if arg is not a variable, assume it is a frozen leaf.
     if (arg.is_variable()) {
       can_try_cache = (can_try_cache || arg.is_leaf());
     }
     if (can_try_cache) {
-      auto it = cached_leaf_casts.find(arg.unsafeGetTensorImpl()); // Use the owned TensorImpl* as a Tensor's uuid.
-      if (it != cached_leaf_casts.end()) {
+      auto it = cached_casts.find(arg.unsafeGetTensorImpl()); // Use the owned TensorImpl* as a Tensor's uuid.
+      if (it != cached_casts.end()) {
         return it->second; // Return the cached value.
       } else {
         auto casted_arg = arg.to(to_type);
-        cached_leaf_casts.emplace(arg.unsafeGetTensorImpl(), casted_arg);
+        cached_casts.emplace(arg.unsafeGetTensorImpl(), casted_arg);
         return casted_arg;
       }
     } else {
@@ -88,11 +92,12 @@ Tensor caching_caster(at::ScalarType to_type, const Tensor & arg) {
   }
 }
 
-// Catchall:  If an arg is not a Tensor, don't try to cast.
+// Template to catch non-Tensor args.
 // Should we bother with perfect forwarding here?  I lean towards no, because types are deduced from the
-// patched function's signature/schema, not from the args.  Besides, we know exactly what argument types
-// we're dealing with.  Function signatures are specified explicitly in registration below.  If something
-// looks like it might benefit from perfect forwarding, we can deal with that when the time comes.
+// patched function's signature/schema, not from the args.
+// Besides, we know exactly what argument types we're dealing with.  Function signatures are given
+// explicitly in registration below.  If something looks like it might benefit from perfect forwarding,
+// we can deal with that when the time comes.
 template<typename T>
 T caching_caster(at::ScalarType to_type, T arg) {
   return arg;
