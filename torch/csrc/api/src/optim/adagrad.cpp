@@ -14,6 +14,11 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
+Adagrad::Adagrad(ParameterContainer&& parameters, const AdagradOptions& options_)
+    : Optimizer(std::forward<ParameterContainer>(parameters)), options(options_) {
+
+}
+
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
@@ -22,8 +27,12 @@ void Adagrad::step() {
     if (!p.grad().defined()) {
       continue;
     }
-
-    if (options.weight_decay() > 0) {
+    auto grad = p.grad().data();
+    // at::IValue curr_state = state[""]
+    // state = self.state[p]
+    // state['step'] += 1
+    if (options.weight_decay() != 0) {
+      TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
       NoGradGuard guard;
       p.grad() = p.grad() + options.weight_decay() * p;
     }
