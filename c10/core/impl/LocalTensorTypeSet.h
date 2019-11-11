@@ -53,6 +53,8 @@ struct C10_API LocalTensorTypeSet {
 
 C10_API LocalTensorTypeSet tls_local_tensor_type_set();
 
+// RAII API for manipulating the thread local state
+
 class C10_API IncludeTensorTypeIdGuard {
 public:
   IncludeTensorTypeIdGuard(TensorTypeId);
@@ -76,5 +78,18 @@ private:
   TensorTypeId id_;
   bool prev_state_;
 };
+
+// Non-RAII API for manipulating the thread local state.  Please
+// prefer using the guards above; this API may be useful if you need
+// to expose this, e.g., to a Python context manager (where you
+// cannot conveniently use a C++ RAII guard).  Note that these
+// APIs are less efficient than the RAII guards because both the
+// getter and setter will do a tls_getaddr lookup (the RAII struct
+// only needs one!)
+
+C10_API TensorTypeSet tls_get_local_included_tensor_type_set();
+C10_API void tls_set_local_included_tensor_type_set(TensorTypeSet);
+C10_API TensorTypeSet tls_get_local_excluded_tensor_type_set();
+C10_API void tls_set_local_excluded_tensor_type_set(TensorTypeSet);
 
 }} // namespace c10::impl

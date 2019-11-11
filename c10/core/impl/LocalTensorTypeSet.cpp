@@ -60,4 +60,17 @@ ExcludeTensorTypeIdGuard::~ExcludeTensorTypeIdGuard() {
   }
 }
 
+TensorTypeSet tls_get_local_included_tensor_type_set() {
+  return raw_local_tensor_type_set.included();
+}
+void tls_set_local_included_tensor_type_set(TensorTypeSet ts) {
+  raw_local_tensor_type_set.set_included(ts);
+}
+TensorTypeSet tls_get_local_excluded_tensor_type_set() {
+  return raw_local_tensor_type_set.excluded();
+}
+void tls_set_local_excluded_tensor_type_set(TensorTypeSet ts) {
+  raw_local_tensor_type_set.set_excluded(ts);
+}
+
 }} // namespace c10::impl
