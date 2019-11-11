@@ -76,7 +76,7 @@ class TORCH_API Adagrad : public Optimizer {
   void load(serialize::InputArchive& archive) override;
 
  private:
-  Adagrad() : Optimizer({}, c10::guts::make_unique<AdagradOptions>(0)) {}
+  Adagrad() {}
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
