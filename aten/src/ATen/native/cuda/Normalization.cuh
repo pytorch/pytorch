@@ -516,8 +516,8 @@ void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_
                                                             bool train, double momentum, double epsilon) {
 
   TensorArg output_arg{ output_, "output", 1 },
-            save_mean_arg{ input_, "save_mean", 2 },
-            save_invstd_arg{ input_, "save_invstd", 3 },
+            save_mean_arg{ save_mean_, "save_mean", 2 },
+            save_invstd_arg{ save_invstd_, "save_invstd", 3 },
             input_arg{ input_, "input", 4 },
             weight_arg{ weight_, "weight", 5 },
             bias_arg{ bias_, "bias", 6 },
