@@ -13,6 +13,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
 
+#include <pybind11/chrono.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -23,12 +25,13 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* rpc_init(PyObject* /* unused */) {
-  auto dist_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!dist_module) {
+  auto rpc_module =
+      THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
+  if (!rpc_module) {
     throw python_error();
   }
 
-  auto module = py::handle(dist_module).cast<py::module>();
+  auto module = py::handle(rpc_module).cast<py::module>();
 
   auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
                         .def_readonly("name", &WorkerInfo::name_)
@@ -39,18 +42,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
-              "sync",
-              &RpcAgent::sync,
+              "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_rpc_timeout",
+              &RpcAgent::getRpcTimeout,
               py::call_guard<py::gil_scoped_release>());
-
-  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
-                      .def(
-                          "wait",
-                          &PyFuture::wait,
-                          py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef")
+          .def(py::init<const py::object&>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -89,10 +89,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
-          py::init<std::string, std::shared_ptr<::c10d::ProcessGroup>, int>(),
+          py::init<
+              std::string,
+              std::shared_ptr<::c10d::ProcessGroup>,
+              int,
+              std::chrono::milliseconds>(),
           py::arg("name"),
           py::arg("process_group"),
-          py::arg("num_send_recv_threads") = 4)
+          py::arg("num_send_recv_threads"),
+          py::arg("rpc_timeout"))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &

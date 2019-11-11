@@ -204,7 +204,7 @@ class CAFFE2_API Tensor {
   }
 
   at::MemoryFormat suggest_memory_format() const {
-    if (impl_->is_strides_like_channels_last()) {
+    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
       return at::MemoryFormat::ChannelsLast;
     }
     return at::MemoryFormat::Contiguous;
@@ -237,8 +237,7 @@ class CAFFE2_API Tensor {
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
-        scalar_type(),
-        is_variable());
+        scalar_type());
   }
   TensorTypeSet type_set() const {
     return impl_->type_set();

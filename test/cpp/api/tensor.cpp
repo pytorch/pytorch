@@ -609,6 +609,13 @@ TEST(TensorTest, TorchTensorCtorWithoutSpecifyingDtype) {
   test_dtype_is_as_expected(/*default_dtype=*/torch::kDouble);
 }
 
+TEST(TensorTest, Arange) {
+  { // Test #1
+    auto x = torch::arange(0, 5);
+    TORCH_INTERNAL_ASSERT(x.dtype() == at::ScalarType::Long);
+  }
+}
+
 TEST(TensorTest, PrettyPrintTensorDataContainer) {
   {
     ASSERT_EQ(
@@ -772,9 +779,6 @@ TEST(TensorTest, DataPtr) {
 TEST(TensorTest, Data) {
   const auto tensor = torch::rand({3, 3});
   ASSERT_TRUE(torch::equal(tensor, tensor.data()));
-
-  const auto tensor2 = at::rand({3, 3});
-  ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
 TEST(TensorTest, BackwardAndGrad) {
@@ -782,11 +786,6 @@ TEST(TensorTest, BackwardAndGrad) {
   auto y = x * x;
   y.backward();
   ASSERT_EQ(x.grad().item<float>(), 10.0);
-
-  x = at::tensor({5});
-  y = x * x;
-  ASSERT_THROWS_WITH(y.backward(), "backward is not implemented for Tensor");
-  ASSERT_THROWS_WITH(x.grad(), "grad is not implemented for Tensor");
 }
 
 TEST(TensorTest, BackwardCreatesOnesGrad) {
@@ -808,12 +807,6 @@ TEST(TensorTest, IsLeaf) {
   auto y = x * x;
   ASSERT_TRUE(x.is_leaf());
   ASSERT_FALSE(y.is_leaf());
-
-  x = at::tensor({5});
-  y = x * x;
-  const auto message = "is_leaf is not implemented for Tensor";
-  ASSERT_THROWS_WITH(y.is_leaf(), message);
-  ASSERT_THROWS_WITH(x.is_leaf(), message);
 }
 
 TEST(TensorTest, OutputNr) {
@@ -821,12 +814,6 @@ TEST(TensorTest, OutputNr) {
   auto y = x * x;
   ASSERT_EQ(x.output_nr(), 0);
   ASSERT_EQ(y.output_nr(), 0);
-
-  x = at::tensor({5});
-  y = x * x;
-  const auto message = "output_nr is not implemented for Tensor";
-  ASSERT_THROWS_WITH(y.output_nr(), message);
-  ASSERT_THROWS_WITH(x.output_nr(), message);
 }
 
 TEST(TensorTest, Version) {
@@ -836,14 +823,6 @@ TEST(TensorTest, Version) {
   ASSERT_EQ(x._version(), 1);
   x.add_(1);
   ASSERT_EQ(x._version(), 2);
-
-  x = at::ones(3);
-  const auto message = "version is not implemented for Tensor";
-  ASSERT_THROWS_WITH(x._version(), message);
-  x.mul_(2);
-  ASSERT_THROWS_WITH(x._version(), message);
-  x.add_(1);
-  ASSERT_THROWS_WITH(x._version(), message);
 }
 
 TEST(TensorTest, Detach) {
@@ -853,12 +832,6 @@ TEST(TensorTest, Detach) {
   ASSERT_FALSE(y.is_leaf());
   ASSERT_TRUE(y_detached.is_leaf());
   ASSERT_FALSE(y_detached.requires_grad());
-
-  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
-  y = x * x;
-  const auto message = "detach is not implemented for Tensor";
-  ASSERT_THROWS_WITH(x.detach(), message);
-  ASSERT_THROWS_WITH(y.detach(), message);
 }
 
 TEST(TensorTest, DetachInplace) {
@@ -869,12 +842,6 @@ TEST(TensorTest, DetachInplace) {
   ASSERT_FALSE(y.requires_grad());
   ASSERT_TRUE(y_detached.is_leaf());
   ASSERT_FALSE(y_detached.requires_grad());
-
-  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
-  y = x * x;
-  const auto message = "detach_ is not implemented for Tensor";
-  ASSERT_THROWS_WITH(x.detach_(), message);
-  ASSERT_THROWS_WITH(y.detach_(), message);
 }
 
 TEST(TensorTest, SetData) {
@@ -886,10 +853,6 @@ TEST(TensorTest, SetData) {
   x.set_data(y);
   ASSERT_TRUE(torch::equal(x, y));
   ASSERT_EQ(x.data_ptr<float>(), y.data_ptr<float>());
-
-  x = at::tensor({5});
-  y = at::tensor({5});
-  ASSERT_THROWS_WITH(x.set_data(y), "set_data is not implemented for Tensor");
 }
 
 TEST(TensorTest, RequiresGradInplace) {
@@ -907,11 +870,4 @@ TEST(TensorTest, RequiresGradInplace) {
   const auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
   ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
     "Only Tensors of floating point dtype can require gradients");
-
-  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
-  y = x * x;
-  ASSERT_THROWS_WITH(x.requires_grad_(false),
-    "requires_grad_ is not implemented for Tensor");
-  ASSERT_THROWS_WITH(y.requires_grad_(false),
-    "requires_grad_ is not implemented for Tensor");
 }

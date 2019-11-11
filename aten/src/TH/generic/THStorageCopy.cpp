@@ -35,5 +35,14 @@ IMPLEMENT_THStorage_COPY(Double)
 IMPLEMENT_THStorage_COPY(Half)
 IMPLEMENT_THStorage_COPY(Bool)
 IMPLEMENT_THStorage_COPY(BFloat16)
+#ifdef THQUINT8
+IMPLEMENT_THStorage_COPY(QUInt8)
+#endif
+#ifdef THQINT8
+IMPLEMENT_THStorage_COPY(QInt8)
+#endif
+#ifdef THQINT32
+IMPLEMENT_THStorage_COPY(QInt32)
+#endif
 
 #endif
