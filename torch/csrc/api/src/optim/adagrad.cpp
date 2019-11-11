@@ -116,7 +116,7 @@ void Adagrad::step() {
 }
 
 void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.push_back(std::move(detail::OptimizerParamGroup(parameters, defaults_->clone())));
+  param_groups_.push_back(std::move(OptimizerParamGroup(parameters, defaults_->clone())));
 }
 
 const std::vector<Tensor>& Adagrad::parameters() const noexcept {
