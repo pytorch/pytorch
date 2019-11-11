@@ -134,7 +134,7 @@ op_bench.generate_pt_tests_from_op_list(qunary_ops_list,
                                         QUnaryOpBenchmark)
 
 
-## Otther unary ops (i.e. the ones that need parameters as args)
+# === Other unary ops (i.e. the ones that need parameters as args) ===
 
 # Configs for pointwise and reduction unary ops
 qunary_ops_topk_configs_short = op_bench.config_list(
