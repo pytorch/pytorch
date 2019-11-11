@@ -416,7 +416,7 @@ TEST(SerializeTest, IValue) {
   input_archive.read("value", ivalue_out);
   ASSERT_EQ(ivalue_out.toInt(), 1);
 
-  ASSERT_THROWS_WITH(input_archive.read("bad_key", ivalue_out), "No such serialized IValue");
+  ASSERT_THROWS_WITH(input_archive.read("bad_key", ivalue_out), "does not have a field with the name");
 }
 
 // NOTE: if a `Module` contains unserializable submodules (e.g. `nn::Functional`),
@@ -492,5 +492,5 @@ TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   const int output = in->named_buffers()["b.foo"].sum().item<int>();
   // `output` should equal to the sum of the values we manually assigned to "b.foo" before
   // serialization.
-  ASSERT_EQ(output, 5);  
+  ASSERT_EQ(output, 5);
 }
