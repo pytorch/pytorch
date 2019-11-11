@@ -115,6 +115,14 @@ class TORCH_API Message final {
   int64_t id_ = -1;
 };
 
+// create an exception given a message and exception.
+TORCH_API Message
+createException(const Message& request, const std::exception& e);
+
+// create an exception given a message and string.
+TORCH_API Message
+createException(const Message& request, const std::string& exceptionStr);
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

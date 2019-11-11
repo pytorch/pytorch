@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/message.h>
 
 namespace torch {
 namespace distributed {
@@ -10,16 +11,6 @@ namespace rpc {
 using namespace torch::distributed::autograd;
 
 namespace {
-
-Message createException(const Message& request, const std::exception& e) {
-  const char* err = e.what();
-  std::vector<char> payload(err, err + strlen(err));
-  return Message(
-      std::move(payload),
-      std::vector<torch::Tensor>(),
-      MessageType::EXCEPTION,
-      request.id());
-}
 
 // When request message has autograd info, processMessage() will set up valid
 // current context id properly. This struct is used to clean up current context
