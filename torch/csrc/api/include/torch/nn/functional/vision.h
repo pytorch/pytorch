@@ -87,7 +87,7 @@ inline Tensor grid_sample(
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,
-    GridSampleFuncOptions options = {}) {
+    const GridSampleFuncOptions& options = {}) {
   return detail::grid_sample(
     input,
     grid,
