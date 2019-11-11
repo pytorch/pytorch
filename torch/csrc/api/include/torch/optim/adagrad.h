@@ -45,7 +45,7 @@ class TORCH_API Adagrad : public Optimizer {
   //     TORCH_CHECK(options.eps() >= 0, "Invalid epsilon value: ", options.eps());
   //   }
 
-  explicit Adagrad(std::vector<c10::Dict<std::string, at::IValue>> param_groups,
+  explicit Adagrad(std::vector<c10::impl::GenericDict> param_groups,
       const AdagradOptions& options_) : Optimizer(param_groups), options(options_) {
       TORCH_CHECK(options.learning_rate() >= 0, "Invalid learning rate: ", options.learning_rate());
       TORCH_CHECK(options.lr_decay() >= 0, "Invalid lr_decay value: ", options.lr_decay());
