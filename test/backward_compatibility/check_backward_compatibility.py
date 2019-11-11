@@ -9,24 +9,12 @@ from torch._C import parse_schema
 
 
 white_list = [
-    ('quantize', datetime.date(2019, 10, 1)),
-    ('q_per_channel_axis', datetime.date(2019, 10, 1)),
-    ('fbgemm_is_cpu_supported', datetime.date(2019, 10, 1)),
     ('c10_experimental', datetime.date(2020, 1, 1)),
-    ('index_fill', datetime.date(2019, 10, 30)),
-    ('align_to', datetime.date(2019, 10, 30)),
-    ('unflatten', datetime.date(2019, 10, 30)),
-    ('softmax', datetime.date(2019, 10, 30)),
-    ('slow_conv_transpose2d_backward', datetime.date(2019, 10, 30)),
-    ('slow_conv_transpose3d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv2d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv_depthwise2d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv3d_backward', datetime.date(2019, 10, 30)),
-    ('empty_like', datetime.date(2019, 10, 30)),
-    ('rand_like', datetime.date(2019, 11, 11)),
-    ('ones_like', datetime.date(2019, 11, 11)),
-    ('full_like', datetime.date(2019, 11, 11)),
-    ('AutogradAnyNonZero', datetime.date(2019, 11, 11)),
+    ('_batch_norm_impl_index', datetime.date(2019, 11, 15)),
+    ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
+    ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
 ]
 
 

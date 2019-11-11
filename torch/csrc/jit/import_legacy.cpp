@@ -298,11 +298,10 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
       std::make_shared<ClassResolver>(source_importer_));
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
-    if (module.find_buffer(attr_def.name())) {
-      // TODO: handle this above so this can be removed
+    if (module.hasattr(attr_def.name())) {
+      // this attribute was already registered as a buffer above.
       continue;
     }
-
     IValue ivalue;
     if (attr_def.id() >= 0) {
       // attribute has no value in the table, set it to None for now. After
@@ -349,17 +348,19 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
         LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
-  for (const script::NameValue& slot : module.get_attributes()) {
+  const ClassTypePtr& module_type = module.module_object()->type();
+  for (size_t i = 0, N = module_type->numAttributes(); i < N; ++i) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    if (slot.value.type()->kind() != TypeKind::OptionalType) {
+    const IValue& v = module.module_object()->getSlot(i);
+    if (module_type->getAttribute(i)->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
-          !slot.value.isNone(),
+          !v.isNone(),
           "The field '",
-          slot.name,
+          module_type->getAttributeName(i),
           "' was left unitialized after __setstate__, but expected a ",
           "value of type '",
-          slot.value.type()->python_str(),
+          v.type()->python_str(),
           "'");
     }
   }

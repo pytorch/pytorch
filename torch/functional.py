@@ -89,7 +89,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         unpack_data (bool): flag indicating if the data should be unpacked
         unpack_pivots (bool): flag indicating if the pivots should be unpacked
 
-    Example::
+    Examples::
 
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = A.lu()
@@ -97,13 +97,53 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         >>>
         >>> # can recover A from factorization
         >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+
+        >>> # LU factorization of a rectangular matrix:
+        >>> A = torch.randn(2, 3, 2)
+        >>> A_LU, pivots = A.lu()
+        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
+        >>> P
+        tensor([[[1., 0., 0.],
+                 [0., 1., 0.],
+                 [0., 0., 1.]],
+
+                [[0., 0., 1.],
+                 [0., 1., 0.],
+                 [1., 0., 0.]]])
+        >>> A_L
+        tensor([[[ 1.0000,  0.0000],
+                 [ 0.4763,  1.0000],
+                 [ 0.3683,  0.1135]],
+
+                [[ 1.0000,  0.0000],
+                 [ 0.2957,  1.0000],
+                 [-0.9668, -0.3335]]])
+        >>> A_U
+        tensor([[[ 2.1962,  1.0881],
+                 [ 0.0000, -0.8681]],
+
+                [[-1.0947,  0.3736],
+                 [ 0.0000,  0.5718]]])
+        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+        >>> torch.norm(A_ - A)
+        tensor(2.9802e-08)
     """
-
-    sz = LU_data.size(-1)
-
+    shape = LU_data.shape
+    # In generalized LU factorization, the following shape relations hold:
+    #   A.shape[-2:] == (m, n)
+    #   P.shape[-2:] == (m, m)
+    #   L.shape[-2:] == (m, k)
+    #   U.shape[-2:] == (k, n)
+    # where k = min(m, n)
+    m, n = shape[-2:]
+    k = min(m, n)
     if unpack_data:
         U = LU_data.triu()
+        if m != k:
+            U = U.narrow(-2, 0, k)
         L = LU_data.tril()
+        if k != n:
+            L = L.narrow(-1, 0, k)
         L.diagonal(dim1=-2, dim2=-1).fill_(1)
     else:
         L = U = None
@@ -111,15 +151,15 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     if unpack_pivots:
         LU_pivots_zero_idx = LU_pivots - 1
         if LU_data.dim() > 2:
-            P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype).expand_as(LU_data).clone()
-            for idx in product(*map(lambda x: list(range(x)), LU_data.shape[:-2])):
-                final_order = list(range(sz))
+            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype).expand(shape[:-1] + (m,)).clone(memory_format=torch.contiguous_format)
+            for idx in product(*map(lambda x: list(range(x)), shape[:-2])):
+                final_order = list(range(m))
                 for k, j in enumerate(LU_pivots_zero_idx[idx]):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
                 P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
         else:
-            P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(sz))
+            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
+            final_order = list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
@@ -385,6 +425,14 @@ del torch.unique_dim
 
 def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     r"""Returns the unique elements of the input tensor.
+
+    .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
+        this function also eliminates non-consecutive duplicate values.
+
+    .. note:: Currently in the CUDA implementation and the CPU implementation when dim is specified,
+        `torch.unique` always sort the tensor at the beginning regardless of the `sort` argument.
+        Sorting could be slow, so if your input tensor is already sorted, it is recommended to use
+        :func:`torch.unique_consecutive` which avoids the sorting.
 
     Arguments:
         input (Tensor): the input tensor
@@ -786,9 +834,10 @@ def chain_matmul(*matrices):
 
 
 def lu(A, pivot=True, get_infos=False, out=None):
-    r"""Computes the LU factorization of a square matrix or batches of square matrices
-    :attr:`A`. Returns a tuple containing the LU factorization and pivots of :attr:`A`.
-    Pivoting is done if :attr:`pivot` is set to ``True``.
+    r"""Computes the LU factorization of a matrix or batches of matrices
+    :attr:`A`. Returns a tuple containing the LU factorization and
+    pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
+    ``True``.
 
     .. note::
         The pivots returned by the function are 1-indexed. If :attr:`pivot` is ``False``,
@@ -804,8 +853,14 @@ def lu(A, pivot=True, get_infos=False, out=None):
         :attr:`get_infos` is ``True`` since the status of the factorization is present in the
         third element of the return tuple.
 
+    .. note::
+        In the case of batches of square matrices with size less or
+        equal to 32 on a CUDA device, the LU factorization is repeated
+        for singular matrices due to the bug in the MAGMA library (see
+        magma issue 13).
+
     Arguments:
-        A (Tensor): the tensor to factor of size :math:`(*, m, m)`
+        A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
         get_infos (bool, optional): if set to ``True``, returns an info IntTensor.
                                     Default: ``False``
@@ -817,7 +872,7 @@ def lu(A, pivot=True, get_infos=False, out=None):
     Returns:
         (Tensor, IntTensor, IntTensor (optional)): A tuple of tensors containing
 
-            - **factorization** (*Tensor*): the factorization of size :math:`(*, m, m)`
+            - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
             - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
 
