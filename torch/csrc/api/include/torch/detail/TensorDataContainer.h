@@ -36,7 +36,6 @@ inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
     // dtype `T` is always respected.
     return at::kLong;
   } else if (scalar_type == at::kDouble) {
-    // yf225 TODO: add thorough tests for this
     // When `scalar_type == at::kDouble`, we know that the user is passing in
     // a floating-point literal without specifying its type (e.g. `1.0` instead of `1.0f`).
     // In Python, the dtype of `torch.tensor(1.0)` depends on the value of
@@ -101,7 +100,10 @@ struct TensorDataContainer {
   // the innermost `TensorDataContainer`.
   TensorDataContainer() :
       sizes_({0}),
-      scalar_type_(at::typeMetaToScalarType(at::get_default_dtype())), // yf225 TODO: comment here  // yf225 TODO: add thorough tests for this
+      // NOTE: In Python, the dtype of tensors with zero-size dimensions (e.g. `torch.tensor([[], []])`)
+      // depends on the value of `torch.get_default_dtype()`, and we should do the same for C++
+      // `torch::tensor({{}, {}})`.
+      scalar_type_(at::typeMetaToScalarType(at::get_default_dtype())),
       type_(TensorDataContainerType::InitList) {}
 #define TENSOR(T, S) \
   TensorDataContainer(T value) : \
