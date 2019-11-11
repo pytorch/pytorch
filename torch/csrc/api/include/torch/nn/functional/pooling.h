@@ -497,7 +497,7 @@ inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
 namespace detail {
 inline Tensor lp_pool1d(
   const Tensor& input,
-  float norm_type,
+  double norm_type,
   ExpandingArray<1> kernel_size,
   ExpandingArray<1> stride,
   bool ceil_mode) {
@@ -525,7 +525,7 @@ inline Tensor lp_pool1d(const Tensor& input, const LPPool1dFuncOptions& options)
 namespace detail {
 inline Tensor lp_pool2d(
   const Tensor& input,
-  float norm_type,
+  double norm_type,
   ExpandingArray<2> kernel_size,
   ExpandingArray<2> stride,
   bool ceil_mode) {

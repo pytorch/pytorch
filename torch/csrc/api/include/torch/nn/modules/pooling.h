@@ -403,7 +403,7 @@ TORCH_MODULE(MaxUnpool3d);
 template <size_t D, typename Derived>
 class TORCH_API LPPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
-  LPPoolImpl(float norm_type, ExpandingArray<D> kernel_size)
+  LPPoolImpl(double norm_type, ExpandingArray<D> kernel_size)
       : LPPoolImpl(LPPoolOptions<D>(norm_type, kernel_size)) {}
   explicit LPPoolImpl(const LPPoolOptions<D>& options_);
 
