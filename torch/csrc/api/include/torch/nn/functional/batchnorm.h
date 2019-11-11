@@ -40,7 +40,7 @@ inline Tensor batch_norm(const Tensor& input,
 } // namespace detail
 
 inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
-                         const Tensor& running_var, const BatchNormOptions& options = {}, bool training = false) {
+                         const Tensor& running_var, BatchNormFuncOptions options = {}, bool training = false) {
   return detail::batch_norm(
     input,
     running_mean,
