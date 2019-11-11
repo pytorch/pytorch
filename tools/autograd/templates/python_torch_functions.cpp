@@ -539,13 +539,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
   for (auto &arg : r.overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
     ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
-    if (ret.ptr() == Py_NotImplemented) {
-      // if ret returns NotImplemented, we check the next implementation in the
-      // precedence order, resetting ret to the null object so we don't leak
-      // references to NotImplemented.
-      ret = py::object();
-    }
-    else {
+    if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where ret
       // is NULL and __torch_function__ raised an exception, which we throw below
       break;
@@ -553,12 +547,11 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
   }
   if (ret.ptr() == nullptr) {
     // if an exception occurred in a user's implementation of
-    // __array_function__, allow the exception to continue propagating
-    // by returning NULL
-    if (PyErr_Occurred() != NULL) {
-      return NULL;
-    }
-    // otherwise all __torch_function__ implementations in overloaded_args
+    // __array_function__, throw it
+    throw python_error();
+  }
+  else if (ret.ptr() == Py_NotImplemented) {
+    // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
     ss << "no implementation found for 'torch." << r.get_func_name()
@@ -574,6 +567,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
     }
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
+    throw python_error();
   }
   // We return a raw PyObject* so we need to explicitly incref, otherwise
   // deallocating the py::object at the end of this scope may cause the
