@@ -63,6 +63,7 @@ FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
 FILE(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
+FILE(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
 
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
@@ -444,7 +445,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 if(INTERN_BUILD_MOBILE)
   set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 else()
-  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake

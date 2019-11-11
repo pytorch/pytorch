@@ -28,7 +28,7 @@ def manual_seed(seed):
     seed = int(seed)
     import torch.cuda
 
-    if not torch.cuda._in_bad_fork:
+    if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
@@ -41,7 +41,7 @@ def seed():
     seed = default_generator.seed()
     import torch.cuda
 
-    if not torch.cuda._in_bad_fork:
+    if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
     return seed

@@ -253,7 +253,7 @@ Tensor empty_like(
 
 #ifdef BUILD_NAMEDTENSOR
   if (self.opt_names()) {
-    namedinference::propagate_names(result, self.opt_names());
+    namedinference::propagate_names(result, self.names());
   }
 #endif
 
