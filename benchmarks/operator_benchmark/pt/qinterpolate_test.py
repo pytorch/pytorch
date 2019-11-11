@@ -21,31 +21,36 @@ qinterpolate_long_configs = op_bench.config_list(
         'dtype': [torch.quint8, torch.qint8, torch.qint32],
         'mode': ['nearest', 'bilinear'],
         'scale': [0.25, 0.5, 1.0, 1.5, 2.0],
+        'contig': [True],  # TODO: Add `False` after #29435
     },
     tags=['long']
 )
 
 
 qinterpolate_short_configs = op_bench.config_list(
-    attr_names=['M', 'N', 'K', 'dtype', 'mode', 'scale'],
+    attr_names=['M', 'N', 'K', 'dtype', 'mode', 'scale', 'contig'],
     attrs=[
-        [32, 32, 32, torch.quint8, 'nearest', 0.5],  # Downsample
-        [32, 32, 32, torch.quint8, 'bilinear', 0.5],  # Downsample
-        [32, 32, 32, torch.quint8, 'nearest', 2.0],  # Upsample
-        [32, 32, 32, torch.quint8, 'bilinear', 2.0],  # Upsample
+        [32, 32, 32, torch.quint8, 'nearest', 0.5, True],  # Downsample
+        [32, 32, 32, torch.quint8, 'bilinear', 0.5, True],  # Downsample
+        [32, 32, 32, torch.quint8, 'nearest', 2.0, True],  # Upsample
+        [32, 32, 32, torch.quint8, 'bilinear', 2.0, True],  # Upsample
     ],
     tags=['short'],
 )
 
 
 class QInterpolateBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, dtype, mode, scale):
+    def init(self, M, N, K, dtype, mode, scale, contig):
         f_input = (torch.rand(1, M, N, K) - 0.5) * 256
         scale = 0.1
         zero_point = 42
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
                                                  zero_point=zero_point,
                                                  dtype=dtype)
+        if not contig:
+            permute_dims = list(range(q_input.ndim))[::-1]
+            self.q_input_a = self.q_input_a.permute(permute_dims)
+
         self.mode = mode
         self.scale_factor = scale
         self.set_module_name('q_interpolate')
