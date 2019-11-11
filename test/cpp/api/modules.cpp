@@ -1565,7 +1565,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
 }
 
 TEST_F(ModulesTest, PairwiseDistance) {
-  PairwiseDistance dist(PairwiseDistanceOptions(1));
+  PairwiseDistance dist(PairwiseDistanceOptions().p(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = dist->forward(input1, input2);
@@ -2871,7 +2871,7 @@ TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
       c10::str(PairwiseDistance()),
       "torch::nn::PairwiseDistance(p=2, eps=1e-06, keepdim=false)");
   ASSERT_EQ(
-      c10::str(PairwiseDistance(PairwiseDistanceOptions(3).eps(0.5).keepdim(true))),
+      c10::str(PairwiseDistance(PairwiseDistanceOptions().p(3).eps(0.5).keepdim(true))),
       "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 

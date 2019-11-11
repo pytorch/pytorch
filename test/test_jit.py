@@ -20,6 +20,7 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
+from jit.test_builtins import TestBuiltins  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -353,6 +354,13 @@ class TestJit(JitTestCase):
         input = input.cuda()
 
         traced_rec = torch.jit.trace(rec, (input))
+
+    def test_trace_legacy_ctor(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return (x + 1, torch.FloatTensor([0]))
+
+        traced_rec = torch.jit.trace(MyModule(), torch.randn(2, 2))
 
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -7558,6 +7566,16 @@ a")
                         break
                 ''')
 
+        with self.assertRaisesRegex(RuntimeError, "do not support break or continue inside"):
+            @torch.jit.script
+            def foo(x):
+                i = 0
+                for a in (1, "2", 1.5):
+                    b = a
+                    if x:
+                        break
+                return b
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
@@ -9396,6 +9414,28 @@ a")
             return b
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+    def test_script_copy(self):
+        class M(torch.nn.Module):
+            __annotations__ = {
+                "val": Optional[torch.Tensor]
+            }
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.val = None
+
+            def some_method(self):
+                return 3
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                self.val = x + self.some_method()
+                return x
+
+        m = torch.jit.script(M())
+        # test copy
+        m_c = m.copy()
 
     @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
@@ -13931,8 +13971,8 @@ a")
 
     def test_string_index(self):
         def fn(x):
-            # type: (str) -> str
-            return x[2]
+            # type: (str)
+            return x[2], x[-1]
 
         self.checkScript(fn, ("abcde",))
 
@@ -15914,6 +15954,7 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
             foo(1)
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
