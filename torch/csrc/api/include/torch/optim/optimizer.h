@@ -43,11 +43,14 @@ class TORCH_API OptimizerBase {
 
   //todo
   template <typename OptimizerOptions>
-  explicit OptimizerBase(std::vector<Tensor> params, OptimizerOptions options) {
+  explicit OptimizerBase(std::vector<std::vector<Tensor>> params, OptimizerOptions options) {
     for(size_t i=0; i<params.size(); i++) {
       c10::Dict<std::string, at::IValue> param_group;
-      param_group.insert("params", params[i]);
       param_group.insert("options", options);
+      param_group.insert("params", std::vector<Tensor>());
+      for(size_t j=0; j<params[i].size(); j++) {
+        param_groups[i].at("params").toTensorList().push_back(params[i][j]);
+      }
       param_groups.push_back(param_group);
     }
     for (const auto& group : param_groups) {
@@ -59,6 +62,8 @@ class TORCH_API OptimizerBase {
       }
     }
   }
+
+  explicit OptimizerBase(std::vector<c10::Dict<std::string, at::IValue>> param_groups_): param_groups(param_groups_) {}
 
   virtual ~OptimizerBase() = default;
 
