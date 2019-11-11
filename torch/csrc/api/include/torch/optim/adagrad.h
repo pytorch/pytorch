@@ -18,13 +18,8 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct TORCH_API AdagradOptions : public detail::OptimizerOptionsBase {
+struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOptions> {
   AdagradOptions(double learning_rate);
-
-  std::unique_ptr<OptimizerOptionsBase> clone() const override {
-    return c10::guts::make_unique<AdagradOptions>(*this);
-  }
-
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, lr_decay) = 0;
   TORCH_ARG(double, weight_decay) = 0;
@@ -32,18 +27,14 @@ struct TORCH_API AdagradOptions : public detail::OptimizerOptionsBase {
   TORCH_ARG(double, eps) = 1e-10;
 };
 
-struct TORCH_API AdagradParamState : public detail::OptimizerParamStateBase {
-  std::unique_ptr<OptimizerParamStateBase> clone() const override {
-    return c10::guts::make_unique<AdagradParamState>(*this);
-  }
-
+struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
   TORCH_ARG(torch::Tensor, sum);
   TORCH_ARG(int64_t, step);
 };
 
 class TORCH_API Adagrad : public Optimizer {
  public:
-  explicit Adagrad(std::vector<detail::OptimizerParamGroup> param_groups,
+  explicit Adagrad(std::vector<OptimizerParamGroup> param_groups,
       AdagradOptions defaults) : Optimizer(std::move(param_groups), c10::guts::make_unique<AdagradOptions>(std::move(defaults))) {
     AdagradOptions* default_derived = static_cast<AdagradOptions*>(defaults_.get());
     TORCH_CHECK(default_derived->learning_rate() >= 0, "Invalid learning rate: ", default_derived->learning_rate());
@@ -65,7 +56,7 @@ class TORCH_API Adagrad : public Optimizer {
   // TODO: we might want to replace `std::vector<Tensor>` with `ParameterContainer` at some point
   explicit Adagrad(
       std::vector<Tensor> params,
-      AdagradOptions defaults) : Adagrad({detail::OptimizerParamGroup(params)}, defaults) {}
+      AdagradOptions defaults) : Adagrad({OptimizerParamGroup(params)}, defaults) {}
 
   void step() override;
 
