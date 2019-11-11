@@ -34,7 +34,7 @@ from functools import wraps
 # In general, we should avoid depending on the type of Tensor Values contained
 # within the trace graph. However, this is sometimes unavoidable (due to ONNX
 # spec requirements, etc). The TensorType object has accessors for these properties
-# that return the property if it is statically known and return nullopt otherwise. 
+# that return the property if it is statically known and return nullopt otherwise.
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
@@ -327,12 +327,24 @@ def _scatter_helper(g, self, dim, index, src):
 
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
+    def _is_all_integral(scalars):
+        for scalar in scalars:
+            try:
+                if scalar.type().scalarType() != 'Long':
+                    return False
+            except Exception:
+                pass
+        return True
+
     # This logic is based on torch.arange docs. If 'dtype' is provided,
     # infer input types from dtype. If not, then check if any of start, stop,
     # or step are floating point, and infer the type from get_default.
     # Otherwise, the dtype is inferred to be torch.int64.
     if _is_value(dtype) and _is_none(dtype):
-        type = scalar_type_to_pytorch_type.index(torch.get_default_dtype())
+        if _is_all_integral([start, end, step]):
+            type = scalar_type_to_pytorch_type.index(torch.int64)
+        else:
+            type = scalar_type_to_pytorch_type.index(torch.get_default_dtype())
     else:
         type = dtype
 
