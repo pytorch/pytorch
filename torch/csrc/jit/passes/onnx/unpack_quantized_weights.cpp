@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
-
 #include <stack>
 
 using ::c10::Dispatcher;
@@ -86,11 +85,9 @@ void unpackQuantizedWeightsHelper(
     qlinear_node->removeInput(1);
 
     // Update the input
+    graph->setInsertPoint(qlinear_node);
     auto val = graph->insertConstant(unpacked_weight);
     qlinear_node->insertInput(1, val);
-    // TODO add to paramsDict?
-    // auto tmp = std::get<0>(result);
-    // paramsDict[val->debugName()] = std::get<0>(result);
 
     // Add bias
     if (std::get<1>(result).has_value()) {
