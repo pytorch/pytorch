@@ -7,13 +7,10 @@ namespace at { namespace namedinference {
 #ifdef BUILD_NAMEDTENSOR
 
 Dimname TensorName::toDimname() const {
-  TORCH_INTERNAL_ASSERT(initialized_);
   return name_;
 }
 
 const TensorName& TensorName::unify(const TensorName& other, const char* op_name) const {
-  TORCH_INTERNAL_ASSERT(initialized_);
-
   // unify(None, None)
   if (name_.isWildcard() && other.name_.isWildcard()) {
     return *this;
@@ -67,24 +64,22 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
 
 TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
   int64_t longer_size = std::max(names_.size(), other.names_.size());
+  int64_t shorter_size = std::min(names_.size(), other.names_.size());
+  int64_t size_difference = longer_size - shorter_size;
   bool this_is_longer = names_.size() == longer_size;
 
-  ArrayRef<TensorName> longer = this_is_longer ? names_ : other.names_;
-  ArrayRef<TensorName> shorter = this_is_longer ? other.names_ : names_;
-  int64_t size_difference = longer_size - shorter.size();
-
-  names_.resize(longer_size);
-
-  // perform unification, starting on the right, on (longer_size - size_difference)
-  // number of elements.
-  for (int64_t idx = longer_size - 1; idx >= size_difference; --idx) {
-    names_[idx] = longer[idx].unify(shorter[idx - size_difference], op_name);
-  }
-
-  // Copy over the remaining elements.
-  if (!this_is_longer) {
-    for (int64_t idx = 0; idx < size_difference; ++idx) {
-      names_[idx] = longer[idx];
+  if (this_is_longer) {
+    for (int64_t idx = size_difference; idx < longer_size; ++idx) {
+      names_[idx] = names_[idx].unify(other.names_[idx - size_difference], op_name);
+    }
+  } else {
+    // pad names_ to the same length as other.names_ before unification
+    names_.insert(
+        names_.begin(),
+        other.names_.begin(),
+        other.names_.begin() + size_difference);
+    for (int64_t idx = size_difference; idx < longer_size; ++idx) {
+      names_[idx] = names_[idx].unify(other.names_[idx], op_name);
     }
   }
 

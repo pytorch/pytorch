@@ -29,14 +29,10 @@ namespace at { namespace namedinference {
 // to A, `tensor` would have duplicate names [A, A]. Therefore we need to check
 // tensor.names [A, None] for the existence of A.
 struct CAFFE2_API TensorName {
-  TensorName()
-    : name_(Dimname::wildcard()),
-      initialized_(false) {};
   explicit TensorName(ArrayRef<Dimname> origin, int origin_idx)
     : origin_(origin),
       name_(origin[maybe_wrap_dim(origin_idx, origin.size())]),
-      origin_idx_(origin_idx),
-      initialized_(true) {}
+      origin_idx_(origin_idx) {}
 
   // op_name is only used for error reporting.
   const TensorName& unify(const TensorName& other, const char* op_name) const;
@@ -46,7 +42,6 @@ struct CAFFE2_API TensorName {
   ArrayRef<Dimname> origin_;
   Dimname name_;
   uint8_t origin_idx_; // A named tensor can have at most 64 dims.
-  bool initialized_;
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,

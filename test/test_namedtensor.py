@@ -1062,6 +1062,14 @@ class TestNamedTensor(TestCase):
             for out in output:
                 self.assertEqual(out.names, expected_names)
 
+        def sum_all_outputs(output):
+            if isinstance(output, torch.Tensor):
+                return output.sum()
+            result = 0
+            for out in output:
+                result = out + result
+            return result.sum()
+
         def test_simple_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             check_output(op(t, 1), ['N', 'L'])
@@ -1071,6 +1079,11 @@ class TestNamedTensor(TestCase):
                 op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
                 op(t, 'H')
+
+        def test_autograd_supports_dimname_overload(op, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device, requires_grad=True)
+            sum_all_outputs(op(t, 'C')).backward()
+            self.assertIsNotNone(t.grad)
 
         def test_complete_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
@@ -1135,6 +1148,7 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op = testcase.op
             test_simple_reduce(op, device)
+            test_autograd_supports_dimname_overload(op, device)
 
             if testcase.supports_keepdim:
                 test_keepdim(op, device)
