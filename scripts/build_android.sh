@@ -106,6 +106,10 @@ CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=$ANDROID_NATIVE_API_LEVEL")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
 
+if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
+  CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
+fi
+
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
