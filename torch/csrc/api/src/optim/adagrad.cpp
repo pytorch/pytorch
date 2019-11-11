@@ -76,18 +76,17 @@ void Adagrad::step() {
       }
       auto grad = p.grad().data();
       // TODO: check that both pointers are not null
-      auto state = std::static_pointer_cast<AdagradParamState>(state_[p.unsafeGetTensorImpl()]);
-      auto options = std::static_pointer_cast<AdagradOptions>(group.options());
+      AdagradParamState* state = static_cast<AdagradParamState*>(state_[p.unsafeGetTensorImpl()].get());
+      AdagradOptions* options = static_cast<AdagradOptions*>(group.options());
 
-
-      state->step_++;
+      state->step(state->step() + 1);
 
       if(options->weight_decay() != 0) {
         TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
         grad = grad.add(p.data(), options->weight_decay());
       }
       const auto clr = options->learning_rate() /
-          (1 + (state->step_ - 1) * options->lr_decay());
+          (1 + (state->step() - 1) * options->lr_decay());
 
       if(grad.is_sparse()) {
         grad = grad.coalesce();
@@ -101,15 +100,15 @@ void Adagrad::step() {
           }
           return torch::sparse_coo_tensor(grad_indices, values, size, grad.options());
         };
-        state->sum_.add_(make_sparse(grad_values.pow(2)));
-        auto std = state->sum_.sparse_mask(grad);
+        state->sum(state->sum().add_(make_sparse(grad_values.pow(2))));
+        auto std = state->sum().sparse_mask(grad);
         const auto std_values = std._values().sqrt_().add_(options->eps());
 
         p.data().add_(make_sparse(grad_values / std_values), -clr);
       }
       else {
-        state->sum_.addcmul_(grad, grad, 1.0);
-        const auto std = state->sum_.sqrt().add_(options->eps());
+        state->sum(state->sum().addcmul_(grad, grad, 1.0));
+        const auto std = state->sum().sqrt().add_(options->eps());
         p.data().addcdiv_(grad, std, -clr);
       }
     }
@@ -117,7 +116,7 @@ void Adagrad::step() {
 }
 
 void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.push_back(detail::OptimizerParamGroup(parameters, defaults_));
+  param_groups_.push_back(std::move(detail::OptimizerParamGroup(parameters, defaults_->clone())));
 }
 
 const std::vector<Tensor>& Adagrad::parameters() const noexcept {
