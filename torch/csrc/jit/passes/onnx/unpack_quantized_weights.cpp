@@ -82,19 +82,60 @@ void unpackQuantizedWeightsHelper(
         std::tuple<at::Tensor, c10::optional<at::Tensor>>,
         at::Tensor>(*op, key, packed_weight);
     at::Tensor unpacked_weight = std::get<0>(result);
+    if (unpacked_weight.ndimension() == 2) {
+      std::cout << "2 dim weight ... permuting \n";
+      unpacked_weight.permute({1, 0});
+    }
+    else if (unpacked_weight.ndimension() == 4) {
+      std::cout << "4 dim weight ... permuting \n";
+      unpacked_weight.permute({0, 2, 3, 1});
+    }
+    // Convert from int8 to uint8
+    int8_t* inp_data = (int8_t*)unpacked_weight.data_ptr<c10::qint8>();
+    auto weight_zp = unpacked_weight.q_zero_point() + 128;
+    at::Tensor caffe2_weight = at::_empty_affine_quantized(
+        unpacked_weight.sizes(),
+        at::device(at::kCPU).dtype(at::kQUInt8),
+        unpacked_weight.q_scale(),
+        weight_zp);
+    auto* caffe2_w_data = caffe2_weight.data_ptr<c10::quint8>();
+    auto wt_numel = unpacked_weight.numel();
+    for (int i = 0; i < wt_numel; ++i) {
+      caffe2_w_data[i] = static_cast<c10::quint8>(inp_data[i] + 128);
+    }
+
     // Remove packed_params
     qlinear_node->removeInput(1);
 
     // Update the input
     graph->setInsertPoint(qlinear_node);
-    auto val = graph->insertConstant(unpacked_weight);
+    auto val = graph->insertConstant(caffe2_weight);
     qlinear_node->insertInput(1, val);
 
     // Add bias
     if (std::get<1>(result).has_value()) {
       at::Tensor original_bias = std::get<1>(result).value();
       original_bias.set_requires_grad(false);
-      auto val = graph->insertConstant(original_bias);
+      auto weight_scale = unpacked_weight.q_scale();
+
+      auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
+      TORCH_INTERNAL_ASSERT(input_val->type()->isSubtypeOf(TensorType::get()));
+
+      /*
+      std::string input_name =
+          match_vmap.at(vmap.at("r"))->node()->inputs()[0]->debugName();
+      std::cout << "input name " << input_name << std::endl;
+      auto itr = paramsDict.find(input_name);
+      if (itr == paramsDict.end()) {
+        throw std::runtime_error(
+            "getValues: Quantized input value not found amongst constant parameters.");
+      }
+      */
+
+      auto input_scale = 1.0;
+      auto q_bias = at::quantize_per_tensor(
+          original_bias, weight_scale * input_scale, 0, at::kQUInt8);
+      auto val = graph->insertConstant(q_bias);
       qlinear_node->insertInput(2, val);
     }
     auto b = graph->block();
