@@ -414,7 +414,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             auto& futuresAtTime = futureTimeouts_[futureStartTime];
             futuresAtTime.erase(
                 std::find(futuresAtTime.begin(), futuresAtTime.end(), id));
-            if (futuresAtTime.size() == 0) {
+            if (futuresAtTime.empty()) {
               // remove the key from futureTimeouts_
               futureTimeouts_.erase(futureStartTime);
             }

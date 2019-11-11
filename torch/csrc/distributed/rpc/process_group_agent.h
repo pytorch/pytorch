@@ -108,7 +108,8 @@ class ProcessGroupAgent : public RpcAgent {
     return ++nextId_;
   }
 
-  // atomic bool indicating if join() has been called and background threads should shutdown.
+  // atomic bool indicating if join() has been called and background threads
+  // should shutdown.
   std::atomic_bool shutdown_;
 
   std::shared_ptr<c10d::ProcessGroup> pg_;
