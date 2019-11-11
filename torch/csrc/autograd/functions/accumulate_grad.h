@@ -4,6 +4,8 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <mutex>
+
 namespace torch { namespace autograd {
 
 struct TORCH_API AccumulateGrad : public Node {
@@ -12,6 +14,8 @@ struct TORCH_API AccumulateGrad : public Node {
   variable_list apply(variable_list&& grads) override;
 
   Variable variable;
+ private:
+  std::mutex grad_mutex;
 };
 
 }} // namespace torch::autograd

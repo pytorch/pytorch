@@ -34,6 +34,9 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
 
   auto new_grad = std::move(grads[0]);
+
+  std::lock_guard<std::mutex> lock(grad_mutex);
+
   for (auto& hook : variable.hooks()) {
     new_grad = (*hook)({new_grad})[0];
   }

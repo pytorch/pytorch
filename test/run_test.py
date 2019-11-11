@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import argparse
 from datetime import datetime
+import multiprocessing
 import os
 import shutil
 import signal
@@ -228,10 +229,29 @@ def test_distributed(executable, test_module, test_directory, options):
     return 0
 
 
+def test_autograd(executable, test_module, test_directory, options):
+    cpu_count = multiprocessing.cpu_count()
+    device_count = torch.cuda.device_count() + 1
+    pre_nthreads = os.environ.get('AUTOGRAD_NUM_THREADS_PER_DEVICE')
+    try:
+        for nthreads in [1, min(2, max(1, cpu_count / device_count))]:
+            os.environ['AUTOGRAD_NUM_THREADS_PER_DEVICE'] = str(nthreads)
+            print_to_stderr('Running autograd tests with {} thread(s)'.format(
+                nthreads))
+            ret = run_test(executable, test_module, test_directory, options)
+            if ret != 0:
+                return ret
+    finally:
+        if pre_nthreads is not None:
+            os.environ['AUTOGRAD_NUM_THREADS_PER_DEVICE'] = pre_nthreads
+    return 0
+
+
 CUSTOM_HANDLERS = {
     'cuda_primary_ctx': test_cuda_primary_ctx,
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
+    'autograd': test_autograd,
 }
 
 

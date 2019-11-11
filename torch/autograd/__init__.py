@@ -179,5 +179,13 @@ def variable(*args, **kwargs):
     warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
     return torch.tensor(*args, **kwargs)
 
+# [Experimental] Configure number of threads on each device to
+# concurrently run autograd backward
+def get_num_threads_per_device():
+    return Variable._execution_engine.get_num_threads_per_device()
+
+def set_num_threads_per_device(nthreads):
+    return Variable._execution_engine.set_num_threads_per_device(nthreads)
+
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")

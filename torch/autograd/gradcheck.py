@@ -130,7 +130,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     return jacobian
 
 
-def get_analytical_jacobian(input, output, nondet_tol=0.0):
+def get_analytical_jacobian(input, output, nondet_tol=1e-13, nondet_rtol=1e-13):
     # it is easier to call to_dense() on the sparse output than
     # to modify analytical jacobian
     if output.is_sparse:
@@ -165,7 +165,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
                         jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
-        if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() > nondet_tol:
+        if not torch.allclose(jacobian_x, jacobian_reentrant_x, nondet_rtol, nondet_tol):
             reentrant = False
 
     return jacobian, reentrant, correct_grad_sizes
@@ -184,7 +184,8 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
-def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True, check_sparse_nnz=False, nondet_tol=0.0):
+def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True,
+              check_sparse_nnz=False, nondet_tol=1e-13, nondet_rtol=1e-13):
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
     and with ``requires_grad=True``.
@@ -215,7 +216,10 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             exact nature of the failure. This is helpful when debugging gradchecks.
         check_sparse_nnz (bool, optional): if True, gradcheck allows for SparseTensor input,
             and for any SparseTensor at input, gradcheck will perform check at nnz positions only.
-        nondet_tol (float, optional): tolerance for non-determinism. When running
+        nondet_tol (float, optional): absolute tolerance for non-determinism. When running
+            identical inputs through the differentiation, the results must either match
+            exactly (default, 0.0) or be within this tolerance.
+        nondet_rtol (float, optional): relative tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
 
@@ -276,7 +280,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         def fn(input):
             return _as_tuple(func(*input))[i]
 
-        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
+        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o,
+                                                                            nondet_tol=nondet_tol, nondet_rtol=nondet_rtol)
         numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
         if not correct_grad_sizes:
@@ -292,7 +297,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             return fail_test('Backward is not reentrant, i.e., running backward with same '
                              'input and grad_output multiple times gives different values, '
                              'although analytical gradient matches numerical gradient. '
-                             'The tolerance for nondeterminism was {}.'.format(nondet_tol))
+                             'The tolerance for nondeterminism was absolute: {}, relative: {}.'.format(nondet_tol, nondet_rtol))
 
     # check if the backward multiplies by grad_output
     output = _differentiable_outputs(func(*tupled_inputs))
@@ -327,7 +332,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
 def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
                   gen_non_contig_grad_outputs=False, raise_exception=True,
-                  nondet_tol=0.0):
+                  nondet_tol=1e-13, nondet_rtol=1e-13):
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point type and with
@@ -366,11 +371,14 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
-        nondet_tol (float, optional): tolerance for non-determinism. When running
+        nondet_tol (float, optional): absolute tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance. Note that a small amount
             of nondeterminism in the gradient will lead to larger inaccuracies in
             the second derivative.
+        nondet_rtol (float, optional): relative tolerance for non-determinism. When running
+            identical inputs through the differentiation, the results must either match
+            exactly (default, 0.0) or be within this tolerance.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -401,4 +409,4 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol)
+                     nondet_tol=nondet_tol, nondet_rtol=nondet_rtol)

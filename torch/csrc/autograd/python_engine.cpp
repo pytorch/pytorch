@@ -240,6 +240,22 @@ PyObject* THPEngine_is_checkpoint_valid(PyObject *self, PyObject *noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THPEngine_get_num_threads_per_device (PyObject *self)
+{
+  return PyLong_FromLong(engine.get_num_threads_per_device());
+}
+
+
+ PyObject * THPEngine_set_num_threads_per_device (PyObject *self, PyObject *arg)
+{
+  THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads_per_device expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  int nthreads = (int)THPUtils_unpackLong(arg);
+  THPUtils_assert(nthreads > 0, "set_num_threads_per_device expects a positive integer");
+  engine.set_num_threads_per_device(nthreads);
+  Py_RETURN_NONE;
+}
+
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   return type->tp_alloc(type, 0);
@@ -249,6 +265,8 @@ static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)(void(*)(void))THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
   {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
+  {(char*)"get_num_threads_per_device", (PyCFunction)THPEngine_get_num_threads_per_device, METH_NOARGS, nullptr},
+  {(char*)"set_num_threads_per_device", (PyCFunction)THPEngine_set_num_threads_per_device, METH_O, nullptr},
   {nullptr}
 };
 
