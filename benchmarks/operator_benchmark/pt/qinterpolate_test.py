@@ -12,7 +12,6 @@ Note: We are not benchmarking `upsample` as it is being depricated, and calls
 the `interpolate` anyway.
 '''
 
-# Configs for PT add operator
 qinterpolate_long_configs = op_bench.config_list(
     attr_names=['M', 'N', 'K'],
     attrs=[
