@@ -2,7 +2,7 @@
 
 namespace at { namespace native {
 
-std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(Tensor& output, Tenosr& save_mean, Tensor& save_invstd, const Tensor& self, const Tensor& weight, const Tensor& bias,
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(Tensor& output, Tensor& save_mean, Tensor& save_invstd, const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                    Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_cuda", [&] {
       auto mean_st = running_mean.dtype();
