@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
-import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-#from torch.distributed.optim import DistributedOptimizer
-#from torch.distributed.rpc import RRef
+# from torch.distributed.optim import DistributedOptimizer
+# from torch.distributed.rpc import RRef
 
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
 
@@ -76,13 +75,11 @@ class RNNModel(nn.Module):
         super(RNNModel, self).__init__()
 
         self.encoder_rref = rpc.remote(ps, Encoder, args=(ntoken, ninp, dropout))
-        #self.rnn_rref = rpc.remote(ps, RNN, args=(ninp, nhid, nlayers, dropout))
         self.rnn = nn.LSTM(ninp, nhid, nlayers, dropout=dropout)
         self.decoder_rref = rpc.remote(ps, Decoder, args=(ntoken, nhid, dropout))
 
     def forward(self, input, hidden):
         emb = _remote_method(Encoder.forward, self.encoder_rref, input)
-        #output, hidden = _remote_method(RNN.forward, self.rnn_rref, emb, hidden)
         output, hidden = self.rnn(emb, hidden)
         decoded = _remote_method(Decoder.forward, self.decoder_rref, output)
         return decoded, hidden
@@ -126,11 +123,11 @@ class DistModelParallelTest(object):
 
         rnn = RNNModel(ps, ntoken, ninp, nhid, nlayers)
         # Depends on #29304 and #28948
-        #opt = DistributedOptimizer(
+        # opt = DistributedOptimizer(
         #    optim.SGD,
         #    rnn.remote_parameters(),
         #    lr=0.05,
-        #)
+        # )
         for _ in range(2):
             with dist_autograd.context() as ctx_id:
                 inp = torch.LongTensor(batch, nindices) % ntoken
@@ -138,4 +135,4 @@ class DistModelParallelTest(object):
                 hidden[1].detach_()
                 output, hidden = rnn(inp, hidden)
                 dist_autograd.backward([output.sum()])
-                #opt.step()
+                # opt.step()
