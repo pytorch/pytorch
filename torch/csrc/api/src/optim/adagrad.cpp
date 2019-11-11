@@ -26,18 +26,6 @@ AdagradOptions convert_ivalue_to_options(at::IValue ivalue) {
     return options;
 }
 
-at::IValue convert_options_to_ivalue(AdagradOptions options) {
-    c10::impl::GenericDict dict(c10::StringType::get(), c10::AnyType::get());
-    dict.insert("learning_rate", options.learning_rate());
-    dict.insert("lr_decay", options.lr_decay());
-    dict.insert("weight_decay", options.weight_decay());
-    dict.insert("initial_accumulator_value", options.initial_accumulator_value());
-    dict.insert("eps", options.eps());
-
-    at::IValue ivalue = dict;
-    return ivalue;
-}
-
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
@@ -85,7 +73,7 @@ void Adagrad::step() {
         p.data().addcdiv_(grad, std, -clr);
       }
     }
-    group.insert_or_assign("options", convert_options_to_ivalue(options));
+    group.insert_or_assign("options", options.convert_options_to_ivalue());
   }
 }
 
