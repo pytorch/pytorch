@@ -32,38 +32,27 @@ class TORCH_API Adagrad : public Optimizer {
   template <typename ParameterContainer>
   explicit Adagrad(
       ParameterContainer&& parameters,
-      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters)), options(options_) {
-    TORCH_CHECK(options.learning_rate() >= 0, "Invalid learning rate: ", options.learning_rate());
-    TORCH_CHECK(options.lr_decay() >= 0, "Invalid lr_decay value: ", options.lr_decay());
-    TORCH_CHECK(options.weight_decay() >= 0, "Invalid weight_decay value: ", options.weight_decay());
-    TORCH_CHECK(options.initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", options.initial_accumulator_value());
-    TORCH_CHECK(options.eps() >= 0, "Invalid epsilon value: ", options.eps());
+      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters), options_), defaultOptions(options_) {
+    TORCH_CHECK(defaultOptions.learning_rate() >= 0, "Invalid learning rate: ", defaultOptions.learning_rate());
+    TORCH_CHECK(defaultOptions.lr_decay() >= 0, "Invalid lr_decay value: ", defaultOptions.lr_decay());
+    TORCH_CHECK(defaultOptions.weight_decay() >= 0, "Invalid weight_decay value: ", defaultOptions.weight_decay());
+    TORCH_CHECK(defaultOptions.initial_accumulator_value() >= 0, "Invalid initial_accumulator_value value: ", defaultOptions.initial_accumulator_value());
+    TORCH_CHECK(defaultOptions.eps() >= 0, "Invalid epsilon value: ", defaultOptions.eps());
   }
 
-  //cross check
-  template <typename ParameterContainer>
-  explicit Adagrad(
-      ParameterContainer parameters,
-      const AdagradOptions& options_) : Optimizer(std::forward<ParameterContainer>(parameters), options_), options(options_) {
-
-  }
   void step() override;
 
-  AdagradOptions options;
+  AdagradOptions defaultOptions;
 
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
-  std::vector<Tensor> sum_buffers;
-  std::vector<int64_t> step_buffers;
-
  private:
-  Adagrad() : options(0) {}
+  Adagrad() : defaultOptions(0) {}
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    _TORCH_OPTIM_SERIALIZE(sum_buffers);
-    _TORCH_OPTIM_SERIALIZE(step_buffers);
+    //_TORCH_OPTIM_SERIALIZE(state); add a serialize function
   }
 };
 } // namespace optim
