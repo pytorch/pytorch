@@ -10,6 +10,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.distributed.rpc import RRef
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
@@ -86,6 +87,14 @@ class MyClass:
 
 def _call_method_on_rref(method, rref, *args, **kwargs):
     return method(rref.local_value(), *args, **kwargs)
+
+
+def get_rref_list(values):
+    return [RRef(MyClass(a)) for a in values]
+
+
+def add_rref_to_value(rref, value):
+    return rref.to_here() + value
 
 
 def run_nested_pickle(pickle_cls_instance, tensor):
@@ -223,16 +232,10 @@ class RpcTest(object):
     def test_self_add(self):
         self_worker_info = rpc.get_worker_info()
         self_worker_name = "worker{}".format(self.rank)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "does not support making RPC calls to self"
-        ):
-            rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
-
-        with self.assertRaisesRegex(
-            RuntimeError, "does not support making RPC calls to self"
-        ):
-            rpc.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
+        fut = rpc.rpc_async(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
+        ret = rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
@@ -265,10 +268,13 @@ class RpcTest(object):
     @dist_init(setup_model_parallel=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
-            rpc.init_model_parallel(
-                self_name="duplicate_name",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="duplicate_name",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
             )
@@ -310,10 +316,13 @@ class RpcTest(object):
     @dist_init(setup_model_parallel=False)
     def test_invalid_names(self):
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(
-                self_name="abc*",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="abc*",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
@@ -322,11 +331,15 @@ class RpcTest(object):
         base_file_name = self.file_name
         # Use a different file path for FileStore to avoid rendezvous mismatch.
         self.file_name = base_file_name + "1"
+
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(
-                self_name=" ",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name=" ",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
@@ -335,10 +348,13 @@ class RpcTest(object):
         # Use a different file path for FileStore to avoid rendezvous mismatch.
         self.file_name = base_file_name + "2"
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            rpc.init_model_parallel(
-                self_name="",
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="",
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
@@ -349,10 +365,13 @@ class RpcTest(object):
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            rpc.init_model_parallel(
-                self_name="".join(["a" for _ in range(500)]),
+            store, _, _ = next(torch.distributed.rendezvous(
+                self.init_method, rank=self.rank, world_size=self.world_size
+            ))
+            rpc._init_rpc(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
+                store=store,
+                self_name="".join(["a" for i in range(500)]),
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
@@ -495,7 +514,6 @@ class RpcTest(object):
         value = VALUE_FUTURE.result()
         self.assertEqual(value, expected_src_rank)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28932")
     @dist_init
     def test_py_built_in(self):
         n = self.rank + 1
@@ -638,6 +656,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29381")
     @dist_init
     def test_nested_rpc(self):
         n = self.rank + 1
@@ -669,7 +688,6 @@ class RpcTest(object):
             )
         )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29150")
     @dist_init
     def test_stress_light_rpc(self):
         self._stress_test_rpc(light_rpc)
@@ -761,7 +779,6 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), my_function(n, n + 1, n + 2))
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29156")
     @dist_init
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
@@ -784,7 +801,6 @@ class RpcTest(object):
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29212")
     @dist_init
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
@@ -818,6 +834,7 @@ class RpcTest(object):
 
         self.assertEqual(c, torch.ones(n, n) + 4)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_remote(self):
         n = self.rank + 1
@@ -831,6 +848,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_rref(self):
         n = self.rank + 1
@@ -918,6 +936,50 @@ class RpcTest(object):
 
         ret = ret_rref
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
+
+    @dist_init
+    def test_local_rref_no_fork(self):
+        local_rref = RRef(35)
+        self.assertEqual(local_rref.local_value(), 35)
+
+    @dist_init
+    def test_return_local_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        rref_list = rpc.rpc_sync(
+            "worker{}".format(dst_rank), get_rref_list, args=(
+                [1, 2, 3], ))
+
+        for rref in rref_list:
+            rpc.rpc_sync(rref.owner(), _call_method_on_rref, args=(
+                MyClass.increment_value, rref, 10))
+
+        rets = [
+            rpc.rpc_sync(rref.owner(), _call_method_on_rref, args=(
+                MyClass.get_value, rref))
+            for rref in rref_list]
+
+        self.assertEqual(rets, [11, 12, 13])
+
+    @dist_init
+    def test_pass_local_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+
+        rref = RRef(40)
+        self.assertEqual(
+            rpc.rpc_sync(
+                dst_worker, add_rref_to_value, args=(rref, 50)), 90)
+        self.assertEqual(
+            rpc.rpc_async(
+                dst_worker, add_rref_to_value, args=(rref, 50)).wait(), 90)
+        self.assertEqual(
+            rpc.remote(
+                dst_worker,
+                add_rref_to_value,
+                args=(rref, 50)).to_here(), 90)
 
     @dist_init
     def test_remote_same_worker(self):
