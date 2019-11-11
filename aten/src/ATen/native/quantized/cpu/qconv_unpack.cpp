@@ -142,6 +142,10 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 
 static auto registry =
     c10::RegisterOperators()
+        .op("quantized::conv_unpack(Tensor packed_weights)"
+            " -> (Tensor unpacked_weights, Tensor? B_origin)",
+            c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
+                TensorTypeId::CPUTensorId))
         .op("quantized::conv2d_unpack(Tensor packed_weights)"
             " -> (Tensor unpacked_weights, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
