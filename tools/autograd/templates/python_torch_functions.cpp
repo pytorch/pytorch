@@ -538,7 +538,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
   py::object ret;
   for (auto &arg : r.overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
-    ret = py::reinterpret_borrow<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
     if (ret.ptr() == Py_NotImplemented) {
       // if ret returns NotImplemented, we check the next implementation in the
       // precedence order, resetting ret to the null object so we don't leak
@@ -575,7 +575,10 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
   }
-  return ret.ptr();
+  // We return a raw PyObject* so we need to explicitly incref, otherwise
+  // deallocating the py::object at the end of this scope may cause the
+  // reference count to drop to zero
+  return ret.inc_ref().ptr();
 }
 
 // generated methods start here
