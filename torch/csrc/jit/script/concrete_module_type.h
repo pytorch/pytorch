@@ -225,7 +225,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   // If true, this type will never compare equally to anything else. This is
   // used if we want to ensure that this type is not shared (for example, if it
   // came from a traced module)
-  bool isPoisoned_;
+  bool isPoisoned_ = false;
 
   // The value of any constants defined by the module.
   std::unordered_map<std::string, Constant> constants_;
