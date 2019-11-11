@@ -236,7 +236,7 @@ namespace detail {
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    torch::Reduction::Reduction reduction) {
+    SmoothL1LossFuncOptions::reduction_t reduction) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN("Using a target size (", target.sizes(), ") that is different to the input size (", input.sizes(), "). ",
                   "This will likely lead to incorrect results due to broadcasting. ",
@@ -247,12 +247,12 @@ inline Tensor smooth_l1_loss(
 
   if (target.requires_grad()) {
     ret = _smooth_l1_loss(input, target);
-    if (reduction != torch::Reduction::None) {
-      ret = reduction == torch::Reduction::Mean ? torch::mean(ret) : torch::sum(ret);
+    if (!c10::get_if<enumtype::kNone>(&reduction)) {
+      ret = c10::get_if<enumtype::kMean>(&reduction) ? torch::mean(ret) : torch::sum(ret);
     }
   } else {
     std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
-    ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], reduction);
+    ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction));
   }
   return ret;
 }

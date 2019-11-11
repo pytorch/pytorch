@@ -1458,7 +1458,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, SmoothL1LossNoReduction) {
-  SmoothL1Loss loss(/*reduction=*/torch::Reduction::None);
+  SmoothL1Loss loss(/*reduction=*/torch::kNone);
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
