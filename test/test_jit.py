@@ -2179,7 +2179,7 @@ graph(%Ra, %Rb):
             m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
 
-    def test_dropout_requires_grad(self):
+    def test_dropout_module_requires_grad(self):
         class MyModule(torch.nn.Module):
             def __init__(self, M):
                 super(MyModule, self).__init__()
@@ -2192,20 +2192,56 @@ graph(%Ra, %Rb):
                 output = self.linear(input)
                 return output
 
-        def func(input):
-            return F.dropout(input, 0.5, training=True)
+        def profile(func, X):
+            with torch.autograd.profiler.profile() as prof:
+                func(X)
+            return [e.name for e in prof.function_events]
 
         M = 1000
-        scripted_module = torch.jit.script(MyModule(M))
-        scripted_func = torch.jit.script(func)
+        scripted = torch.jit.script(MyModule(M))
+        # To reduce confusion about expected behaviors:
+        #   requires_grad controls whether dropout is symbolically differentiated.
+        #   training controls whether bernoulli_ is called inside symbolic differentiation of dropout.
+        # When requires_grad=True and training=False, bernoulli_ might still show up in the graph.
+        # But it's in a branch that's not called. That's why we have separate checks for autograd
+        # profiler to make sure it's not run.
+        for training in (True, False):
+            if training:
+                scripted.train()
+            else:
+                scripted.eval()
+            for requires_grad in (True, False):
+                X = torch.randn(M, M, requires_grad=requires_grad)
+                if requires_grad:
+                    FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X))
+                else:
+                    FileCheck().check_not("aten::bernoulli_").run(scripted.graph_for(X))
+                self.assertEqual(training, 'bernoulli_' in profile(scripted, X))
 
-        X = torch.randn(M, M, requires_grad=True)
-        FileCheck().check("aten::bernoulli_").run(scripted_module.graph_for(X))
-        FileCheck().check("aten::bernoulli_").run(scripted_func.graph_for(X))
+    def test_dropout_func_requires_grad(self):
+        def dropout_training(input):
+            return F.dropout(input, 0.5, training=True)
 
-        X = torch.randn(M, M, requires_grad=False)
-        FileCheck().check_not("aten::bernoulli_").run(scripted_module.graph_for(X))
-        FileCheck().check_not("aten::bernoulli_").run(scripted_func.graph_for(X))
+        def dropout_eval(input):
+            return F.dropout(input, 0.5, training=False)
+
+        def profile(func, X):
+            with torch.autograd.profiler.profile() as prof:
+                func(X)
+            return [e.name for e in prof.function_events]
+
+        M = 1000
+        scripted_training = torch.jit.script(dropout_training)
+        scripted_eval = torch.jit.script(dropout_eval)
+        # See comments in test_dropout_module_requires_grad.
+        for requires_grad in (True, False):
+            X = torch.randn(M, M, requires_grad=requires_grad)
+            if requires_grad:
+                FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X))
+            else:
+                FileCheck().check_not("aten::bernoulli_").run(scripted_training.graph_for(X))
+            self.assertIn('bernoulli_', profile(scripted_training, X))
+            self.assertNotIn('bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):

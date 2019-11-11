@@ -1178,7 +1178,7 @@ const std::vector<std::string> functions = {
             else:
                 p1m = 1.
                 res = input
-                mask = torch.ones_like(input)
+                mask = torch.empty_like(input)
 
             def backward(grad_output):
                 use_cuda = grad_output.is_cuda
