@@ -67,7 +67,10 @@ at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
 // Cast Tensor arg if appropriate.
 Tensor caching_caster(at::ScalarType to_type, const Tensor & arg) {
   if (arg.is_floating_point() && arg.scalar_type() != to_type) {
-    bool can_try_cache = (arg.is_leaf() && arg.scalar_type() == at::kFloat && to_type == at::kHalf);
+    bool can_try_cache = (arg.scalar_type() == at::kFloat && to_type == at::kHalf);
+    if (arg.is_variable()) {
+      can_try_cache = (can_try_cache || arg.is_leaf());
+    }
     if (can_try_cache) {
       auto it = cached_leaf_casts.find(arg.unsafeGetTensorImpl()); // Use the owned TensorImpl* as a Tensor's uuid.
       if (it != cached_leaf_casts.end()) {
@@ -98,12 +101,6 @@ T caching_caster(at::ScalarType to_type, T arg) {
 // https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer
 template <CastPolicy policy, typename F, F* func> struct Patch {};
 
-template <typename Ret, typename F, typename... Args>
-Ret call_guarded(F call, Args... args) {
-  c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-  return call(args...);
-}
-
 template <CastPolicy policy, typename Ret, typename... Args, auto (*F)(Args...) -> Ret>
 struct Patch<policy, Ret (Args...), F> {
   static Ret call(Args... args) {
@@ -121,7 +118,8 @@ struct Patch<policy, Ret (Args...), F> {
       default:
         AT_ERROR("Unexpected CastPolicy in autograd::Patch");
     }
-    return call_guarded<Ret>(F, caching_caster(to_type, args)...);
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    return F(caching_caster(to_type, args)...);
   }
 };
 
@@ -138,47 +136,74 @@ namespace {
 // actually the right answer.  I can include checks for all outputs that their grad_fns saved inputs
 // in the expected/desired types.
 
+#define PATCH(FUNC, POLICY) &Patch<CastPolicy::POLICY, decltype( FUNC ), FUNC>::call
+// example:
+// PATCH(at::cudnn_convolution, fp16)
+// becomes
+// &Patch<CastPolicy::fp16, decltype( at::cudnn_convolution ), at::cudnn_convolution>::call
+// I guess I could have used a complex set of macros instead of templates above.
+
 auto registerer = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), &Patch<CastPolicy::fp16, decltype(at::cudnn_convolution), at::cudnn_convolution>::call>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool),
+                            PATCH(at::cudnn_convolution, fp16)>
+                           (TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
+    .impl_unboxedOnlyKernel<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, std::array<bool,3>),
+                            PATCH(at::cudnn_convolution_backward, fp16)>
+                           (TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_backward_bias(Tensor grad_output) -> Tensor")
+    .kernel<Tensor (const Tensor &)>
+           (TensorTypeId::AutocastTensorId,
+            PATCH(at::cudnn_convolution_backward_bias, fp16))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool),
+                            PATCH(at::cudnn_convolution_backward_input,fp16)>
+                           (TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool),
+                            PATCH(at::cudnn_convolution_backward_weight, fp16)>
+                           (TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool),
+                            PATCH(at::cudnn_convolution_transpose, fp16)>
+                           (TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
+    .impl_unboxedOnlyKernel<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, std::array<bool,3>),
+                            PATCH(at::cudnn_convolution_transpose_backward, fp16)>
+                           (TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_transpose_backward_bias(Tensor grad_output) -> Tensor")
+    .kernel<Tensor (const Tensor &)>
+           (TensorTypeId::AutocastTensorId,
+            PATCH(at::cudnn_convolution_transpose_backward_bias, fp16))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool),
+                            PATCH(at::cudnn_convolution_transpose_backward_input, fp16)>
+                           (TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cudnn_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool),
+                            PATCH(at::cudnn_convolution_transpose_backward_weight, fp16)>
+                           (TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
-  //   .impl_unboxedOnlyKernel<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, std::array<bool,3>), &VariableType::cudnn_convolution_backward>(TensorTypeId::AutocastTensorId)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_backward_bias(Tensor grad_output) -> Tensor")
-  //   .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, &VariableType::cudnn_convolution_backward_bias)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-  //   .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), &VariableType::cudnn_convolution_backward_input>(TensorTypeId::AutocastTensorId)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-  //   .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), &VariableType::cudnn_convolution_backward_weight>(TensorTypeId::AutocastTensorId)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-  //   .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), &VariableType::cudnn_convolution_transpose>(TensorTypeId::AutocastTensorId)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
-  //   .impl_unboxedOnlyKernel<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool, std::array<bool,3>), &VariableType::cudnn_convolution_transpose_backward>(TensorTypeId::AutocastTensorId)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_transpose_backward_bias(Tensor grad_output) -> Tensor")
-  //   .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, &VariableType::cudnn_convolution_transpose_backward_bias)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-  //   .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), &VariableType::cudnn_convolution_transpose_backward_input>(TensorTypeId::AutocastTensorId)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  // .op(torch::RegisterOperators::options()
-  //   .schema("aten::cudnn_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-  //   .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), &VariableType::cudnn_convolution_transpose_backward_weight>(TensorTypeId::AutocastTensorId)
-  //   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 }
 #endif
 
