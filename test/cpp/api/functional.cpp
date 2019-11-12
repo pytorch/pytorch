@@ -985,7 +985,7 @@ TEST_F(FunctionalTest, EmbeddingBag) {
   auto offsets = torch::tensor({0,4}, torch::kLong);
   auto weight = torch::empty({10, 3});
   torch::nn::init::normal_(weight);
-  auto y = F::embedding_bag(input, weight, EmbeddingBagOptions().mode(torch::kSum), offsets);
+  auto y = F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets));
   auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor()));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 
