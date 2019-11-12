@@ -1210,6 +1210,14 @@ def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
+def scalar_tensor(g, scalar, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    scalar = g.op("Cast", scalar, to_i=sym_help.scalar_type_to_onnx[dtype])
+    return scalar
+
+
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
