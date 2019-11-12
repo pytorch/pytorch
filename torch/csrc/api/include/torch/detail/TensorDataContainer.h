@@ -24,7 +24,7 @@ inline std::ostream& operator<<(std::ostream& stream, c10::BFloat16 value) {
 }
 
 inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
-  // NOTE: the dtype computation in this fucntion only takes effect when the user passes
+  // NOTE: the dtype computation in this function only takes effect when the user passes
   // an integer literal / floating-point literal or a braced-init-list to `torch::tensor`
   // constructor. It doesn't affect `torch::tensor(at::ArrayRef<T>)` and `torch::tensor(std::vector<T>)`
   // as the specified dtype `T` is always respected.
