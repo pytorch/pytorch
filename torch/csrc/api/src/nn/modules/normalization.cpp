@@ -39,7 +39,7 @@ void LayerNormImpl::pretty_print(std::ostream& stream) const {
 }
 
 torch::Tensor LayerNormImpl::forward(const Tensor& input) {
-  return F::layer_norm(input, options, weight, bias);
+  return F::detail::layer_norm(input, options.normalized_shape(), weight, bias, options.eps());
 }
 
 // ============================================================================
@@ -48,7 +48,7 @@ LocalResponseNormImpl::LocalResponseNormImpl(const LocalResponseNormOptions& opt
     : options(options_) {}
 
 Tensor LocalResponseNormImpl::forward(const Tensor& input) {
-  return F::local_response_norm(input, options);
+  return F::detail::local_response_norm(input, options.size(), options.alpha(), options.beta(), options.k());
 }
 
 void LocalResponseNormImpl::reset() {}
@@ -61,5 +61,21 @@ void LocalResponseNormImpl::pretty_print(std::ostream& stream) const {
          << ", k=" << options.k()
          << ")";
 }
+
+void CrossMapLRN2dImpl::reset() {}
+
+void CrossMapLRN2dImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::CrossMapLRN2d(" << options.size()
+         << ", alpha=" << options.alpha()
+         << ", beta=" << options.beta()
+         << ", k=" << options.k()
+         << ")";
+}
+
+torch::Tensor CrossMapLRN2dImpl::forward(const torch::Tensor& input) {
+  return functions::CrossMapLRN2d::apply(input, options);
+}
+
 } // namespace nn
 } // namespace torch
