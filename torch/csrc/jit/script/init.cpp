@@ -433,6 +433,98 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
   return true;
 }
 
+// helper used to implement ._parameters, ._buffers, ._modules dicts
+// inside of script nn.Module
+template <typename Policy>
+struct slot_dict_impl {
+  slot_dict_impl(script::ModulePtr module) : module_(std::move(module)) {}
+  bool contains(const std::string& name) const {
+    if (auto slot = module_->type()->findAttributeSlot(name)) {
+      if (Policy::valid(module_->type(), *slot)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  std::vector<std::pair<std::string, py::object>> items() const {
+    std::vector<std::pair<std::string, py::object>> result;
+    for (size_t i = 0, N = module_->type()->numAttributes(); i < N; ++i) {
+      if (Policy::valid(module_->type(), i)) {
+        result.emplace_back(
+            module_->type()->getAttributeName(i),
+            toPyObject(module_->getSlot(i)));
+      }
+    }
+    return result;
+  }
+
+  void setattr(const std::string& name, py::object value) {
+    const TypePtr& type = module_->type()->getAttribute(name);
+    script::Module(module_).setattr(name, toIValue(std::move(value), type));
+  }
+
+  py::object getattr(const std::string& name) {
+    return toPyObject(script::Module(module_).attr(name));
+  }
+
+  static void bind(const py::module& m, const char* name) {
+    py::class_<slot_dict_impl<Policy>>(m, name)
+        .def(py::init(
+            [](Module& m) { return slot_dict_impl<Policy>(m.module_object()); }))
+        .def("contains", &slot_dict_impl<Policy>::contains)
+        .def("items", &slot_dict_impl<Policy>::items)
+        .def("setattr", &slot_dict_impl<Policy>::setattr)
+        .def("getattr", &slot_dict_impl<Policy>::getattr);
+  }
+ private:
+  script::ModulePtr module_;
+};
+
+template <typename T>
+py::list debugMakeList(const T& list) {
+  py::list result;
+  for (auto elem : list) {
+    result.append(py::cast(elem));
+  }
+  return result;
+}
+template <typename T>
+py::list debugMakeNamedList(const T& list) {
+  py::list result;
+  for (auto elem : list) {
+    result.append(py::cast(std::make_pair(elem.name, elem.value)));
+  }
+  return result;
+}
+
+static py::dict _jit_debug_module_iterators(Module& module) {
+  py::dict result;
+  result["children"] = debugMakeList(module.children());
+  result["named_children"] = debugMakeNamedList(module.named_children());
+  result["modules"] = debugMakeList(module.modules());
+  result["named_modules"] = debugMakeNamedList(module.named_modules());
+
+  result["parameters"] = debugMakeList(module.parameters(false));
+  result["named_parameters"] =
+      debugMakeNamedList(module.named_parameters(false));
+  result["parameters_r"] = debugMakeList(module.parameters(true));
+  result["named_parameters_r"] =
+      debugMakeNamedList(module.named_parameters(true));
+
+  result["buffers"] = debugMakeList(module.buffers(false));
+  result["named_buffers"] = debugMakeNamedList(module.named_buffers(false));
+  result["buffers_r"] = debugMakeList(module.buffers(true));
+  result["named_buffers_r"] = debugMakeNamedList(module.named_buffers(true));
+
+  result["named_attributes"] =
+      debugMakeNamedList(module.named_attributes(false));
+  result["named_attributes_r"] =
+      debugMakeNamedList(module.named_attributes(true));
+  return result;
+}
+
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -494,85 +586,35 @@ void initJitScriptBindings(PyObject* module) {
             return self.get_method(name);
           },
           py::keep_alive<0, 1>())
-      .def("_register_parameter", &Module::register_parameter)
       .def(
-          "_register_attribute",
-          [](Module& self, std::string name, TypePtr type, py::object value) {
-            auto unshaped = unshapedType(type);
-            self.register_attribute(
-                name, unshaped, toIValue(std::move(value), type));
-          })
-      .def("_register_module", &Module::register_module)
-      .def("_register_buffer", &Module::register_buffer)
-      .def(
-          "_set_attribute",
+          "setattr",
           [](Module& self, const std::string& name, py::object value) {
-            auto attr = self.find_attribute(name);
-            TORCH_CHECK(attr, "Could not find attribute '", name, "'");
-            auto ivalue =
-                toIValue(std::move(value), self.type()->getAttribute(name));
-            self.set_attribute(name, ivalue);
-          })
-      .def("_set_parameter", &Module::set_parameter)
-      .def("_get_parameter", &Module::get_parameter)
-      .def("_get_buffer", &Module::get_buffer)
-      .def("_get_attribute", &Module::get_attribute)
-      .def("_get_module", &Module::get_module)
-      .def(
-          "_get_modules",
-          [](Module& self) {
-            std::vector<std::pair<std::string, Module>> modules;
-            for (const NameModule& s : self.get_modules()) {
-              modules.emplace_back(std::make_pair(s.name, s.module));
-            }
-            return modules;
+            TypePtr type = self.type()->getAttribute(name);
+            TORCH_CHECK(type, "Module has no attribute '", name, "'");
+            auto ivalue = toIValue(std::move(value), type);
+            self.setattr(name, ivalue);
           })
       .def(
-          "_get_parameters",
-          [](Module& self) -> py::tuple {
-            auto parameters = self.get_parameters();
-            py::tuple result(parameters.size());
-            auto i = 0;
-            for (const NameValue& p : parameters) {
-              py::tuple r(2);
-              result[i++] = std::make_tuple(
-                  p.name, autograd::as_variable_ref(p.value.toTensor()));
-            }
-            return result;
-          })
-      .def(
-          "_get_attributes",
-          [](Module& self) -> py::tuple {
-            auto attributes = self.get_attributes();
-            py::tuple result(attributes.size());
-            size_t i = 0;
-            for (const NameValue& attr : attributes) {
-              py::tuple r(3);
-              IValue v = attr.value;
-              result[i++] = std::make_tuple(
-                  attr.name, attr.value.type(), toPyObject(std::move(v)));
-            }
-            return result;
-          })
-      .def(
-          "_has_attribute",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_attribute(name).has_value();
-          })
-      .def(
-          "_has_parameter",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_parameter(name).has_value();
-          })
-      .def(
-          "_has_buffer",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_buffer(name).has_value();
-          })
-      .def(
-          "_has_module",
+          "getattr",
           [](Module& self, const std::string& name) {
-            return bool(self.find_module(name));
+            return toPyObject(self.attr(name));
+          })
+      .def(
+          "hasattr",
+          [](Module& self, const std::string& name) {
+            return self.hasattr(name);
+          })
+      .def(
+          "_replicate_for_data_parallel",
+          [](Module& module) {
+            const ModulePtr& obj = module.module_object();
+            auto copy = c10::ivalue::Object::create(
+                c10::StrongTypePtr(obj->compilation_unit(), obj->type()),
+                obj->slots().size());
+            for (size_t i = 0; i < obj->slots().size(); ++i) {
+              copy->setSlot(i, obj->getSlot(i));
+            }
+            return Module(std::move(copy));
           })
       .def(
           "_has_method",
@@ -627,11 +669,11 @@ void initJitScriptBindings(PyObject* module) {
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
       .def_property_readonly(
-          "name", [](const Module& self) { return self.name().name(); })
-      .def(
-          "clone_method", [](Module& m, Module& orig, const std::string& name) {
-            m.clone_method(orig, name);
-          });
+          "name", [](const Module& self) { return self.name().name(); });
+
+  slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
+  slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
+  slot_dict_impl<script::detail::ModulePolicy>::bind(m, "ModuleDict");
 
   py::class_<ErrorReport, std::shared_ptr<ErrorReport>>(m, "ErrorReport")
       .def(py::init<SourceRange>())
@@ -659,19 +701,15 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
+            HANDLE_TH_ERRORS
             // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
             bool tracing = tracer::isTracing();
-            if (tracing) {
-              tracer::getTracingState()->graph->push_scope(callee.name());
-            }
             py::object result = invokeScriptFunctionFromPython(
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
-            if (tracing) {
-              tracer::getTracingState()->graph->pop_scope();
-            }
             return result;
+            END_HANDLE_TH_ERRORS_PYBIND
           })
       .def(
           "save",
@@ -839,9 +877,13 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_interface_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
-         ResolutionCallback rcb) {
+         ResolutionCallback rcb,
+         bool is_module) {
         get_python_cu()->define_interface(
-            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
+            c10::QualifiedName(qualifiedName),
+            classDef,
+            pythonResolver(std::move(rcb)),
+            is_module);
       });
 
   m.def("_parse_source_def", [](const std::string& src) {
@@ -913,6 +955,7 @@ void initJitScriptBindings(PyObject* module) {
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
+  m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
@@ -978,11 +1021,12 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
-      .def("get_module_names", &ConcreteModuleType::getModuleNamesPy)
+      .def("get_modules", &ConcreteModuleType::getModulesPy)
       .def("add_constant", &ConcreteModuleType::addConstant)
       .def("add_attribute", &ConcreteModuleType::addAttribute)
       .def("add_function_attribute", &ConcreteModuleType::addFunctionAttribute)
       .def("add_module", &ConcreteModuleType::addModule)
+      .def("add_module_interface", &ConcreteModuleType::addModuleInterface)
       .def("add_pyclass", &ConcreteModuleType::addPyClass)
       .def("add_overload", &ConcreteModuleType::addOverload)
       .def("add_jit_type", &ConcreteModuleType::addJitType)
