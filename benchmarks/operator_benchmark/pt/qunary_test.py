@@ -11,7 +11,7 @@ import torch
 """Microbenchmarks for quantized unary operators (point-wise and reduction)."""
 
 
-# Configs for pointwise unary ops
+# Configs for pointwise and reduction unary ops
 qunary_ops_configs_short = op_bench.config_list(
     attr_names=['M', 'N'],
     attrs=[
@@ -132,6 +132,46 @@ qunary_ops_list = op_bench.op_list(
 op_bench.generate_pt_tests_from_op_list(qunary_ops_list,
                                         qunary_ops_configs_short + qunary_ops_configs_long,
                                         QUnaryOpBenchmark)
+
+
+# === Other unary ops (i.e. the ones that need parameters as args) ===
+
+# Configs for pointwise and reduction unary ops
+qunary_ops_topk_configs_short = op_bench.config_list(
+    attr_names=['M', 'N', 'k'],
+    attrs=[
+        [512, 512, 5],
+    ],
+    cross_product_configs={
+        'dtype': [torch.quint8],
+    },
+    tags=['short']
+)
+
+qunary_ops_topk_configs_long = op_bench.cross_product_configs(
+    M=[256, 1024],
+    N=[256, 1024],
+    k=[1, 3, 5],
+    dtype=[torch.quint8, torch.qint8, torch.qint32],
+    tags=['long']
+)
+
+class QTopkOpBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, M, N, dtype, k):
+        self.k = k
+        f_input = torch.rand(M, N)
+        scale = 1.0
+        zero_point = 0
+        self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
+                                                 zero_point=zero_point,
+                                                 dtype=dtype)
+        self.set_module_name('qtopk')
+
+    def forward(self):
+        return torch.topk(self.q_input, self.k)
+
+op_bench.generate_pt_test(qunary_ops_topk_configs_short + qunary_ops_topk_configs_long,
+                          QTopkOpBenchmark)
 
 
 if __name__ == "__main__":
