@@ -24,19 +24,19 @@ void gather_kernel_cuda(Tensor & result, const Tensor & self, int64_t dim, const
         // Specialize for a small number of dimensions.
         switch (index_info.dims) {
           case 1:
-            gather_kernel<unsigned int, scalar_t, 1><<<grid, block, stream>>>(
+            gather_kernel<unsigned int, scalar_t, 1><<<grid, block, 0, stream>>>(
               result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
             break;
           case 2:
-            gather_kernel<unsigned int, scalar_t, 2><<<grid, block, stream>>>(
+            gather_kernel<unsigned int, scalar_t, 2><<<grid, block, 0, stream>>>(
               result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
             break;
           case 3:
-            gather_kernel<unsigned int, scalar_t, 3><<<grid, block, stream>>>(
+            gather_kernel<unsigned int, scalar_t, 3><<<grid, block, 0, stream>>>(
               result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
             break;
           default:
-            gather_kernel<unsigned int, scalar_t, -1><<<grid, block, stream>>>(
+            gather_kernel<unsigned int, scalar_t, -1><<<grid, block, 0, stream>>>(
               result_info, self_info, index_info, dim, static_cast<unsigned int>(numel));
             break;
         }
@@ -44,7 +44,7 @@ void gather_kernel_cuda(Tensor & result, const Tensor & self, int64_t dim, const
         auto result_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(result);
         auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
         auto index_info = cuda::detail::getTensorInfo<int64_t, uint64_t>(index);
-        gather_kernel<uint64_t, scalar_t, -1><<<grid, block, stream>>>(
+        gather_kernel<uint64_t, scalar_t, -1><<<grid, block, 0, stream>>>(
           result_info, self_info, index_info, dim, static_cast<uint64_t>(numel));
       }
     });
