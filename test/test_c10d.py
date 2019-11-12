@@ -3095,9 +3095,9 @@ class ReducerTest(TestCase):
         output.backward()
 
         # The reducer will have marked the grad of fc3 as ready, because
-        # it doesn't show up in the autograd graph of `output`.
-        # This should result in its contents being equal to zero.
-        self.assertEqual(torch.zeros(model.fc3.weight.size()), model.fc3.weight.grad)
+        # it doesn't show up in the autograd graph of `output`. Since fc3.weight
+        # is considered being globally unused, it will be kept untouched as None.
+        self.assertEqual(None, model.fc3.weight.grad)
 
     def test_forward_backward_optimizer(self):
         batch_size = 10
