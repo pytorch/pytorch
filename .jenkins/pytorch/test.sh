@@ -221,6 +221,9 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
+# TODO move this to docker
+pip_install unittest-xml-reporting
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")

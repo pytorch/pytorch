@@ -11,6 +11,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch (distributed only)"
 
+# TODO move this to docker
+pip_install unittest-xml-reporting
+
 if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker

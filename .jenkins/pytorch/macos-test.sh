@@ -6,6 +6,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" psutil
 
+
+# TODO move this to docker
+pip install unittest-xml-reporting
+
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
   pip install -q faulthandler

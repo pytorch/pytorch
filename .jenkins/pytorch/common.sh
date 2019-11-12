@@ -179,6 +179,3 @@ function get_exit_code() {
   set -e
   return $retcode
 }
-
-# TODO move this to docker
-pip_install unittest-xml-reporting
