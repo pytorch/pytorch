@@ -1851,7 +1851,7 @@ class TestNN(NNTestCase):
         grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             for p, g in zip(l.parameters(), grads):
-                p._grad = g.clone().view_as(p.data)
+                p._grad = g.clone(memory_format=torch.contiguous_format).view_as(p.data)
             norm_before = compute_norm(norm_type)
             norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
@@ -1877,8 +1877,8 @@ class TestNN(NNTestCase):
         # Should accept a single Tensor as input
         p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
         g = torch.arange(1., 101).view(10, 10)
-        p1._grad = g.clone()
-        p2._grad = g.clone()
+        p1._grad = g.clone(memory_format=torch.contiguous_format)
+        p2._grad = g.clone(memory_format=torch.contiguous_format)
         for norm_type in [0.5, 1.5, 2, 4, 'inf']:
             clip_grad_norm_(p1, max_norm, norm_type=norm_type)
             clip_grad_norm_([p2], max_norm, norm_type=norm_type)
@@ -1891,7 +1891,7 @@ class TestNN(NNTestCase):
         grad_w, grad_b = torch.arange(-50., 50).view(10, 10).div_(5), torch.ones(10).mul_(2)
         for grad_list in [[grad_w, grad_b], [grad_w, None]]:
             for p, g in zip(l.parameters(), grad_list):
-                p._grad = g.clone().view_as(p.data) if g is not None else g
+                p._grad = g.clone(memory_format=torch.contiguous_format).view_as(p.data) if g is not None else g
 
             clip_grad_value_(l.parameters(), clip_value)
             for p in filter(lambda p: p.grad is not None, l.parameters()):
@@ -1901,8 +1901,8 @@ class TestNN(NNTestCase):
         # Should accept a single Tensor as input
         p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
         g = torch.arange(-50., 50).view(10, 10).div_(5)
-        p1._grad = g.clone()
-        p2._grad = g.clone()
+        p1._grad = g.clone(memory_format=torch.contiguous_format)
+        p2._grad = g.clone(memory_format=torch.contiguous_format)
         clip_grad_value_(p1, clip_value)
         clip_grad_value_([p2], clip_value)
         self.assertEqual(p1.grad, p2.grad)
@@ -5060,13 +5060,13 @@ class TestNN(NNTestCase):
 
             output = rnn(input, hx)
             output[0].sum().backward()
-            grads = [v.grad.data.clone() for v in all_vars]
+            grads = [v.grad.data.clone(memory_format=torch.contiguous_format) for v in all_vars]
             for v in all_vars:
                 v.grad.data.zero_()
 
             # Weights will no longer view onto the same chunk of memory
             weight = all_vars[4]
-            weight_data = weight.data.clone()
+            weight_data = weight.data.clone(memory_format=torch.contiguous_format)
             with torch.no_grad():
                 weight.set_(weight_data)
 
@@ -5079,7 +5079,7 @@ class TestNN(NNTestCase):
                     first_warn = False
                     warnings.resetwarnings()
                 output_noncontig[0].sum().backward()
-                grads_noncontig = [v.grad.data.clone() for v in all_vars]
+                grads_noncontig = [v.grad.data.clone(memory_format=torch.contiguous_format) for v in all_vars]
                 for v in all_vars:
                     v.grad.data.zero_()
                 self.assertEqual(output, output_noncontig)
