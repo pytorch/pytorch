@@ -420,7 +420,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
   Sequential sequential_named({
       {"linear", Linear(10, 3)},
       {"conv2d", Conv2d(1, 2, 3)},
-      {"dropout", Dropout(0.5)},S
+      {"dropout", Dropout(0.5)},
       {"batchnorm", BatchNorm(5)},
       {"embedding", Embedding(4, 10)},
       {"lstm", LSTM(4, 5)}

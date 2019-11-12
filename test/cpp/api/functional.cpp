@@ -1673,7 +1673,6 @@ TEST_F(FunctionalTest, Pad) {
   }
 }
 
-<<<<<<< 4926a51010b0ea8c190165d88157cf2f66a4a25b
 TEST_F(FunctionalTest, CTCLoss) {
   { // test CTCLoss typechecks
     const auto target_lengths = torch::tensor({30, 25, 20});
