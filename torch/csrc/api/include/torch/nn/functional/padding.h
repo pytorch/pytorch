@@ -27,47 +27,51 @@ inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
   return input;
 }
 
-inline Tensor pad(const Tensor& input, const PadOptions& options) {
-  TORCH_CHECK(options.pad().size() % 2 == 0, "Padding length must be divisible by 2");
-  TORCH_CHECK(((int64_t)(options.pad().size() / 2)) <= input.dim(), "Padding length too large");
-  if (c10::get_if<enumtype::kConstant>(&options.mode())) {
-    return torch::constant_pad_nd(input, options.pad(), options.value());
+namespace detail {
+inline Tensor pad(const Tensor& input,
+                  IntArrayRef pad,
+                  PadFuncOptions::mode_t mode,
+                  double value) {
+  TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
+  TORCH_CHECK(((int64_t)(pad.size() / 2)) <= input.dim(), "Padding length too large");
+  if (c10::get_if<enumtype::kConstant>(&mode)) {
+    return torch::constant_pad_nd(input, pad, value);
   } else {
     TORCH_CHECK(
-      options.value() == 0,
+      value == 0,
       "Padding mode \"",
-      torch::enumtype::get_enum_name(options.mode()),
+      torch::enumtype::get_enum_name(mode),
       "\" doesn't take in value argument");
     if (input.dim() == 3) {
-      TORCH_CHECK(options.pad().size() == 2, "3D tensors expect 2 values for padding");
-      if (c10::get_if<enumtype::kReflect>(&options.mode())) {
-        return torch::reflection_pad1d(input, options.pad());
-      } else if (c10::get_if<enumtype::kReplicate>(&options.mode())) {
-        return torch::replication_pad1d(input, options.pad());
-      } else if (c10::get_if<enumtype::kCircular>(&options.mode())) {
-        return _pad_circular(input, options.pad());
+      TORCH_CHECK(pad.size() == 2, "3D tensors expect 2 values for padding");
+      if (c10::get_if<enumtype::kReflect>(&mode)) {
+        return torch::reflection_pad1d(input, pad);
+      } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
+        return torch::replication_pad1d(input, pad);
+      } else if (c10::get_if<enumtype::kCircular>(&mode)) {
+        return _pad_circular(input, pad);
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }
     } else if (input.dim() == 4) {
-      TORCH_CHECK(options.pad().size() == 4, "4D tensors expect 4 values for padding");
-      if (c10::get_if<enumtype::kReflect>(&options.mode())) {
-        return torch::reflection_pad2d(input, options.pad());
-      } else if (c10::get_if<enumtype::kReplicate>(&options.mode())) {
-        return torch::replication_pad2d(input, options.pad());
-      } else if (c10::get_if<enumtype::kCircular>(&options.mode())) {
-        return _pad_circular(input, options.pad());
+      TORCH_CHECK(pad.size() == 4, "4D tensors expect 4 values for padding");
+      if (c10::get_if<enumtype::kReflect>(&mode)) {
+        return torch::reflection_pad2d(input, pad);
+      } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
+        return torch::replication_pad2d(input, pad);
+      } else if (c10::get_if<enumtype::kCircular>(&mode)) {
+        return _pad_circular(input, pad);
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }
     } else if (input.dim() == 5) {
-      TORCH_CHECK(options.pad().size() == 6, "5D tensors expect 6 values for padding");
-      if (c10::get_if<enumtype::kReflect>(&options.mode())) {
+      TORCH_CHECK(pad.size() == 6, "5D tensors expect 6 values for padding");
+      if (c10::get_if<enumtype::kReflect>(&mode)) {
         TORCH_CHECK(false, "NotImplementedError");
-      } else if (c10::get_if<enumtype::kReplicate>(&options.mode())) {
-        return torch::replication_pad3d(input, options.pad());
-      } else if (c10::get_if<enumtype::kCircular>(&options.mode())) {
-        return _pad_circular(input, options.pad());
+      } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
+        return torch::replication_pad3d(input, pad);
+      } else if (c10::get_if<enumtype::kCircular>(&mode)) {
+        return _pad_circular(input, pad);
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }
@@ -75,6 +79,11 @@ inline Tensor pad(const Tensor& input, const PadOptions& options) {
       TORCH_CHECK(false, "Only 3D, 4D, 5D padding with non-constant padding are supported for now");
     }
   }
+}
+} // namespace detail
+
+inline Tensor pad(const Tensor& input, PadFuncOptions options) {
+  return detail::pad(input, options.pad(), options.mode(), options.value());
 }
 
 } // namespace functional

@@ -1,12 +1,13 @@
-from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
-from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
-from torch.distributed import _start_rpc_agent
-from torch.distributed import _destroy_rref_context, _cleanup_python_rpc_handler
-from torch.distributed import WorkerInfo
+from . import invoke_rpc_builtin, invoke_rpc_python_udf
+from . import invoke_remote_builtin, invoke_remote_python_udf
+from . import _start_rpc_agent
+from . import _destroy_rref_context, _cleanup_python_rpc_handler
+from . import WorkerInfo
 from . import backend_registry
 from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
+import datetime
 import functools
 import sys
 import torch
@@ -78,6 +79,11 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
+    if not isinstance(rpc_timeout, datetime.timedelta):
+        raise RuntimeError(
+            "`rpc_timeout` must be a `datetime.timedelta`."
+        )
+
     _agent = backend_registry.init_backend(
         backend,
         store=store,

@@ -25,12 +25,13 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* rpc_init(PyObject* /* unused */) {
-  auto dist_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!dist_module) {
+  auto rpc_module =
+      THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
+  if (!rpc_module) {
     throw python_error();
   }
 
-  auto module = py::handle(dist_module).cast<py::module>();
+  auto module = py::handle(rpc_module).cast<py::module>();
 
   auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
                         .def_readonly("name", &WorkerInfo::name_)
@@ -41,15 +42,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
-              "sync",
-              &RpcAgent::sync,
+              "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_rpc_timeout",
+              &RpcAgent::getRpcTimeout,
               py::call_guard<py::gil_scoped_release>());
-
-  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
-                      .def(
-                          "wait",
-                          &PyFuture::wait,
-                          py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef")
@@ -117,10 +114,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "sync",
           &ProcessGroupAgent::sync,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_get_rpc_timeout",
-          &ProcessGroupAgent::getRpcTimeout,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {

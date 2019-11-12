@@ -48,15 +48,22 @@ Similarly, if we raise a C++ exception, prior to returning to the Python
 interpreter, we must set the Python error flags, so it turns into a C++
 exception.
 
-Exceptions defines some useful helpers: `HANDLE_TH_ERRORS`, `END_HANDLE_TH_ERRORS`
-and an exception class `python_error`.  You call them like this:
+Moreover, when using the following macros, the generated warnings
+will be converted into python warnings that can be caught by the user.
+
+Exceptions define helpers for two main cases:
+* For code where you write the python binding by hand, `HANDLE_TH_ERRORS`,
+`END_HANDLE_TH_ERRORS` and an exception class `python_error`.  You call them like this:
 
 ```
 // Entry point from Python interpreter
-PyObject* run() {
+PyObject* run(PyObject* arg) {
   HANDLE_TH_ERRORS
   ...
   if (!x) throw python_error();
+  // From c10/Exception.h
+  TORCH_CHECK(cond, "cond was false here");
+  TORCH_WARN("Warning message");
   ...
   END_HANDLE_TH_ERRORS
 }
@@ -67,6 +74,27 @@ into an appropriate Python signal.  `python_error` is a special
 exception which doesn't contain any info, instead it says, "An error
 occurred in the Python API; if you return to the interpreter, Python
 will raise that exception, nothing else needs to be done."
+
+* For code that you bind using pybind, `HANDLE_TH_ERRORS` and `END_HANDLE_TH_ERRORS_PYBIND`
+can be used. They will work jointly with pybind error handling to raise
+pytorch errors and warnings natively and let pybind handle other errors. It can be used as:
+
+```
+// Function given to the pybind binding
+at::Tensor foo(at::Tensor x) {
+  HANDLE_TH_ERRORS
+  ...
+  if (!x) throw python_error();
+  // pybind native error
+  if (!x) throw py::value_error();
+  // From c10/Exception.h
+  TORCH_CHECK(cond, "cond was false here");
+  TORCH_WARN("Warning message");
+  ...
+  END_HANDLE_TH_ERRORS_PYBIND
+}
+```
+
 
 ### `utils/auto_gil.h`
 
