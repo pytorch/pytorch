@@ -134,7 +134,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output = at::zeros(
       {M, N}, bias.options().dtype(at::kFloat));
-  auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+  auto buffer = at::zeros_like(output, output.options().dtype(at::kInt), at::MemoryFormat::Contiguous);
 
   // Pull out the PackBMatrix instance from the owning tensor
   auto& packB = cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
