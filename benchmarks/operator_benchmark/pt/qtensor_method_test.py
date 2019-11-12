@@ -45,7 +45,7 @@ class _QMethodBenchmarkBase(op_bench.TorchBenchmarkBase):
                                                  dtype=dtype)
         if not contig:
             permute_dims = list(range(self.q_input.ndim))[::-1]
-            self.q_input = self.q_input(permute_dims)
+            self.q_input = self.q_input.permute(permute_dims)
         self.op_func = op_func
 
 
@@ -64,3 +64,6 @@ op_bench.generate_pt_tests_from_op_list(
     qmethods_configs_short + qmethods_configs_long,
     QMethodTensorInputBenchmark
 )
+
+if __name__ == "__main__":
+    op_bench.benchmark_runner.main()
