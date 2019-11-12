@@ -50,7 +50,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       TORCH_CHECK(
           kSpatialDim == 2,
-          "quantized::conv_prepack (qnnpack): QNNPACK only supports Conv2d "
+          "quantized::conv2d_prepack (qnnpack): QNNPACK only supports Conv2d "
           "now.");
       return qnnpack_conv_prepack(
           weight, bias, stride, padding, dilation, groups);
@@ -59,7 +59,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
     TORCH_CHECK(
         false,
-        "Didn't find engine for operation quantized::conv_prepack ",
+        "Didn't find engine for operation quantized::conv2d_prepack ",
         toString(ctx.qEngine()));
   }
 
@@ -216,23 +216,23 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
       int64_t groups) {
     TORCH_CHECK(
         weight.ndimension() == 4,
-        "quantized::conv_prepack (qnnpack): Weights are expected to have 4 "
+        "quantized::conv2d_prepack (qnnpack): Weights are expected to have 4 "
         "dimensions");
     const auto qtype = weight.qscheme();
     TORCH_CHECK(
         weight.qscheme() == kPerTensorAffine,
-        "quantized::conv_prepack (qnnpack): only supports Per Tensor "
+        "quantized::conv2d_prepack (qnnpack): only supports Per Tensor "
         "Quantization Scheme")
     TORCH_CHECK(
         stride.size() == 2,
-        "quantized::conv_prepack (qnnpack): 2D convolution only");
+        "quantized::conv2d_prepack (qnnpack): 2D convolution only");
     TORCH_CHECK(
         padding.size() == 2,
-        "quantized::conv_prepack (qnnpack): Specify top/left padding only. "
+        "quantized::conv2d_prepack (qnnpack): Specify top/left padding only. "
         "bottom/right padding assumed to be equal to top/left");
     TORCH_CHECK(
         dilation.size() == 2,
-        " quantized::conv_prepack (qnnpack): 2D convolution only");
+        " quantized::conv2d_prepack (qnnpack): 2D convolution only");
 
     initQNNPACK();
 
@@ -252,7 +252,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(
         !bias_fp32.defined() ||
             (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
-        "quantized::conv_prepack (qnnpack): expected bias to be 1-dimensional "
+        "quantized::conv2d_prepack (qnnpack): expected bias to be 1-dimensional "
         "with ",
         out_ch,
         " elements",
@@ -314,7 +314,12 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::conv_prepack",
+        .op("quantized::conv_prepack", // conv_prepack is deprecated, please use
+                                       // conv2d_prepack for 2D conv.
+            c10::RegisterOperators::options().kernel<QConvPackWeightInt8<2>>(
+                TensorTypeId::QuantizedCPUTensorId))
+        .op("quantized::conv2d_prepack", // We use  conv2d_prepack to be
+                                         // consistent with conv3d_prepack
             c10::RegisterOperators::options().kernel<QConvPackWeightInt8<2>>(
                 TensorTypeId::QuantizedCPUTensorId))
         .op("quantized::conv3d_prepack",
