@@ -43,7 +43,7 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
  public:
   using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
 
-  static Embedding from_pretrained(const torch::Tensor& embeddings, EmbeddingFromPretrainedOptions options = {}) {
+  static Embedding from_pretrained(const torch::Tensor& embeddings, const EmbeddingFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
 
     int64_t rows, cols;
@@ -90,7 +90,7 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
  public:
   using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
 
-  static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, EmbeddingBagFromPretrainedOptions options = {}) {
+  static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, const EmbeddingBagFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
 
     int64_t rows, cols;
