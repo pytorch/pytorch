@@ -96,12 +96,3 @@
 
 #include <THNN/generic/Tanh.c>
 #include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateLongType.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateBFloat16Type.h>

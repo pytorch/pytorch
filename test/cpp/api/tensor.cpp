@@ -568,6 +568,13 @@ TEST(TensorTest, TorchTensorCtorWithoutSpecifyingDtype) {
   ASSERT_EQ(torch::tensor({{1., 2., 3.}}, torch::TensorOptions()).dtype(), torch::kDouble);
 }
 
+TEST(TensorTest, Arange) {
+  { // Test #1
+    auto x = torch::arange(0, 5);
+    TORCH_INTERNAL_ASSERT(x.dtype() == at::ScalarType::Long);
+  }
+}
+
 TEST(TensorTest, PrettyPrintTensorDataContainer) {
   {
     ASSERT_EQ(
