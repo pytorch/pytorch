@@ -62,7 +62,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -171,21 +171,6 @@ private:
   friend class Dispatcher;
 
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
-};
-
-class CAFFE2_API SchemaRegistrationHandleRAII final {
-public:
-  const OperatorHandle& opHandle() const {
-    return opHandle_;
-  }
-
-private:
-  friend class Dispatcher;
-  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle)
-    : opHandle_(std::move(opHandle)), registrationHandle_(std::move(registrationHandle)) {}
-
-  OperatorHandle opHandle_;
-  RegistrationHandleRAII registrationHandle_;
 };
 
 namespace detail {

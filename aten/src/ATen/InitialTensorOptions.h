@@ -9,7 +9,7 @@ namespace at {
 // NOTE: this is not a stable API.
 inline TensorOptions initialTensorOptions() {
   return TensorOptions(kCPU).dtype(kFloat).layout(kStrided)
-                            .requires_grad(false).is_variable(false);
+                            .requires_grad(false);
 }
 
 }
