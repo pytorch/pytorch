@@ -179,3 +179,11 @@ function get_exit_code() {
   set -e
   return $retcode
 }
+
+function xla_failure_help() {
+  echo '=================================== XLA build fails? ========================================='
+  echo 'If you need help investigate the root cause or this PR requires downstream changes: '
+  echo '  1. Open an issue in https://github.com/pytorch/xla/issues with [PT_BREAK] as title prefix'
+  echo '  2. PyTorch/XLA devs will reply and help unblock you from there.'
+  echo '=============================================================================================='
+}

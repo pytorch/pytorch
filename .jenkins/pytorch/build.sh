@@ -261,7 +261,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Use cloud cache to build when available.
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 
-  python setup.py install
+  python setup.py install || xla_failure_help
   popd
   assert_git_not_dirty
 fi
