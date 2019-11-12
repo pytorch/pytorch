@@ -50,8 +50,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto options = TensorOptions(scalar_type)
         .device(computeDeviceType(type_id))
-        .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
-        .is_variable(true);
+        .layout(layout_from_backend(tensorTypeIdToBackend(type_id)));
     var = at::empty({0}, options);
   } else if (THPVariable_Check(data)) {
     var = ((THPVariable*)data)->cdata.detach();
