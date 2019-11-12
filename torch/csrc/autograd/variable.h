@@ -88,6 +88,83 @@ struct Node;
 struct AutogradMeta;
 struct DifferentiableViewMeta;
 
+// Private-ish functions for manipulating variables; we don't want to put them
+// on Tensor proper
+namespace impl {
+
+  // WARNING: This may return a nullptr.  If you require AutogradMeta to return
+  // a materialized structure, use materialize_autograd_meta instead.
+  TORCH_API AutogradMeta* get_autograd_meta(const Variable&) noexcept;
+
+  // Returns the current autograd meta, materializing it if it was previously
+  // none.  This counts as a *mutating* operation, so do not call it on
+  // "read-only" operators; in particular, this is NOT thread safe
+  TORCH_API AutogradMeta* materialize_autograd_meta(const Variable&);
+
+  /// Set the gradient accumulator of the `Variable`. This is only applicable to
+  /// leaf variables. Interior variables should call `set_gradient_edge()`.
+  TORCH_API void set_grad_accumulator(const Variable&, std::weak_ptr<Node> grad_accumulator);
+
+  /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
+  /// if it still exists. If the gradient accumulator function has been
+  /// destroyed, returns a `nullptr`.
+  TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(const Variable&);
+
+  /// Gets the gradient accumulator of the `Variable` if it has one, or else
+  /// create one on the fly and return it.
+  TORCH_API std::shared_ptr<Node> grad_accumulator(const Variable&);
+
+  /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
+  /// gradient function if this is an interior `Variable`, or the gradient
+  /// accumulator otherwise. If the `Variable` is interior, the returned `Edge`
+  /// will store the input index of the `Node` to which this variable is
+  /// connected in its `input_nr` field. For leaves, the `input_nr` is always
+  /// zero. Note that `set_gradient_edge` and `gradient_edge` are not
+  /// symmetric. You must use `set_gradient_edge` to set the `grad_fn` and
+  /// `set_grad_accumulator` to set the accumulator.
+  TORCH_API Edge gradient_edge(const Variable&);
+
+  /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
+  /// `Variable`.
+  /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
+  /// and never the `grad_accumulator`. For the latter, use
+  /// `set_grad_accumulator`. This allows late construction of an interior
+  /// `Variable`.
+  TORCH_API void set_gradient_edge(const Variable&, Edge edge) noexcept;
+
+  // Autograd Graph Interaction
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  /// Update the `grad_fn` of an existing Variable. Called after in-place
+  /// modifications.
+  ///
+  /// For View Variables:
+  /// Called after in-place modifications. Modifies the grad_fn of the base
+  /// Variable.
+  TORCH_API void rebase_history(const Variable&, Edge gradient_edge);
+
+  /// Gets the raw gradient function pointer, whatever it currently is.
+  TORCH_API Node* grad_fn_unsafe(const Variable&);
+
+  /// Increments the version count of this `Variable`.
+  TORCH_API void bump_version(const Variable&) noexcept;
+  TORCH_API void set_version_counter(const Variable&, const c10::VariableVersion& version_counter) noexcept;
+
+  /// Retrieves this `Variable`s version counter.
+  TORCH_API const c10::VariableVersion& version_counter(const Variable&) noexcept;
+
+  TORCH_API PyObject* pyobj(const Variable&) noexcept;
+  TORCH_API void set_pyobj(const Variable&, PyObject* pyobj) noexcept;
+
+  TORCH_API void set_name(const Variable&, const std::string& name);
+
+  TORCH_API void add_hook(const Variable&, std::shared_ptr<FunctionPreHook> hook);
+  TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(const Variable&) noexcept;
+  TORCH_API void clear_hooks(const Variable&);
+
+  TORCH_API void create_cpp_hook(const Variable&);
+}
+
 struct TORCH_API Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
@@ -141,49 +218,6 @@ struct TORCH_API Variable : public at::Tensor {
   /// this and the base Variable.
   const std::shared_ptr<Node>& grad_fn() const;
 
-  /// Gets the raw gradient function pointer, whatever it currently is.
-  Node* grad_fn_unsafe() const;
-
-private:
-  /// Set the gradient accumulator of the `Variable`. This is only applicable to
-  /// leaf variables. Interior variables should call `set_gradient_edge()`.
-  void set_grad_accumulator(std::weak_ptr<Node> grad_accumulator);
-
-  // Only user of set_grad_accumulator
-  friend class SavedVariable;
-
-public:
-  /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
-  /// if it still exists. If the gradient accumulator function has been
-  /// destroyed, returns a `nullptr`.
-  std::shared_ptr<Node> try_get_grad_accumulator() const;
-
-  /// Gets the gradient accumulator of the `Variable` if it has one, or else
-  /// create one on the fly and return it.
-  std::shared_ptr<Node> grad_accumulator() const;
-
-  /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
-  /// gradient function if this is an interior `Variable`, or the gradient
-  /// accumulator otherwise. If the `Variable` is interior, the returned `Edge`
-  /// will store the input index of the `Node` to which this variable is
-  /// connected in its `input_nr` field. For leaves, the `input_nr` is always
-  /// zero. Note that `set_gradient_edge` and `gradient_edge` are not
-  /// symmetric. You must use `set_gradient_edge` to set the `grad_fn` and
-  /// `set_grad_accumulator` to set the accumulator.
-  Edge gradient_edge() const {
-    // If grad_fn is null (as is the case for a leaf node), we instead
-    // interpret the gradient function to be a gradient accumulator, which will
-    // accumulate its inputs into the grad property of the variable. These
-    // nodes get suppressed in some situations, see "suppress gradient
-    // accumulation" below. Note that only variables which have `requires_grad =
-    // True` can have gradient accumulators.
-    if (const auto& gradient = grad_fn()) {
-      return Edge(gradient, output_nr());
-    } else {
-      return Edge(grad_accumulator(), 0);
-    }
-  }
-
   /// Returns a copy of this `Variable` that is detached from its autograd graph
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
@@ -213,14 +247,6 @@ public:
   /// checking `_has_compatible_shallow_copy_type(this, new_data)`.
   void set_data(const at::Tensor &new_data) const;
 
-  /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
-  /// `Variable`.
-  /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
-  /// and never the `grad_accumulator`. For the latter, use
-  /// `set_grad_accumulator`. This allows late construction of an interior
-  /// `Variable`.
-  void set_gradient_edge(Edge edge) noexcept;
-
   /// Returns the input index of the gradient `Node` to which this
   /// `Variable` is connected.  Note: input indexes of the gradient `Node`
   /// correspond to output indexes of the corresponding forward `Node`.
@@ -232,41 +258,17 @@ public:
   // Versions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// Increments the version count of this `Variable`.
-  void bump_version() noexcept;
-  void set_version_counter(const c10::VariableVersion& version_counter) noexcept;
-
-  /// Retrieves this `Variable`s version counter.
-  const c10::VariableVersion& version_counter() const noexcept;
-
   /// Retrieves the current value of the `Variable`'s version counter.
   /// Equivalent to calling `version_counter().current_version()`.
   uint32_t current_version() const noexcept;
 
-  // Autograd Graph Interaction
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  /// Update the `grad_fn` of an existing Variable. Called after in-place
-  /// modifications.
-  ///
-  /// For View Variables:
-  /// Called after in-place modifications. Modifies the grad_fn of the base
-  /// Variable.
-  void rebase_history(Edge gradient_edge);
-
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  void add_hook(std::shared_ptr<FunctionPreHook> hook);
-  const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const noexcept;
-  void clear_hooks();
 
   template <typename T>
   using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Variable)>::type>::value, unsigned>;
   template <typename T>
   using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Variable)>::type, Variable>::value, unsigned>;
-  // Remove hook at given position
-  void remove_hook(unsigned pos);
 
   // Returns the index of the hook in the list which can be used to remove hook
   // Register a hook with no return value
@@ -275,6 +277,9 @@ public:
   // Register a hook with variable return value
   template <typename T>
   hook_return_var_t<T> register_hook(T&& hook);
+
+  // Remove hook at given position
+  void remove_hook(unsigned pos);
 
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -289,27 +294,7 @@ public:
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void set_name(const std::string& name);
   const std::string& name() const noexcept;
-
-  PyObject* pyobj() const noexcept;
-  void set_pyobj(PyObject* pyobj) noexcept;
-
- public:
-  // WARNING: This may return a nullptr.  If you require AutogradMeta to return
-  // a materialized structure, use materialize_autograd_meta instead.
-  AutogradMeta* get_autograd_meta() const noexcept;
-
- private:
-  // Private Methods
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  at::TensorImpl* get() const;
-  void create_cpp_hook();
-
-  // Returns the current autograd meta, materializing it if it was previously
-  // none.  This counts as a *mutating* operation, so do not call it on
-  // "read-only" operators; in particular, this is NOT thread safe
-  AutogradMeta* materialize_autograd_meta();
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -504,7 +489,7 @@ inline Variable make_variable_view(
     } else {
       /// Non-differentiable view. Just share version counter.
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/base.version_counter(),
+        /*version_counter=*/impl::version_counter(base),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       data_impl_copy->set_autograd_meta(nullptr);
       return Variable(data_impl_copy);
@@ -585,14 +570,14 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
 }
 
 inline at::Tensor Variable::tensor_data() const noexcept {
-  auto self_impl_copy = get()->shallow_copy_and_detach(
-    /*version_counter=*/get()->version_counter(),
-    /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());
+  auto self_impl_copy = unsafeGetTensorImpl()->shallow_copy_and_detach(
+    /*version_counter=*/unsafeGetTensorImpl()->version_counter(),
+    /*allow_tensor_metadata_change=*/unsafeGetTensorImpl()->allow_tensor_metadata_change());
   return at::Tensor(self_impl_copy);
 }
 
 inline at::Tensor Variable::variable_data() const noexcept {
-  auto self_impl_copy = get()->shallow_copy_and_detach(
+  auto self_impl_copy = unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/0,
     /*allow_tensor_metadata_change=*/false);
   self_impl_copy->set_autograd_meta(nullptr);
@@ -602,27 +587,6 @@ inline at::Tensor Variable::variable_data() const noexcept {
 // Gradient Node and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline Node* Variable::grad_fn_unsafe() const {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->grad_fn_.get();
-  } else {
-    return nullptr;
-  }
-}
-
-inline void Variable::set_grad_accumulator(
-    std::weak_ptr<Node> grad_accumulator) {
-  materialize_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
-}
-
-inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->grad_accumulator_.lock();
-  } else {
-    return nullptr;
-  }
-}
-
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, *this, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false);
 #ifdef BUILD_NAMEDTENSOR
@@ -631,72 +595,20 @@ inline Variable Variable::detach() const {
   return var;
 }
 
-inline void Variable::set_gradient_edge(Edge edge) noexcept {
-  auto* meta = materialize_autograd_meta();
-  meta->grad_fn_ = std::move(edge.function);
-  meta->output_nr_ = edge.input_nr;
-}
-
 inline uint32_t Variable::output_nr() const noexcept {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->output_nr_;
+  if (impl::get_autograd_meta(*this)) {
+    return impl::get_autograd_meta(*this)->output_nr_;
   } else {
     return 0;
   }
 }
 
 inline bool Variable::is_leaf() const noexcept {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->grad_fn_ == nullptr;
+  if (impl::get_autograd_meta(*this)) {
+    return impl::get_autograd_meta(*this)->grad_fn_ == nullptr;
   } else {
     return true;
   }
-}
-
-// Versions
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline void Variable::set_version_counter(
-    const c10::VariableVersion& version_counter) noexcept {
-  unsafeGetTensorImpl()->set_version_counter(version_counter);
-}
-
-inline void Variable::bump_version() noexcept {
-  unsafeGetTensorImpl()->bump_version();
-}
-
-inline uint32_t Variable::current_version() const noexcept {
-  return unsafeGetTensorImpl()->version_counter().current_version();
-}
-
-inline const c10::VariableVersion& Variable::version_counter() const noexcept {
-  return unsafeGetTensorImpl()->version_counter();
-}
-
-// Hooks
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline void Variable::add_hook(std::shared_ptr<FunctionPreHook> hook) {
-  materialize_autograd_meta()->hooks_.push_back(std::move(hook));
-}
-
-namespace {
-  std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
-}
-
-// TODO: Return an ArrayRef instead
-inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
-    const noexcept {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->hooks_;
-  } else {
-    return empty_singleton;
-  }
-}
-
-inline void Variable::clear_hooks() {
-  // This is a little goofy, but usually this should be a no oop
-  materialize_autograd_meta()->hooks_.clear();
 }
 
 template <typename T>
@@ -704,9 +616,9 @@ auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = impl::get_autograd_meta(*this)->cpp_hooks_list;
   if(!list) {
-    create_cpp_hook();
+    impl::create_cpp_hook(*this);
   }
   unsigned idx = list->size();
   // Return the grad argument in case of a hook with void return type to have an
@@ -723,9 +635,9 @@ auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = impl::get_autograd_meta(*this)->cpp_hooks_list;
   if(!list) {
-    create_cpp_hook();
+    impl::create_cpp_hook(*this);
   }
   unsigned idx = list->size();
   list->push_back(hook);
@@ -736,8 +648,8 @@ auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline bool Variable::is_view() const noexcept {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->is_view_;
+  if (impl::get_autograd_meta(*this)) {
+    return impl::get_autograd_meta(*this)->is_view_;
   } else {
     return false;
   }
@@ -746,43 +658,11 @@ inline bool Variable::is_view() const noexcept {
 inline const Variable& Variable::base() const {
   if (is_view()) {
     // is_view() implies get_autograd_meta()
-    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta());
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(*this));
     return diff_view_meta->base_;
   } else {
     throw std::runtime_error("Can't get base of non-view Variable");
   }
-}
-
-// Miscellaneous
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline void Variable::set_name(const std::string& name) {
-  materialize_autograd_meta()->name_ = name;
-}
-
-namespace {
-  std::string singleton_string;
-}
-
-inline const std::string& Variable::name() const noexcept {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->name_;
-  } else {
-    return singleton_string;
-  }
-}
-
-inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
-  get()->set_pyobj(pyobj);
-}
-
-inline PyObject* Variable::pyobj() const noexcept {
-  return get()->pyobj();
-}
-
-inline AutogradMeta* Variable::get_autograd_meta() const noexcept {
-  // NB: could return null
-  return static_cast<AutogradMeta*>(get()->autograd_meta());
 }
 
 // Private Methods
@@ -791,8 +671,4 @@ inline AutogradMeta* Variable::get_autograd_meta() const noexcept {
 inline Variable::Variable(c10::intrusive_ptr<at::TensorImpl> self)
     : at::Tensor(std::move(self)) {}
 
-inline at::TensorImpl* Variable::get() const {
-  TORCH_CHECK(defined(), "Called Variable::get() on an undefined Variable");
-  return unsafeGetTensorImpl();
-}
 }} // namespace torch::autograd
