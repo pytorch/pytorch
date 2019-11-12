@@ -23,9 +23,9 @@ mm_short_configs = op_bench.config_list(
 
 
 mm_long_configs = op_bench.cross_product_configs(
-    M=[64, 128, 256],
-    N=range(2, 10, 3),
-    K=[128, 512, 1024],
+    M=[64, 128],
+    N=[64, 128],
+    K=[512],
     trans_a=[True, False],
     trans_b=[True, False],
     device=['cpu', 'cuda'],

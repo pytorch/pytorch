@@ -53,6 +53,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           A class encapsulating a reference to a value of some type on a remote worker.
           This handle will keep the referenced remote value alive on the worker.
       )")
+          .def(py::init<const py::object&>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
