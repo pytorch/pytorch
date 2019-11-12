@@ -56,7 +56,6 @@
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
-#include <caffe2/serialize/func_adapter.h>
 
 #include <ATen/core/function_schema.h>
 
@@ -428,34 +427,42 @@ void initJITBindings(PyObject* module) {
                                      size);
            });
 
+  class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
+   public:
+    BufferAdapter(const py::object& buffer) : buffer_(std::move(buffer)) {
+      // Jump to the end of the buffer to get its size
+      auto current = buffer.attr("tell")();
+      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+      size_ = py::cast<size_t>(buffer.attr("tell")());
+      buffer.attr("seek")(current);
+    }
+
+    size_t size() const override {
+      return size_;
+    }
+
+    size_t read(uint64_t pos, void* buf, size_t n, const char* what)
+        const override {
+      // Seek to desired position
+      buffer_.attr("seek")(pos);
+
+      // Read bytes into `buf` from the buffer
+      std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
+      std::copy(
+          bytes.data(),
+          bytes.data() + bytes.size(),
+          reinterpret_cast<char*>(buf));
+      return bytes.size();
+    }
+
+    py::object buffer_;
+    size_t size_;
+  };
+
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object &buffer) {
-        // Get size
-        auto current = buffer.attr("tell")();
-        buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
-        size_t size = py::cast<size_t>(buffer.attr("tell")());
-        buffer.attr("seek")(current);
-
-        // Make function to read bytes from the buffer
-        auto reader_func = [=](void* output_buffer, size_t size) {
-          std::string bytes = py::cast<std::string>(buffer.attr("read")(size));
-          std::copy(bytes.data(), bytes.data() + bytes.size(),
-                    reinterpret_cast<char *>(output_buffer));
-          return bytes.size();
-        };
-
-        // Make function to seek to some spot in the buffer
-        auto seeker_func = [=](size_t pos) {
-          auto result = buffer.attr("seek")(pos);
-          if (!result.is_none()) {
-            return py::cast<size_t>(result);
-          }
-          // Python 2's seek() methods return None
-          return pos;
-        };
-        auto adapter = caffe2::make_unique<caffe2::serialize::FuncAdapter>(
-            std::move(reader_func), std::move(seeker_func), size);
+        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
         return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def("get_record", [](PyTorchStreamReader &self, const std::string &key) {
