@@ -1117,7 +1117,7 @@ graph(%x : Tensor,
 
         get_forward(m._c)(data)
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
-        assert len(m._c._get_modules()) == 1, \
+        assert len(m._modules._c.items()) == 1, \
             'Expected to have single submodule of conv'
 
         get_forward(m._c)(data)
