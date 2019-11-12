@@ -15,7 +15,7 @@ linear_configs_short = op_bench.config_list(
     attr_names=["N", "IN", "OUT"],
     attrs=[
         [4, 256, 128],
-        [16, 1024, 256],
+        [16, 512, 256],
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
