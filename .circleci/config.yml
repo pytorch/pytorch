@@ -409,12 +409,23 @@ jobs:
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
+
+          retrieve_test_reports() {
+            echo "retrieving test reports"
+            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./
+          }
+          trap "retrieve_test_reports" ERR
+
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          retrieve_test_reports
+    - store_test_results:
+        path: test-reports
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
@@ -1069,6 +1080,8 @@ jobs:
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+      - store_test_results:
+          path: test-reports
 
   pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
     environment:
@@ -1299,7 +1312,7 @@ jobs:
           name: cert install
           no_output_timeout: "1h"
           command: |
-            set -e 
+            set -e
             PROJ_ROOT=/Users/distiller/project
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
@@ -1360,7 +1373,7 @@ jobs:
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
               exit 1
-            fi 
+            fi
             echo ${IOS_DEV_TEAM_ID}
             ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
             if ! [ "$?" -eq "0" ]; then
