@@ -9915,7 +9915,7 @@ class TestTorchDeviceType(TestCase):
                 m2 = 3
             res = torch.tensor([3, 6], dtype=dtype, device=device)
             if ((dtype == torch.half and not device.startswith('cuda')) or
-                (dtype == torch.bfloat16 and device != 'cpu')):
+               (dtype == torch.bfloat16 and device != 'cpu')):
                 self.assertRaises(RuntimeError, lambda: m1 * m2)
                 self.assertRaises(RuntimeError, lambda: m2 * m1)
                 self.assertRaises(RuntimeError, lambda: torch.mul(m1, m2))
