@@ -59,8 +59,7 @@ may send and receive gradient recording tensors over RPC. In the forward pass,
 we record when gradient recording tensors are sent over RPC and during the
 backward pass we use this information to perform a distributed backward pass
 using RPC. For more details see the design doc
-`here
-<https://github.com/pytorch/pytorch/pull/29175>`_.
+`here <https://github.com/pytorch/pytorch/pull/29175>`_.
 
 .. automodule:: torch.distributed.autograd
     :members:
