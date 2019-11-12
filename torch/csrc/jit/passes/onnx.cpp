@@ -208,10 +208,14 @@ void BlockToONNX(
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
         if (auto value = old->type()->cast<TensorType>()) {
+          // Check if Tensor has scalartype when overwriting type
           if (value->scalarType().has_value()) {
             outputs[i]->setType(old->type());
           }
         }
+        else
+          outputs[i]->setType(old->type());
+
         // Copy over source location and scope information to all nodes
         // created by the symbolic
         outputs[i]->node()->setSourceRange(node->sourceRange());
