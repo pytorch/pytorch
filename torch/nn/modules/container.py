@@ -87,6 +87,9 @@ class Sequential(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+    def __iter__(self):
+        return iter(self._modules.values())
+
     def forward(self, input):
         for module in self._modules.values():
             input = module(input)
