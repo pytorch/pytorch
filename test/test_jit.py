@@ -62,7 +62,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -432,6 +432,18 @@ class TestJit(JitTestCase):
             return (x,)
         jit_f2 = torch.jit.trace(f2, x)
         assert f2(x) == jit_f2(x)  # fails
+
+    def test_trace_namedtuple(self):
+        Point = namedtuple('point', ['x', 'y'])
+
+        def f(p):
+            if type(p) is tuple:
+                p = Point(*p)
+            return p.x + p.y
+
+        p = Point(torch.randn(1), torch.randn(1))
+        traced = torch.jit.trace(f, (p,))
+        self.assertEqual(f(p), traced(p))
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
@@ -1159,8 +1171,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK: quantized::conv_prepack
-        # CHECK: quantized::conv_unpack
+        # CHECK: quantized::conv2d_prepack
+        # CHECK: quantized::conv2d_unpack
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r)"""
@@ -1177,7 +1189,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype,
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         %a_dequant = aten::dequantize(%a_quant)
         %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
-        %w_quant : Tensor, %b : Tensor? = quantized::conv_unpack(%packed_params)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
@@ -1431,8 +1443,8 @@ graph(%input, %weight):
                 xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
                 wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
                 stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
-                packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
-                w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
+                packed = torch.ops.quantized.conv2d_prepack(wq, self.bias, stride, padding, dilation, groups)
+                w_unpacked, b_unpacked = torch.ops.quantized.conv2d_unpack(packed)
                 r = torch.nn.functional.conv2d(xq.dequantize(),
                                                w_unpacked.dequantize(),
                                                b_unpacked,
@@ -8596,8 +8608,6 @@ a")
             self.assertEqual(m(), 10)
 
     def test_moduledict(self):
-        from collections import OrderedDict
-
         class Inner(torch.nn.Module):
             def forward(self, x):
                 return x + 10
@@ -8685,6 +8695,80 @@ a")
             self.checkModule(M(), (inp, name))
             self.checkModule(M2(), (inp, name))
 
+    def test_custom_container_forward(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        class CustomSequential(nn.Sequential):
+            def __init__(self):
+                super(CustomSequential, self).__init__(
+                    nn.ReLU(), Inner())
+
+            def forward(self, x):
+                x = x + 3
+                for mod in self:
+                    x = mod(x)
+                return x - 5
+
+        self.checkModule(CustomSequential(), (torch.tensor(.5),))
+
+        class CustomModuleList(nn.ModuleList):
+            def __init__(self):
+                super(CustomModuleList, self).__init__(
+                    [nn.ReLU(), Inner()])
+
+            def forward(self, x):
+                x = x + 3
+                for mod in self:
+                    x = mod(x)
+                return x - 5
+
+        self.checkModule(CustomModuleList(), (torch.tensor(.5),))
+
+        class CustomModuleDict(nn.ModuleDict):
+            def __init__(self):
+                super(CustomModuleDict, self).__init__(
+                    OrderedDict([
+                        ('one', Inner()),
+                        ('two', nn.ReLU()),
+                        ('three', Inner()),
+                    ]))
+
+            def forward(self, x):
+                x = x + 3
+                names = torch.jit.annotate(List[str], [])
+                for name, mod in self.items():
+                    x = mod(x)
+                    names.append(name)
+                return names, x - 5
+
+        self.checkModule(CustomModuleDict(), (torch.tensor(.5),))
+
+    def test_override_magic(self):
+        class OverrideMagic(nn.Module):
+            def __init__(self):
+                super(OverrideMagic, self).__init__()
+
+            @torch.jit.export
+            def __len__(self):
+                return 10
+
+        mod = OverrideMagic()
+        self.assertEqual(len(mod), len(torch.jit.script(mod)))
+
+        class OverrideMagicSeq(nn.Sequential):
+            def __init__(self):
+                super(OverrideMagicSeq, self).__init__()
+
+            @torch.jit.export
+            def __len__(self):
+                return 10
+
+        mod = OverrideMagicSeq()
+        self.assertEqual(len(mod), len(torch.jit.script(mod)))
+        self.assertTrue(torch.jit.script(mod))
+
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -8716,6 +8800,9 @@ a")
             for sub in m.mods:
                 v = sub(v)
             self.assertEqual(o, v)
+
+            with self.assertRaisesRegex(Exception, "object is not iterable"):
+                print([val for val in m])
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
@@ -9019,8 +9106,6 @@ a")
             self.assertEqual(o2, v)
 
     def test_script_sequential_orderdict(self):
-        from collections import OrderedDict
-
         class M(torch.jit.ScriptModule):
             __constants__ = ['mods']
 

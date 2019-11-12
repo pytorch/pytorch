@@ -298,9 +298,11 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     _interpolate_warning(mode)
 
     align_corners = _maybe_get_const(align_corners, 'b')
-    if not _is_none(align_corners) and align_corners:
+    if isinstance(align_corners, bool) and align_corners:
         return _unimplemented("interpolate", "align_corners == True")
 
+    if not input.type().dim():
+        return _unimplemented("interpolate", "missing input shape")
     dim = input.type().dim()
 
     if not _is_none(scale_factor):
@@ -314,7 +316,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
                 size = g.op("Concat", *size, axis_i=0)
         scale_factor = _interpolate_size_to_scales(g, input, size, dim)
     else:
-        _unimplemented("Both size and scales are None in __interpolate")
+        return _unimplemented("Both size and scales are None in __interpolate")
     return scale_factor, mode
 
 
