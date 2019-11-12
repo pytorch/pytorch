@@ -1331,8 +1331,8 @@ def script_method(fn):
 #  len(view)
 
 class OrderedDictWrapper(object):
-    def __init__(self, module):
-        self.module = module
+    def __init__(self, _c):
+        self._c = _c
 
     def keys(self):
         return [k for k, v in self.items()]
@@ -1347,21 +1347,26 @@ class OrderedDictWrapper(object):
         raise RuntimeError("cannot delete methods or parameters of a script module")
 
     def items(self):
-        raise NotImplementedError
-
-    def __contains__(self, k):
-        raise NotImplementedError
-
-    def __getitem__(self, k):
-        raise NotImplementedError
+        return self._c.items()
 
     def __setitem__(self, k, v):
-        raise NotImplementedError
+        if k not in self:
+            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
+                               " Tried to add '{}".format(k))
+        self._c.setattr(k, v)
+
+    def __contains__(self, k):
+        return self._c.contains(k)
+
+    def __getitem__(self, k):
+        if k not in self:
+            raise KeyError(k)
+        return self._c.getattr(k)
 
 
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module, python_dict):
-        super(OrderedModuleDict, self).__init__(module)
+        super(OrderedModuleDict, self).__init__(torch._C.ModuleDict(module))
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
@@ -1388,7 +1393,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # Note: the value to be swapped in has to be ScriptModule instead of nn.Module,
         # otherwise it's illegal and we throw error.
         if isinstance(v, ScriptModule):
-            self.module._set_attribute(k, v)
+            self._c.setattr(k, v)
             self._python_modules[k] = v
         else:
             raise RuntimeError("Cannot re-assign modules in a ScriptModule with non-scripted "
@@ -1397,50 +1402,6 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __getitem__(self, k):
         return self._python_modules[k]
-
-
-class OrderedParameterDict(OrderedDictWrapper):
-    def __init__(self, module):
-        super(OrderedParameterDict, self).__init__(module)
-
-    def items(self):
-        return [(name, param) for name, param in self.module._get_parameters()]
-
-    def __setitem__(self, k, v):
-        if not self.module._has_parameter(k):
-            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
-                               " Tried to add '{}".format(k))
-        self.module._set_parameter(k, v)
-
-    def __contains__(self, k):
-        return self.module._has_parameter(k)
-
-    def __getitem__(self, k):
-        if k not in self:
-            raise KeyError(k)
-        return self.module._get_parameter(k)
-
-
-class OrderedBufferDict(OrderedDictWrapper):
-    def __init__(self, module):
-        super(OrderedBufferDict, self).__init__(module)
-
-    def items(self):
-        return [(name, param) for name, param in self.module._get_buffers()]
-
-    def __setitem__(self, k, v):
-        if not self.module._has_buffer(k):
-            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
-                               " Tried to add '{}".format(k))
-        self.module._set_attribute(k, v)
-
-    def __contains__(self, k):
-        return self.module._has_buffer(k)
-
-    def __getitem__(self, k):
-        if k not in self:
-            raise KeyError(k)
-        return self.module._get_buffer(k)
 
 # For each user-defined class that subclasses ScriptModule, this meta-class:
 # (1) finds all the methods annotated with @script_method in a ScriptModule and
@@ -1621,8 +1582,8 @@ if _enabled:
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
-            script_module._parameters = OrderedParameterDict(script_module._c)
-            script_module._buffers = OrderedBufferDict(script_module._c)
+            script_module._parameters = OrderedDictWrapper(torch._C.ParameterDict(script_module._c))
+            script_module._buffers = OrderedDictWrapper(torch._C.BufferDict(script_module._c))
             script_module._modules = OrderedModuleDict(script_module._c, script_module._modules)
             script_module._initializing = False
             return script_module
@@ -1689,32 +1650,29 @@ if _enabled:
             if self._initializing:
                 return super(RecursiveScriptModule, self).__getattr__(attr)
 
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
-            if self._c._has_method(attr):
+            # _modules check is before hasattr since modules are included as attributes in _c,
+            # but we want to get the python wrapper from _modules instead of the raw _c object.
+            if attr in self._modules:
+                return self._modules[attr]
+            elif self._c.hasattr(attr):
+                return self._c.getattr(attr)
+            elif self._c._has_method(attr):
                 script_method = self._c._get_method(attr)
                 # cache method so future calls do not go through __getattr__
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
 
-            # parameters, buffers, and submodules can be handled by delegating
-            # to nn.Module, which will index into our custom OrderedXDicts
             return super(RecursiveScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if self._initializing:
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
-            if self._c._has_attribute(attr):
-                self._c._set_attribute(attr, value)
-            elif self._c._has_buffer(attr):
-                # XXX: buffers are implemented as attributes in the JIT
-                self._c._set_attribute(attr, value)
-            elif self._c._has_module(attr):
+            if attr in self._modules:
                 self._modules[attr] = value
-            elif self._c._has_parameter(attr):
-                self._c._set_parameter(attr, value)
+            elif self._c.hasattr(attr):
+                self._c.setattr(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
                 # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
                 # We should encode constants as class type attributes (or something) so it persists across save/load.
