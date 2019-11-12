@@ -15550,7 +15550,7 @@ a")
                   result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
                                     non_blocking=False, copy=False)
                   result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
+                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"), memory_format=torch.contiguous_format)
                   _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
                   return _2
                 ''',
