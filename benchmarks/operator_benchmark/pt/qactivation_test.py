@@ -3,8 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import random
-
 import torch
 import torch.nn.quantized as nnq
 

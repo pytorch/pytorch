@@ -124,11 +124,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
             op.set_module_name(op_name)
 
         op._set_backward_test(run_backward)
-        try:
-            op.init(**init_dict)
-        except SkipInputShape:
-            print("Skipping: Config<{}> is not valid for op<{}>".format(input_config, op.module_name()))
-            continue
+        op.init(**init_dict)
 
         input_name = None
 
@@ -174,7 +170,7 @@ class BenchmarkRunner(object):
         self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.predefined_minimum_secs = 2
+        self.predefined_minimum_secs = 1
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
@@ -190,7 +186,6 @@ class BenchmarkRunner(object):
         if self.args.test_name is not None:
             self.args.tag_filter = None
 
-
     def _print_header(self):
         DASH_LINE = '-' * 40
         print("# {}\n"
@@ -199,16 +194,10 @@ class BenchmarkRunner(object):
               "# Tag : {}\n".format(DASH_LINE, DASH_LINE, self.args.tag_filter))
         if self.args.list_tests:
             print("# List of tests:")
-            for _, test_case in BENCHMARK_TESTER.items():
-                print("# {}".format(test_case.test_config.test_name))
         elif self.args.list_ops:
             print("# List of Operators to run:")
-            if self.args.operators is None:
-                ops = set(test_case.op_bench.module_name()
-                          for _, test_case in BENCHMARK_TESTER.items())
-                for op in ops:
-                    print("# {}".format(op))
-            else:
+            self.printed_ops_list = set()
+            if self.args.operators:
                 print("# {}".format(self.args.operators))
 
     def _print_perf_result(self, reported_run_time_us, test_case):
@@ -353,11 +342,24 @@ class BenchmarkRunner(object):
 
         return False
 
+    def _print_test_case_info(self, test_case):
+        # Print out the test name and skip the real execution
+        if self.args.list_tests:
+            print("# {}".format(test_case.test_config.test_name))
+            return True
+        elif self.args.list_ops:
+            if self.args.operators is None:
+                op_name = test_case.op_bench.module_name()
+
+                if op_name not in self.printed_ops_list:
+                    print("# {}".format(op_name))
+                    self.printed_ops_list.add(op_name)
+            return True
+
+        return False
+
     def run(self):
         self._print_header()
-
-        if self.args.list_ops or self.args.list_tests:
-            return
 
         for test_metainfo in BENCHMARK_TESTER:
             # If auto_set is used, _build_test will return a list of tests including
@@ -366,6 +368,9 @@ class BenchmarkRunner(object):
             for test in test_list:
                 full_test_id, test_case = test
                 op_test_config = test_case.test_config
+
+                if self._print_test_case_info(test_case):
+                    continue
 
                 if not self._keep_test(test_case):
                     continue
