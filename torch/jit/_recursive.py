@@ -1,7 +1,6 @@
 import inspect
 import torch
 import collections
-import types
 import textwrap
 import functools
 import warnings
@@ -44,7 +43,7 @@ def make_stub_from_method(nn_module, method):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
+_constant_types = (bool, float, int, str, type(None), torch.device, torch.layout, torch.dtype)
 
 def _get_valid_constant(attr, v):
     if isinstance(v, _constant_types):
@@ -295,13 +294,9 @@ def create_script_module_for_tracing(nn_module, stubs):
     # Get a ConcreteType without a JIT type. We will generate one ourselves
     # and fill it in.
     concrete_type = infer_raw_concrete_type(nn_module)
-    cpp_module = torch._C.ScriptModule(torch._jit_internal._qualified_name(type(nn_module)),
-                                       torch.jit._python_cu,
-                                       True)
-    # Poison this concrete type to ensure that it never gets re-used
     concrete_type.set_poisoned()
-    concrete_type.add_jit_type(cpp_module._type())
-
+    concrete_type.create_new_type_from_this()
+    cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
     return create_script_module_impl(nn_module, concrete_type, cpp_module, stubs)
 
 
@@ -336,11 +331,8 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
         for name, (attr_type, is_param) in concrete_type.get_attributes().items():
             orig_value = getattr(nn_module, name)
-            if is_param:
-                cpp_module._register_parameter(name, orig_value, False)
-            else:
-                orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
-                cpp_module._register_attribute(name, attr_type, orig_value)
+            orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
+            cpp_module.setattr(name, orig_value)
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
         #    recursively scripting them.
@@ -353,18 +345,8 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
             else:
                 # use the default recursive rule to compile the module
                 scripted = recursive_script(orig_value)
-            cpp_module._register_module(name, scripted._c)
-
+            cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
-
-        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
-        #    This ensures we can access these Python methods on the ScriptModule.
-        for name in dir(nn_module):
-            item = getattr(nn_module, name, None)
-            if not inspect.ismethod(item):
-                continue
-            if _jit_internal.is_ignored_fn(item):
-                setattr(script_module, name, item)
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
@@ -594,7 +576,7 @@ def wrap_cpp_module(cpp_module):
     Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules
     """
     def init_fn(script_module):
-        for name, cpp_module in script_module._c._get_modules():
+        for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 

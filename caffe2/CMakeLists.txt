@@ -445,6 +445,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/object.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
@@ -582,6 +583,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/embedding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
