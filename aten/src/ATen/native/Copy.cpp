@@ -122,6 +122,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     self.set_quantizer_(src.quantizer());
   }
 
+  if (!self.is_quantized() && src.is_quantized()) {
+    TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
+  }
+
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(true);
   iter.add_output(self);
