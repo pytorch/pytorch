@@ -237,6 +237,12 @@ class RpcTest(object):
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
+    @dist_init
+    def test_self_py_udf_remote(self):
+        self_worker_info = rpc.get_worker_info()
+        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
+        self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1 + 3)
+
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
     @dist_init(setup_model_parallel=False)
