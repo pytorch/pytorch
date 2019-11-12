@@ -14,7 +14,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-static ObjectPtr create_object_value(
+static ObjectPtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
@@ -33,7 +33,7 @@ static ObjectPtr create_object_value(
 }
 
 Module::Module(c10::QualifiedName class_name)
-    : Object(create_object_value(
+    : Object(create_module_object(
           std::move(class_name),
           std::make_shared<CompilationUnit>())) {}
 
@@ -48,20 +48,10 @@ Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle)
-    : Object(create_object_value(
+    : Object(create_module_object(
           std::move(class_name),
           std::move(cu),
           shouldMangle)) {}
-
-ObjectPtr Object::object_value() const {
-  if (!object_value_) {
-    // User has created a Model without assigning it to something already
-    // loaded. This is done in tests, and when using the .define method.
-    object_value_ =
-        create_object_value("Object", std::make_shared<CompilationUnit>());
-  }
-  return object_value_;
-}
 
 // first class mode runs models as first class objects,
 // and does not force inlining everywhere. This is experimental
@@ -102,7 +92,9 @@ void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
 #endif
 }
 
-void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
+void Module::_save_for_mobile(
+    std::ostream& out,
+    const ExtraFilesMap& extra_files) const {
 #ifndef C10_MOBILE
   ExportModule(*this, out, extra_files, true);
 #else
@@ -110,8 +102,9 @@ void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_file
 #endif
 }
 
-void Module::_save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
-    const {
+void Module::_save_for_mobile(
+    const std::string& filename,
+    const ExtraFilesMap& extra_files) const {
 #ifndef C10_MOBILE
   ExportModule(*this, filename, extra_files, true);
 #else
@@ -145,26 +138,20 @@ void Module::to_impl(
   }
 }
 
-Method::Method(ObjectPtr owner, Function* function)
+Method::Method(ModulePtr owner, Function* function)
     : owner_(std::move(owner)), function_(function) {}
 
 Module Method::owner() const {
   return Module(owner_);
 }
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner().object_value());
+  stack.insert(stack.begin(), owner()._ivalue());
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
-  stack.insert(stack.begin(), owner().object_value());
+  stack.insert(stack.begin(), owner()._ivalue());
   return (*function_)(std::move(stack), kwargs);
-}
-
-void Object::define(const std::string& src, const ResolverPtr& resolver) {
-  const auto self = SimpleSelf(type());
-  class_compilation_unit()->define(
-      name(), src, resolver ? resolver : script::nativeResolver(), &self);
 }
 
 void Module::clone_method(
@@ -192,7 +179,7 @@ void Module::clone_method(
   auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
   const auto this_method_name = getNameForMethod(method.name());
   auto copied =
-      class_compilation_unit()->create_function(this_method_name, graph);
+      _ivalue()->compilation_unit()->create_function(this_method_name, graph);
   type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
@@ -203,8 +190,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   while (!to_scan.empty()) {
     auto entry = to_scan.back();
     to_scan.pop_back();
-    type_remap[entry.first.object_value()->type()] =
-        entry.second.object_value()->type();
+    type_remap[entry.first._ivalue()->type()] = entry.second._ivalue()->type();
     for (const NameModule& s : entry.first.named_children()) {
       to_scan.emplace_back(
           s.value, Module(entry.second.attr(s.name).toObject()));
@@ -220,16 +206,16 @@ Module Module::clone() const {
 
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap) const {
-  // Create a new object_value in the same compilation unit.
+  // Create a new _ivalue in the same compilation unit.
   // The name is the same as for the original module, but it'll be mangled.
   // The class type is also created from scratch.
-  Module r(name(), class_compilation_unit(), true);
+  Module r(*type()->name(), _ivalue()->compilation_unit(), true);
   type_remap[type()] = r.type();
 
   // Copy slots. If a slot is a module - recursively clone it.
   size_t N = type()->numAttributes();
   for (size_t i = 0; i < N; ++i) {
-    IValue s = object_value()->getSlot(i);
+    IValue s = _ivalue()->getSlot(i);
     if (type()->getAttribute(i)->is_module()) {
       const Module& orig = Module(s.toObject());
       Module cloned = orig.clone_impl(type_remap);
@@ -237,7 +223,10 @@ Module Module::clone_impl(
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
       r.register_attribute(
-          type()->getAttributeName(i), s.type(), s, type()->is_parameter(i));
+          type()->getAttributeName(i),
+          type()->getAttribute(i),
+          s,
+          type()->is_parameter(i));
     }
   }
 
@@ -250,18 +239,18 @@ Module Module::clone_impl(
 
 void Module::train(bool on) {
   for (Module m : modules()) {
-    if (auto slot = m.object_value()->type()->findAttributeSlot("training")) {
-      m.object_value()->setSlot(*slot, on);
+    if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
+      m._ivalue()->setSlot(*slot, on);
     } else {
       TORCH_INTERNAL_ASSERT("'training' attribute not found");
     }
   }
 }
 
-IValue Object::create_class(const c10::QualifiedName& name, Stack stack) const {
+IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Look up the class
   const auto classType =
-      class_compilation_unit()->get_class(c10::QualifiedName(name));
+      _ivalue()->compilation_unit()->get_class(c10::QualifiedName(name));
   if (!classType) {
     AT_ERROR(
         "Could not find class with name: '",
@@ -272,7 +261,7 @@ IValue Object::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
   auto obj = c10::ivalue::Object::create(
-      c10::StrongTypePtr(class_compilation_unit(), classType), numAttrs);
+      c10::StrongTypePtr(_ivalue()->compilation_unit(), classType), numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};
@@ -311,15 +300,6 @@ parameter_list Module::parameters(bool recurse) const {
 }
 named_parameter_list Module::named_parameters(bool recurse) const {
   return named_parameter_list(*this, recurse, /*return_module=*/false);
-}
-
-c10::optional<Method> Object::find_method(const std::string& basename) const {
-  for (Function* fn : type()->methods()) {
-    if (fn->name() == basename) {
-      return Method(object_value(), fn);
-    }
-  }
-  return c10::nullopt;
 }
 
 attribute_list Module::attributes(bool recurse) const {
@@ -374,7 +354,7 @@ std::string Module::dump_to_str(
     methods_ss << "  }" << std::endl;
   }
 
-  ss << "module " << name().qualifiedName() << " {" << std::endl;
+  ss << "module " << type()->name()->qualifiedName() << " {" << std::endl;
   ss << "  parameters {" << std::endl;
   ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
   ss << "  }" << std::endl;
@@ -403,9 +383,7 @@ void Module::dump(
     bool print_attr_values = true,
     bool print_param_values = true) const {
   std::cout << dump_to_str(
-                   print_method_bodies,
-                   print_attr_values,
-                   print_param_values)
+                   print_method_bodies, print_attr_values, print_param_values)
             << std::endl;
 }
 
