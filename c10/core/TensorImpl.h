@@ -1378,10 +1378,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * contiguous
    */
   virtual void empty_tensor_restride(MemoryFormat memory_format) {
-    is_contiguous_ = false;
-    is_channels_last_contiguous_ = false;
-    is_channels_last_ = false;
-    is_non_overlapping_and_dense_ = false;
+    #ifdef DEBUG
+        TORCH_INTERNAL_ASSERT(compute_numel() == numel_,
+        "If you are seeing this error, that means empty_tensor_restride was "
+        "called before setting correct numel");
+    #endif
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         strides_.resize(sizes_.size(), 0);
@@ -1392,23 +1393,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
           }
         }
-        is_contiguous_ = true;
-        is_non_overlapping_and_dense_ = true;
-        return;
+        break;
       }
       case MemoryFormat::ChannelsLast: {
         TORCH_CHECK(
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
-        is_channels_last_contiguous_ = true;
-        is_channels_last_ = true;
-        is_non_overlapping_and_dense_ = true;
-        return;
+        break;
       }
       case MemoryFormat::Preserve:
         TORCH_CHECK(false, "unsupported memory format ", memory_format);
+        // Cleaning warning messages, no need to break as TORCH_CHECK(false)
+        // terminates flow.
+        // break;
     }
+    // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
+    // exclusive see #24090
+    refresh_contiguous();
   }
 
   bool is_strides_like_channels_last() const {
@@ -1441,8 +1443,8 @@ private:
       new_numel *= src[i];
       sizes_[i] = src[i];
     }
-    empty_tensor_restride(MemoryFormat::Contiguous);
     numel_ = new_numel;
+    empty_tensor_restride(MemoryFormat::Contiguous);
     return numel_ != old_numel;
   }
 

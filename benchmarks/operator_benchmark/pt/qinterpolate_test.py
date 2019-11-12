@@ -20,7 +20,7 @@ qinterpolate_long_configs = op_bench.config_list(
     cross_product_configs={
         'dtype': [torch.quint8, torch.qint8, torch.qint32],
         'mode': ['nearest', 'bilinear'],
-        'scale': [0.25, 0.5, 1.0, 1.5, 2.0],
+        'scale': [0.5, 1.0, 2.0],
         'contig': [True],  # TODO: Add `False` after #29435
     },
     tags=['long']
