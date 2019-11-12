@@ -1,5 +1,5 @@
 #pragma once
-
+#include <c10/util/C++17.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
@@ -45,10 +45,31 @@ struct inter_copy_type<uint8_t> {
 template <typename T>
 using inter_copy_type_t = typename inter_copy_type<T>::type;
 
+template<typename dest_t, typename src_t>
+struct needs_real {
+  constexpr static bool value = (is_complex_t<src_t>::value && !is_complex_t<dest_t>::value);
+};
+
+template<bool, typename src_t>
+struct maybe_real {
+  C10_HOST_DEVICE static inline src_t apply(src_t src) {
+    return src;
+  }
+};
+
+template<typename src_t>
+struct maybe_real<true, src_t> {
+  C10_HOST_DEVICE static inline auto apply(src_t src) -> decltype(src.real()) {
+    return src.real();
+  }
+};
+
+
 template <typename dest_t, typename src_t>
 C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
+  constexpr bool real = needs_real<dest_t, src_t>::value;
   return static_cast<dest_t>(
-    static_cast<inter_copy_type_t<dest_t>>(src));
+    static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
 }
 
 // Dynamic type casting utils:
@@ -103,38 +124,16 @@ C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
 #define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
 #endif
 
-template<typename dest_t, typename complex_src_t>
-struct MaybeReal {
-  static C10_HOST_DEVICE inline typename complex_src_t::value_type maybe_real(complex_src_t src) {
-    return src.real();
-  }
-};
-
-template<typename complex_src_t>
-struct MaybeReal<std::complex<float>, complex_src_t> {
-  static C10_HOST_DEVICE inline complex_src_t maybe_real(complex_src_t src) {
-    return src;
-  }
-};
-
-template<typename complex_src_t>
-struct MaybeReal<std::complex<double>, complex_src_t> {
-  static C10_HOST_DEVICE inline complex_src_t maybe_real(complex_src_t src) {
-    return src;
-  }
-};
-
 // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
 #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(*(const type *)ptr);
-#define FETCH_AND_CAST_COMPLEX_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(MaybeReal<dest_t, type>::maybe_real(*(const type *)ptr));
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, FETCH_AND_CAST_CASE)
-    AT_FORALL_COMPLEX_TYPES(FETCH_AND_CAST_COMPLEX_CASE)
-    default:;
+    AT_FORALL_COMPLEX_TYPES(FETCH_AND_CAST_CASE)
+    default:
+      ERROR_UNSUPPORTED_CAST
   }
-  ERROR_UNSUPPORTED_CAST
   return dest_t(0); // just to avoid compiler warning
 }
 
@@ -144,43 +143,7 @@ template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
-    case kComplexFloat:
-      *(std::complex<float> *)ptr = static_cast<std::complex<float>>(value);
-      break;
-    case kComplexDouble:
-      *(std::complex<double> *)ptr = static_cast<std::complex<double>>(value);
-      break;
-    default:;
-  }
-  ERROR_UNSUPPORTED_CAST
-}
-
-template<>
-C10_HOST_DEVICE inline void cast_and_store<std::complex<float>>(const ScalarType dest_type, void *ptr, std::complex<float> value_) {
-  auto value = value_.real();
-  switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
-    case kComplexFloat:
-      *(std::complex<float> *)ptr = static_cast<std::complex<float>>(value_);
-      break;
-    case kComplexDouble:
-      *(std::complex<double> *)ptr = static_cast<std::complex<double>>(value_);
-      break;
-    default:;
-  }
-  ERROR_UNSUPPORTED_CAST
-}
-template<>
-C10_HOST_DEVICE inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, void *ptr, std::complex<double> value_) {
-  auto value = value_.real();
-  switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
-    case kComplexFloat:
-      *(std::complex<float> *)ptr = static_cast<std::complex<float>>(value_);
-      break;
-    case kComplexDouble:
-      *(std::complex<double> *)ptr = static_cast<std::complex<double>>(value_);
-      break;
+    AT_FORALL_COMPLEX_TYPES(CAST_AND_STORE_CASE)
     default:;
   }
   ERROR_UNSUPPORTED_CAST
