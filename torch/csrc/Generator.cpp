@@ -4,6 +4,12 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGenerator.h>
 
+#include <ATen/AESCPUGenerator.h>
+#include <ATen/RDRANDCPUGenerator.h>
+#undef NAMESPACE_END
+
+#include <ATen/MT19937CPUGenerator.h>
+
 #include <TH/TH.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Device.h>
@@ -47,16 +53,23 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
 {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-    "Generator(Device device=None)"
+    "Generator(Device device=None, std::string algorithm=None)"
   });
-  torch::ParsedArgs<1> parsed_args;
+  torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
+  const auto algorithm = r.string(1);
 
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
   if (device.type() == at::kCPU) {
-    self->cdata = new CPUGenerator();
+    if ("aes" == algorithm) {
+      self->cdata = new AESCPUGenerator();
+    } else if ("rdrand" == algorithm) {
+      self->cdata = new RDRANDCPUGenerator();
+    } else {
+      self->cdata = new MT19937CPUGenerator();
+    }
   } else if (device.type() == at::kCUDA){
     self->cdata = new CUDAGenerator(device.index());
   } else {
@@ -67,7 +80,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   TORCH_CHECK(device.type() == at::kCPU,
               "Device type ", c10::DeviceTypeName(device.type()),
               " is not supported for torch.Generator() api.");
-  self->cdata = new CPUGenerator();
+  self->cdata = new AESCPUGenerator();
 #endif
   self->owner = true;
   return (PyObject*)self.release();

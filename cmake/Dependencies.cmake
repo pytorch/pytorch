@@ -92,6 +92,12 @@ if (USE_TBB)
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 endif()
 
+if (USE_CRYPTOPP)
+  message(STATUS "Compiling CryptoPP from source")
+  set(CRYPTOPP_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/cryptopp")
+  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cryptopp)
+endif()
+
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)

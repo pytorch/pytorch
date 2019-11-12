@@ -8,6 +8,7 @@
 
 #include <ATen/CPUGenerator.h>
 #include <ATen/core/Array.h>
+#include <c10/util/Half.h>
 #include <type_traits>
 #include <limits>
 #include <cmath>

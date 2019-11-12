@@ -873,6 +873,21 @@ if(USE_ROCM)
     )
 endif()
 
+if(USE_CRYPTOPP)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS "${CMAKE_BINARY_DIR}/lib/libcryptopp.a")
+endif()
+
+if (NOT WIN32 AND NOT USE_ASAN)
+  # Enable hidden visibility by default to make it easier to debug issues with
+  # TORCH_API annotations. Hidden visibility with selective default visibility
+  # behaves close enough to Windows' dllimport/dllexport.
+  #
+  # Unfortunately, hidden visibility messes up some ubsan warnings because
+  # templated classes crossing library boundary get duplicated (but identical)
+  # definitions. It's easier to just disable it.
+  target_compile_options(torch PRIVATE "-fvisibility=hidden")
+endif()
+
 if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
   target_link_libraries(torch_cpu PRIVATE caffe2_protos_whole)
@@ -1119,7 +1134,7 @@ if (BUILD_TEST)
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
-    target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
+    target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main "${CMAKE_BINARY_DIR}/lib/libcryptopp.a")
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)

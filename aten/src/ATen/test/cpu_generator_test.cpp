@@ -4,6 +4,7 @@
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/core/PhiloxRNGEngine.h>
+#include <ATen/core/MT19937RNGEngine.h>
 #include <thread>
 #include <limits>
 #include <random>

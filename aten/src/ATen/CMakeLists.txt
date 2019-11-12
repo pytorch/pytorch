@@ -130,6 +130,12 @@ IF (USE_TBB)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
 ENDIF()
 
+IF (USE_CRYPTOPP)
+  message("ATen is compiled with CryptoPP (${CRYPTOPP_ROOT_DIR})")
+  list(APPEND ATen_CPU_INCLUDE ${CRYPTOPP_ROOT_DIR})
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS "${CMAKE_BINARY_DIR}/lib/libcryptopp.a")
+ENDIF()
+
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")

@@ -160,6 +160,9 @@
 #   USE_TBB
 #      enable TBB support
 #
+#   USE_CRYPTOPP
+#      enable CryptoPP support
+#
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
