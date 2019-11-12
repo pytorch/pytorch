@@ -45,13 +45,14 @@ Tensor& resize_as_(
         optional_memory_format.value_or(MemoryFormat::Contiguous));
     return native::resize_as_sparse_(self, the_template);
   }
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
   Tensor& result = self.resize_(the_template.sizes());
-  if (memory_format == MemoryFormat::Preserve) {
-    memory_format = the_template.suggest_memory_format();
+  if (optional_memory_format.has_value()) {
+    auto memory_format = optional_memory_format.value();
+    if (memory_format == MemoryFormat::Preserve) {
+      memory_format = the_template.suggest_memory_format();
+    }
+    self.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
-  self.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 #ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, the_template);
 #endif
