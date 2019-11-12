@@ -52,11 +52,11 @@ def relu(g, input):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'f', 'i', 't')
-def quantize_per_tensor(g, input, scale, zero_point, dtype):
+@parse_args('v', 'f', 'i')
+def quantize_per_tensor(g, input, scale, zero_point):
     kwargs = {
         "Y_scale_f": scale,
-        "zero_point_i": zero_point,
+        "Y_zero_point_i": zero_point,
     }
     output = g.op("_caffe2::Int8Quantize", input, **kwargs)
     sym_help._quantized_ops.add(output)

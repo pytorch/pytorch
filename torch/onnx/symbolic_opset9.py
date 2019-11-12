@@ -2091,19 +2091,14 @@ def _weight_norm(g, weight_v, weight_g, dim):
     else:
         return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
 
+# Ops below are for PyTorch Quantization conversion process.
 @parse_args('v', 'f', 'i', 't')
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
-    kwargs = {
-        "Y_scale_f": scale,
-        "zero_point_i": zero_point,
-    }
-    output = g.op("_caffe2::Int8Quantize", input, **kwargs)
-    sym_help._quantized_ops.add(output)
-    return output
+    return sym_caffe2.quantize_per_tensor(g, input, scale, zero_point)
 
 @parse_args('v')
 def dequantize(g, input):
-    return g.op("_caffe2::Int8Dequantize", input)
+    return sym_caffe2.dequantize(g, input)
 
 @parse_args('v', 't', 't', 't', 't', 't', 't', 't')
 def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
