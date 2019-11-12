@@ -264,7 +264,6 @@ TEST(TensorTest, TorchTensorCtorScalarBoolType) {
 
 TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   auto tensor = torch::tensor({1, 2, 3});
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kLong);
@@ -273,7 +272,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
   tensor = torch::tensor(at::ArrayRef<int>({1, 2, 3}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kInt);
@@ -282,7 +280,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
   tensor = torch::tensor(std::vector<int>({1, 2, 3}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kInt);
@@ -291,7 +288,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
   tensor = torch::tensor(at::ArrayRef<int64_t>({1, 2, 3}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kLong);
@@ -300,7 +296,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
   tensor = torch::tensor(std::vector<int64_t>({1, 2, 3}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kLong);
@@ -311,7 +306,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
 
 TEST(TensorTest, TorchTensorCtorSingleDimFloatingType) {
   auto tensor = torch::tensor({1.5, 2.25, 3.125});
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kDouble);
@@ -320,7 +314,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimFloatingType) {
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
   tensor = torch::tensor(at::ArrayRef<double>({1.5, 2.25, 3.125}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
@@ -328,7 +321,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimFloatingType) {
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
   tensor = torch::tensor(std::vector<double>({1.5, 2.25, 3.125}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kDouble);
@@ -339,7 +331,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimFloatingType) {
 
 TEST(TensorTest, TorchTensorCtorSingleDimBoolType) {
   auto tensor = torch::tensor({true, false, true});
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kBool);
@@ -348,7 +339,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimBoolType) {
   ASSERT_TRUE(exactly_equal(tensor[2], true));
 
   tensor = torch::tensor(at::ArrayRef<bool>({true, false, true}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kBool);
@@ -647,7 +637,6 @@ TEST(TensorTest, FromBlob) {
   std::vector<double> v = {1.0, 2.0, 3.0};
   auto tensor = torch::from_blob(
       v.data(), v.size(), torch::dtype(torch::kFloat64).requires_grad(true));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_TRUE(tensor.requires_grad());
   ASSERT_EQ(tensor.dtype(), torch::kFloat64);
   ASSERT_EQ(tensor.numel(), 3);
@@ -682,7 +671,6 @@ TEST(TensorTest, FromBlobWithStrides) {
       /*sizes=*/{3, 3},
       /*strides=*/{1, 3},
       torch::kInt32);
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.dtype(), torch::kInt32);
   ASSERT_EQ(tensor.numel(), 9);
   const std::vector<int64_t> expected_strides = {1, 3};
