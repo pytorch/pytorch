@@ -1684,9 +1684,17 @@ template <typename T>
 void ConvertIntegralValueToCaffe2(caffe2::OperatorDef* c2_op,
                                   caffe2::Argument* c2_values,
                                   const TensorProto& onnx_tensor) {
-  c2_op->set_type(
-      onnx_tensor.data_type() == TensorProto::BOOL ? "GivenTensorBoolFill"
-                                                   : "GivenTensorIntFill");
+  std::string c2_op_type;
+  if (onnx_tensor.data_type() == TensorProto::BOOL) {
+    c2_op_type = "GivenTensorBoolFill";
+  } else if (onnx_tensor.data_type() == TensorProto::UINT8 || onnx_tensor.data_type() == TensorProto::INT8) {
+    c2_op_type = "Int8GivenIntTensorFill";
+  }
+  else {
+    c2_op_type = "GivenTensorIntFill";
+  }
+  c2_op->set_type(c2_op_type);
+
   ::google::protobuf::RepeatedField<T> tmp;
   const ::google::protobuf::RepeatedField<T>* src =
       &tmp;

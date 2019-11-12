@@ -14,9 +14,7 @@ using namespace ::c10::onnx;
 
 }
 template <class Result, class... Args>
-inline Result callOpUnboxed(
-    const c10::OperatorHandle& op,
-    Args... args) {
+inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   return c10::Dispatcher::singleton().template callUnboxed<Result, Args...>(
       op, std::forward<Args>(args)...);
@@ -58,7 +56,8 @@ double getScaleFromInput(Node* input_node) {
       return scale.value().toDouble();
     }
   } else if (input_name.find("quantized::linear") != std::string::npos) {
-    // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale, %w_zero_point)
+    // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale,
+    // %w_zero_point)
     scale = toIValue(input_node->inputs()[3]);
     if (scale.value().isDouble()) {
       return scale.value().toDouble();
@@ -96,6 +95,34 @@ double getScaleFromInput(Node* input_node) {
   return 1.0;
 }
 
+Node* CreateQuantizedWeights(
+    std::string data,
+    std::shared_ptr<Graph>& graph,
+    std::vector<int64_t> shapes,
+    double scale,
+    int64_t zero_point) {
+  Node* cast_node = graph->create(Symbol::caffe2("Int8GivenTensorFill"));
+  cast_node->is_(Symbol::attr("shape"), shapes);
+  cast_node->i_(Symbol::attr("Y_zero_point"), zero_point);
+  cast_node->f_(Symbol::attr("Y_scale"), scale);
+  cast_node->s_(Symbol::attr("values"), data);
+  return cast_node;
+}
+
+Node* CreateQuantizedBias(
+    std::vector<int64_t> data,
+    std::shared_ptr<Graph>& graph,
+    std::vector<int64_t> shapes,
+    double scale,
+    int64_t zero_point) {
+  Node* cast_node = graph->create(Symbol::caffe2("Int8GivenIntTensorFill"));
+  cast_node->is_(Symbol::attr("shape"), shapes);
+  cast_node->i_(Symbol::attr("Y_zero_point"), zero_point);
+  cast_node->f_(Symbol::attr("Y_scale"), scale);
+  cast_node->is_(Symbol::attr("values"), data);
+  return cast_node;
+}
+
 // This is called after onnx optimize_graph so the graph already contains
 // "_caffe2" nodes at this point for quantized ops. Using pattern matching we
 // find the relevant nodes and extract the packed_params The packed_params are
@@ -129,6 +156,8 @@ void unpackQuantizedWeightsHelper(
         std::tuple<at::Tensor, c10::optional<at::Tensor>>,
         at::Tensor>(*op, packed_weight);
     at::Tensor unpacked_weight = std::get<0>(result);
+    // Permute weights?
+    /*
     if (unpacked_weight.ndimension() == 2) {
       std::cout << "2 dim weight ... permuting \n";
       unpacked_weight.permute({1, 0});
@@ -136,46 +165,70 @@ void unpackQuantizedWeightsHelper(
       std::cout << "4 dim weight ... permuting \n";
       unpacked_weight.permute({0, 2, 3, 1});
     }
+    */
     // Convert from int8 to uint8
     int8_t* inp_data = (int8_t*)unpacked_weight.data_ptr<c10::qint8>();
     auto weight_zp = unpacked_weight.q_zero_point() + 128;
-    at::Tensor caffe2_weight = at::_empty_affine_quantized(
-        unpacked_weight.sizes(),
-        at::device(at::kCPU).dtype(at::kQUInt8),
-        unpacked_weight.q_scale(),
-        weight_zp);
-    auto* caffe2_w_data = caffe2_weight.data_ptr<c10::quint8>();
     auto wt_numel = unpacked_weight.numel();
+    uint8_t* caffe2_w_data =
+        static_cast<uint8_t*>(malloc(sizeof(uint8_t) * wt_numel));
     for (int i = 0; i < wt_numel; ++i) {
-      caffe2_w_data[i] = static_cast<c10::quint8>(inp_data[i] + 128);
+      caffe2_w_data[i] = inp_data[i] + 128;
     }
-
     // Remove packed_params
     qlinear_node->removeInput(1);
 
-    // Update the input
+    // Create caffe2::Int8GivenTensorFill node
     graph->setInsertPoint(qlinear_node);
-    auto val = graph->insertConstant(caffe2_weight);
-    qlinear_node->insertInput(1, val);
+    std::string w_data;
+    for (int i = 0; i < wt_numel; ++i) {
+      w_data = w_data + static_cast<char>(caffe2_w_data[i]);
+    }
+
+    Node* c2_weight = CreateQuantizedWeights(
+        w_data,
+        graph,
+        unpacked_weight.sizes().vec(),
+        unpacked_weight.q_scale(),
+        weight_zp);
+    c2_weight->insertBefore(qlinear_node);
+    qlinear_node->insertInput(1, c2_weight->output());
 
     // Add bias
+    at::Tensor original_bias;
     if (std::get<1>(result).has_value()) {
-      at::Tensor original_bias = std::get<1>(result).value();
+      original_bias = std::get<1>(result).value();
       original_bias.set_requires_grad(false);
-      auto weight_scale = unpacked_weight.q_scale();
-
-      auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
-      TORCH_INTERNAL_ASSERT(input_val->type()->isSubtypeOf(TensorType::get()));
-
-      auto input_node =
-          match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
-      auto input_scale = getScaleFromInput(input_node);
-
-      auto q_bias = at::quantize_per_tensor(
-          original_bias, weight_scale * input_scale, 0, at::kQInt8);
-      auto val = graph->insertConstant(q_bias);
-      qlinear_node->insertInput(2, val);
+    } else {
+      int64_t bias_size = unpacked_weight.size(0);
+      original_bias =
+          at::zeros(bias_size, unpacked_weight.options().dtype(at::kFloat));
     }
+
+    auto weight_scale = unpacked_weight.q_scale();
+
+    auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
+    TORCH_INTERNAL_ASSERT(input_val->type()->isSubtypeOf(TensorType::get()));
+
+    auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
+    auto input_scale = getScaleFromInput(input_node);
+    auto q_bias = at::quantize_per_tensor(
+        original_bias, weight_scale * input_scale, 0, at::kQInt32);
+
+    std::vector<int64_t> bias_values;
+    auto bias_data = (int32_t*)q_bias.data_ptr<c10::qint32>();
+    for (int i = 0; i < q_bias.numel(); ++i) {
+      bias_values.push_back(bias_data[i]);
+    }
+    Node* c2_bias = CreateQuantizedBias(
+        bias_values,
+        graph,
+        q_bias.sizes().vec(),
+        q_bias.q_scale(),
+        q_bias.q_zero_point());
+    c2_bias->insertBefore(qlinear_node);
+    qlinear_node->insertInput(2, c2_bias->output());
+
     auto b = graph->block();
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
     eraseUnusedValuesFromMap(valsToParamsMap);
