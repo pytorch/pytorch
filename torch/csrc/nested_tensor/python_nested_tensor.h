@@ -124,6 +124,13 @@ static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
   }
 }
 
+struct TORCH_API _ListNestedTensor2 {
+  PyObject_HEAD
+  /* Type-specific fields go here. */
+};
+
+TORCH_API extern PyTypeObject _ListNestedTensor2Type;
+
 // TODO: Eventually allow construction from a list of _BufferNestedTensors.
 
 struct TORCH_API _ListNestedTensor {

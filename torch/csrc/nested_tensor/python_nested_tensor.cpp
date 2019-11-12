@@ -120,33 +120,79 @@ std::string _ListNestedTensor::__repr__() {
   return result.str();
 }
 
-void initialize_python_bindings() {
-  auto obj = py::module::import("torch");
-  auto m = py::handle(obj).cast<py::module>();
+// PyTypeObject *_init_ListNestedTensor2TypeObject(PyTypeObject &type) {
+//   // TODO: Necessary for NestedTensor as well?
+//   // NOTE: we don't use the typical static declaration of PyTypeObject because
+//   // we need to initialize as many types as there are VariableType instances.
+//   // The typical PyVarObject_HEAD_INIT(nullptr, 0) is described in the Python
+//   // documentation: it initializes the refcnt to 1 and the other object header
+//   // fields to zero.
+//   memset(&type, 0, sizeof(PyTypeObject));
+//   ((PyObject *)&type)->ob_refcnt = 1;
+//   ((PyObject *)&type)->ob_type = &_ListNestedTensor2Type;
+//   type.tp_basicsize = sizeof(_ListNestedTensor2Type);
+//   type.tp_flags = Py_TPFLAGS_DEFAULT;
+//   type.tp_name = "torch._ListNestedTensor2";
+//   type.tp_new = PyType_GenericNew;
+// 
+//   // type.tp_doc = "Custom objects";
+//   // type.tp_itemsize = 0;
+// 
+//   // type.tp_basicsize = sizeof(_ListNestedTensor2Type);
+//   // type.tp_flags = Py_TPFLAGS_DEFAULT;
+//   // type.tp_name = "_ListNestedTensor2";
+//   // type.tp_new = PyType_GenericNew;
+//   if (PyType_Ready(&type) < 0) {
+//     throw python_error();
+//   }
+//   return &type;
+// }
 
-  py::class_<_ListNestedTensor>(m, "_ListNestedTensor")
-      .def(py::init<std::vector<py::object>>())
-      .def_property_readonly("dtype", &_ListNestedTensor::get_dtype)
-      .def_property_readonly("layout", &_ListNestedTensor::get_layout)
-      .def_property_readonly("device", &_ListNestedTensor::get_device)
-      .def_property_readonly("requires_grad", &_ListNestedTensor::requires_grad)
-      .def_property_readonly("grad", &_ListNestedTensor::grad)
-      .def("detach", &_ListNestedTensor::detach)
-      .def("pin_memory", &_ListNestedTensor::pin_memory)
-      .def("backward", &_ListNestedTensor::backward)
-      .def("requires_grad_", &_ListNestedTensor::requires_grad_)
-      .def("element_size", &_ListNestedTensor::element_size)
-      .def("size", &_ListNestedTensor::size)
-      .def("unbind", &_ListNestedTensor::unbind)
-      .def("nested_size", &_ListNestedTensor::nested_size)
-      .def("nested_stride", &_ListNestedTensor::nested_stride)
-      .def("is_pinned", &_ListNestedTensor::is_contiguous)
-      .def("is_contiguous", &_ListNestedTensor::is_contiguous)
-      .def("__len__", &_ListNestedTensor::__len__)
-      .def("__str__", &_ListNestedTensor::__str__)
-      .def("dim", &_ListNestedTensor::dim)
-      .def("numel", &_ListNestedTensor::numel)
-      .def("nested_dim", &_ListNestedTensor::nested_dim);
+void initialize_python_bindings() {
+  PyObject *m;
+  if (PyType_Ready(&_ListNestedTensor2Type) < 0) {
+    throw python_error();
+  }
+
+  m = PyImport_ImportModule("torch");
+  if (!m) {
+    throw python_error();
+  }
+
+  Py_INCREF(&_ListNestedTensor2Type);
+  if (PyModule_AddObject(m, "_ListNestedTensor2", (PyObject *)&_ListNestedTensor2Type) < 0) {
+    Py_DECREF(&_ListNestedTensor2Type);
+    Py_DECREF(m);
+    throw python_error();
+  }
+
+  // auto obj = py::module::import("torch");
+  // auto m = py::handle(obj).cast<py::module>();
+
+  // py::class_<_ListNestedTensor>(m, "_ListNestedTensor")
+  //     .def(py::init<std::vector<py::object>>())
+  //     .def_property_readonly("dtype", &_ListNestedTensor::get_dtype)
+  //     .def_property_readonly("layout", &_ListNestedTensor::get_layout)
+  //     .def_property_readonly("device", &_ListNestedTensor::get_device)
+  //     .def_property_readonly("requires_grad",
+  //     &_ListNestedTensor::requires_grad)
+  //     .def_property_readonly("grad", &_ListNestedTensor::grad)
+  //     .def("detach", &_ListNestedTensor::detach)
+  //     .def("pin_memory", &_ListNestedTensor::pin_memory)
+  //     .def("backward", &_ListNestedTensor::backward)
+  //     .def("requires_grad_", &_ListNestedTensor::requires_grad_)
+  //     .def("element_size", &_ListNestedTensor::element_size)
+  //     .def("size", &_ListNestedTensor::size)
+  //     .def("unbind", &_ListNestedTensor::unbind)
+  //     .def("nested_size", &_ListNestedTensor::nested_size)
+  //     .def("nested_stride", &_ListNestedTensor::nested_stride)
+  //     .def("is_pinned", &_ListNestedTensor::is_contiguous)
+  //     .def("is_contiguous", &_ListNestedTensor::is_contiguous)
+  //     .def("__len__", &_ListNestedTensor::__len__)
+  //     .def("__str__", &_ListNestedTensor::__str__)
+  //     .def("dim", &_ListNestedTensor::dim)
+  //     .def("numel", &_ListNestedTensor::numel)
+  //     .def("nested_dim", &_ListNestedTensor::nested_dim);
 }
 }
 }
