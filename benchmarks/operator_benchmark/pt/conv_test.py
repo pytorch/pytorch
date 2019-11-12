@@ -20,8 +20,8 @@ conv_1d_configs_short = op_bench.config_list(
         'in_c', 'out_c', 'kernel', 'stride', 'N', 'L'
     ],
     attrs=[
-        [256, 256, 3, 1, 1, 64],
-        [256, 256, 3, 2, 16, 128],
+        [128, 256, 3, 1, 1, 64],
+        [256, 256, 3, 2, 4, 64],
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
