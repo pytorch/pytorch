@@ -30,7 +30,15 @@ struct Generator;
 struct Type;
 class DeprecatedTypeProperties;
 class Tensor;
+class IndexedTensor;
 } // namespace at
+namespace at {
+namespace indexing {
+struct TensorIndex;
+} // namespace indexing
+} // namespace at
+
+using namespace at::indexing;
 
 namespace at {
 
@@ -378,6 +386,33 @@ class CAFFE2_API Tensor {
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
+
+  // yf225 TODO: look at implementations in THPVariable_getitem / THPVariable_setitem / applySlicing in torch/csrc/autograd/python_variable_indexing.cpp
+  // yf225 TODO: helper functions should live in TensorIndexing.h/.cpp, such as applySelect and applySlice
+
+  // yf225 TODO: write integration tests for these methods first! see test_indexing.py and test_indexing_cuda.py
+
+  // We can't do `template<typename... T> Tensor operator()(T... indices)`, because it can't resolve
+  // the type of `{...}` for slices.
+  //
+  // Also we can't do `template <typename... Rest> Tensor parse_index_token(IndexToken first, Rest&&... rest)`,
+  // because it can't resolve the type of `{...}` for slices either.
+  //
+  // As a result, we provide `Tensor operator()(TensorIndex index_dim1, TensorIndex index_dim2, ...)` overload for up to 10 dims,
+  // in order to cover all practical use cases.
+  //
+  // yf225 TODO: figure out how to make these not `const&` (or is it actually a good idea? how does std::initializer_list() actually behave? does it do copying?)
+  // yf225 TODO: let's make 20-dims
+  IndexedTensor operator()(const TensorIndex& index_dim1) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7, const TensorIndex& index_dim8) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7, const TensorIndex& index_dim8, const TensorIndex& index_dim9) const;
+  IndexedTensor operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7, const TensorIndex& index_dim8, const TensorIndex& index_dim9, const TensorIndex& index_dim10) const;
 
   Tensor cpu() const;
   Tensor cuda() const;

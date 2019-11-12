@@ -114,6 +114,11 @@ class C10_API IndexError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for invalid values.
+class C10_API ValueError : public Error {
+  using Error::Error;
+};
+
 
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
