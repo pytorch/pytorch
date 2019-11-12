@@ -197,7 +197,7 @@ PyObject *THPVariable_get_version(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return PyInt_FromLong(var.current_version());
+  return PyInt_FromLong(var._version());
   END_HANDLE_TH_ERRORS
 }
 
