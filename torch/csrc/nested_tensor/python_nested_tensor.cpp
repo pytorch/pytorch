@@ -31,27 +31,14 @@ using namespace at;
 using namespace torch::autograd;
 namespace py = pybind11;
 
-std::vector<_ListNestedTensor> _ListNestedTensor::unbind_nested() {
-  std::vector<_ListNestedTensor> result;
-  size_t i = 0;
-  for (_NestedNode child : _structure._children) {
-    result.push_back(_ListNestedTensor(
-        std::vector<at::Tensor>(_flat_tensors.begin() + i,
-                                _flat_tensors.begin() + i + _num_tensor(child)),
-        child));
-    i += _num_tensor(child);
-  }
-  return result;
-}
-
 template <class F> std::vector<py::object> map_fn(_ListNestedTensor nt, F fn) {
   std::vector<py::object> result;
   if (nt.nested_dim() == 1) {
-    for (at::Tensor tensor : nt.get_flat_tensors()) {
-      result.push_back(fn(tensor));
+    for (_NestedNode node : nt.get_structure()._children) {
+      result.push_back(fn(node._tensor_node._tensor));
     }
   } else {
-    for (_ListNestedTensor nti : nt.unbind_nested()) {
+    for (_ListNestedTensor nti : nt.get_structure()._children) {
       result.push_back(py::cast(map_fn(nti, fn)));
     }
   }
@@ -75,14 +62,13 @@ std::vector<py::object> _ListNestedTensor::nested_stride() {
 std::vector<py::object> _ListNestedTensor::unbind() {
   std::vector<py::object> result;
   if (nested_dim() == 1) {
-    for (at::Tensor tensor : _flat_tensors) {
+    for (_NestedNode node : _structure._children) {
       result.push_back(py::reinterpret_borrow<py::object>(
-          torch::autograd::utils::wrap(tensor)));
+          torch::autograd::utils::wrap(node._tensor_node._tensor)));
     }
   } else {
-    std::vector<_ListNestedTensor> nts = unbind_nested();
-    for (_ListNestedTensor nt : nts) {
-      result.push_back(py::cast(nt));
+    for (_NestedNode node : _structure._children) {
+      result.push_back(py::cast(_ListNestedTensor(node)));
     }
   }
   return result;
@@ -91,14 +77,15 @@ std::vector<py::object> _ListNestedTensor::unbind() {
 std::string _ListNestedTensor::__str__() {
   std::stringstream result;
   if (nested_dim() == 1) {
-    for (auto tensor : _flat_tensors) {
+    for (_NestedNode node : _structure._children) {
       result << "  ";
-      result << tensor;
+      result << node._tensor_node._tensor;
       result << ",";
       result << std::endl;
     }
   } else {
-    for (_ListNestedTensor nt : unbind_nested()) {
+    for (_NestedNode node : _structure._children) {
+      _ListNestedTensor nt(node);
       result << "  ";
       result << nt.__str__();
       result << ",";

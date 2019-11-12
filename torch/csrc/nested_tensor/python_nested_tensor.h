@@ -20,6 +20,13 @@ namespace py = pybind11;
 
 struct _ListNestedTensor;
 
+struct _TensorNode {
+  _TensorNode() {}
+  _TensorNode(at::Tensor tensor) : _tensor(tensor) {}
+
+  at::Tensor _tensor;
+};
+
 // If is_leaf tensors are available, otherwise children.
 struct _NestedNode {
   // _NestedNode() = delete;
@@ -28,7 +35,9 @@ struct _NestedNode {
 
   _NestedNode() {}
   _NestedNode(const std::vector<_NestedNode> children) : _children(children) {}
+  _NestedNode(_TensorNode tensor_node) : _tensor_node(tensor_node) {}
   const std::vector<_NestedNode> _children;
+  _TensorNode _tensor_node;
 };
 
 static size_t _num_tensor(const _NestedNode &meta_node) {
@@ -39,51 +48,52 @@ static size_t _num_tensor(const _NestedNode &meta_node) {
   return result;
 }
 
-static _NestedNode _get_meta_node(std::vector<py::object> tensors) {
+static _NestedNode _get_structure(std::vector<py::object> tensors) {
   std::vector<_NestedNode> meta_nodes;
   try {
     for (py::object item : tensors) {
-      item.cast<at::Tensor>();
-      meta_nodes.push_back(_NestedNode());
+      meta_nodes.push_back(_NestedNode(_TensorNode(item.cast<at::Tensor>())));
     }
   } catch (std::exception e) {
     for (py::object item : tensors) {
       meta_nodes.push_back(
-          _get_meta_node(item.cast<std::vector<py::object>>()));
+          _get_structure(item.cast<std::vector<py::object>>()));
     }
   }
   return _NestedNode(meta_nodes);
 }
 
-static const std::vector<at::Tensor>
-_get_flat_tensors(std::vector<py::object> tensors) {
-  try {
-    std::vector<at::Tensor> last_tensors;
-    for (py::object item : tensors) {
-      last_tensors.push_back(item.cast<at::Tensor>());
+static at::Tensor _get_first_tensor(_NestedNode nested_node) {
+  const _NestedNode *start = &nested_node;
+  while (start->_children.size()) {
+    start = &start->_children[0];
+  }
+  return start->_tensor_node._tensor;
+}
+
+template <class F> static _NestedNode map(_NestedNode nested_node, F fn) {
+  if (nested_node._children.size() == 0) {
+    _NestedNode new_nested_node(
+        _TensorNode(fn(nested_node._tensor_node._tensor)));
+    return new_nested_node;
+  } else {
+    std::vector<_NestedNode> new_children;
+    for (size_t i = 0; i < nested_node._children.size(); i++) {
+      new_children.push_back(_NestedNode(map(nested_node._children[i], fn)));
     }
-    return last_tensors;
-  } catch (std::exception e) {
-    std::vector<at::Tensor> flat_tensors;
-    for (py::object item : tensors) {
-      const std::vector<at::Tensor> item_flat_tensors =
-          _get_flat_tensors(item.cast<std::vector<py::object>>());
-      for (at::Tensor tensor : item_flat_tensors) {
-        flat_tensors.push_back(tensor);
-      }
-    }
-    return flat_tensors;
+    return _NestedNode(new_children);
   }
 }
 
 template <class F>
-static std::vector<at::Tensor>
-map_flat_tensors(std::vector<at::Tensor> flat_tensors, F fn) {
-  std::vector<at::Tensor> result_tensors;
-  for (at::Tensor tensor : flat_tensors) {
-    result_tensors.push_back(fn(tensor));
+static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
+  if (nested_node1._children.size() == 0) {
+    fn(nested_node1._tensor_node._tensor, nested_node2._tensor_node._tensor);
+  } else {
+    for (size_t i = 0; i < nested_node1._children.size(); i++) {
+      apply2(nested_node1._children[i], nested_node2._children[i], fn);
+    }
   }
-  return result_tensors;
 }
 
 // TODO: Eventually allow construction from a list of _BufferNestedTensors.
@@ -94,45 +104,35 @@ struct TORCH_API _ListNestedTensor {
   // _ListNestedTensor(_ListNestedTensor&&) = delete;
 
   _ListNestedTensor(std::vector<py::object> tensors)
-      : _ListNestedTensor(_get_flat_tensors(tensors), _get_meta_node(tensors)) {
-  }
-  _ListNestedTensor(const std::vector<at::Tensor> flat_tensors,
-                    _NestedNode structure)
-      : _flat_tensors(flat_tensors), _structure(structure),
-        _first_tensor(_flat_tensors[0]) {}
-  size_t element_size() { return _flat_tensors[0].element_size(); }
+      : _ListNestedTensor(_get_structure(tensors)) {}
+  _ListNestedTensor(_NestedNode structure)
+      : _structure(structure), _first_tensor(_get_first_tensor(_structure)) {}
+  size_t element_size() { return _first_tensor.element_size(); }
   _ListNestedTensor grad() {
     return _ListNestedTensor(
-        map_flat_tensors(
-            _flat_tensors,
-            [](at::Tensor tensor) -> at::Tensor { return tensor.grad(); }),
-        _structure);
+        map(_structure,
+            [](at::Tensor tensor) -> at::Tensor { return tensor.grad(); }));
   }
   _ListNestedTensor detach() {
     return _ListNestedTensor(
-        map_flat_tensors(
-            _flat_tensors,
-            [](at::Tensor tensor) -> at::Tensor { return tensor.detach(); }),
-        _structure);
+        map(_structure,
+            [](at::Tensor tensor) -> at::Tensor { return tensor.detach(); }));
   }
   _ListNestedTensor requires_grad_(bool requires_grad) {
     return _ListNestedTensor(
-        map_flat_tensors(_flat_tensors,
-                         [requires_grad](at::Tensor tensor) -> at::Tensor {
-                           return tensor.requires_grad_(requires_grad);
-                         }),
-        _structure);
+        map(_structure, [requires_grad](at::Tensor tensor) -> at::Tensor {
+          return tensor.requires_grad_(requires_grad);
+        }));
   }
   void backward(_ListNestedTensor gradient, bool retain_graph,
                 bool create_graph) {
-    auto gradient_tensors = gradient._flat_tensors;
-    for (size_t i = 0; i < _flat_tensors.size(); i++) {
-      _flat_tensors[i].backward(gradient_tensors[i], retain_graph,
-                                create_graph);
-    }
+    apply2(_structure, gradient.get_structure(),
+           [retain_graph, create_graph](
+               at::Tensor &tensor1, const at::Tensor &tensor2) {
+             tensor1.backward(tensor2, retain_graph, create_graph);
+           });
   }
   // Only works if nested_dim() higher than 1.
-  std::vector<_ListNestedTensor> unbind_nested();
   std::vector<py::object> unbind();
   std::vector<py::object> nested_size();
   std::vector<py::object> nested_stride();
@@ -162,12 +162,10 @@ struct TORCH_API _ListNestedTensor {
   int64_t dim() { return _first_tensor.dim() + nested_dim(); }
   bool is_pinned() { return _first_tensor.is_pinned(); }
   bool is_contiguous() { return true; }
-  const _NestedNode get_structure() { return _structure; }
-  const std::vector<at::Tensor> &get_flat_tensors() { return _flat_tensors; }
+  _NestedNode get_structure() { return _structure; }
   std::string __str__();
 
 private:
-  const std::vector<at::Tensor> _flat_tensors;
   const _NestedNode _structure;
   const at::Tensor _first_tensor;
 };
