@@ -634,11 +634,19 @@ TEST(TensorTest, TorchTensorCtorWithoutSpecifyingDtype) {
   test_TorchTensorCtorWithoutSpecifyingDtype_expected_dtype(/*default_dtype=*/torch::kDouble);
 }
 
+void test_Arange_expected_dtype(c10::ScalarType default_dtype) {
+  AutoDefaultDtypeMode dtype_mode(default_dtype);
+
+  ASSERT_EQ(torch::arange(0., 5).dtype(), default_dtype);
+}
+
 TEST(TensorTest, Arange) {
-  { // Test #1
+  {
     auto x = torch::arange(0, 5);
-    TORCH_INTERNAL_ASSERT(x.dtype() == at::ScalarType::Long);
+    ASSERT_EQ(x.dtype() == torch::kLong);
   }
+  test_Arange_expected_dtype(torch::kFloat);
+  test_Arange_expected_dtype(torch::kDouble);
 }
 
 TEST(TensorTest, PrettyPrintTensorDataContainer) {
