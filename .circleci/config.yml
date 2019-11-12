@@ -1866,18 +1866,19 @@ workflows:
       - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
           requires:
             - setup
-      - pytorch_android_gradle_build-x86_32:
-          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
-          requires:
-            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
-
-      - pytorch_android_gradle_build:
-          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
-          requires:
-            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
-            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
-            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
-            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+# disabled until fixing https://github.com/pytorch/pytorch/issues/29159
+#      - pytorch_android_gradle_build-x86_32:
+#          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
+#          requires:
+#            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
+#
+#      - pytorch_android_gradle_build:
+#          name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
+#          requires:
+#            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
+#            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
+#            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
+#            - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_x86_64_build
@@ -3798,25 +3799,26 @@ workflows:
             branches:
               only: nightly
 
-      - pytorch_android_gradle_build:
-          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
-          requires:
-            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
-            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
-            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
-            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
-          filters:
-            branches:
-              only: nightly
-
-      - pytorch_android_publish_snapshot:
-          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_publish_snapshot
-          requires:
-            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
-          context: org-member
-          filters:
-            branches:
-              only: nightly
+# disabled until fixing https://github.com/pytorch/pytorch/issues/29159
+#      - pytorch_android_gradle_build:
+#          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
+#          requires:
+#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
+#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
+#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
+#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+#          filters:
+#            branches:
+#              only: nightly
+#
+#      - pytorch_android_publish_snapshot:
+#          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_publish_snapshot
+#          requires:
+#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
+#          context: org-member
+#          filters:
+#            branches:
+#              only: nightly
 ##############################################################################
 # Nightly tests
 ##############################################################################
