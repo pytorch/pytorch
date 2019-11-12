@@ -34,8 +34,8 @@ conv_1d_configs_long = op_bench.cross_product_configs(
     out_c=[128, 512],
     kernel=[3],
     stride=[1, 2],
-    N=[4, 8],
-    L=[64, 128],
+    N=[8],
+    L=[128],
     device=['cpu', 'cuda'],
     tags=["long"]
 )
@@ -91,9 +91,9 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     out_c=[128, 512],
     kernel=[3],
     stride=[1, 2],
-    N=[4, 8],
-    H=[32, 64],
-    W=[32, 64],
+    N=[8],
+    H=[64],
+    W=[64],
     device=['cpu', 'cuda'],
     tags=["long"]
 )
@@ -135,26 +135,12 @@ conv_3d_configs_short = op_bench.config_list(
         'in_c', 'out_c', 'kernel', 'stride', 'N', 'D', 'H', 'W'
     ],
     attrs=[
-        [256, 256, 3, 1, 8, 4, 16, 16],
+        [64, 64, 3, 1, 8, 4, 16, 16],
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
     },
     tags=['short']
-)
-
-
-conv_3d_configs_long = op_bench.cross_product_configs(
-    in_c=[128, 512],
-    out_c=[128, 512],
-    kernel=[3],
-    stride=[1, 2],
-    N=[8, 16],
-    D=[4, 8],
-    H=[32, 64],
-    W=[32, 64],
-    device=['cpu', 'cuda'],
-    tags=["long"]
 )
 
 
@@ -178,8 +164,8 @@ class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
         return self.convtranspose3d(self.input)
 
 
-op_bench.generate_pt_test(conv_3d_configs_short + conv_3d_configs_long, Conv3dBenchmark)
-op_bench.generate_pt_test(conv_3d_configs_short + conv_3d_configs_long,
+op_bench.generate_pt_test(conv_3d_configs_short, Conv3dBenchmark)
+op_bench.generate_pt_test(conv_3d_configs_short,
                           ConvTranspose3dBenchmark)
 
 
