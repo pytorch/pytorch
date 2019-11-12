@@ -140,6 +140,22 @@ template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
+template <typename T>
+std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
+  // Don't add this OnwerRRef to the owners_ map yet, otherwise
+  // it will never be removed from there. Instead, only add it to the
+  // map in prepareChildFork, in case this local RRef is being passed
+  // to another worker.
+  return std::shared_ptr<OwnerRRef<T>>(
+      new OwnerRRef<T>(getWorkerId(), genGloballyUniqueId()));
+}
+
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
+    IValue>();
+
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
+    py::object>();
+
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
   if (rref->isOwner()) {
@@ -154,6 +170,12 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
     // TODO: When adding failure retries and timeout, this fork needs to be
     // deleted if the owner does not receive the ACK within the timeout.
     addForkOfOwner(rfd.rrefId_, rfd.forkId_);
+    // ensure that this RRef is in the owners_ list to keep it alive.
+    // this is needed for OwnerRRefs that were created locally.
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      owners_[rref->rrefId()] = rref;
+    }
   } else {
     // Note [Useful Phantom Fork ID for User to Owner Call]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
