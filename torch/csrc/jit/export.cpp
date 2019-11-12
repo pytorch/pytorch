@@ -200,6 +200,8 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT8;
     case at::kQUInt8:
       return onnx::TensorProto_DataType_UINT8;
+    case at::kQInt32:
+      return onnx::TensorProto_DataType_INT32;
     default:
       AT_ERROR("unexpected tensor scalar type");
   }

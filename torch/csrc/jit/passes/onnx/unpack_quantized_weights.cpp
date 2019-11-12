@@ -48,6 +48,54 @@ void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
     }
   }
 }
+
+double getScaleFromInput(Node* input_node) {
+  c10::optional<IValue> scale;
+  std::string input_name = input_node->kind().toQualString();
+  if (input_name.find("quantize_per_tensor") != std::string::npos) {
+    scale = toIValue(input_node->inputs()[1]);
+    if (scale.value().isDouble()) {
+      return scale.value().toDouble();
+    }
+  } else if (input_name.find("quantized::linear") != std::string::npos) {
+    // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale, %w_zero_point)
+    scale = toIValue(input_node->inputs()[3]);
+    if (scale.value().isDouble()) {
+      return scale.value().toDouble();
+    }
+  } else if (input_name.find("quantized::conv2d") != std::string::npos) {
+    // %r = quantized::conv2d(%input, %unpacked_weight, %bias, %stride,
+    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    scale = toIValue(input_node->inputs()[7]);
+    if (scale.value().isDouble()) {
+      return scale.value().toDouble();
+    }
+  } else if (input_name.find("quantized::conv2d_relu") != std::string::npos) {
+    // %r = quantized::conv2d_relu(%input, %unpacked_weight, %bias, %stride,
+    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    scale = toIValue(input_node->inputs()[7]);
+    if (scale.value().isDouble()) {
+      return scale.value().toDouble();
+    }
+  } else if (input_name.find("quantized::add") != std::string::npos) {
+    // %r = quantized::add(%input_a, %input_b, %w_scale, %w_zero_point)
+    scale = toIValue(input_node->inputs()[2]);
+    if (scale.value().isDouble()) {
+      return scale.value().toDouble();
+    }
+  }
+  // For the ops below the scale is not part of the op signature, so we traverse
+  // up the graph to get the scale from its input when defined in the graph.
+  else if (input_name.find("quantized::max_pool2d") != std::string::npos) {
+    auto tmp = input_node->inputs()[0]->node();
+    return getScaleFromInput(tmp);
+  } else if (input_name.find("aten::relu") != std::string::npos) {
+    auto tmp = input_node->inputs()[0]->node();
+    return getScaleFromInput(tmp);
+  }
+  return 1.0;
+}
+
 // This is called after onnx optimize_graph so the graph already contains
 // "_caffe2" nodes at this point for quantized ops. Using pattern matching we
 // find the relevant nodes and extract the packed_params The packed_params are
@@ -68,7 +116,7 @@ void unpackQuantizedWeightsHelper(
     auto qlinear_node = match_vmap.at(vmap.at("r"))->node();
     std::string quantized_weight =
         match_vmap.at(vmap.at("r"))->node()->inputs()[1]->debugName();
-    auto packed_node = match_vmap.at(vmap.at("r"))->node()->inputs()[1]->node();
+
     auto itr = paramsDict.find(quantized_weight);
     if (itr == paramsDict.end()) {
       throw std::runtime_error(
@@ -85,8 +133,7 @@ void unpackQuantizedWeightsHelper(
     if (unpacked_weight.ndimension() == 2) {
       std::cout << "2 dim weight ... permuting \n";
       unpacked_weight.permute({1, 0});
-    }
-    else if (unpacked_weight.ndimension() == 4) {
+    } else if (unpacked_weight.ndimension() == 4) {
       std::cout << "4 dim weight ... permuting \n";
       unpacked_weight.permute({0, 2, 3, 1});
     }
@@ -121,20 +168,12 @@ void unpackQuantizedWeightsHelper(
       auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
       TORCH_INTERNAL_ASSERT(input_val->type()->isSubtypeOf(TensorType::get()));
 
-      /*
-      std::string input_name =
-          match_vmap.at(vmap.at("r"))->node()->inputs()[0]->debugName();
-      std::cout << "input name " << input_name << std::endl;
-      auto itr = paramsDict.find(input_name);
-      if (itr == paramsDict.end()) {
-        throw std::runtime_error(
-            "getValues: Quantized input value not found amongst constant parameters.");
-      }
-      */
+      auto input_node =
+          match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
+      auto input_scale = getScaleFromInput(input_node);
 
-      auto input_scale = 1.0;
       auto q_bias = at::quantize_per_tensor(
-          original_bias, weight_scale * input_scale, 0, at::kQUInt8);
+          original_bias, weight_scale * input_scale, 0, at::kQInt8);
       auto val = graph->insertConstant(q_bias);
       qlinear_node->insertInput(2, val);
     }
@@ -165,8 +204,8 @@ void UnpackQuantizedWeights(
       graph, paramsDict, qlinear, "quantized::linear_unpack");
   unpackQuantizedWeightsHelper(
       graph, paramsDict, qconv, "quantized::conv_unpack");
-  // unpackQuantizedWeightsHelper(graph, paramsDict, qconv_relu,
-  // "quantized::conv_unpack");
+  unpackQuantizedWeightsHelper(
+      graph, paramsDict, qconv_relu, "quantized::conv_unpack");
 }
 
 } // namespace jit
