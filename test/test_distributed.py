@@ -1940,7 +1940,7 @@ class _DistTestBase(object):
             model_DDP, device_ids=gpus
         )
 
-        local_bs = len(gpus)*2
+        local_bs = len(gpus) * 2
         global_bs = int(WORLD_SIZE) * local_bs
         input_cpu = torch.randn(global_bs, 2)
         target = torch.randn(global_bs, 2)
