@@ -46,6 +46,7 @@ def quux_dispatcher(a):
 
 @torch_function_dispatch(quux_dispatcher)
 def quux(a):
+    """Used to test that errors raised in user implementations get propagated"""
     return a
 
 # HANDLED_FUNCTIONS_DIAGONAL is a dispatch table that
