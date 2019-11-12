@@ -27,11 +27,6 @@ const TypeMetaData _typeMetaDataInstance_uninitialized_ = detail::TypeMetaData(
     TypeIdentifier::uninitialized(),
     "nullptr (uninitialized)");
 
-C10_EXPORT CollisionChecker& collisionChecker_() {
-  static CollisionChecker singleton;
-  return singleton;
-}
-
 } // namespace detail
 
 // TODO Inlineable on non-MSVC like other preallocated ids?

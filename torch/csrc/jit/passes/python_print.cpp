@@ -1200,6 +1200,7 @@ struct PythonPrintImpl {
         enforce_importable_(enforce_importable) {}
 
   void printModuleMetadata(const ClassTypePtr& moduleType) {
+    TORCH_CHECK(moduleType->numConstants() == 0, "Can't serialize module with constants right now, will add support in a separate PR.");
     std::vector<std::string> params;
     size_t numAttrs = moduleType->numAttributes();
     // Populate the __parameters__ field. This tells the importer which
