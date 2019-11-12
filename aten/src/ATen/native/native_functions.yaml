@@ -37,9 +37,13 @@
   use_c10_dispatcher: full
   variants: function
 
+# Computes the gradient of current tensor w.r.t. graph leaves.
 - func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
   variants: method
 
+# Sets the tensor data held by this `Variable` to be the same as `new_data`.
+# It requires that `new_data` and `Variable` have compatible tensor type, by
+# checking `_has_compatible_shallow_copy_type(this, new_data)`.
 - func: set_data(Tensor(a!) self, Tensor new_data) -> ()
   use_c10_dispatcher: unboxed_only
   variants: method
@@ -47,9 +51,13 @@
 - func: data(Tensor self) -> Tensor
   variants: method
 
+# True if this `Variable` is a leaf and thus does not have a `grad_fn`.
 - func: is_leaf(Tensor self) -> bool
   variants: method
 
+# Returns the input index of the gradient `Node` to which this
+# `Variable` is connected.  Note: input indexes of the gradient `Node`
+# correspond to output indexes of the corresponding forward `Node`.
 - func: output_nr(Tensor self) -> int
   variants: method
   supports_named_tensor: True
@@ -2333,11 +2341,25 @@
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+# Returns a copy of this `Variable` that is detached from its autograd graph
+# and has a blank version. This method is OK to call if the `Variable` is a
+# view.
+# NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
+# storage / storage_offset) of a tensor created from `detach()`, those metadata
+# in the original tensor will also be updated. However, the new behavior is that
+# those metadata changes to the detached tensor will not update the original tensor
+# anymore, and in the `detach()` function we need to set `allow_tensor_metadata_change_`
+# to false to make such changes explicitly illegal, in order to prevent users from
+# changing metadata of the detached tensor and expecting the original tensor to also
+# be updated.
 - func: detach(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
 
+# Like `detach()`, but removes this `Variable` in-place. This method may
+# only be called on non-view `Variable`s. You can use `is_view()` to check
+# this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method

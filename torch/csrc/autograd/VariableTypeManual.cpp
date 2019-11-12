@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
+#include <torch/csrc/autograd/autograd.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
@@ -80,11 +81,41 @@ void backward(
     const Tensor& gradient,
     bool keep_graph,
     bool create_graph) {
-  as_variable_ref(self).backward(gradient, keep_graph, create_graph);
+  torch::autograd::backward({self}, {gradient}, keep_graph, create_graph);
 }
 
 void set_data(const Tensor & self, const Tensor & new_data) {
-  as_variable_ref(self).set_data(new_data);
+  // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
+  TORCH_CHECK(
+    _has_compatible_shallow_copy_type(self, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
+
+  // Resets gradient accumulator if metadata is out of date
+  AutogradMeta* autograd_meta = impl::get_autograd_meta(self);
+  if (autograd_meta) {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+    auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
+    if (prior_accumulator) {
+      const auto prior_device = prior_accumulator->input_metadata(0).device();
+      const auto new_device = new_data.device();
+
+      if (new_data.type() != self.type() || prior_device != new_device) {
+        autograd_meta->grad_accumulator_.reset();
+      }
+    }
+  }
+
+  // Version counter is not shared when we replace a `Variable`'s tensor data
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  //
+  // `var.set_data(new_data)` always ignores `var`'s `allow_tensor_metadata_change_`, because
+  // users need this API as an escape hatch for changing a tensor's metadata regardless of its
+  // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
+  // the behavior they want.
+  self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
 Tensor data(const Tensor & self) {
@@ -92,11 +123,19 @@ Tensor data(const Tensor & self) {
 }
 
 bool is_leaf(const Tensor & self) {
-  return as_variable_ref(self).is_leaf();
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
 }
 
 int64_t output_nr(const Tensor & self) {
-  return as_variable_ref(self).output_nr();
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->output_nr_;
+  } else {
+    return 0;
+  }
 }
 
 int64_t _version(const Tensor & self) {
@@ -208,7 +247,10 @@ Tensor detach(const Tensor & self) {
 
   }
   // <NON_GENERATED_CODE>
-  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach(); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+  auto result = make_variable_view(self, self, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, self);
+#endif
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
@@ -229,7 +271,19 @@ Tensor & detach_(Tensor & self) {
     jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
   // <NON_GENERATED_CODE>
-  as_variable_ref(self).detach_();
+  if (as_variable_ref(self).is_view()) {
+    AT_ERROR("Can't detach views in-place. Use detach() instead");
+  }
+  // I think the choice here is conservative.  In principle, doing
+  // an in-place detach should give us the ability to just clear
+  // the autograd meta.  But this function ONLY resets requires_grad,
+  // grad_fn and output_nr; there's other metadata like debug name
+  // and hooks which aren't cleared.  Is this function supposed to
+  // clear those too? I'm not too sure, so I'm leaving it be for now.
+  auto autograd_meta = impl::materialize_autograd_meta(as_variable_ref(self));
+  autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
+  autograd_meta->grad_fn_.reset();
+  autograd_meta->output_nr_ = 0;
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, self);

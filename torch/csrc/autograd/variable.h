@@ -218,43 +218,6 @@ struct TORCH_API Variable : public at::Tensor {
   /// this and the base Variable.
   const std::shared_ptr<Node>& grad_fn() const;
 
-  /// Returns a copy of this `Variable` that is detached from its autograd graph
-  /// and has a blank version. This method is OK to call if the `Variable` is a
-  /// view.
-  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
-  /// storage / storage_offset) of a tensor created from `detach()`, those metadata
-  /// in the original tensor will also be updated. However, the new behavior is that
-  /// those metadata changes to the detached tensor will not update the original tensor
-  /// anymore, and in the `detach()` function we need to set `allow_tensor_metadata_change_`
-  /// to false to make such changes explicitly illegal, in order to prevent users from
-  /// changing metadata of the detached tensor and expecting the original tensor to also
-  /// be updated.
-  Variable detach() const;
-
-  /// Like `detach()`, but removes this `Variable` in-place. This method may
-  /// only be called on non-view `Variable`s. You can use `is_view()` to check
-  /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
-  void detach_();
-
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
-  void backward(
-      const Tensor& gradient,
-      bool keep_graph,
-      bool create_graph) const;
-
-  /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
-  /// It requires that `new_data` and `Variable` have compatible tensor type, by
-  /// checking `_has_compatible_shallow_copy_type(this, new_data)`.
-  void set_data(const at::Tensor &new_data) const;
-
-  /// Returns the input index of the gradient `Node` to which this
-  /// `Variable` is connected.  Note: input indexes of the gradient `Node`
-  /// correspond to output indexes of the corresponding forward `Node`.
-  uint32_t output_nr() const noexcept;
-
-  /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
-  bool is_leaf() const noexcept;
-
   // Versions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -586,30 +549,6 @@ inline at::Tensor Variable::variable_data() const noexcept {
 
 // Gradient Node and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline Variable Variable::detach() const {
-  auto var = make_variable_view(*this, *this, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(var, *this);
-#endif
-  return var;
-}
-
-inline uint32_t Variable::output_nr() const noexcept {
-  if (impl::get_autograd_meta(*this)) {
-    return impl::get_autograd_meta(*this)->output_nr_;
-  } else {
-    return 0;
-  }
-}
-
-inline bool Variable::is_leaf() const noexcept {
-  if (impl::get_autograd_meta(*this)) {
-    return impl::get_autograd_meta(*this)->grad_fn_ == nullptr;
-  } else {
-    return true;
-  }
-}
 
 template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
