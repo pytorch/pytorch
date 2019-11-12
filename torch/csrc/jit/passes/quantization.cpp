@@ -130,28 +130,47 @@ class InsertObserversHelper {
       const script::Module& module,
       const std::string& method_name);
 
-  // Values that are the output of GetAttr[name="weight"] and
-  // GetAttr[name="bias"] will be propagated from parent method call to the
-  // child graph
-  void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
-
   const ModuleQConfigMap& module_qconfig_map_;
   // Values we want to skip observing, used to skip values in
   // the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
-  // Values that are the output of GetAttr[name="weight"] and they
-  // will be propagated through the function call hierarchy
-  std::unordered_set<Value*> weight_values_;
-  // Values that are the output of GetAttr[name="bias"] and they
-  // will be propagated through the function call hierarchy
-  std::unordered_set<Value*> bias_values_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
   // every time to find a unique id.
   int uid_ = 0;
 };
+
+bool isBiasOfConvOrLinear(Value* v) {
+  for (const Use& u : v->uses()) {
+    if (u.user->kind() == Symbol::aten("conv2d")) {
+      if (v == u.user->inputs().at(2)) {
+        return true;
+      }
+    } else if (u.user->kind() == prim::CallFunction) {
+      auto func_name = getFuncName(u.user->inputs()[0]);
+      if (func_name == "linear" && v == u.user->inputs().at(3)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isWeightOfConvOrLinear(Value* v) {
+  for (const Use& u : v->uses()) {
+    if (u.user->kind() == Symbol::aten("conv2d") &&
+        v == u.user->inputs().at(1)) {
+      return true;
+    } else if (u.user->kind() == prim::CallFunction &&
+               getFuncName(u.user->inputs()[0]) == "linear" &&
+               v == u.user->inputs().at(2)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
@@ -161,16 +180,18 @@ Node* InsertObserversHelper::insertObserverFor(
     script::Module& module,
     const QConfig& qconfig) {
   // Skip observing bias
-  if (bias_values_.count(v)) {
+  if (isBiasOfConvOrLinear(v)) {
     return nullptr;
   }
 
   script::Module observer_module;
-  if (weight_values_.count(v)) {
+  if (isWeightOfConvOrLinear(v)) {
+    TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
   }
+
   script::Module observer = observer_module.clone();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
@@ -251,19 +272,6 @@ graph(%input, %weight, %bias, %4):
   }
 }
 
-void InsertObserversHelper::propagateValues(
-    Node* n,
-    std::shared_ptr<Graph>& graph) {
-  for (size_t i = 1; i < n->inputs().size(); ++i) {
-    if (weight_values_.count(n->inputs()[i])) {
-      weight_values_.emplace(graph->inputs()[i]);
-    }
-    if (bias_values_.count(n->inputs()[i])) {
-      bias_values_.emplace(graph->inputs()[i]);
-    }
-  }
-}
-
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
@@ -323,13 +331,6 @@ void InsertObserversHelper::insertObservers(
         if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
-        if (v->node()->kind() == prim::GetAttr) {
-          if (v->node()->s(attr::name) == "weight") {
-            weight_values_.emplace(v);
-          } else if (v->node()->s(attr::name) == "bias") {
-            bias_values_.emplace(v);
-          }
-        }
       }
 
       if (n->kind() == prim::CallMethod) {
@@ -351,7 +352,6 @@ void InsertObserversHelper::insertObservers(
         }
         auto method_graph =
             callee_module.get_method(module_method_name).graph();
-        propagateValues(n, method_graph);
         // Recursively insert observer for the forward function of child
         // module
         insertObservers(callee_module, module_method_name);
@@ -590,10 +590,6 @@ void InsertQuantDeQuantImpl(
           if (m) {
             InsertQuantDeQuantImpl(m.value(), module_method_name);
           }
-        }
-        if (v->node()->kind() == prim::GetAttr &&
-            v->node()->s(c10::attr::name) == "bias") {
-          continue;
         }
         qh.quantizeTensor(v);
       }
