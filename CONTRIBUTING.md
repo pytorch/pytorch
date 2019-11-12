@@ -1,3 +1,33 @@
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  * [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+- [Writing Documentation](#writing-documentation)
+  * [Building Documentation](#building-documentation)
+    + [Tips](#tips)
+  * [Adding Documentation Tests](#adding-documentation-tests)
+- [Managing Multiple Build Trees](#managing-multiple-build-trees)
+- [C++ Development tips](#c---development-tips)
+  * [Build only what you need.](#build-only-what-you-need)
+  * [Code completion and IDE support](#code-completion-and-ide-support)
+  * [Make no-op build fast.](#make-no-op-build-fast)
+    + [Use Ninja](#use-ninja)
+    + [Use CCache](#use-ccache)
+    + [Use a faster linker](#use-a-faster-linker)
+- [CUDA Development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
+  * [Running Clang-Tidy](#running-clang-tidy)
+  * [Pre-commit Tidy/Linting Hook](#pre-commit-tidy-linting-hook)
+  * [Building PyTorch with ASAN](#building-pytorch-with-asan)
+    + [Getting `ccache` to work](#getting--ccache--to-work)
+    + [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with--ld-preload--and--libasan-rt--)
+    + [Why LD_PRELOAD in the build function?](#why-ld-preload-in-the-build-function-)
+    + [Why no Leak detection?](#why-no-leak-detection-)
+- [Caffe2 notes](#caffe2-notes)
+
+
 ## Contributing to PyTorch
 
 If you are interested in contributing to PyTorch, your contributions will fall
@@ -267,7 +297,7 @@ ls | grep rst | grep -v index | grep -v jit | xargs rm
 # Make your changes, build the docs, etc.
 
 # Don't commit the deletions!
-git add index.rst jit.rst 
+git add index.rst jit.rst
 ...
 ```
 
