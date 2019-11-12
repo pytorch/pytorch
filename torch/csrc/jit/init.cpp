@@ -427,6 +427,8 @@ void initJITBindings(PyObject* module) {
                                      size);
            });
 
+  // This allows PyTorchStreamReader to read from a Python buffer. It requires
+  // that the buffer implement `seek()`, `tell()`, and `read()`.
   class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
    public:
     BufferAdapter(const py::object& buffer) : buffer_(std::move(buffer)) {
@@ -461,17 +463,16 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def(py::init([](const py::object &buffer) {
+      .def(py::init([](const py::object& buffer) {
         auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
         return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
-      .def("get_record", [](PyTorchStreamReader &self, const std::string &key) {
+      .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecord(key);
-        return py::bytes(reinterpret_cast<const char *>(data.get()), size);
+        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
       });
-
 
   m.def(
       "_jit_get_operation",
