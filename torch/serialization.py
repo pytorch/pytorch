@@ -177,106 +177,66 @@ def _is_path(name_or_buffer):
         (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
 
 
-class _open_file(object):
+class _opener(object):
+    def __init__(self, file_like):
+        self.file_like = file_like
+
+    def __enter__(self):
+        return self.file_like
+
+    def __exit__(self, *args):
+        pass
+
+
+class _open_file(_opener):
     def __init__(self, name, mode):
-        self.name = name
-        self.mode = mode
-
-    def __enter__(self):
-        self.file = open(self.name, self.mode)
-        return self.file
-    
-    def __exit__(self, *args):
-        self.file.close()
-
-
-class _open_buffer(object):
-    def __init__(self, buffer, mode):
-        self.buffer = buffer
-    
-    def __enter__(self):
-        return self.buffer
+        super(_open_file, self).__init__(open(name, mode))
 
     def __exit__(self, *args):
-        self.buffer.flush()
+        self.file_like.close()
+
+
+class _open_buffer(_opener):
+    def __exit__(self, *args):
+        self.file_like.flush()
 
 
 def _open_file_like(name_or_buffer, mode):
     if _is_path(name_or_buffer):
         return _open_file(name_or_buffer, mode)
     else:
-        return _open_buffer(name_or_buffer, mode)
-    
-
-class _open_zipfile_reader_file(_open_file):
-    def __enter__(self):
-        return torch._C.PyTorchFileReader(self.name)
-
-    def __exit__(self, *args):
-        pass
+        return _open_buffer(name_or_buffer)
 
 
-class _open_zipfile_reader_buffer(_open_buffer):
-    def __enter__(self):
-        def reader(capsule, size):
-            the_bytes = self.buffer.read(size)
-            torch._C.read_into(capsule, the_bytes)
-            return len(the_bytes)
-
-        def seeker(pos):
-            result = self.buffer.seek(pos)
-            if result is not None:
-                return result
-            # Python 2's seek() methods return None
-            return pos
-
-        # Get the size of the buffer
-        current = self.buffer.tell()
-        self.buffer.seek(current, os.SEEK_END)
-        size = self.buffer.tell()
-        self.buffer.seek(current)
-        self.file = torch._C.PyTorchFileReader(reader, seeker, size)
-        return self.file
-    
-    def __exit__(self, *args):
-        pass
+class _open_zipfile_reader(_opener):
+    def __init__(self, name_or_buffer):
+        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
-class _open_zipfile_writer_file(_open_file):
-    def __enter__(self):
-        self.file = torch._C.PyTorchFileWriter(self.name)
-        return self.file
-    
-    def __exit__(self, *args):
-        self.file.write_end_of_file()
-
-
-class _open_zipfile_writer_buffer(_open_buffer):
-    def __enter__(self):
-        def write(capsule, size):
-            self.buffer.write(torch._C.make_bytes(capsule, size))
-            return size
-        self.file = torch._C.PyTorchFileWriter(write)
-        return self.file
+class _open_zipfile_writer_file(_opener):
+    def __init__(self, name):
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
 
     def __exit__(self, *args):
-        self.file.write_end_of_file()
-        super(_open_zipfile_writer_buffer, self).__exit__(self, *args)
+        self.file_like.write_end_of_file()
+
+
+class _open_zipfile_writer_buffer(_opener):
+    def __init__(self, buffer):
+        self.buffer = buffer
+        super(_open_zipfile_writer_buffer, self).__init__(torch._C.PyTorchFileWriter(buffer))
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+        self.buffer.flush()
+
 
 def _open_zipfile_writer(name_or_buffer):
     if _is_path(name_or_buffer):
         container = _open_zipfile_writer_file
     else:
         container = _open_zipfile_writer_buffer
-    return container(name_or_buffer, 'wb')
-
-
-def _open_zipfile_reader(name_or_buffer):
-    if _is_path(name_or_buffer):
-        container = _open_zipfile_reader_file
-    else:
-        container = _open_zipfile_reader_buffer
-    return container(name_or_buffer, 'rb')
+    return container(name_or_buffer)
 
 
 def _is_compressed_file(f):

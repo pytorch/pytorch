@@ -407,41 +407,55 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
-      .def(
-          "write_record",
-          [](PyTorchStreamWriter& self,
-             const std::string& name,
-             const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
+      .def(py::init([](const py::object &buffer) {
+        auto writer_func = [=](const void *data, size_t size) {
+          auto bytes = py::bytes(reinterpret_cast<const char *>(data), size);
+          buffer.attr("write")(std::move(bytes));
+          return size;
+        };
+        return caffe2::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+      }))
+      .def(py::init<const std::function<size_t(const void *, size_t)> &>())
+      .def("write_record",
+           [](PyTorchStreamWriter &self, const std::string &name,
+              const char *data,
+              size_t size) { return self.writeRecord(name, data, size); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
-      .def(
-          "write_record",
-          [](PyTorchStreamWriter& self,
-             const std::string& name,
-             uintptr_t data,
-             size_t size) {
-            return self.writeRecord(
-                name, reinterpret_cast<const char*>(data), size);
-          });
-
-  m.def("make_bytes", [](py::capsule data, size_t len) {
-    char* bytes = data;
-    return py::bytes(bytes, len);
-  });
-  m.def("read_into", [](py::capsule capsule, py::bytes bytes) {
-    char* output_bytes = capsule;
-    std::string input_bytes = bytes;
-    size_t size = py::len(bytes);
-    std::copy(input_bytes.data(), input_bytes.data() + size, output_bytes);
-  });
+      .def("write_record",
+           [](PyTorchStreamWriter &self, const std::string &name,
+              uintptr_t data, size_t size) {
+             return self.writeRecord(name, reinterpret_cast<const char *>(data),
+                                     size);
+           });
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def(py::init([](caffe2::serialize::ReaderFunc in,
-                      caffe2::serialize::SeekerFunc seeker, size_t size) {
-        auto adapter =
-            caffe2::make_unique<caffe2::serialize::FuncAdapter>(in, seeker, size);
+      .def(py::init([](const py::object &buffer) {
+        // Get size
+        auto current = buffer.attr("tell")();
+        buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+        size_t size = py::cast<size_t>(buffer.attr("tell")());
+        buffer.attr("seek")(current);
+
+        // Make function to read bytes from the buffer
+        auto reader_func = [=](void* output_buffer, size_t size) {
+          std::string bytes = py::cast<std::string>(buffer.attr("read")(size));
+          std::copy(bytes.data(), bytes.data() + bytes.size(),
+                    reinterpret_cast<char *>(output_buffer));
+          return bytes.size();
+        };
+
+        // Make function to seek to some spot in the buffer
+        auto seeker_func = [=](size_t pos) {
+          auto result = buffer.attr("seek")(pos);
+          if (!result.is_none()) {
+            return py::cast<size_t>(result);
+          }
+          // Python 2's seek() methods return None
+          return pos;
+        };
+        auto adapter = caffe2::make_unique<caffe2::serialize::FuncAdapter>(
+            std::move(reader_func), std::move(seeker_func), size);
         return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def("get_record", [](PyTorchStreamReader &self, const std::string &key) {

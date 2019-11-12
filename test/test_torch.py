@@ -3910,7 +3910,6 @@ class _TestTorchMixin(object):
 
             if hasattr(name_or_buffer, 'seek'):
                 name_or_buffer.seek(0)
-            # torch.serialization._open_zipfile_reader(name_or_buffer)
 
             with torch.serialization._open_zipfile_reader(name_or_buffer) as zip_file:
                 for key in data:
@@ -3920,6 +3919,7 @@ class _TestTorchMixin(object):
 
         with tempfile.NamedTemporaryFile() as f:
             test(f)
+        
         with tempfile.NamedTemporaryFile() as f:
             test(f.name)
 
