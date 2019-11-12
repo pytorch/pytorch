@@ -13,13 +13,13 @@ void gather_kernel_cuda(Tensor & result, const Tensor & self, int64_t dim, const
 
   if (numel > 0) {
     AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Bool, ScalarType::Half, self.scalar_type(), "gather_out_cuda", [&](){
+      auto stream = at::cuda::getCurrentCUDAStream();
       if (cuda::detail::canUse32BitIndexMath(result) &&
           cuda::detail::canUse32BitIndexMath(self) &&
           cuda::detail::canUse32BitIndexMath(index)) {
         auto result_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(result);
         auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
         auto index_info = cuda::detail::getTensorInfo<int64_t, unsigned int>(index);
-        auto stream = at::cuda::getCurrentCUDAStream();
 
         // Specialize for a small number of dimensions.
         switch (index_info.dims) {
