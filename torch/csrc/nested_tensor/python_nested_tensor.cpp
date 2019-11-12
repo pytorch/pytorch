@@ -96,6 +96,30 @@ std::string _ListNestedTensor::__str__() {
   return result.str();
 }
 
+std::string _ListNestedTensor::__repr__() {
+  std::stringstream result;
+  if (nested_dim() == 1) {
+    for (_NestedNode node : _structure._children) {
+      result << "  ";
+      // TODO: There appears to be no difference between
+      // __str__ and __repr__ for torch.Tensor.
+      result << node._tensor_node._tensor;
+      result << ",";
+      result << std::endl;
+    }
+  } else {
+    for (_NestedNode node : _structure._children) {
+      _ListNestedTensor nt(node);
+      result << "  ";
+      result << nt.__repr__();
+      result << ",";
+      result << std::endl;
+    }
+  }
+  result << "])";
+  return result.str();
+}
+
 void initialize_python_bindings() {
   auto obj = py::module::import("torch");
   auto m = py::handle(obj).cast<py::module>();
@@ -108,6 +132,7 @@ void initialize_python_bindings() {
       .def_property_readonly("requires_grad", &_ListNestedTensor::requires_grad)
       .def_property_readonly("grad", &_ListNestedTensor::grad)
       .def("detach", &_ListNestedTensor::detach)
+      .def("pin_memory", &_ListNestedTensor::pin_memory)
       .def("backward", &_ListNestedTensor::backward)
       .def("requires_grad_", &_ListNestedTensor::requires_grad_)
       .def("element_size", &_ListNestedTensor::element_size)
@@ -119,6 +144,7 @@ void initialize_python_bindings() {
       .def("__len__", &_ListNestedTensor::__len__)
       .def("__str__", &_ListNestedTensor::__str__)
       .def("dim", &_ListNestedTensor::dim)
+      .def("numel", &_ListNestedTensor::numel)
       .def("nested_dim", &_ListNestedTensor::nested_dim);
 }
 }

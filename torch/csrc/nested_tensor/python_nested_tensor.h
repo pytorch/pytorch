@@ -48,6 +48,18 @@ static size_t _num_tensor(const _NestedNode &meta_node) {
   return result;
 }
 
+static int64_t _numel(const _NestedNode &meta_node) {
+  if (meta_node._children.size() == 0) {
+    return meta_node._tensor_node._tensor.numel();
+  } else {
+    int64_t result = 0;
+    for (size_t i = 0; i < meta_node._children.size(); i++) {
+      result += _numel(meta_node._children[i]);
+    }
+    return result;
+  }
+}
+
 static _NestedNode _get_structure(std::vector<py::object> tensors) {
   std::vector<_NestedNode> meta_nodes;
   try {
@@ -108,6 +120,11 @@ struct TORCH_API _ListNestedTensor {
   _ListNestedTensor(_NestedNode structure)
       : _structure(structure), _first_tensor(_get_first_tensor(_structure)) {}
   size_t element_size() { return _first_tensor.element_size(); }
+  _ListNestedTensor pin_memory() {
+    return _ListNestedTensor(
+        map(_structure,
+            [](at::Tensor tensor) -> at::Tensor { return tensor.pin_memory(); }));
+  }
   _ListNestedTensor grad() {
     return _ListNestedTensor(
         map(_structure,
@@ -127,8 +144,8 @@ struct TORCH_API _ListNestedTensor {
   void backward(_ListNestedTensor gradient, bool retain_graph,
                 bool create_graph) {
     apply2(_structure, gradient.get_structure(),
-           [retain_graph, create_graph](
-               at::Tensor &tensor1, const at::Tensor &tensor2) {
+           [retain_graph, create_graph](at::Tensor &tensor1,
+                                        const at::Tensor &tensor2) {
              tensor1.backward(tensor2, retain_graph, create_graph);
            });
   }
@@ -160,10 +177,12 @@ struct TORCH_API _ListNestedTensor {
   }
   bool requires_grad() { return _first_tensor.requires_grad(); }
   int64_t dim() { return _first_tensor.dim() + nested_dim(); }
+  int64_t numel() { return _numel(_structure); }
   bool is_pinned() { return _first_tensor.is_pinned(); }
   bool is_contiguous() { return true; }
   _NestedNode get_structure() { return _structure; }
   std::string __str__();
+  std::string __repr__();
 
 private:
   const _NestedNode _structure;
