@@ -507,7 +507,7 @@
 
 - name: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   self: grad.clone().masked_fill_(mask, 0)
-  value: at::where(mask, grad, zeros_like(grad)).sum()
+  value: at::where(mask, grad, zeros_like(grad, at::MemoryFormat::Preserve)).sum()
   mask: non_differentiable
 
 - name: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
@@ -519,7 +519,7 @@
 # normally broadcasting is handled implicitly, but here, because we call an inplace
 # function as an optimization and the LHS doesn't broadcast for inplace functions,
 # we need to explicitly broadcast.
-  self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes()))).masked_scatter_(mask, grad)
+  self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes())), at::MemoryFormat::Preserve).masked_scatter_(mask, grad)
   mask: non_differentiable
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -685,7 +685,7 @@
   self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
 
 - name: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
-  self: grad.clone().put_(index, zeros_like(source), accumulate)
+  self: grad.clone().put_(index, zeros_like(source, at::MemoryFormat::Preserve), accumulate)
   index: non_differentiable
   source: grad.take(index)
 
@@ -917,8 +917,8 @@
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
-  self: where(condition, grad, zeros_like(grad))
-  other: where(condition, zeros_like(grad), grad)
+  self: where(condition, grad, zeros_like(grad, at::MemoryFormat::Preserve))
+  other: where(condition, zeros_like(grad, at::MemoryFormat::Preserve), grad)
 
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
 # to be running backward with create_graph=True, fall back to a backward function that uses
@@ -1276,7 +1276,7 @@
 - name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
   grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
-  target: zeros_like(grad)
+  target: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: l1_loss_double_backward_grad_output(grad, self, target, reduction)
