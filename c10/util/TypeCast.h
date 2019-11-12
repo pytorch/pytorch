@@ -161,7 +161,6 @@ inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) { 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
 
 #undef FETCH_AND_CAST_CASE
-#undef FETCH_AND_CAST_COMPLEX_CASE
 #undef CAST_AND_STORE_CASE
 #undef DEFINE_UNCASTABLE
 #undef ERROR_UNSUPPORTED_CAST
