@@ -63,22 +63,19 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
 }
 
 TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
-  int64_t longer_size = std::max(names_.size(), other.names_.size());
-  int64_t shorter_size = std::min(names_.size(), other.names_.size());
-  int64_t size_difference = longer_size - shorter_size;
-  bool this_is_longer = names_.size() == longer_size;
+  int64_t size_diff = std::labs(names_.size() - other.names_.size());
 
-  if (this_is_longer) {
-    for (int64_t idx = size_difference; idx < longer_size; ++idx) {
-      names_[idx] = names_[idx].unify(other.names_[idx - size_difference], op_name);
+  if (names_.size() > other.names_.size()) {
+    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+      names_[idx] = names_[idx].unify(other.names_[idx - size_diff], op_name);
     }
   } else {
     // pad names_ to the same length as other.names_ before unification
     names_.insert(
         names_.begin(),
         other.names_.begin(),
-        other.names_.begin() + size_difference);
-    for (int64_t idx = size_difference; idx < longer_size; ++idx) {
+        other.names_.begin() + size_diff);
+    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
       names_[idx] = names_[idx].unify(other.names_[idx], op_name);
     }
   }
