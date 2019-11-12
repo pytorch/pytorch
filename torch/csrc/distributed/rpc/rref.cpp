@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -153,8 +154,7 @@ const ForkId& UserRRef<T>::forkId() const {
 }
 
 template <>
-std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
-  auto future = std::make_shared<ivalue::Future>(nullptr);
+IValue UserRRef<IValue>::toHere() {
   auto agent = RpcAgent::getDefaultRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
@@ -166,18 +166,15 @@ std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
       ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
       true /* forceGradRecording */);
 
-  futureResponse->addCallback([future](const Message& message) {
-    RRefContext::handleException(message);
-    auto response = deserializeResponse(message);
-    auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
-    future->markCompleted(rfr.values().front());
-  });
-  return future;
+  const Message& message = futureResponse->wait();
+  RRefContext::handleException(message);
+  auto response = deserializeResponse(message);
+  auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
+  return rfr.values().front();
 }
 
 template <>
-std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
-  auto future = std::make_shared<ivalue::Future>(nullptr);
+py::object UserRRef<py::object>::toHere() {
   auto agent = RpcAgent::getDefaultRpcAgent();
 
   // PythonRRefFetchCall message always carries autograd context id even if
@@ -189,13 +186,12 @@ std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
       PythonRRefFetchCall(ownerId_, rrefId()).toMessage(),
       true /* forceGradRecording */);
 
-  futureResponse->addCallback([future](const Message& message) {
-    RRefContext::handleException(message);
-    auto response = deserializeResponse(message);
-    auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
-    future->markCompleted(c10::ivalue::Tuple::create(rfr.values()));
-  });
-  return future;
+  const Message& message = futureResponse->wait();
+  RRefContext::handleException(message);
+  auto response = deserializeResponse(message);
+  auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
+  return PythonRpcHandler::getInstance().deserialize(
+      SerializedPyObj::fromIValues(rfr.values()));
 }
 
 template class UserRRef<IValue>;
