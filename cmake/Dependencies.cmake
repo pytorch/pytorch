@@ -795,12 +795,15 @@ endif()
 
 if(pybind11_FOUND)
     message(STATUS "System pybind11 found")
-    message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
-    include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 else()
     message(STATUS "Using third_party/pybind11.")
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+    set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
 endif()
+message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
+include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+install(DIRECTORY ${pybind11_INCLUDE_DIRS}
+        DESTINATION ${CMAKE_INSTALL_PREFIX}
+        FILES_MATCHING PATTERN "*.h")
 
 # ---[ MPI
 if(USE_MPI)
