@@ -264,7 +264,7 @@ def isfinite(tensor):
     # have a similar concept. It's safe to assume any created LongTensor doesn't
     # overflow and it's finite.
     if not tensor.is_floating_point():
-        return torch.ones_like(tensor, dtype=torch.bool)
+        return torch.ones_like(tensor, dtype=torch.bool, memory_format=torch.legacy_contiguous_format)
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
@@ -285,7 +285,7 @@ def isinf(tensor):
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
     if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
-        return torch.zeros_like(tensor, dtype=torch.bool)
+        return torch.zeros_like(tensor, dtype=torch.bool, memory_format=torch.legacy_contiguous_format)
     return tensor.abs() == inf
 
 
