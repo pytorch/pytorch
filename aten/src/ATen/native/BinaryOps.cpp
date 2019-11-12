@@ -179,7 +179,7 @@ Tensor div(const Tensor& self, Scalar other) {
 }
 
 Tensor div(Scalar other, const Tensor& self) {
-  return native::div(self, other);
+  return wrapped_scalar_tensor(other).div(self); // redispatch!
 }
 
 // WARNING: This function, with a sparse self, is currently only
@@ -207,7 +207,7 @@ Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor sub(Scalar other, const Tensor& self, Scalar alpha) {
-  return native::sub(self, other, alpha);
+  return native::sub(wrapped_scalar_tensor(other), self, alpha);
 }
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
@@ -219,7 +219,7 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor rsub(Scalar other, const Tensor& self, Scalar alpha) {
-  return native::rsub(self, other, alpha);
+  return native::rsub(wrapped_scalar_tensor(other), self, alpha);
 }
 
 template <typename Stub>
