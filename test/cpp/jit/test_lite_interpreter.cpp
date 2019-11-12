@@ -4,10 +4,6 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/import.h>
-#include <torch/script.h>
-
-#include <torch/csrc/jit/instruction.h>
-
 
 // Tests go in torch::jit
 namespace torch {
@@ -132,6 +128,5 @@ void testLiteInterpreterPrimOverload() {
   auto output = bc.run_method("forward", inputs);
   AT_ASSERT(output.toIntList()[2] == 3);
 }
-
 } // namespace torch
 } // namespace jit
