@@ -555,6 +555,14 @@ void initJitScriptBindings(PyObject* module) {
             return toPyObject(self.attr(name));
           })
       .def(
+          "__getattr__",
+          [](Object& self, const std::string& name) {
+            if (auto method = self.find_method(name)) {
+              return py::cast(*method);
+            }
+            return toPyObject(self.attr(name));
+          })
+      .def(
           "hasattr",
           [](Object& self, const std::string& name) {
             return self.hasattr(name);
