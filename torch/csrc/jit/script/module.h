@@ -199,6 +199,7 @@ struct TORCH_API Module {
   void setattr(const std::string& name, IValue v) {
     size_t slot = module_object()->type()->getAttributeSlot(name);
     const TypePtr& expected = module_object()->type()->getAttribute(slot);
+    TORCH_CHECK(expected, "Module has no attribute '", name, "'");
     TORCH_CHECK(
         v.type()->isSubtypeOf(expected),
         "Expected a value of type '",

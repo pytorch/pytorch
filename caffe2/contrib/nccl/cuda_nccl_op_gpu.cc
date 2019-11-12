@@ -1,7 +1,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
 
-#include "cuda_nccl_gpu.h"
+#include "caffe2/contrib/nccl/cuda_nccl_gpu.h"
 
 namespace caffe2 {
 

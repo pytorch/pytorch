@@ -7,8 +7,15 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
-                         const Tensor& running_var, const BatchNormOptions& options = {}, bool training = false) {
+namespace detail {
+inline Tensor batch_norm(const Tensor& input,
+                         const Tensor& running_mean,
+                         const Tensor& running_var,
+                         Tensor weight,
+                         Tensor bias,
+                         bool training,
+                         c10::optional<double> momentum,
+                         double eps) {
   if (training) {
     auto size = input.sizes();
     int64_t size_prods = size[0];
@@ -21,14 +28,28 @@ inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
 
   return torch::batch_norm(
     input,
-    options.weight(),
-    options.bias(),
+    weight,
+    bias,
     running_mean,
     running_var,
     training,
-    options.momentum().value(),
-    options.eps(),
+    momentum.value(),
+    eps,
     at::globalContext().userEnabledCuDNN());
+}
+} // namespace detail
+
+inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
+                         const Tensor& running_var, BatchNormFuncOptions options = {}, bool training = false) {
+  return detail::batch_norm(
+    input,
+    running_mean,
+    running_var,
+    options.weight(),
+    options.bias(),
+    training,
+    options.momentum(),
+    options.eps());
 }
 
 } // namespace functional
