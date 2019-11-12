@@ -267,7 +267,8 @@ DimVector TensorIterator::invert_perm(IntArrayRef input) const {
   // Invert the permutation caused by reorder_dimensions. This is not valid
   // after coalesce_dimensions is called.
   TORCH_INTERNAL_ASSERT(!has_coalesced_dimensions_);
-  auto res = DimVector(input.size(), 0);
+  TORCH_INTERNAL_ASSERT(input.size()==perm_.size());
+  auto res = DimVector(input.size()); //no initialization needed, every value in res should be written to.
   for (int dim = 0; dim < ndim(); dim++) {
     res[perm_[dim]] = input[dim];
   }
@@ -281,13 +282,27 @@ void TensorIterator::allocate_outputs() {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.dtype);
       op.stride_bytes = compatible_stride(element_size);
-
-      auto tensor_shape = invert_perm(shape_);
-      auto tensor_stride = invert_perm(op.stride_bytes);
-      for (int dim = 0; dim < ndim(); dim++) {
-        tensor_stride[dim] /= element_size;
+      //check if permutation is just an inverted order
+      bool inverted = true;
+      for (int i = 1; i <= ndim(); i++) {
+        if (perm_[i-1] != ndim() - i) {
+          inverted = false;
+          break;
+        }
       }
-      op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.options());
+      auto tensor_shape = invert_perm(shape_);
+      if (inverted) {
+        // can just return contiguous output
+        // it is faster because it avoids allocating 0 size tensor and resizing and restriding it
+        op.tensor = at::empty(tensor_shape, op.options());
+      } else {
+        auto tensor_stride = invert_perm(op.stride_bytes);
+        for (int dim = 0; dim < ndim(); dim++) {
+          tensor_stride[dim] /= element_size;
+        }
+        op.tensor =
+            at::empty_strided(tensor_shape, tensor_stride, op.options());
+      }
     }
   }
 }
@@ -739,6 +754,9 @@ void TensorIterator::check_mem_overlaps() {
 }
 
 void TensorIterator::compute_shape() {
+  all_ops_same_shape_ = true;
+  bool has_scalars = false;
+  bool has_tensors = false;
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
 
@@ -746,15 +764,22 @@ void TensorIterator::compute_shape() {
     // This preserves the legacy behavior where torch.add(..., out=dst) resizes
     // the destination tensor.
     if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
-
     auto shape = op.tensor.sizes();
+    if (shape.size() == 0) {
+      has_scalars = true;
+    } else {
+      has_tensors = true;
+    }
+    if (has_scalars && has_tensors) {
+      all_ops_same_shape_ = false;
+    }
     if (shape_.empty()) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
+      all_ops_same_shape_ = false;
       shape_ = DimVector(infer_size(shape_, shape));
     }
   }
-
   // Outputs cannot be broadcasted. Check that the shape of the outputs matches
   // the inferred shape. There's an exception for write-only tensors to support
   // our legacy behavior that functions with `out=` arguments resize their
@@ -848,6 +873,52 @@ int TensorIterator::get_dim_to_split() const {
   return dim_to_split;
 }
 
+void TensorIterator::fast_set_up() {
+  //this function is called if all the inputs are contiguous to avoid needless reordering of dimensions
+  //and tracking output strides
+  //TODO enable fast handling for reductions
+  //TODO enable fast handling for channels_last
+
+  //allocate contiguous tensor for output
+  for (int i = 0; i < num_outputs_; i++){
+      auto& op = operands_[i];
+      if (!op.tensor.defined()) {
+        TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+        op.tensor = at::empty(shape_, op.options());
+      }
+  }
+  //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
+  if (ndim() > 1){
+    has_coalesced_dimensions_ = true;
+  }
+  if (ndim() >= 1) {
+    shape_[0] = numel();
+    shape_.resize(1);
+  }
+  for (auto& op : operands_ ) {
+    auto element_size_in_bytes = op.tensor.element_size();
+    op.stride_bytes.resize(ndim());
+    if (ndim()>0) {
+      op.stride_bytes[0] = element_size_in_bytes;
+    }
+  }
+}
+
+bool TensorIterator::can_use_fast_set_up() {
+  if (is_reduction_) return false;
+  if (!all_ops_same_shape_) {
+    return false;
+  }
+  for (auto& op : operands_) {
+    if (op.tensor.defined()) {
+      if (!op.tensor.is_contiguous()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 void TensorIterator::build() {
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
@@ -862,18 +933,22 @@ void TensorIterator::build() {
   compute_shape();
   // compute the result dtype and device
   compute_types();
-  // compute each tensor's stride after broadcasting
-  compute_strides();
-  // re-order dimensions to improve coalescing
-  reorder_dimensions();
-  // allocate the output tensor if it's not provided
-  allocate_outputs();
+  if (can_use_fast_set_up()) {
+    fast_set_up();
+  } else {
+    // compute each tensor's stride after broadcasting
+    compute_strides();
+    // re-order dimensions to improve coalescing
+    reorder_dimensions();
+    // allocate the output tensor if it's not provided
+    allocate_outputs();
+    // coalesce adjacent dimensions when possible
+    coalesce_dimensions();
+  }
 #ifdef BUILD_NAMEDTENSOR
   // perform name inference
   propagate_names_to_outputs();
 #endif
-  // coalesce adjacent dimensions when possible
-  coalesce_dimensions();
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
