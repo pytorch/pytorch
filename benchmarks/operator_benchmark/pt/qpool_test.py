@@ -22,7 +22,7 @@ qpool2d_long_configs = op_bench.config_list(
     cross_product_configs={
         'N': (1, 4),
         'contig': (False, True),
-        'dtype': (torch.quint32,),
+        'dtype': (torch.quint8,),
     },
     tags=('long',)
 )
@@ -55,7 +55,7 @@ qadaptive_avgpool2d_long_configs = op_bench.cross_product_configs(
     N=(1, 4),
     C=(1, 3, 64, 128),
     contig=(False, True),
-    dtype=(torch.quint32,),
+    dtype=(torch.quint8,),
     tags=('long',)
 )
 
