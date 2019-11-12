@@ -441,23 +441,14 @@ c10::optional<std::string> findObserverName(Value* v) {
 
 class QuantizeHelper {
  public:
-  QuantizeHelper(script::Module& m) : module_(m) {}
+  QuantizeHelper(const script::Module& m) : module_(m) {}
   // quantization parameters and scalar type
   std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
   void quantizeTensor(Value* v, bool insert_after = true);
   void removeObserver(Value* v, const std::string& observer_name);
-  void removeModulesAndNodes() {
-    // Remove observer modules from last one to first one in order to
-    // reduce the time complexity, assuming all the observer modules
-    // are added after the existing modules, we'll have complexity of
-    // O(N) where N is number of observer moduels with this optimization
-    for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
-      auto observer_name = observer_modules_to_remove_[i];
-      module_.module_object()->unsafeRemoveAttr(observer_name);
-      module_.type()->unsafeRemoveAttribute(observer_name);
-    }
+  void destroyNodes() {
     // Destroy observer forward calls
     for (auto& n : nodes_to_destroy_) {
       n->destroy();
@@ -465,7 +456,7 @@ class QuantizeHelper {
   }
 
  private:
-  script::Module& module_;
+  const script::Module& module_;
   std::vector<std::string> observer_modules_to_remove_;
   std::vector<Node*> nodes_to_destroy_;
 };
@@ -613,7 +604,7 @@ void InsertQuantDeQuantImpl(
     qh.quantizeTensor(v, false);
   }
 
-  qh.removeModulesAndNodes();
+  qh.destroyNodes();
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
