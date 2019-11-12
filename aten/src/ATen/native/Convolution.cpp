@@ -735,7 +735,7 @@ at::Tensor _convolution_nogroup(
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
-      return at::thnn_conv3d(
+      return at::slow_conv3d(
           input, weight, kernel_size, bias,
           stride, padding);
     }
