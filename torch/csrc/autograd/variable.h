@@ -218,13 +218,6 @@ struct TORCH_API Variable : public at::Tensor {
   /// this and the base Variable.
   const std::shared_ptr<Node>& grad_fn() const;
 
-  // Versions
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  /// Retrieves the current value of the `Variable`'s version counter.
-  /// Equivalent to calling `version_counter().current_version()`.
-  uint32_t current_version() const noexcept;
-
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -139,7 +139,7 @@ int64_t output_nr(const Tensor & self) {
 }
 
 int64_t _version(const Tensor & self) {
-  return as_variable_ref(self).current_version();
+  return self.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 Tensor& requires_grad_(Tensor& self, bool _requires_grad) {

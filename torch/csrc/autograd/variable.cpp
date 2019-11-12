@@ -66,7 +66,7 @@ const std::shared_ptr<Node>& Variable::grad_fn() const {
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
-    auto current_version = this->current_version();
+    auto current_version = this->_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<generated::AsStridedBackward>();
@@ -97,10 +97,6 @@ void Variable::remove_hook(unsigned pos) {
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
-}
-
-uint32_t Variable::current_version() const noexcept {
-  return unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 namespace {
