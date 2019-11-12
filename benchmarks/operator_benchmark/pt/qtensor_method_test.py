@@ -10,11 +10,11 @@ import torch
 qmethods_configs_short = op_bench.config_list(
     attr_names=['M', 'N'],
     attrs=[
-        [512, 512],
+        [32, 32],
     ],
     cross_product_configs={
         'dtype': [torch.quint8],
-        'contig': [True],
+        'contig': [False, True],
     },
     tags=['short']
 )
@@ -22,7 +22,7 @@ qmethods_configs_short = op_bench.config_list(
 qmethods_configs_long = op_bench.cross_product_configs(
     M=[256, 1024],
     N=[256, 1024],
-    dtype=[torch.quint8, torch.qint8, torch.qint32],
+    dtype=[torch.qint8, torch.qint32],
     contig=[False, True],
     tags=['long']
 )
