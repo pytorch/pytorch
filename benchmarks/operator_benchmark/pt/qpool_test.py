@@ -68,6 +68,7 @@ qadaptive_avgpool2d_short_configs = op_bench.config_list(
     tags=('short',)
 )
 
+
 class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
     def setup(self, N, C, H, W, dtype, contig):
         # Input
