@@ -55,6 +55,42 @@ op_bench.generate_pt_test(quantize_configs_short + quantize_configs_long,
                           QuantizePerTensorBenchmark)
 
 
+class QuantizePerChannelBenchmark(op_bench.TorchBenchmarkBase):
+    r"""Benchmarks both quantization and dequantization."""
+    def init(self, C, M, N, dtype, mode):
+        assert(mode in ('Q', 'D'))
+        self.input = torch.rand(C, M, N)
+        self.dtype = dtype
+
+        self.op = torch.quantize_per_channel
+
+        scales = torch.tensor([1.0] * C)
+        zero_points = torch.tensor([0] * C)
+        dtype = dtype
+
+        self.kwargs = {
+            'scales': scales,
+            'zero_points': zero_points,
+            'dtype': dtype,
+            'axis': 0
+        }
+
+        self.set_module_name('QuantizePerChannel')
+
+        if mode == 'D':
+            self.input = self.op(self.input, **self.kwargs)
+            # Dequantize doesn't take any arguments
+            self.op = lambda x, **kwargs: x.dequantize()
+            self.set_module_name('DequantizePerChannel')
+
+    def forward(self):
+        return self.op(self.input, **self.kwargs)
+
+
+op_bench.generate_pt_test(quantize_configs_short + quantize_configs_long,
+                          QuantizePerChannelBenchmark)
+
+
 fake_quantize_configs_short = op_bench.config_list(
     # mode is used to show the direction of the benchmark:
     # if 'Q', benchmark quantization, else dequantization
