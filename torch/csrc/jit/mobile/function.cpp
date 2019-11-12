@@ -2,6 +2,7 @@
 #include "interpreter.h"
 #include <torch/csrc/jit/instruction.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <regex>
 
 namespace torch{
 namespace jit{
@@ -25,6 +26,57 @@ void tensorListConstruct(int num_inputs, Stack& stack) {
   }
   drop(stack, num_inputs);
   push(stack, std::move(vals));
+}
+
+void tupleConstruct(int num_inputs, Stack& stack) {
+  std::vector<IValue> elems{
+    std::make_move_iterator(stack.end() - num_inputs),
+    std::make_move_iterator(stack.end())};
+  drop(stack, num_inputs);
+  push(stack, c10::ivalue::Tuple::create(std::move(elems)));
+}
+
+void tupleUnpack(int num_inputs, Stack& stack) {
+  auto tuple = pop(stack).toTuple();
+  if (tuple->elements().size() != num_inputs) {
+    AT_ERROR(
+       "Expected a tuple of ",
+       num_inputs,
+       " elements, but got ",
+       tuple->elements().size());
+  }
+  stack.insert(
+     stack.end(),
+     tuple->elements().begin(),
+     tuple->elements().end());
+}
+
+static const std::regex unsupported_options("\\{(.*?)\\}");
+void format(int num_inputs, Stack& stack) {
+  auto format = peek(stack, 0, num_inputs).toStringRef();
+
+  if (std::regex_search(format, unsupported_options)) {
+    AT_WARN("Format options are not supported.");
+  }
+
+  auto args = last(stack, num_inputs - 1);
+  std::stringstream ss;
+  for (size_t begin = 0, used_args = 0; true; ++used_args) {
+    size_t loc = format.find("{}", begin);
+    if (loc == std::string::npos) {
+      ss << format.substr(begin);
+      break;
+    }
+    ss << format.substr(begin, loc - begin);
+    if (used_args >= args.size()) {
+      AT_ERROR("Too few arguments for format string: ", format);
+    }
+    ss << args[used_args];
+    begin = loc + 2;
+  }
+
+  drop(stack, num_inputs);
+  push(stack, ss.str());
 }
 }
 
@@ -68,7 +120,14 @@ void Function::build_vararg_operator_table() {
         } else {
           AT_ERROR("Type of ListConstruct is not supported.");
         }
-      } else {
+      } else if (opname.name == "prim::TupleConstruct") {
+        code_->vararg_operators_.emplace_back(tupleConstruct);
+      } else if (opname.name == "prim::TupleUnpack") {
+        code_->vararg_operators_.emplace_back(tupleUnpack);
+      } else if (opname.name == "aten::format") {
+        code_->vararg_operators_.emplace_back(format);
+      }
+      else {
         AT_ERROR("OPN operator ", opname.name, " is not supported.");
       }
       ins.X = code_->vararg_operators_.size() - 1;
