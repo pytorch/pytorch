@@ -107,7 +107,6 @@ void testLiteInterpreterTuple() {
   )JIT");
   std::stringstream ss;
   m._save_for_mobile(ss);
-  m._save_for_mobile("/Users/myuan/temp/test.bc");
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.run_method("forward", inputs);
