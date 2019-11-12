@@ -312,6 +312,21 @@ static auto registry0 = torch::RegisterOperators().op(
   []() {
   })
 ).op(
+  "_prim::TupleConstruct",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::TupleUnpack",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_aten::format",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
   "_aten::append.Tensor(Tensor self) -> void",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](c10::OperatorKernel* kernel, Stack* stack) {
@@ -324,3 +339,4 @@ static auto registry0 = torch::RegisterOperators().op(
     listAppend<int64_t>(*stack);
   })
 );
+

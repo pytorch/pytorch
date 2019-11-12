@@ -69,6 +69,7 @@ namespace jit {
   _(LiteInterpreterAdd)                \
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
+  _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
   _(CommonAncestor)
 
