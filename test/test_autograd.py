@@ -12,6 +12,8 @@ from itertools import product
 from operator import mul
 from functools import reduce
 import torch
+from fake_operators import fake_empty_like, fake_rand_like, fake_randint_like, fake_randn_like, fake_ones_like, fake_zeros_like, fake_full_like
+
 
 # TODO: remove this global setting
 # Autograd tests use double as the default dtype
@@ -29,7 +31,6 @@ from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
-from torch.testing import randn_like
 from common_methods_invocations import (method_tests,
                                         create_input, unpack_variables,
                                         EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
@@ -1028,7 +1029,7 @@ class TestAutograd(TestCase):
         b = torch.zeros(3, requires_grad=True)
         tensor = b + 0
         tensor[a != 0] = tensor[a != 0]
-        tensor.backward(torch.zeros_like(tensor))
+        tensor.backward(fake_zeros_like(tensor, memory_format=torch.preserve_format))
 
     def test_volatile_deprecated(self):
         v = torch.autograd.torch.randn(3, 3)
@@ -1162,7 +1163,7 @@ class TestAutograd(TestCase):
         b = torch.randn(5, 5, requires_grad=True)
 
         x = a * b
-        grad_output = torch.randn_like(x)
+        grad_output = fake_randn_like(x)
         torch.autograd.backward([x, x], [grad_output, grad_output])
 
         self.assertEqual(a.grad.data, b.data * grad_output * 2)
@@ -1404,7 +1405,7 @@ class TestAutograd(TestCase):
         expected_grad_input = torch.ones(*size)
         expected_grad_input[index] = 0
         self.assertEqual(x.grad, expected_grad_input)
-        self.assertEqual(value.grad, torch.ones_like(value))
+        self.assertEqual(value.grad, fake_ones_like(value))
 
         # case when x broadcasts to as y[1]
         x = torch.randn(4, requires_grad=True)
@@ -1478,7 +1479,7 @@ class TestAutograd(TestCase):
             outs = stacked.unbind()
             gi = grad.unbind()[i]
             g, = torch.autograd.grad(outs[i], stacked, gi)
-            g_expected = torch.stack([gi if j == i else torch.zeros_like(gi)
+            g_expected = torch.stack([gi if j == i else fake_zeros_like(gi)
                                       for j in range(3)], dim=0)
             self.assertEqual(g, g_expected)
 
@@ -1544,7 +1545,7 @@ class TestAutograd(TestCase):
         else:
             ind = torch.zeros(size_ind, dtype=torch.int64)
         out = torch.gather(x, dim, ind, sparse_grad=False)
-        grad = torch.rand_like(out)
+        grad = fake_rand_like(out)
         out.backward(grad)
         grad_dense = x.grad.clone()
         x.grad = None
@@ -1815,11 +1816,11 @@ class TestAutograd(TestCase):
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
-        self.assertEqual(fvar.grad, torch.ones_like(fvar))
+        self.assertEqual(fvar.grad, fake_ones_like(fvar))
         self.assertEqual(type(fvar.grad.data), type(fvar.data))
         dvar = Variable(t(torch.randn(5, 5).double()), requires_grad=True)
         dvar.float().sum().backward()
-        self.assertEqual(dvar.grad, torch.ones_like(dvar))
+        self.assertEqual(dvar.grad, fake_ones_like(dvar))
         self.assertEqual(type(dvar.grad.data), type(dvar.data))
 
     def test_type_conversions(self):
@@ -2067,7 +2068,7 @@ class TestAutograd(TestCase):
         x = torch.randn(5, 5, requires_grad=True)
         y = MyFn.apply(x)
         y.sum().backward()
-        self.assertEqual(x.grad, torch.ones_like(x))
+        self.assertEqual(x.grad, fake_ones_like(x))
 
     def test_pickle(self):
         x = torch.randn(10, 10, requires_grad=True)
@@ -2978,7 +2979,7 @@ class TestAutograd(TestCase):
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
         b = torch.randn(2, 2, requires_grad=True)
-        x = torch.zeros_like(a)
+        x = fake_zeros_like(a)
 
         # out=... functions don't support automatic differentiation currently
         self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
@@ -3051,14 +3052,14 @@ class TestAutograd(TestCase):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
         with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
-            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+            torch.autograd.backward([w, v], [fake_ones_like(w), fake_ones_like(v)])
 
     @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
         u, s, v = torch.svd(A, compute_uv=False)
         with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
-            torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
+            torch.autograd.backward([u, s, v], [fake_ones_like(u), fake_ones_like(s), fake_ones_like(v)])
 
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
@@ -3125,7 +3126,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_out):
-                return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + torch.rand_like(grad_out) * ctx._jitter), None
+                return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + fake_rand_like(grad_out) * ctx._jitter), None
 
         inp = torch.randn(5, 5, requires_grad=True)
         gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp)
@@ -3371,7 +3372,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
-        output_variable.backward(randn_like(output_variable))
+        output_variable.backward(fake_randn_like(output_variable))
         test_case.assertEqual(self_variable.type(), self_variable.grad.type())
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
@@ -3452,9 +3453,9 @@ def add_test(
                         output_variable = getattr(torch, name)(*self_and_args_variable, **kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
                         if output_variable.is_sparse:
-                            rand = randn_like(output_variable.to_dense()).to_sparse()
+                            rand = fake_randn_like(output_variable.to_dense()).to_sparse()
                         else:
-                            rand = randn_like(output_variable)
+                            rand = fake_randn_like(output_variable)
                         output_variable.backward(rand)
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
@@ -3492,7 +3493,7 @@ def add_test(
                             if i.grad is not None:
                                 i.grad.data.zero_()
                         for io, o in zip(inplace_output_variable, output_variable):
-                            grad = randn_like(io).double()
+                            grad = fake_randn_like(io).double()
                             io.backward(grad)
                             o.backward(grad)
                         for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
@@ -3580,7 +3581,7 @@ class TestAutogradDeviceType(TestCase):
 
             # assert that _values is non-differentiable
             with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
-                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
+                other.detach().requires_grad_()._values().backward(fake_ones_like(other._values()))
 
         for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
@@ -3903,7 +3904,7 @@ class TestAutogradDeviceType(TestCase):
         # Tests half type on CUDA
         if self.device_type == 'cuda':
             x = x.to(dtype=torch.half, device=devices[0])
-            x.grad = torch.zeros_like(x)
+            x.grad = fake_zeros_like(x)
 
         # Tests cross-device assignment raises
         if len(devices) > 1:
@@ -3914,7 +3915,7 @@ class TestAutogradDeviceType(TestCase):
     @deviceCountAtLeast(1)
     @dtypes(torch.float, torch.double)
     def test_requires_grad_factory(self, devices, dtype):
-        fns = [torch.ones_like, torch.testing.randn_like]
+        fns = [fake_ones_like, fake_randn_like]
         x = torch.randn(2, 3, dtype=dtype, device=devices[0])
 
         for fn in fns:
