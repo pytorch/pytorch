@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/jit/pybind_utils.h>
 
@@ -21,41 +23,31 @@ constexpr int RREF_TUPLE_SIZE = 2;
 
 } // namespace
 
+///////////////////////////  PyRRef  //////////////////////////////////
+
 PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
+
+PyRRef::PyRRef(const py::object& value)
+    : PyRRef([&value]() {
+        auto rref = RRefContext::getInstance().createOwnerRRef<py::object>();
+        py::object copy(value); // increases refcount
+        rref->setValue(std::move(copy));
+        return rref;
+      }()) {}
 
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
-worker_id_t PyRRef::owner() const {
-  return rref_->owner();
+WorkerInfo PyRRef::owner() const {
+  return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
 }
 
 py::object PyRRef::toHere() {
   if (rref_->isOwner()) {
-    if (rref_->isPyObj()) {
-      const py::object& value =
-          std::static_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
-
-      {
-        // acquiring GIL as the return statement construct a new py::object from
-        // a const reference.
-        AutoGIL ag;
-        return value;
-      }
-    } else {
-      IValue value =
-          std::static_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
-
-      {
-        // acquiring GIL as torch::jit::toPyObject creates new py::object
-        // without grabbing the GIL.
-        AutoGIL ag;
-        return torch::jit::toPyObject(std::move(value));
-      }
-    }
+    return localValue();
   } else {
     if (rref_->isPyObj()) {
       // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires

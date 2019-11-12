@@ -3,7 +3,12 @@ producer_name: "pytorch"
 producer_version: "1.3"
 graph {
   node {
+    input: "input"
     output: "1"
+    op_type: "Shape"
+  }
+  node {
+    output: "2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -15,13 +20,8 @@ graph {
     }
   }
   node {
-    input: "input"
-    output: "2"
-    op_type: "Shape"
-  }
-  node {
-    input: "2"
     input: "1"
+    input: "2"
     output: "3"
     op_type: "Gather"
     attribute {
@@ -74,7 +74,12 @@ graph {
     op_type: "Floor"
   }
   node {
+    input: "input"
     output: "9"
+    op_type: "Shape"
+  }
+  node {
+    output: "10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -86,13 +91,8 @@ graph {
     }
   }
   node {
-    input: "input"
-    output: "10"
-    op_type: "Shape"
-  }
-  node {
-    input: "10"
     input: "9"
+    input: "10"
     output: "11"
     op_type: "Gather"
     attribute {

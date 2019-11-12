@@ -13,7 +13,7 @@ namespace {
 using namespace vec256;
 
 static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar scalar_end, int64_t steps) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "linspace_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "linspace_cpu", [&]() {
     int64_t idx = 0;
     scalar_t start = scalar_start.to<scalar_t>();
     scalar_t end = scalar_end.to<scalar_t>();

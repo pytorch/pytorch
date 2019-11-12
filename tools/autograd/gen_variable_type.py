@@ -30,7 +30,7 @@ from .gen_autograd_functions import uses_single_grad
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr', '_version'
+    'set_data', 'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -48,8 +48,41 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'zero': 'zeros_like',
-    'fill': 'full_like',
+    'zero': 'zeros_like',  # replacing aten::zero_ with aten::zeros_like
+    'fill': 'full_like',  # replacing aten::fill_ with aten::full_like
+}
+
+# `torch.jit.trace` have undocumented keyword argument `_force_outplace`,
+# which force jit to replace functions with outplace variants (for
+# example `aten::add_` becomes `aten::add`).
+#
+# This replacement implemented in-place with minimum modifications of
+# arguments stack (as it assumes that outplace call has the same arguments
+# as inplace version).
+#
+# However there are no such substitutions available for `aten::fill_`
+# and `aten::zero_` operators, as we never implemented `aten::fill`
+# and `aten::zero`. So jit tracing hack replacing `aten::zero_` with
+# `aten::zeros_like` and replacing `aten::fill_` with `aten::full_like`.
+#
+# But as they potentially can have different arguments, we also have
+# to hack into the stack and add missing ones.
+#
+# A possible alternative would be:
+#
+#  - Add `aten::fill` and `aten::zero`
+#
+#  - Or keep `aten::zeros_like` arguments aligned with `aten::zero_`
+# arguments (inside of the `native_functions.yaml`)
+RENAME_TRACE_ADD_ARGS = {
+    'fill': '''\
+    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
+    'zero': '''\
+    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
 }
 
 # (declaration name, argument name) -> attribute name
@@ -153,17 +186,10 @@ ${return_type} ${api_name}(${type_method_formals}) {
 }
 """)
 
-LEGACY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
-
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -178,7 +204,7 @@ UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
 UNPACK_OPTIONS = CodeTemplate("""\
-auto ${arg_name}_ = TensorOptions(${arg_name}).is_variable(false);""")
+auto ${arg_name}_ = TensorOptions(${arg_name});""")
 
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
@@ -239,6 +265,7 @@ RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::pee
 """)
 
 SELECT = CodeTemplate("""\
+
 if (${cond}) {
   ${true}
 } else {
@@ -415,7 +442,21 @@ def format_prerecord_trace(declaration):
     is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
 
     local['set_op_name'] = format_trace_op_name(declaration)
-    local['add_trace_inputs'] = format_trace_inputs(declaration)
+
+    is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
+    add_args = ''
+    if is_inplace:
+        api_name = uninplace_api_name(declaration['api_name'])
+        add_args = RENAME_TRACE_ADD_ARGS.get(api_name, '')
+    if add_args:
+        select_params = {}
+        select_params['cond'] = 'tracer_state->force_outplace'
+        select_params['true'] = add_args
+        select_params['false'] = ''
+        additional_inputs = SELECT.substitute(select_params)
+    else:
+        additional_inputs = ''
+    local['add_trace_inputs'] = format_trace_inputs(declaration) + additional_inputs
 
     local['inplace_guard'] = ''
     if is_inplace:
@@ -480,12 +521,9 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         if declaration['use_c10_dispatcher'] == 'full':
             wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
-        elif declaration['use_c10_dispatcher'] == 'unboxed_only':
-            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
         else:
-            assert declaration['use_c10_dispatcher'] == 'no'
-            wrapper_registrations.append(LEGACY_WRAPPER_REGISTRATION.substitute(
+            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
 
     env = {
@@ -509,7 +547,7 @@ def emit_body(declaration):
     inplace = declaration['inplace']
     is_out_fn = name.endswith('_out')
     modifies_arguments = inplace or is_out_fn
-    returns_void = len(returns) == 1 and returns[0]['type'] == 'void'
+    returns_void = len(returns) == 0
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)

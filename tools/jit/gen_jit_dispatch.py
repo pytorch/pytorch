@@ -160,15 +160,9 @@ const auto options = TensorOptions()
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
-# Adding `AutoNonVariableTypeMode` guard for `USE_STATIC_DISPATCH` case is kinda
-# hack to address issue #26764. TODO: remove this hack after Variable/Tensor
-# unification (#23032) is done.
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
     ${lvalues}
-#ifdef USE_STATIC_DISPATCH
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-#endif
     ${call}
     drop(stack, ${num_inputs});
     pack(stack, std::move(result_));
@@ -209,7 +203,8 @@ def is_jit_arg(i, arg):
 
 def is_jit_op(decl):
     # We currently don't support functions that return nothing
-    if all(r['type'] == 'void' for r in decl['returns']):
+    assert all(r['type'] != 'void' for r in decl['returns'])
+    if len(decl['returns']) == 0:
         return False
 
     arguments = decl['arguments']

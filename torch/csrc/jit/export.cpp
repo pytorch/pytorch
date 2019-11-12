@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/passes/inliner.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -630,13 +631,12 @@ class ScriptModuleSerializer {
           src.size() > kMinToCompress /*compress*/);
 
       // Write out the debug information
-      std::ostringstream debugFilename;
-      debugFilename << filename << ".debug_pkl";
+      std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      const auto& range_data =
+      auto range_data =
           source_range_pickler.pickle(item.value().ranges());
       writer_.writeRecord(
-          debugFilename.str(),
+          debugFilename,
           range_data.data(),
           range_data.size(),
           range_data.size() > kMinToCompress /*compress*/);
@@ -648,7 +648,9 @@ class ScriptModuleSerializer {
     std::vector<c10::IValue> elements;
     for (const auto& method : methods) {
       const auto& func = method.function();
-      torch::jit::Code code(func.graph());
+      auto graph = func.graph()->copy();
+      Inline(*graph);
+      torch::jit::Code code(graph);
       // Make a copy of opnames. Some of them may be changed for mobile later.
       std::vector<c10::OperatorName> opnames;
       for (size_t i = 0; i < code.instructions().size(); ++i) {

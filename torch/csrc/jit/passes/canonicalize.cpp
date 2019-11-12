@@ -60,15 +60,6 @@ size_t blockIndex(const Block* b) {
   AT_ASSERT(false);
 }
 
-size_t blocksFromGraphBlock(Node* n) {
-  size_t dist = 0;
-  while (n->owningBlock()->owningNode()) {
-    n = n->owningBlock()->owningNode();
-    ++dist;
-  }
-  return dist;
-}
-
 /*
  * This establishes a canonical ordering of nodes.
  * If n1 and n2 are in the same block, whichever node appears first
@@ -85,8 +76,8 @@ bool isBefore(Node* n1, Node* n2) {
   AT_ASSERT(n1 != n2);
 
   // Set n1 and n2 to be the number of blocks from the Graph block
-  size_t d_1 = blocksFromGraphBlock(n1);
-  size_t d_2 = blocksFromGraphBlock(n2);
+  size_t d_1 = n1->blocksFromGraphBlock();
+  size_t d_2 = n2->blocksFromGraphBlock();
 
   for (; d_1 > d_2; --d_1) {
     n1 = n1->owningBlock()->owningNode();

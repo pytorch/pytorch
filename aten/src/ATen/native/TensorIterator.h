@@ -127,9 +127,10 @@ struct CAFFE2_API OperandInfo {
 struct SplitUntil32Bit;
 
 enum class CommonDTypeStrategy : uint8_t {
-  COMPUTE_ALL = 0, // Compute common dtype based on inputs and outputs. Try to promote common dtype to inputs and outputs
-  COMPUTE_INPUTS = 1, // Compute common dtype based only on inputs. Try to promote common dtype only to inputs
-  COMPUTE_NONE = 2, // Do not compute and promote common dtype
+  NONE, // Do not compute a common dtype
+  CHECK, // Compute and validate a common dtype but don't promote.
+  PROMOTE_INPUTS, // Promote common dtype but only validate inputs (comparison ops have boolean output)
+  PROMOTE // Promote to common dtype.
 };
 
 struct CAFFE2_API TensorIterator {
@@ -190,6 +191,7 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
+  ScalarType common_dtype() const { return common_dtype_; }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
@@ -206,7 +208,7 @@ struct CAFFE2_API TensorIterator {
   }
 
   void cast_outputs() {
-    if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_ALL) {
+    if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE) {
       for(int i=0; i < noutputs(); i++) {
         if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
           operands_[i].original_tensor.copy_(operands_[i].tensor);
@@ -285,6 +287,10 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
+  bool needs_dynamic_casting() const {
+    return (common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_;
+  }
+
   void set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
   }
@@ -308,12 +314,16 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
+  void promote_common_dtype() {
+    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE;
+  }
+
   void dont_compute_common_dtype() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_NONE;
+    common_dtype_strategy_ = CommonDTypeStrategy::NONE;
   }
 
   void compute_common_dtype_only_for_inputs() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_INPUTS;
+    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE_INPUTS;
   }
 
   void dont_resize_outputs() {
@@ -332,6 +342,8 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
+  void fast_set_up();
+  bool can_use_fast_set_up();
 #ifdef BUILD_NAMEDTENSOR
   void compute_names();
   void propagate_names_to_outputs();
@@ -346,7 +358,8 @@ protected:
 #endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
-  CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_ALL;
+  CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
+  ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
@@ -355,6 +368,8 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
+  bool have_differing_types_ = false;
+  bool all_ops_same_shape_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

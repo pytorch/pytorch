@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from test_pytorch_common import TestCase, run_tests, flatten
+from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
 
 import torch
 import torch.onnx
@@ -265,6 +265,16 @@ class TestOperators(TestCase):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
         self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
 
+    def test_conv_onnx_irv4_opset8(self):
+        # This test point checks that for opset 8 (or lower), even if
+        # keep_initializers_as_inputs is set to False, it is ignored,
+        # and initializers are listed as ONNX graph input, in accordance
+        # with ONNX IR v3 semantics (which apply to opset version <= 8).
+        x = torch.ones(1, 2, 5, 7, requires_grad=True)
+        conv_node = nn.Conv2d(2, 4, 3, bias=False)
+        conv_node.weight.data.fill_(1.0)
+        self.assertONNX(conv_node, x, opset_version=8, keep_initializers_as_inputs=False)
+
     def test_conv_variable_length(self):
         x = torch.ones(5, 3, 6, 6, requires_grad=True)
         model = torch.nn.Conv2d(3, 2, 3)
@@ -489,6 +499,10 @@ class TestOperators(TestCase):
     def test_slice(self):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
+
+    def test_slice_dynamic(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x[x.size(0):, x.size(1) - 3], x, opset_version=10)
 
     def test_sign(self):
         x = torch.rand(3, 4, requires_grad=True)
@@ -794,6 +808,12 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
 
+    def test_meshgrid(self):
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+
     def test_topk(self):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
@@ -813,6 +833,11 @@ class TestOperators(TestCase):
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
+
+    @skipIfNoLapack
+    def test_det(self):
+        x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
+        self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
 
 if __name__ == '__main__':

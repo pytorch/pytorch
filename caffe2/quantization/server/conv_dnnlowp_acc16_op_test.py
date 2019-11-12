@@ -330,11 +330,15 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
-                    group=group,
+                    stride=stride,
+                    kernel=kernel,
+                    dilation=dilation,
+                    pad=pad,
                     nbits_in_non_outlier=nbits_in_non_outlier,
                     preserve_weight_sparsity=preserve_weight_sparsity,
-                    in_scale=x_q_param.scale,
                     engine=engine,
+                    group=group,
+                    in_scale=x_q_param.scale,
                 )
                 init_net.Proto().op.extend([pack])
 

@@ -82,6 +82,13 @@ Tensor autograd functions
 .. autoclass:: Function
     :members:
 
+Context method mixins
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+When creating a new :class:`Function`, the following methods are available to `ctx`.
+
+.. autoclass:: torch.autograd.function._ContextMethodMixin
+    :members:
+
 .. _grad-check:
 
 Numerical gradient checking

@@ -135,6 +135,7 @@ TORCH_API void InsertPrepackUnpack(script::Module& module);
  */
 TORCH_API void FoldPrepackedWeightIntoModule(
     script::Module& module,
-    const script::Module& wrapper_module);
+    const script::Module& linear_params_module,
+    const script::Module& conv_params_module);
 } // namespace jit
 } // namespace torch
