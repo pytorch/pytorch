@@ -2915,7 +2915,7 @@ class TestAutograd(TestCase):
 
         def test():
             root = torch.randn(3, 3, requires_grad=True)
-            copy = root.clone()
+            copy = root.clone(memory_format=torch.contiguous_format)
             copy.grad_fn.register_hook(IncrementOnDelete())
             view = copy.view(9)
             torch.nn.functional.relu(view, inplace=True)
