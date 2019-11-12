@@ -109,8 +109,18 @@ test_python_nn() {
   assert_git_not_dirty
 }
 
+test_python_ge_config_simple() {
+  time python test/run_test.py --include jit_simple --verbose
+  assert_git_not_dirty
+}
+
+test_python_ge_config_legacy() {
+  time python test/run_test.py --include jit_legacy jit_fuser_legacy --verbose
+  assert_git_not_dirty
+}
+
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
+  time python test/run_test.py --exclude nn jit_simple jit_legacy jit_fuser_legacy --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
   assert_git_not_dirty
 }
 
@@ -219,6 +229,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
+elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
+  test_python_ge_config_legacy
+elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_simple* || "${JOB_BASE_NAME}" == *ge_config_simple* ]]; then
+  test_python_ge_config_simple
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
