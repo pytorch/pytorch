@@ -15,7 +15,6 @@ from torch import nn
 from torch.autograd import Variable, function
 import torch.utils.model_zoo as model_zoo
 from torch.nn.utils import rnn as rnn_utils
-import torch.nn.quantized as nnq
 from debug_embed_params import run_embed_params
 import io
 import os
@@ -2512,8 +2511,8 @@ class TestQuantizedOps(unittest.TestCase):
         buf.seek(0)
         torch.backends.quantized.engine = "qnnpack"
         model = torch.jit.load(buf)
-        input_names=["x"]
-        torch.onnx.export(model, x, os.path.join("model.onnx"), verbose=True, input_names=input_names,example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        input_names = ["x"]
+        torch.onnx.export(model, x, os.path.join("model.onnx"), verbose=True, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = onnx.load('model.onnx')
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, x_numpy)))[0]
         np.testing.assert_almost_equal(np.squeeze(outputs.numpy()), caffe_res, decimal=3)
