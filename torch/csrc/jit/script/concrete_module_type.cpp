@@ -187,6 +187,7 @@ c10::optional<py::object> ConcreteModuleType::findConstant(
 }
 
 void ConcreteModuleType::dump() const {
+  std::cout << "ConcreteModuleType for: " << py::getattr(pyClass_, "__name__") << "\n";
   std::cout << "Constants: \n";
   for (const auto& pr : constants_) {
     std::cout << "\t" << pr.first << ": " << pr.second.v_ << "\n";
@@ -199,11 +200,16 @@ void ConcreteModuleType::dump() const {
   std::cout << "\nSubmodules: \n";
   for (const auto& info : modules_) {
     std::cout << "\t" << info.name_ << ": "
-              << info.type_->python_str() << "\n";
+          << info.getJitType()->python_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : overloads_) {
     std::cout << "\t" << pr.first << ": " << pr.second << "\n";
+  }
+  std::string isPoisoned = isPoisoned_ ? "true" : "false";
+  std::cout << "isPoisoned: " << isPoisoned << "\n";
+  if (jitType_) {
+    std::cout << "jit type: " << jitType_->python_str() << "\n";
   }
 }
 

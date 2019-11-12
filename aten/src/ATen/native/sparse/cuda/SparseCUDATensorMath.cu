@@ -598,8 +598,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       for (auto d : dense_dims_to_sum_v) grad_input_values = grad_input_values.unsqueeze(d - 1); // -1 since grad has no nnz dim
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
-    grad_input_values = grad_input_values.expand(expand_size).clone();
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values,  input.options().dtype(grad_.dtype())); // convert to grad dtype
+    grad_input_values = grad_input_values.expand(expand_size).clone(at::MemoryFormat::Contiguous);
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values,  input.options().dtype(grad_.dtype())); // convert to grad dtype
   }
   else {
     TORCH_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad_ Tensor to be sparse, but got dense");
@@ -614,7 +614,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       auto expand_size = input_values.sizes().vec();
       if (sum_sparse_dim) expand_size[0] = grad_values.size(0); // update nnz
       for (auto d : dense_dims_to_sum_v) grad_values_expand = grad_values_expand.unsqueeze(d);
-      grad_values_expand = grad_values_expand.expand(expand_size).clone();
+      grad_values_expand = grad_values_expand.expand(expand_size).clone(at::MemoryFormat::Contiguous);
     }
 
     Tensor grad_input_values;
@@ -629,7 +629,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       auto policy = thrust::cuda::par(allocator).on(stream);
       typedef thrust::device_ptr<int64_t> thrust_ptr;
 
-      grad_input_values = at::empty_like(input_values, grad_values.options());
+      grad_input_values = at::empty_like(input_values, grad_values.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       AT_ASSERT(grad_input_values.is_cuda());
 
       // get 1D indices
@@ -642,7 +642,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       thrust_ptr input_indices_iter(input_indices_1D.data_ptr<int64_t>());
 
       // store lower_bound of input indices at grad indices
-      LongTensor input_indices_pos = at::empty_like(input_indices_1D);
+      LongTensor input_indices_pos = at::empty_like(input_indices_1D, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       thrust_ptr input_indices_pos_iter(input_indices_pos.data_ptr<int64_t>());
       thrust::lower_bound(policy,
                           grad_indices_iter, grad_indices_iter + grad_nnz,
@@ -674,7 +674,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       });
     }
 
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, grad.options());
+    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options());
   }
 }
 
