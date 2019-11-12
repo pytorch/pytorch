@@ -6,15 +6,15 @@ import torch
 # rpc_fork tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+from process_group_rpc_test import ProcessGroupRpcTest
 from common_distributed import MultiProcessTestCase
 from common_utils import run_tests
-from process_group_rpc_test import ProcessGroupRpcTest
 
 
-class RpcTestWithFork(MultiProcessTestCase, ProcessGroupRpcTest):
+class ProcessGroupRpcTestWithFork(MultiProcessTestCase, ProcessGroupRpcTest):
 
     def setUp(self):
-        super(RpcTestWithFork, self).setUp()
+        super(ProcessGroupRpcTestWithFork, self).setUp()
         self._fork_processes()
 
 if __name__ == '__main__':

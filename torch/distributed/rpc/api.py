@@ -75,7 +75,7 @@ def _init_rpc(
         raise RuntimeError("RPC package does not support Python2.")
 
     if not isinstance(backend, backend_registry.BackendType):
-        raise RuntimeError("`self_name` must be a string.")
+        raise RuntimeError("`backend` must be a `backend_registry.BackendType`.")
 
     if not isinstance(store, dist.Store):
         raise RuntimeError("`store` must be a c10d::Store. {}".format(store))
