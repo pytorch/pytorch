@@ -3,6 +3,7 @@ try:
 except ImportError:
     from urlparse import urlparse
 
+import numbers
 import os
 from . import FileStore, TCPStore
 
@@ -42,6 +43,15 @@ def register_rendezvous_handler(scheme, handler):
 
 
 def rendezvous(url, rank=-1, world_size=-1, **kwargs):
+    if not isinstance(url, str):
+        raise RuntimeError("`url` must be a string. {}".format(url))
+
+    if not isinstance(rank, numbers.Integral):
+        raise RuntimeError("`rank` must be an integer. {}".format(rank))
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+
     # Append node-specific arguments.
     if rank != -1 or world_size != -1:
         assert (

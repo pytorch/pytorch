@@ -24,13 +24,10 @@ def register_backend(
     """Registers a new RPC backend.
 
     Arguments:
-        backend (str): backend string to identify the handler.
+        backend_name (str): backend string to identify the handler.
         construct_rpc_agent_options_handler (function):
             Handler that is invoked when
             rpc_backen.construct_rpc_agent_options(**dict) is called.
-        Handler that is invoked when the
-            `_init_rpc()` function is called with a backend.
-             This returns the agent.
         init_backend_handler (function): Handler that is invoked when the
             `_init_rpc()` function is called with a backend.
              This returns the agent.
@@ -66,7 +63,7 @@ def init_backend(backend, *args, **kwargs):
     return backend.value.init_backend_handler(*args, **kwargs)
 
 
-def process_group_construct_rpc_agent_soptions_handler(
+def process_group_construct_rpc_agent_options_handler(
     rpc_timeout, num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS, **kwargs
 ):
     from . import ProcessGroupRpcAgentOptions
@@ -122,6 +119,6 @@ def process_group_init_backend_handler(
 
 register_backend(
     "PROCESS_GROUP",
-    process_group_construct_rpc_agent_soptions_handler,
+    process_group_construct_rpc_agent_options_handler,
     process_group_init_backend_handler,
 )

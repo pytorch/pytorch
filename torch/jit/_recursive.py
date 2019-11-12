@@ -1,7 +1,6 @@
 import inspect
 import torch
 import collections
-import types
 import textwrap
 import functools
 import warnings
@@ -44,7 +43,7 @@ def make_stub_from_method(nn_module, method):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
+_constant_types = (bool, float, int, str, type(None), torch.device, torch.layout, torch.dtype)
 
 def _get_valid_constant(attr, v):
     if isinstance(v, _constant_types):

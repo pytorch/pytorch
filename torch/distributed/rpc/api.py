@@ -7,8 +7,10 @@ from . import backend_registry
 from .internal import _internal_rpc_pickler, PythonUDF
 
 import functools
+import numbers
 import sys
 import torch
+import torch.distributed as dist
 
 
 _agent = None
@@ -67,8 +69,32 @@ def _init_rpc(
     world_size=-1,
     rpc_agent_options=None,
 ):
+    from . import RpcAgentOptions
+
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
+
+    if not isinstance(backend, backend_registry.BackendType):
+        raise RuntimeError("`self_name` must be a string.")
+
+    if not isinstance(store, dist.Store):
+        raise RuntimeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(self_name, str):
+        raise RuntimeError("`self_name` must be a string. {}".format(self_name))
+
+    if not isinstance(self_rank, numbers.Integral):
+        raise RuntimeError("`self_rank` must be an integer. {}".format(self_rank))
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+
+    if not isinstance(rpc_agent_options, RpcAgentOptions):
+        raise RuntimeError(
+            "`rpc_agent_options` must be an `RpcAgentOptions`. {}".format(
+                rpc_agent_options
+            )
+        )
 
     global _agent
 

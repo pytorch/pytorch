@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 
 from . import backend_registry
-from .constants import DEFAULT_NUM_SEND_RECV_THREADS, DEFAULT_RPC_TIMEOUT
 
 
 def is_available():
@@ -54,48 +53,23 @@ if is_available():
             init_method(str): backend specific init arguments.
             self_rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
+            rpc_agent_options (RpcAgentOptions): The options passed to RpcAgent
+                consturctor.
         """
-        from . import RpcAgentOptions
-
         # Rendezvous.
-        if not isinstance(init_method, str):
-            raise RuntimeError("`init_method` must be a string. {}".format(init_method))
-
-        if not isinstance(self_rank, numbers.Integral):
-            raise RuntimeError("`self_rank` must be an integer. {}".format(self_rank))
-
-        if not isinstance(world_size, numbers.Integral):
-            raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
-
         rendezvous_iterator = torch.distributed.rendezvous(
             init_method, rank=self_rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
 
-        # Initialize RPC.
-        if not isinstance(backend, backend_registry.BackendType):
-            raise RuntimeError("`self_name` must be a string.")
-
-        if not isinstance(store, dist.Store):
-            raise RuntimeError("`store` must be a c10d::Store. {}".format(store))
-
-        if not isinstance(self_name, str):
-            raise RuntimeError("`self_name` must be a string. {}".format(self_name))
-
-        if not isinstance(self_rank, numbers.Integral):
-            raise RuntimeError("`self_rank` must be an integer. {}".format(self_rank))
-
-        if not isinstance(world_size, numbers.Integral):
-            raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
-
-        if not isinstance(rpc_agent_options, RpcAgentOptions):
-            raise RuntimeError(
-                "`rpc_agent_options` must be an `RpcAgentOptions`. {}".format(
-                    rpc_agent_options
-                )
-            )
-
-        _init_rpc(backend, store, self_name, self_rank, world_size, rpc_agent_options)
-
         # Initialize Autograd.
-        torch.distributed.autograd._init(api._agent.get_worker_info().id)
+        # Initialize autograd before RPC since _init_rpc guarantees all
+        # processes sync via the store. If we initialize autograd after RPC,
+        # there could be a race where some nodes might have initialized autograd
+        # and others might not have. As a result, a node calling
+        # torch.distributed.autograd.backward() would run into errors since
+        # other nodes might not have been initialized.
+        torch.distributed.autograd._init(self_rank)
+
+        # Initialize RPC.
+        _init_rpc(backend, store, self_name, self_rank, world_size, rpc_agent_options)
