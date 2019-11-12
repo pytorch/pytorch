@@ -848,8 +848,8 @@ Tensor& slow_conv_transpose3d_out_cpu(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor finput = at::empty_like(input);
-  Tensor fgrad = at::empty_like(input);
+  Tensor finput = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor fgrad = at::empty_like(input, at::MemoryFormat::Contiguous);
 
   slow_conv_transpose3d_out_cpu_template(
       output,
@@ -876,9 +876,9 @@ Tensor slow_conv_transpose3d_cpu(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor output = at::empty_like(input);
-  Tensor finput = at::empty_like(input);
-  Tensor fgrad = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor finput = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor fgrad = at::empty_like(input, at::MemoryFormat::Contiguous);
 
   slow_conv_transpose3d_out_cpu_template(
       output,

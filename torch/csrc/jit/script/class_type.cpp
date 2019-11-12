@@ -4,68 +4,45 @@
 
 namespace c10 {
 
-// This file exists because we need to reference module.h, which we can't from
-// c10. Sigh...
-FunctionType::FunctionType(Function* function)
-    : NamedType(TypeKind::FunctionType, function->qualname()),
-      function_(function) {}
-
-Function* ClassType::getMethod(const std::string& name) const {
-  for (auto method : methods_) {
-    if (name == method->name()) {
-      return method;
-    }
-  }
-  return nullptr;
-}
-
-std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
-  auto cu = compilation_unit_.lock();
-  TORCH_INTERNAL_ASSERT(cu);
-  return cu;
-}
-std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
-  auto cu = compilation_unit_.lock();
-  TORCH_INTERNAL_ASSERT(cu);
-  return cu;
-}
-
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module) {
-  return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+  return ClassTypePtr(
+      new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
 
-ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassType::create(name(), compilation_unit_);
-  AT_ASSERT(numAttributes() == refined_slots.size());
-  for(size_t i = 0; i < attributeNames_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
-    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+ClassType::ClassType(
+    c10::optional<QualifiedName> name,
+    std::weak_ptr<CompilationUnit> cu,
+    bool is_module)
+    : NamedType(TypeKind::ClassType, std::move(name)),
+      compilation_unit_(std::move(cu)) {
+  if (is_module) {
+    parameterSlots_ = std::make_shared<std::vector<bool>>();
   }
-  // Copy methods over
-  for (const auto& method : methods()) {
-    ptr->addMethod(method);
+}
+
+const std::vector<Function*>& ClassType::methods() const {
+  return methods_;
+}
+
+void ClassType::checkNotExist(const std::string& name, const std::string& what) const {
+  // Check no overlap with existing constants
+  for (size_t i = 0; i < constantNames_.size(); ++i) {
+    TORCH_CHECK(
+        name != constantNames_[i],
+        "attempting to add ",
+        what,
+        " '",
+        name,
+        "' to ",
+        python_str(),
+        " but a constant field of the same name already exists with value ",
+        constantValues_[i]);
   }
-  return ptr;
-}
 
-void ClassType::addMethod(Function* method) {
-  TORCH_CHECK(
-      getMethod(method->name()) == nullptr,
-      "Can't redefine method: ",
-      method->name(),
-      " on class: ",
-      python_str());
-  methods_.push_back(method);
-}
-
-size_t ClassType::addAttribute(
-    const std::string& name,
-    TypePtr type,
-    bool is_parameter) {
-  const char* what = is_parameter ? "parameter" : "attribute";
+  // Check no overlap with existing attributes
   for (size_t i = 0; i < attributeNames_.size(); ++i) {
     TORCH_CHECK(
         name != attributeNames_[i],
@@ -75,9 +52,17 @@ size_t ClassType::addAttribute(
         name,
         "' to ",
         python_str(),
-        " but a field of the same name already exists with type ",
+        " but a attribute field of the same name already exists with type ",
         attributeTypes_[i]->python_str());
   }
+}
+
+size_t ClassType::addAttribute(
+    const std::string& name,
+    TypePtr type,
+    bool is_parameter) {
+  const char* what = is_parameter ? "parameter" : "attribute";
+  checkNotExist(name, what);
   checkNoAny(*this, what, name, type);
 
   size_t slot = attributeNames_.size();
@@ -92,20 +77,35 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
+void ClassType::unsafeRemoveAttribute(const std::string& name) {
+  auto slot = getAttributeSlot(name);
+  attributeNames_.erase(attributeNames_.begin() + slot);
+  attributeTypes_.erase(attributeTypes_.begin() + slot);
+}
+
+void ClassType::addMethod(Function* method) {
+  TORCH_CHECK(
+      getMethod(method->name()) == nullptr,
+      "Can't redefine method: ",
+      method->name(),
+      " on class: ",
+      python_str());
+  methods_.push_back(method);
+}
+
+Function* ClassType::getMethod(const std::string& name) const {
+  for (auto method : methods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
+}
+
 size_t ClassType::addConstant(
       const std::string& name,
       IValue value) {
-  for (size_t i = 0; i < constantNames_.size(); ++i) {
-    TORCH_CHECK(
-        name != constantNames_[i],
-        "attempting to add constant",
-        " '",
-        name,
-        "' to ",
-        python_str(),
-        " but a field of the same name already exists with value ",
-        constantValues_[i]);
-  }
+  checkNotExist(name, "constant");
   size_t slot = constantNames_.size();
   constantNames_.push_back(name);
   constantValues_.push_back(value);
@@ -128,19 +128,37 @@ c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
   return constantValues_[pos];
 }
 
-const std::vector<Function*>& ClassType::methods() const {
-  return methods_;
+std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
+}
+std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
+  auto cu = compilation_unit_.lock();
+  TORCH_INTERNAL_ASSERT(cu);
+  return cu;
 }
 
-ClassType::ClassType(
-    c10::optional<QualifiedName> name,
-    std::weak_ptr<CompilationUnit> cu,
-    bool is_module)
-    : NamedType(TypeKind::ClassType, std::move(name)),
-      compilation_unit_(std::move(cu)) {
-  if (is_module) {
-    parameterSlots_ = std::make_shared<std::vector<bool>>();
+#ifndef USE_MOBILE_CLASSTYPE
+
+// This file exists because we need to reference module.h, which we can't from
+// c10. Sigh...
+FunctionType::FunctionType(Function* function)
+    : NamedType(TypeKind::FunctionType, function->qualname()),
+      function_(function) {}
+
+ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
+  auto ptr = ClassType::create(name(), compilation_unit_);
+  AT_ASSERT(numAttributes() == refined_slots.size());
+  for (size_t i = 0; i < attributeNames_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
+    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
   }
+  // Copy methods over
+  for (const auto& method : methods()) {
+    ptr->addMethod(method);
+  }
+  return ptr;
 }
 
 bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
@@ -183,5 +201,9 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
-
+#else
+bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  return Type::isSubtypeOfExt(rhs, why_not);
+}
+#endif
 } // namespace c10
