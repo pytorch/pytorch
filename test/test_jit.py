@@ -8755,6 +8755,7 @@ a")
 
         mod = OverrideMagicSeq()
         self.assertEqual(len(mod), len(torch.jit.script(mod)))
+        self.assertTrue(torch.jit.script(mod))
 
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
