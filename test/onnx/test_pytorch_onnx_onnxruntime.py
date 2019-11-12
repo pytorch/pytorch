@@ -185,6 +185,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(MyModel(), x)
 
+    def test_scalar_tensor(self):
+        class test(torch.nn.Module):
+            def forward(self, input):
+                return torch.scalar_tensor(input.size(0)), \
+                    torch.scalar_tensor(input.size(1), dtype=torch.int64)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(7, 8, 9)
+        model = test()
+        self.run_test(model, x, test_with_inputs=[y],
+                      input_names=['input_1'],
+                      dynamic_axes={'input_1': [0, 1, 2]})
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):

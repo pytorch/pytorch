@@ -11962,6 +11962,14 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             z = torch.empty_like(sparse, memory_format=torch.preserve_format)
 
+    def test_memory_format_consistency(self, device):
+        x = torch.randn(10, 3, 1, 1, device=device)
+        x_rep = x.as_strided(x.size(), x.stride())
+        self.assertEqual(x.size(), x_rep.size())
+        self.assertEqual(x.stride(), x_rep.stride())
+        self.assertEqual(x.is_contiguous(), x_rep.is_contiguous())
+        self.assertEqual(x.is_contiguous(memory_format=torch.channels_last), x_rep.is_contiguous(memory_format=torch.channels_last))
+
     def test_unique(self, device):
         x = torch.tensor([1, 2, 3, 2, 8, 5, 2, 3], device=device)
         expected_unique = torch.tensor([1, 2, 3, 5, 8], device=device)
