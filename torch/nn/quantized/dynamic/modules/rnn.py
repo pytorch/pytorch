@@ -27,6 +27,12 @@ class PackedParameter(torch.nn.Module):
         self.param = torch.ops.quantized.linear_prepack(*state[0])
         self.training = state[1]
 
+    # This only exists because there's a bug in recursive scripting
+    # that arises only in Python 2 where a recursively scripted
+    # module does not have a forward(). We can delete this once we
+    # drop python 2 support
+    def forward(self):
+        raise RuntimeError('PackedParameter cannot be called')
 
 class RNNBase(torch.nn.Module):
 

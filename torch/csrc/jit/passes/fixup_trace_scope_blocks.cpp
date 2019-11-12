@@ -385,7 +385,7 @@ std::string mangleMethodName(
   for (size_t method_idx = 0;; method_idx++) {
     auto mangled = method_name;
     if (method_idx != 0) {
-      mangled += std::to_string(method_idx);
+      mangled += c10::to_string(method_idx);
     }
     bool found = false;
     for (Function* fn : mod_type->methods()) {
@@ -503,8 +503,8 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
 
 void runCleanupPasses(script::Module* m) {
   auto methods = m->get_methods();
-  for (auto module : m->get_modules()) {
-    runCleanupPasses(&module.module);
+  for (auto module : m->children()) {
+    runCleanupPasses(&module);
   }
   for (auto& method : methods) {
     runCleanupPasses(method.graph());
