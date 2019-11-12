@@ -136,6 +136,7 @@ void initialize_python_bindings() {
       .def("backward", &_ListNestedTensor::backward)
       .def("requires_grad_", &_ListNestedTensor::requires_grad_)
       .def("element_size", &_ListNestedTensor::element_size)
+      .def("size", &_ListNestedTensor::size)
       .def("unbind", &_ListNestedTensor::unbind)
       .def("nested_size", &_ListNestedTensor::nested_size)
       .def("nested_stride", &_ListNestedTensor::nested_stride)

@@ -83,6 +83,22 @@ static at::Tensor _get_first_tensor(_NestedNode nested_node) {
   return start->_tensor_node._tensor;
 }
 
+static std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
+  if (nested_node._children.size() == 0) {
+    return std::vector<at::IntArrayRef>(
+        {nested_node._tensor_node._tensor.sizes()});
+  } else {
+    std::vector<at::IntArrayRef> flat_sizes;
+    for (size_t i = 0; i < nested_node._children.size(); i++) {
+      auto flat_sizes_i = _get_flat_sizes(nested_node._children[i]);
+      for (size_t j = 0; j < flat_sizes_i.size(); j++) {
+        flat_sizes.push_back(flat_sizes_i[j]);
+      }
+    }
+    return flat_sizes;
+  }
+}
+
 template <class F> static _NestedNode map(_NestedNode nested_node, F fn) {
   if (nested_node._children.size() == 0) {
     _NestedNode new_nested_node(
@@ -120,10 +136,12 @@ struct TORCH_API _ListNestedTensor {
   _ListNestedTensor(_NestedNode structure)
       : _structure(structure), _first_tensor(_get_first_tensor(_structure)) {}
   size_t element_size() { return _first_tensor.element_size(); }
+  py::tuple size(int64_t dim) { return py::make_tuple(py::none(), py::none()); }
   _ListNestedTensor pin_memory() {
     return _ListNestedTensor(
-        map(_structure,
-            [](at::Tensor tensor) -> at::Tensor { return tensor.pin_memory(); }));
+        map(_structure, [](at::Tensor tensor) -> at::Tensor {
+          return tensor.pin_memory();
+        }));
   }
   _ListNestedTensor grad() {
     return _ListNestedTensor(
