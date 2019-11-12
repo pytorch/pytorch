@@ -372,11 +372,11 @@ class TestBottleneck(TestCase):
 
     def _check_run_args(self):
         # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck('bottleneck/test_args.py')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py')
         self.assertEqual(rc, 2, None, self._fail_msg('Missing args should error', out + err))
 
         # This should succeed
-        rc, out, err = self._run_bottleneck('bottleneck/test_args.py', '--foo foo --bar bar')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py', '--foo foo --bar bar')
         self.assertEqual(rc, 0, None, self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
@@ -420,7 +420,7 @@ class TestBottleneck(TestCase):
 
     @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck('bottleneck/test.py')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
         self._check_run_args()
@@ -432,7 +432,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     @skipIfRocm
     def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
+        rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
         self._check_run_args()
