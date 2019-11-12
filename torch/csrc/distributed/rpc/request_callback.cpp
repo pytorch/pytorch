@@ -37,7 +37,7 @@ Message RequestCallback::operator()(Message& request) const {
   } catch (std::exception& e) {
     LOG(ERROR) << "Received error while processing request type "
                << request.type() << ": " << e.what();
-    return createException(request, e);
+    return createExceptionResponse(request, e);
   }
 }
 

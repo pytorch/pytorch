@@ -117,11 +117,12 @@ class TORCH_API Message final {
 
 // create an exception given a message and exception.
 TORCH_API Message
-createException(const Message& request, const std::exception& e);
+createExceptionResponse(const Message& request, const std::exception& e);
 
 // create an exception given a message and string.
-TORCH_API Message
-createException(const Message& request, const std::string& exceptionStr);
+TORCH_API Message createExceptionResponse(
+    const Message& request,
+    const std::string& exceptionStr);
 
 } // namespace rpc
 } // namespace distributed
