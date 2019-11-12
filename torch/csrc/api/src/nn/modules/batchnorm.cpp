@@ -152,12 +152,15 @@ Tensor BatchNormImplBase<D, Derived>::forward(const Tensor& input) {
     }
   }
 
-  return F::batch_norm(
+  return F::detail::batch_norm(
       input,
       running_mean,
       running_var,
-      BatchNormOptions().weight(weight).bias(bias).momentum(exponential_average_factor).eps(options.eps()),
-      this->is_training() || !options.track_running_stats());
+      weight,
+      bias,
+      this->is_training() || !options.track_running_stats(),
+      /*momentum=*/exponential_average_factor,
+      options.eps());
 }
 
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
