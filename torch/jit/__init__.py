@@ -1726,6 +1726,15 @@ if _enabled:
                 return super(RecursiveScriptModule, self).__dir__()
             return self_method()
 
+        # to resolve bool(value), python looks if __bool__ is defined then __iter__
+        # is defined then returns true for classes. because __iter__() on this
+        # class throws if it isn't overriden, we define __bool__ to preserve default behavior
+        def __bool__(self):
+            self_method = getattr(self, "__bool__")
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__bool__"):
+                return True
+            return self_method()
+
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
     # This is because `super(MyScriptModule, self).foo()` does not use
