@@ -494,7 +494,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
     if (!timedOutFutures.empty()) {
-      auto exceptionMsg = createException(
+      auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), "future timed out.");
       // Clean up timedOutFutures and remove the entries from the respective
       // maps.

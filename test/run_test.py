@@ -54,6 +54,9 @@ TESTS = [
     'utils',
     'namedtuple_return_api',
     'jit_fuser',
+    'jit_simple',
+    'jit_legacy',
+    'jit_fuser_legacy',
     'tensorboard',
     'namedtensor',
     'type_promotion',
@@ -135,14 +138,12 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
-
     command = executable + argv
     return shell(command, test_directory)
 
 
 def test_cuda_primary_ctx(executable, test_module, test_directory, options):
     return run_test(executable, test_module, test_directory, options, '--subprocess')
-
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
@@ -444,7 +445,6 @@ def main():
                 signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
                 message += ' Received signal: {}'.format(signal_name)
             raise RuntimeError(message)
-
     if options.coverage:
         shell(['coverage', 'combine'])
         shell(['coverage', 'html'])

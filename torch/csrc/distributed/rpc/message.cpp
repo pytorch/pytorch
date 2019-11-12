@@ -113,12 +113,14 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-Message createException(const Message& request, const std::exception& e) {
+Message createExceptionResponse(
+    const Message& request,
+    const std::exception& e) {
   std::string exceptionMsg = e.what();
-  return createException(request, exceptionMsg);
+  return createExceptionResponse(request, exceptionMsg);
 }
 
-Message createException(
+Message createExceptionResponse(
     const Message& request,
     const std::string& exceptionStr) {
   std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());

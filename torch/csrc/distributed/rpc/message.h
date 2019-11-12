@@ -115,13 +115,16 @@ class TORCH_API Message final {
   int64_t id_ = -1;
 };
 
-// create an exception given a message and exception.
+// Create a response Message with an exception for the provided request message.
+// The exception string representation will be used as the message's payload.
 TORCH_API Message
-createException(const Message& request, const std::exception& e);
+createExceptionResponse(const Message& request, const std::exception& e);
 
-// create an exception given a message and string.
-TORCH_API Message
-createException(const Message& request, const std::string& exceptionStr);
+// Create a response Message with an exception type for the provided request
+// message. The passed in string will be used as the created message's payload
+TORCH_API Message createExceptionResponse(
+    const Message& request,
+    const std::string& exceptionStr);
 
 } // namespace rpc
 } // namespace distributed
