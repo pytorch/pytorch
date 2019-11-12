@@ -26,7 +26,7 @@ inline Tensor& resize_named_tensor_(
       optional_memory_format.value_or(MemoryFormat::Contiguous) ==
           MemoryFormat::Contiguous,
       "Unsupported memory format for named tensor resize ",
-      optional_memory_format.value_or(MemoryFormat::Contiguous));
+      optional_memory_format.value());
   return self;
 }
 #endif
