@@ -135,8 +135,14 @@ class TestQuantizedOps(TestCase):
         }
 
         for name, op in ops_under_test.items():
-            qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+            for inplace in (True, False):
+                if hasattr(op, 'inplace'):
+                    op.inplace = inplace
+                    qY_hat = op(qX)
+                else:
+                    qY_hat = op(qX, inplace=inplace)
+                self.assertEqual(qY, qY_hat,
+                                 message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
     @no_deadline
@@ -656,6 +662,7 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
