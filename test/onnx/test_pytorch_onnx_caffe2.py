@@ -1383,6 +1383,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5)
         self.run_model_test(UnbindModel2(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
         class Zero_(torch.nn.Module):
             def forward(self, x):
@@ -1391,6 +1392,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
         class Fill_(torch.nn.Module):
             def forward(self, x):
