@@ -24,7 +24,7 @@ from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf
+    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -44,8 +44,10 @@ if not TEST_CUDA:
 TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
+TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
@@ -1899,6 +1901,168 @@ t2 = threading.Thread(target=worker, args=(1,))
 t1.start()
 t2.start()
 """])
+
+    @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
+    def test_cublas_multiple_threads_same_device(self):
+        # Note, these parameters should be very carefully tuned
+        # Too small number makes it hard for the racing condition
+        # to happen, while too large number sometimes cause hang
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 100
+
+        weight = torch.ones((size, size), device='cuda')
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = torch.mm(results[t], weight)
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
+    def test_cudnn_multiple_threads_same_device(self):
+        # This function is intended to test the lazy creation and reuse of per-thread
+        # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
+        # Failure here likely indicates something wrong with that logic.
+        weight = torch.ones((1, 1, 2, 2), device='cuda')
+
+        results = {}
+
+        num_threads = 2
+        trials = 3
+        test_iters = 1000
+        barrier = threading.Barrier(num_threads)
+
+        with torch.backends.cudnn.flags(enabled=True):
+            def _worker(t):
+                my_stream = torch.cuda.Stream()
+                # Hard sync so we don't need to worry about creating and using tensors
+                # across streams or the fact that default streams are thread-local.
+                # Those issues are not the target of this test.
+                torch.cuda.synchronize()
+                # Line up threads to increase likelihood of race conditions.
+                barrier.wait()
+                with torch.cuda.stream(my_stream):
+                    for _ in range(test_iters):
+                        # If all threads are sharing the same cudnn handle,
+                        # the following sequence may occur:
+                        # thread 0 calls setCuDNNStreamToCurrent()
+                        # thread 1 calls setCuDNNStreamToCurrent()
+                        # thread 0 launches its raw convolution, which it thinks is in
+                        #          its own stream, but is actually in thread 1's stream.
+                        # thread 0 enqueues its div_, which IS is its own stream,
+                        #          but now races with its convolution.
+                        results[t] = torch.nn.functional.conv2d(results[t], weight, padding=0)
+                        results[t].div_(4.0)
+                torch.cuda.synchronize()
+
+            for _ in range(trials):
+                for t in range(num_threads):
+                    results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
+
+                threads = [threading.Thread(target=_worker,
+                                            args=(t,)) for t in range(num_threads)]
+
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                for t in range(num_threads):
+                    self.assertEqual(results[t].sum().item(),
+                                     (2048 - test_iters) * (2048 - test_iters))
+
+    @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
+    def test_cusparse_multiple_threads_same_device(self):
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 500
+
+        def ones_sparse(size):
+            a = torch.arange(size, device='cuda')
+            indices = torch.cartesian_prod(a, a).t()
+            values = torch.ones(size * size, device='cuda')
+            return torch.sparse_coo_tensor(indices, values)
+
+        weight = ones_sparse(size)
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = weight.mm(results[t])
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
 
 
 if __name__ == '__main__':

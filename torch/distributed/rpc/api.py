@@ -1,11 +1,13 @@
-from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
-from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
-from torch.distributed import _start_rpc_agent
-from torch.distributed import _destroy_rref_context, _cleanup_python_rpc_handler
-from torch.distributed import WorkerInfo
+from . import invoke_rpc_builtin, invoke_rpc_python_udf
+from . import invoke_remote_builtin, invoke_remote_python_udf
+from . import _start_rpc_agent
+from . import _destroy_rref_context, _cleanup_python_rpc_handler
+from . import WorkerInfo
 from . import backend_registry
+from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
+import datetime
 import functools
 import sys
 import torch
@@ -65,7 +67,8 @@ def _init_rpc(
     self_name=None,
     self_rank=-1,
     worker_name_to_id=None,
-    num_send_recv_threads=4,
+    num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
+    rpc_timeout=DEFAULT_RPC_TIMEOUT,
 ):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
@@ -76,6 +79,11 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
+    if not isinstance(rpc_timeout, datetime.timedelta):
+        raise RuntimeError(
+            "`rpc_timeout` must be a `datetime.timedelta`."
+        )
+
     _agent = backend_registry.init_backend(
         backend,
         store=store,
@@ -83,6 +91,7 @@ def _init_rpc(
         self_rank=self_rank,
         worker_name_to_id=worker_name_to_id,
         num_send_recv_threads=num_send_recv_threads,
+        rpc_timeout=rpc_timeout,
     )
     _start_rpc_agent(_agent)
 
@@ -106,6 +115,16 @@ def get_worker_info(worker_name=None):
         return _agent.get_worker_info(worker_name)
     else:
         return _agent.get_worker_info()
+
+@_require_initialized
+def get_rpc_timeout():
+    """
+    Retrieve the timeout for all RPCs that was set during RPC initialization.
+
+    Returns:
+        `datetime.timedelta` instance indicating the RPC timeout.
+    """
+    return _agent._get_rpc_timeout()
 
 
 def _to_worker_info(name_or_info):
