@@ -174,7 +174,7 @@ class BenchmarkRunner(object):
         self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.predefined_minimum_secs = 2
+        self.predefined_minimum_secs = 1
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
