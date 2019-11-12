@@ -6,8 +6,13 @@ namespace rpc {
 
 constexpr size_t WorkerInfo::MAX_NAME_LEN;
 
-RpcAgent::RpcAgent(WorkerInfo workerId, std::unique_ptr<RequestCallback> cb)
-    : workerInfo_(std::move(workerId)), cb_(std::move(cb)) {}
+RpcAgent::RpcAgent(
+    WorkerInfo workerId,
+    std::unique_ptr<RequestCallback> cb,
+    std::chrono::milliseconds rpcTimeout)
+    : workerInfo_(std::move(workerId)),
+      cb_(std::move(cb)),
+      rpcTimeout_(rpcTimeout) {}
 
 RpcAgent::~RpcAgent() = default;
 
