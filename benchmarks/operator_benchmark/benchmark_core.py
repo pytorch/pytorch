@@ -124,11 +124,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
             op.set_module_name(op_name)
 
         op._set_backward_test(run_backward)
-        try:
-            op.init(**init_dict)
-        except SkipInputShape:
-            print("Skipping: Config<{}> is not valid for op<{}>".format(input_config, op.module_name()))
-            continue
+        op.init(**init_dict)
 
         input_name = None
 
