@@ -8,7 +8,7 @@ import operator_benchmark as op_bench
 import torch
 import torch.quantization.observer as obs
 
-qobserrver_short_configs_dict = {
+qobserver_short_configs_dict = {
     'attr_names': ('C', 'M', 'N', 'dtype'),
     'attrs': (
         (3, 512, 512, torch.quint8),
@@ -29,7 +29,7 @@ qobserver_per_tensor_configs_short = op_bench.config_list(
     cross_product_configs={
         'qscheme': (torch.per_tensor_affine, torch.per_tensor_symmetric)
     },
-    **qobserrver_short_configs_dict,
+    **qobserver_short_configs_dict,  # noqa
 )
 
 qobserver_per_tensor_configs_long = op_bench.cross_product_configs(
@@ -41,7 +41,7 @@ qobserver_per_channel_configs_short = op_bench.config_list(
     cross_product_configs={
         'qscheme': (torch.per_channel_affine, torch.per_channel_symmetric)
     },
-    **qobserrver_short_configs_dict,
+    **qobserver_short_configs_dict,
 )
 
 qobserver_per_channel_configs_long = op_bench.cross_product_configs(
