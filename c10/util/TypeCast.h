@@ -1,5 +1,4 @@
 #pragma once
-#include <c10/util/C++17.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
@@ -129,8 +128,7 @@ C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, FETCH_AND_CAST_CASE)
-    AT_FORALL_COMPLEX_TYPES(FETCH_AND_CAST_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
     default:
       ERROR_UNSUPPORTED_CAST
   }
@@ -142,8 +140,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
-    AT_FORALL_COMPLEX_TYPES(CAST_AND_STORE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
     default:;
   }
   ERROR_UNSUPPORTED_CAST
