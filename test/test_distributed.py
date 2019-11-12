@@ -1963,8 +1963,8 @@ class _DistTestBase(object):
         self._test_DDP_5iter(
             model_gpu,
             model_DDP,
-            input_cpu.cuda(gpu_subset[0]),
-            target.cuda(gpu_subset[0]),
+            input_cpu.cuda(gpus[0]),
+            target.cuda(gpus[0]),
             loss,
             local_bs,
             rank,
