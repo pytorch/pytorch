@@ -424,6 +424,10 @@ class _TestTorchMixin(object):
         with self.assertRaisesRegex(RuntimeError, "Condition for computing multivariate log-gamma not met"):
             run_test(3)
 
+    def test_msnpu_error(self):
+        with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
+            torch.zeros(1, device=torch.device('msnpu'))
+
     def _digamma_input(self, test_poles=True):
         input = []
         input.append((torch.randn(10).abs() + 1e-4).tolist())
@@ -1632,6 +1636,14 @@ class _TestTorchMixin(object):
         self.assertEqual(res1.size(0), 30)
         self.assertEqual(res1[0], 1)
         self.assertEqual(res1[29], 9.7)
+
+        # Bool Input matching numpy semantics
+        r = torch.arange(True)
+        self.assertEqual(r[0], 0)
+        r2 = torch.arange(False)
+        self.assertEqual(len(r2), 0)
+        self.assertEqual(r.dtype, torch.int64)
+        self.assertEqual(r2.dtype, torch.int64)
 
         # Check that it's exclusive
         r = torch.arange(0, 5)
@@ -11055,7 +11067,7 @@ class TestTorchDeviceType(TestCase):
             ("abs", doubles, True, True, 'cpu'),
             ("abs", doubles, True, True, 'cuda'),
             ("acos", doubles, True, True, 'cpu'),
-            ("acos", doubles, False, True, 'cuda'),
+            ("acos", doubles, True, True, 'cuda'),
             ("asin", doubles, True, True, 'cpu'),
             ("asin", doubles, True, True, 'cuda'),
             ("atan", doubles, True, True, 'cpu'),
@@ -11082,7 +11094,7 @@ class TestTorchDeviceType(TestCase):
             ("floor", doubles, True, True, 'cpu'),
             ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
-            ("frac", doubles, False, True, 'cuda'),
+            ("frac", doubles, True, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),
             ("log", positives, True, True, 'cuda'),
             ("log10", positives, True, True, 'cpu'),
@@ -11949,6 +11961,14 @@ class TestTorchDeviceType(TestCase):
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):
             z = torch.empty_like(sparse, memory_format=torch.preserve_format)
+
+    def test_memory_format_consistency(self, device):
+        x = torch.randn(10, 3, 1, 1, device=device)
+        x_rep = x.as_strided(x.size(), x.stride())
+        self.assertEqual(x.size(), x_rep.size())
+        self.assertEqual(x.stride(), x_rep.stride())
+        self.assertEqual(x.is_contiguous(), x_rep.is_contiguous())
+        self.assertEqual(x.is_contiguous(memory_format=torch.channels_last), x_rep.is_contiguous(memory_format=torch.channels_last))
 
     def test_unique(self, device):
         x = torch.tensor([1, 2, 3, 2, 8, 5, 2, 3], device=device)
