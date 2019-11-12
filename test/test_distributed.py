@@ -17,7 +17,7 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from common_utils import TestCase, run_tests, skipIfRocm
+from common_utils import TestCase, run_tests, TEST_WITH_ROCM
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 
@@ -104,6 +104,7 @@ SKIP_IF_NO_CUDA_EXIT_CODE = 75
 SKIP_IF_NO_GPU_EXIT_CODE = 76
 SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
 SKIP_IF_BACKEND_UNAVAILABLE = 78
+SKIP_IF_ROCM_EXIT_CODE = 79
 
 
 def skip_if_no_cuda_distributed(func):
@@ -144,6 +145,18 @@ def skip_if_small_worldsize(func):
             sys.exit(SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE)
 
         return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_rocm(func):
+    func.skip_if_rocm = True
+    """Skips a test for ROCm"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_ROCM:
+            return func(*args, **kwargs)
+        sys.exit(SKIP_IF_ROCM_EXIT_CODE)
 
     return wrapper
 
@@ -724,7 +737,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skipIfRocm
+    @skip_if_rocm
     def test_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1524,7 +1537,7 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     @skip_if_no_gpu
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-    @skipIfRocm
+    @skip_if_rocm
     def test_barrier_group_cuda(self):
         group, group_id, rank = self._init_group_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1654,7 +1667,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports reduce multigpu")
     @skip_if_no_gpu
-    @skipIfRocm
+    @skip_if_rocm
     def test_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1900,7 +1913,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skipIfRocm
+    @skip_if_rocm
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -2099,7 +2112,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             skip_ok = (
                 getattr(fn, "skip_if_no_cuda_distributed", False) or
                 getattr(fn, "skip_if_no_gpu", False) or
-                getattr(fn, "skip_if_small_worldsize", False)
+                getattr(fn, "skip_if_small_worldsize", False) or
+                getattr(fn, "skip_if_rocm", False)
             )
             join_timeout = get_timeout(self.id())
             for rank, process in enumerate(self.processes):
@@ -2122,7 +2136,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     first_process.exitcode == 0 or
                     first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
+                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
+                    first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
                 )
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
@@ -2133,6 +2148,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     )
                 if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
                     raise unittest.SkipTest("worldsize is too small to run group tests")
+                if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
+                    raise unittest.SkipTest("Test skipped for ROCm")
 
             self.assertEqual(first_process.exitcode, 0)
 
