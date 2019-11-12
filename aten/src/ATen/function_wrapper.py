@@ -147,16 +147,6 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
-C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals}) const {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return op.callUnboxedOnly<${formals_types_with_return}>(${method_actuals});
-#endif
-}
-""")
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
@@ -176,17 +166,6 @@ DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
 C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add method definition in Functions.h
-C10_UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return op.callUnboxedOnly<${formals_types_with_return}>(${native_actuals});
-#endif
-}
-""")
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
@@ -230,18 +209,6 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 """)
 
 # special method definition for factory functions in Functions.h that initializes backends
-C10_UNBOXEDONLY_FACTORY_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
-    static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return op.callUnboxedOnly<${formals_types_with_return}>(${native_actuals});
-#endif
-}
-""")
 C10_FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
@@ -1188,11 +1155,7 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
-            if option['use_c10_dispatcher'] == 'unboxed_only':
-                method_definition = C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION
-            else:
-                assert option['use_c10_dispatcher'] == 'full'
-                method_definition = C10_TENSOR_METHOD_DEFINITION
+            method_definition = C10_TENSOR_METHOD_DEFINITION
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
@@ -1224,21 +1187,11 @@ def create_generic(top_env, declarations):
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                if option['use_c10_dispatcher'] == 'unboxed_only':
-                    fn_definition = C10_UNBOXEDONLY_FACTORY_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
-                else:
-                    assert option['use_c10_dispatcher'] == 'full'
-                    fn_definition = C10_FACTORY_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
+                fn_definition = C10_FACTORY_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body)
             else:
-                if option['use_c10_dispatcher'] == 'unboxed_only':
-                    fn_definition = C10_UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
-                else:
-                    assert option['use_c10_dispatcher'] == 'full'
-                    fn_definition = C10_FUNCTION_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
+                fn_definition = C10_FUNCTION_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here

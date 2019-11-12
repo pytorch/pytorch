@@ -101,9 +101,6 @@ public:
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
-  template<class Return, class... Args>
-  Return callUnboxedOnly(const OperatorHandle& op, Args... args) const;
-
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
@@ -156,11 +153,6 @@ public:
     return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  template<class Return, class... Args>
-  Return callUnboxedOnly(Args... args) const {
-    return c10::Dispatcher::singleton().callUnboxedOnly<Return, Args...>(*this, std::forward<Args>(args)...);
-  }
-
   void callBoxed(Stack* stack) const {
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
@@ -187,18 +179,6 @@ inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) co
       c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
       const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
       return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
-    });
-  });
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
-    return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
-      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
-      const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
-      return kernel.template callUnboxedOnly<Return, Args...>(op, std::forward<Args>(args)...);
     });
   });
 }
