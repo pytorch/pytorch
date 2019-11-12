@@ -533,10 +533,60 @@ void initJitScriptBindings(PyObject* module) {
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
 
+  py::class_<Object>(m, "ScriptObject")
+      .def("_type", [](Module& m) { return m.type(); })
+      .def(
+          "_get_method",
+          [](Object& self, const std::string& name) -> Method {
+            return self.get_method(name);
+          },
+          py::keep_alive<0, 1>())
+      .def(
+          "setattr",
+          [](Object& self, const std::string& name, py::object value) {
+            TypePtr type = self.type()->getAttribute(name);
+            TORCH_CHECK(type, "Module has no attribute '", name, "'");
+            auto ivalue = toIValue(std::move(value), type);
+            self.setattr(name, ivalue);
+          })
+      .def(
+          "getattr",
+          [](Object& self, const std::string& name) {
+            return toPyObject(self.attr(name));
+          })
+      .def(
+          "__getattr__",
+          [](Object& self, const std::string& name) {
+            if (auto method = self.find_method(name)) {
+              return py::cast(*method);
+            }
+            return toPyObject(self.attr(name));
+          })
+      .def(
+          "hasattr",
+          [](Object& self, const std::string& name) {
+            return self.hasattr(name);
+          })
+      .def(
+          "_has_method",
+          [](Object& self, const std::string& name) {
+            return bool(self.find_method(name));
+          })
+      .def(
+          "_method_names",
+          [](Object& self) {
+            return fmap(self.get_methods(), [](const Method& method) {
+              return method.name();
+            });
+          })
+      .def_property_readonly("name", [](const Module& self) {
+        return self.type()->name()->name();
+      });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
-  py::class_<Module>(m, "ScriptModule")
+  py::class_<Module, Object>(m, "ScriptModule")
       .def(py::init<std::string, std::shared_ptr<CompilationUnit>, bool>())
       .def(
           "save",
@@ -570,42 +620,6 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("params") = true,
           py::arg("indent") = 0)
       .def(
-          "_define",
-          [](Module& m,
-             std::shared_ptr<ConcreteModuleType> concreteType,
-             const std::string& script,
-             ResolutionCallback rcb) {
-            const auto self = ModuleSelf(std::move(concreteType));
-            m._ivalue()->compilation_unit()->define(
-                *m.type()->name(), script, pythonResolver(rcb), &self);
-            didFinishEmitModule(m);
-          })
-      .def("_type", [](Module& m) { return m.type(); })
-      .def(
-          "_get_method",
-          [](Module& self, const std::string& name) -> Method {
-            return self.get_method(name);
-          },
-          py::keep_alive<0, 1>())
-      .def(
-          "setattr",
-          [](Module& self, const std::string& name, py::object value) {
-            TypePtr type = self.type()->getAttribute(name);
-            TORCH_CHECK(type, "Module has no attribute '", name, "'");
-            auto ivalue = toIValue(std::move(value), type);
-            self.setattr(name, ivalue);
-          })
-      .def(
-          "getattr",
-          [](Module& self, const std::string& name) {
-            return toPyObject(self.attr(name));
-          })
-      .def(
-          "hasattr",
-          [](Module& self, const std::string& name) {
-            return self.hasattr(name);
-          })
-      .def(
           "_replicate_for_data_parallel",
           [](Module& module) {
             const ModulePtr& obj = module._ivalue();
@@ -618,16 +632,24 @@ void initJitScriptBindings(PyObject* module) {
             return Module(std::move(copy));
           })
       .def(
-          "_has_method",
-          [](Module& self, const std::string& name) {
-            return bool(self.find_method(name));
+          "get_debug_state",
+          [](Module& self) {
+            if (auto m = self.find_method("forward")) {
+              return m->get_executor().getDebugState();
+            }
+            throw std::runtime_error(
+                "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
       .def(
-          "_method_names",
-          [](Module& self) {
-            return fmap(self.get_methods(), [](const Method& method) {
-              return method.name();
-            });
+          "_define",
+          [](Module& m,
+             std::shared_ptr<ConcreteModuleType> concreteType,
+             const std::string& script,
+             ResolutionCallback rcb) {
+            const auto self = ModuleSelf(std::move(concreteType));
+            m._ivalue()->compilation_unit()->define(
+                *m.type()->name(), script, pythonResolver(rcb), &self);
+            didFinishEmitModule(m);
           })
       .def(
           "_create_method_from_trace",
@@ -649,15 +671,6 @@ void initJitScriptBindings(PyObject* module) {
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
-      .def(
-          "get_debug_state",
-          [](Module& self) {
-            if (auto m = self.find_method("forward")) {
-              return m->get_executor().getDebugState();
-            }
-            throw std::runtime_error(
-                "Attempted to call get_debug_state on a Module without a compiled forward()");
-          })
       .def_property_readonly(
           "code",
           [](Module& self) {
@@ -668,10 +681,7 @@ void initJitScriptBindings(PyObject* module) {
             return pp.str();
           })
       .def("apply", &Module::apply)
-      .def("_clone", &Module::clone)
-      .def_property_readonly("name", [](const Module& self) {
-        return self.type()->name()->name();
-      });
+      .def("_clone", &Module::clone);
 
   slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
