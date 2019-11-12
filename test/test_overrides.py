@@ -826,11 +826,10 @@ class TestTorchFunctionOverride(TestCase):
         __torch_function__ implementation to call is determined by
         examining the types of the arguments. The precedence order is
         left-to-right in the argument list, except subclasses are always
-        checked before superclasses. The __torch_function__
-        implementations are called in order of precedence, with the
-        first result that is not NotImplemented returned to the user. If
-        all implementations return NotImplemented, a TypeError is
-        raised.
+        checked before superclasses. The first result of calling the
+        implementations in precedence order that is not NotImplemented
+        is returned to the user. If all implementations return
+        NotImplemented, a TypeError is raised.
 
         All cases are tested with functions implemented in C++ and
         either foo or baz, which are python functions defined above that
