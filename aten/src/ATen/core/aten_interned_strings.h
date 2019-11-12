@@ -649,9 +649,9 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
-_(aten, thnn_conv3d) \
-_(aten, thnn_conv3d_backward) \
-_(aten, thnn_conv3d_forward) \
+_(aten, slow_conv3d) \
+_(aten, slow_conv3d_backward) \
+_(aten, slow_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \
