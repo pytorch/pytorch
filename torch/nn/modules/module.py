@@ -424,6 +424,9 @@ class Module(object):
                 raise TypeError('nn.Module.to only accepts floating point '
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
+        # memory_format handled separately as we can't call `to` operator with
+        # only memory_format, and we want to keep ability to convert layouts,
+        # without converting dtype or device
         convert_to_format = kwargs.get('memory_format', None)
 
         def convert(t):
