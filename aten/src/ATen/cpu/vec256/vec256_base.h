@@ -184,7 +184,7 @@ public:
   Vec256<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
-    return map([](T x) -> T { return x < static_cast<other_t_abs>(0) ? -x : x; });
+    return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
   template <typename float_t_abs = T,
             typename std::enable_if<std::is_floating_point<float_t_abs>::value, int>::type = 0>
@@ -246,7 +246,7 @@ public:
     // complex_t_imag is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_imag, T>::value, "complex_t_imag must be T");
     // Specifically map() does not perform the type conversion needed by abs.
-    return map([](T x) { return static_cast<T>(x.real()); });
+    return map([](T x) { return static_cast<T>(x.imag()); });
   }
   Vec256<T> conj() const {
     return *this;
