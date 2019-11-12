@@ -61,6 +61,10 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
+  // Create an empty owner rref of type T.
+  template <typename T>
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
+
   // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);

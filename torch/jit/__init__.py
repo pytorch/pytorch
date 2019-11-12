@@ -26,7 +26,6 @@ import os
 import pickle
 import sys
 import textwrap
-import types
 import warnings
 
 from collections import OrderedDict
@@ -75,17 +74,6 @@ if _enabled:
 else:
     def Attribute(value, type):
         return value
-
-@contextlib.contextmanager
-def scope(scope_name):
-    tracing_state = torch._C._get_tracing_state()
-    if tracing_state:
-        tracing_state.push_scope(scope_name)
-    try:
-        yield
-    finally:
-        if tracing_state:
-            tracing_state.pop_scope()
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
@@ -251,8 +239,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     return torch.jit._recursive.wrap_cpp_module(cpp_module)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
-                    return_inputs=False, _return_inputs_states=False):
+def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+                     return_inputs=False, _return_inputs_states=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
@@ -280,7 +268,8 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    outs = ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    return outs
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -346,7 +335,7 @@ class ONNXTracedModule(Module):
         def wrapper(*args):
             trace_inputs = _unflatten(args[:len(in_vars)], in_desc)
 
-            ret_inputs.append(tuple(x.clone() for x in args))
+            ret_inputs.append(tuple(x.clone(memory_format=torch.preserve_format) for x in args))
             if self._return_inputs_states:
                 inputs_states.append(_unflatten(args[:len(in_vars)], in_desc))
             outs.append(self.inner(*trace_inputs))
@@ -379,12 +368,12 @@ def _clone_inputs(args):
             return None
         elif isinstance(a, torch.Tensor):
             # TODO: figure out one liner to .clone() and set requires_grad
-            v = Variable(a.data.clone(), requires_grad=a.requires_grad)
+            v = Variable(a.data.clone(memory_format=torch.preserve_format), requires_grad=a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
         else:
-            return a.clone()
+            return a.clone(memory_format=torch.preserve_format)
     return function._nested_map(lambda x: isinstance(x, torch.Tensor),
                                 clone_input, condition_msg="tensors")(args)
 
@@ -490,11 +479,11 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             raise ValueError(("Model returns {} outputs, but default loss function "
                               "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
-        saved_outs = [v.data.clone() for v in out_vars]
+        saved_outs = [v.data.clone(memory_format=torch.preserve_format) for v in out_vars]
         loss = loss_fn(*out)
         grads = torch.autograd.grad([loss], in_vars)
         # TODO: I'm not sure if the clone here is necessary but it is safer
-        saved_grads = [v.data.clone() for v in grads]
+        saved_grads = [v.data.clone(memory_format=torch.preserve_format) for v in grads]
         return (saved_outs, saved_grads)
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
@@ -874,6 +863,7 @@ def trace(func,
         warnings.warn('The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.')
         return func
 
+
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
@@ -881,7 +871,6 @@ def trace(func,
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
-
         return trace_module(func.__self__, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
@@ -913,6 +902,7 @@ def trace(func,
 
     return traced
 
+_trace_module_map = None
 
 def trace_module(mod,
                  inputs,
@@ -1010,24 +1000,38 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
+    old_module_map = torch.jit._trace_module_map
+    try:
+        torch.jit._trace_module_map = {}
 
-    module = make_module(mod, _module_class, _compilation_unit)
+        def register_submods(mod, prefix):
+            for name, child in mod.named_children():
+                submod_qualname = prefix + '.' + name
+                torch.jit._trace_module_map[child] = submod_qualname
+                register_submods(child, submod_qualname)
 
-    for method_name, example_inputs in inputs.items():
-        # this is needed since Module.__call__ sets up some extra tracing
-        func = mod if method_name == "forward" else getattr(mod, method_name)
-        example_inputs = make_tuple(example_inputs)
-        module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-        check_trace_method = module._c._get_method(method_name)
+        torch.jit._trace_module_map['__module'] = mod
+        register_submods(mod, '__module')
 
-        # Check the trace against new traces created from user-specified inputs
-        if check_trace:
-            if check_inputs is not None:
-                _check_trace(check_inputs, func, check_trace_method,
-                             check_tolerance, _force_outplace, True, _module_class)
-            else:
-                _check_trace([inputs], func, check_trace_method,
-                             check_tolerance, _force_outplace, True, _module_class)
+        module = make_module(mod, _module_class, _compilation_unit)
+
+        for method_name, example_inputs in inputs.items():
+            # this is needed since Module.__call__ sets up some extra tracing
+            func = mod if method_name == "forward" else getattr(mod, method_name)
+            example_inputs = make_tuple(example_inputs)
+            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            check_trace_method = module._c._get_method(method_name)
+
+            # Check the trace against new traces created from user-specified inputs
+            if check_trace:
+                if check_inputs is not None:
+                    _check_trace(check_inputs, func, check_trace_method,
+                                 check_tolerance, _force_outplace, True, _module_class)
+                else:
+                    _check_trace([inputs], func, check_trace_method,
+                                 check_tolerance, _force_outplace, True, _module_class)
+    finally:
+        torch.jit._trace_module_map = old_module_map
 
     return module
 
@@ -1236,7 +1240,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
     if isinstance(obj, torch.nn.Module):
-        return torch.jit.torch.jit._recursive.recursive_script(obj)
+        return torch.jit._recursive.recursive_script(obj)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
@@ -1249,7 +1253,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. "
-                               "Please inherit from 'object'")
+                               "Please inherit from 'object'.")
+        if len(obj.mro()) > 2:
+            raise RuntimeError("TorchScript classes does not support inheritance yet. "
+                               "Please directly inherit from 'object'.")
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
@@ -1269,10 +1276,20 @@ def interface(obj):
         raise RuntimeError("interface must be applied to a class")
     if not _is_new_style_class(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+
+    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
+
+    if not is_module_interface and len(obj.mro()) > 2:
+        raise RuntimeError("TorchScript interface does not support inheritance yet. "
+                           "Please directly inherit from 'object' or 'nn.Module'.")
+
     qualified_name = _qualified_name(obj)
-    ast = get_jit_class_def(obj, obj.__name__)
     rcb = _jit_internal.createResolutionCallbackFromFrame(1)
-    torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    # if this type is a `nn.Module` subclass, generate an module interface type
+    # instead of a class interface type, an module interface type only compile
+    # the user provided methods as part of the interface
+    ast = get_jit_class_def(obj, obj.__name__)
+    torch._C._jit_script_interface_compile(qualified_name, ast, rcb, is_module_interface)
     obj.__torch_script_interface__ = True
     return obj
 
@@ -1314,8 +1331,8 @@ def script_method(fn):
 #  len(view)
 
 class OrderedDictWrapper(object):
-    def __init__(self, module):
-        self.module = module
+    def __init__(self, _c):
+        self._c = _c
 
     def keys(self):
         return [k for k, v in self.items()]
@@ -1330,21 +1347,26 @@ class OrderedDictWrapper(object):
         raise RuntimeError("cannot delete methods or parameters of a script module")
 
     def items(self):
-        raise NotImplementedError
-
-    def __contains__(self, k):
-        raise NotImplementedError
-
-    def __getitem__(self, k):
-        raise NotImplementedError
+        return self._c.items()
 
     def __setitem__(self, k, v):
-        raise NotImplementedError
+        if k not in self:
+            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
+                               " Tried to add '{}".format(k))
+        self._c.setattr(k, v)
+
+    def __contains__(self, k):
+        return self._c.contains(k)
+
+    def __getitem__(self, k):
+        if k not in self:
+            raise KeyError(k)
+        return self._c.getattr(k)
 
 
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module, python_dict):
-        super(OrderedModuleDict, self).__init__(module)
+        super(OrderedModuleDict, self).__init__(torch._C.ModuleDict(module))
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
@@ -1361,78 +1383,25 @@ class OrderedModuleDict(OrderedDictWrapper):
         return k in self._python_modules
 
     def __setitem__(self, k, v):
-        raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                           "tried to replace existing module '{}': {}".format(k, v))
+        # Cases where sub-module can be re-assigned after ScriptModule construction
+        # 1. If the attr is an module interface type, it's guranteed that the module is
+        #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
+        # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
+        #    and it's legit to swap a new module in.
+        # In these two cases we allow swapping a new scripted module and update the
+        # corresponding python module dict to keep sync.
+        # Note: the value to be swapped in has to be ScriptModule instead of nn.Module,
+        # otherwise it's illegal and we throw error.
+        if isinstance(v, ScriptModule):
+            self._c.setattr(k, v)
+            self._python_modules[k] = v
+        else:
+            raise RuntimeError("Cannot re-assign modules in a ScriptModule with non-scripted "
+                               "module, tried to replace existing module '{}': {}".format(k, v))
+
 
     def __getitem__(self, k):
         return self._python_modules[k]
-
-
-class OrderedParameterDict(OrderedDictWrapper):
-    def __init__(self, module):
-        super(OrderedParameterDict, self).__init__(module)
-
-    def items(self):
-        return [(name, param) for name, param in self.module._get_parameters()]
-
-    def __setitem__(self, k, v):
-        if not self.module._has_parameter(k):
-            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
-                               " Tried to add '{}".format(k))
-        self.module._set_parameter(k, v)
-
-    def __contains__(self, k):
-        return self.module._has_parameter(k)
-
-    def __getitem__(self, k):
-        if k not in self:
-            raise KeyError(k)
-        return self.module._get_parameter(k)
-
-
-class OrderedBufferDict(OrderedDictWrapper):
-    def __init__(self, module):
-        super(OrderedBufferDict, self).__init__(module)
-
-    def items(self):
-        return [(name, param) for name, _, param in
-                self.module._get_attributes() if isinstance(param, torch.Tensor)]
-
-    def __setitem__(self, k, v):
-        if not self.module._has_buffer(k):
-            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
-                               " Tried to add '{}".format(k))
-        self.module._set_attribute(k, v)
-
-    def __contains__(self, k):
-        return self.module._has_buffer(k)
-
-    def __getitem__(self, k):
-        if k not in self:
-            raise KeyError(k)
-        return self.module._get_buffer(k)
-
-# base types that can be constants
-# in addition, tuples and lists of these base types are also considered constants
-# If you edit this list, then you also need to edit the handlers in
-# ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
-
-
-def _get_valid_constant(attr, v):
-    if isinstance(v, _constant_types):
-        return v
-    elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(attr, x) for x in v)
-    constants = ", ".join(typ.__name__ for typ in _constant_types)
-    raise TypeError(textwrap.dedent("""
-        '{}' object for attribute '{}' is not a valid constant.
-        Valid constants are:
-          1. a nn.ModuleList
-          2. a value of type {{{}}}
-          3. a list or tuple of (2)
-        """.format(type(v).__name__, attr, constants)))
-
 
 # For each user-defined class that subclasses ScriptModule, this meta-class:
 # (1) finds all the methods annotated with @script_method in a ScriptModule and
@@ -1485,7 +1454,7 @@ class ScriptMeta(type):
                         # today, but it is wrong)
                         continue
                     delattr(self, name)
-                for name in concrete_type.get_module_names():
+                for name, _ in concrete_type.get_modules():
                     delattr(self, name)
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
@@ -1613,8 +1582,8 @@ if _enabled:
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
-            script_module._parameters = OrderedParameterDict(script_module._c)
-            script_module._buffers = OrderedBufferDict(script_module._c)
+            script_module._parameters = OrderedDictWrapper(torch._C.ParameterDict(script_module._c))
+            script_module._buffers = OrderedDictWrapper(torch._C.BufferDict(script_module._c))
             script_module._modules = OrderedModuleDict(script_module._c, script_module._modules)
             script_module._initializing = False
             return script_module
@@ -1681,33 +1650,29 @@ if _enabled:
             if self._initializing:
                 return super(RecursiveScriptModule, self).__getattr__(attr)
 
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
-            if self._c._has_method(attr):
+            # _modules check is before hasattr since modules are included as attributes in _c,
+            # but we want to get the python wrapper from _modules instead of the raw _c object.
+            if attr in self._modules:
+                return self._modules[attr]
+            elif self._c.hasattr(attr):
+                return self._c.getattr(attr)
+            elif self._c._has_method(attr):
                 script_method = self._c._get_method(attr)
                 # cache method so future calls do not go through __getattr__
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
 
-            # parameters, buffers, and submodules can be handled by delegating
-            # to nn.Module, which will index into our custom OrderedXDicts
             return super(RecursiveScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if self._initializing:
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
-            if self._c._has_attribute(attr):
-                self._c._set_attribute(attr, value)
-            elif self._c._has_buffer(attr):
-                # XXX: buffers are implemented as attributes in the JIT
-                self._c._set_attribute(attr, value)
-            elif self._c._has_module(attr):
-                raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                                   "tried to replace existing module '{}': {}".format(attr, value))
-            elif self._c._has_parameter(attr):
-                self._c._set_parameter(attr, value)
+            if attr in self._modules:
+                self._modules[attr] = value
+            elif self._c.hasattr(attr):
+                self._c.setattr(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
                 # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
                 # We should encode constants as class type attributes (or something) so it persists across save/load.
@@ -2102,7 +2067,6 @@ _compiled_overloaded_fns = {}
 
 def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
-    _frames_up = 0
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn

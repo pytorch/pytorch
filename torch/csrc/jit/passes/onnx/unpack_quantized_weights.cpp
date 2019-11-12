@@ -16,10 +16,10 @@ using namespace ::c10::onnx;
 template <class Result, class... Args>
 inline Result callOpUnboxed(
     const c10::OperatorHandle& op,
-    c10::TensorTypeId dispatchKey,
     Args... args) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
   return c10::Dispatcher::singleton().template callUnboxed<Result, Args...>(
-      op, dispatchKey, std::forward<Args>(args)...);
+      op, std::forward<Args>(args)...);
 }
 using ValueToParamPairMap =
     std::map<Value*, std::pair<std::string, at::Tensor>>;
@@ -125,10 +125,9 @@ void unpackQuantizedWeightsHelper(
     at::Tensor packed_weight = itr->second;
     auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
     assert(op.has_value());
-    auto key = c10::TensorTypeId::CPUTensorId;
     std::tuple<at::Tensor, c10::optional<at::Tensor>> result = callOpUnboxed<
         std::tuple<at::Tensor, c10::optional<at::Tensor>>,
-        at::Tensor>(*op, key, packed_weight);
+        at::Tensor>(*op, packed_weight);
     at::Tensor unpacked_weight = std::get<0>(result);
     if (unpacked_weight.ndimension() == 2) {
       std::cout << "2 dim weight ... permuting \n";

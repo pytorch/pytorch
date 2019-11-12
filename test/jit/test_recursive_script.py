@@ -14,6 +14,11 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
 
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
+
 class TestRecursiveScript(JitTestCase):
     def test_inferred_nonetype(self):
         class M(nn.Module):
@@ -108,12 +113,12 @@ class TestRecursiveScript(JitTestCase):
 
         # sm1 was created while m had training = True
         self.assertTrue(sm1.training)
-        self.assertEqual(sm1.training, sm1._c._get_attribute('training'))
+        self.assertEqual(sm1.training, sm1._c.getattr('training'))
         self.assertEqual(sm1(), 2)
 
         # sm2 was created after m was eval'ed
         self.assertFalse(sm2.training)
-        self.assertEqual(sm2.training, sm2._c._get_attribute('training'))
+        self.assertEqual(sm2.training, sm2._c.getattr('training'))
         self.assertEqual(sm2(), 0)
 
     def test_module_name(self):
@@ -555,8 +560,41 @@ class TestRecursiveScript(JitTestCase):
         m = M()
         self.checkModule(m, (torch.randn(5, 5), ))
 
+    def test_property(self):
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.x = 0
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+            @property
+            def x_and_1(self):
+                return self.x + 1
+
+            def forward(self, new_x):
+                # type: (int) -> int
+                self.x = new_x
+                return self.x_and_1
+
+        with self.assertRaisesRegex(RuntimeError, "property"):
+            torch.jit.script(M())
+
+    def test_inner_traced_module(self):
+        class Dummy(nn.Module):
+            def forward(self, x):
+                return x
+
+        class Model(nn.Module):
+            def __init__(self, dummies):
+                super(Model, self).__init__()
+                self._dummies = dummies
+
+            def forward(self, x):
+                out = []
+                for dummy in self._dummies:
+                    out.append(dummy(x))
+                return out
+
+        dummy = torch.jit.trace(Dummy(), torch.randn(1, 2))
+        dummies = nn.ModuleList([dummy])
+        model = Model(dummies)
+        self.checkModule(model, (torch.rand(5, 5), ))

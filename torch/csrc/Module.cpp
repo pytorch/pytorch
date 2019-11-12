@@ -142,6 +142,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
 static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
   THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_asan expects an int, "
           "but got %s", THPUtils_typename(arg));
+  //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
   x[static_cast<int>(THPUtils_unpackLong(arg))] = 0;
   return PyLong_FromLong(x[0]);
@@ -514,13 +515,14 @@ PyObject *THPModule_supportedQEngines(PyObject */* unused */)
   return list.release();
 }
 
+//NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  nullptr},
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, nullptr},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       nullptr},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  nullptr},
-  {"_safe_call",      (PyCFunction)(void(*)(void))THPModule_safeCall, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_safe_call",      (PyCFunction)(void(*)())THPModule_safeCall, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, nullptr},
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, nullptr},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, nullptr},
@@ -610,28 +612,6 @@ PyMethodDef* THCUDNN_methods() {
 }
 #endif
 
-// ATen warning handler for Python
-static void warning_handler(
-    const c10::SourceLocation& source_location,
-    const char* msg) {
-  AutoGIL gil;
-  auto result = -1;
-  if (source_location.file == nullptr) {
-    result = PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1);
-  } else {
-    result = PyErr_WarnExplicit(
-        /*category=*/PyExc_UserWarning,
-        /*message=*/msg,
-        /*filename=*/source_location.file,
-        /*lineno=*/source_location.line,
-        /*module=*/nullptr,
-        /*registry=*/nullptr);
-  }
-  if (result < 0) {
-    throw python_error();
-  }
-}
-
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
 // Guaranteed to be invoked from Python under GIL, no locking on map needed
 static void LogAPIUsageOnceFromPython(const std::string& event) {
@@ -642,7 +622,6 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
-
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -652,6 +631,7 @@ PyObject* initModule() {
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
@@ -766,9 +746,6 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
-
-  // Set ATen warnings to issue Python warnings
-  ::c10::Warning::set_warning_handler(&warning_handler);
 
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
