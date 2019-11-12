@@ -132,8 +132,6 @@ class DiagonalTensor(object):
             kwargs = {}
         if func not in self.handled_functions:
             return NotImplemented
-        # Note: this allows subclasses that don't override
-        # __torch_function__ to handle DiagonalTensor objects.
         return self.handled_functions[func](*args, **kwargs)
 
     def __eq__(self, other):
@@ -210,8 +208,6 @@ class SubTensor(torch.Tensor):
 
         if func not in HANDLED_FUNCTIONS_SUB:
             return NotImplemented
-        # Note: this allows subclasses that don't override
-        # __torch_function__ to handle DiagonalTensor objects.
         return HANDLED_FUNCTIONS_SUB[func](*args, **kwargs)
 
 @implements_sub(torch.mean)
