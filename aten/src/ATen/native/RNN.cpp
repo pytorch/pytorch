@@ -1207,12 +1207,6 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
-  if (use_miopen(data, dropout_p)) {
-    Tensor output, hy, cy;
-    lstm_packed_miopen_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
-            _params, has_biases, num_layers, dropout_p, train, bidirectional);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
-  }
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
 
   PackedSequence input { data, batch_sizes };
