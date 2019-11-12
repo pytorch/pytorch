@@ -50,7 +50,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
-          A class encapsulating a reference to a value of some type on a remote worker. This handle will keep the referenced remote value alive on the worker.
+          A class encapsulating a reference to a value of some type on a remote worker.
+          This handle will keep the referenced remote value alive on the worker.
       )")
           .def(
               // not releasing GIL here to avoid context switch on getters
