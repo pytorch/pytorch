@@ -131,7 +131,7 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
 }
 
 template<>
-inline void cast_and_store<std::complex<float>>(const ScalarType dest_type, void *ptr, std::complex<float> value_) {
+C10_HOST_DEVICE inline void cast_and_store<std::complex<float>>(const ScalarType dest_type, void *ptr, std::complex<float> value_) {
   auto value = std::real(value_);
   switch (dest_type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
@@ -140,7 +140,7 @@ inline void cast_and_store<std::complex<float>>(const ScalarType dest_type, void
   ERROR_UNSUPPORTED_CAST
 }
 template<>
-inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, void *ptr, std::complex<double> value_) {
+C10_HOST_DEVICE inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, void *ptr, std::complex<double> value_) {
   auto value = std::real(value_);
   switch (dest_type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
@@ -151,12 +151,12 @@ inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, voi
 
 #define DEFINE_UNCASTABLE(T, scalartype_)                                         \
 template<>                                                                        \
-inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
+C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
   assert(ScalarType::scalartype_ == src_type);                                    \
   return *(const T *)ptr;                                                         \
 }                                                                                 \
 template<>                                                                        \
-inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
+C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
   assert(ScalarType::scalartype_ == dest_type);                                   \
   *(T *)ptr = value;                                                              \
 }
