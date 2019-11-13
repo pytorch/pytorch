@@ -42,10 +42,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
-              "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_get_rpc_timeout",
-              &RpcAgent::getRpcTimeout,
+              "sync",
+              &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
@@ -167,6 +165,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
          std::vector<torch::Tensor>& tensors) {
         return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
+
+  module.def("get_rpc_timeout", []() {
+    return RpcAgent::getDefaultRpcAgent()->getRpcTimeout();
+  });
 
   Py_RETURN_TRUE;
 }
