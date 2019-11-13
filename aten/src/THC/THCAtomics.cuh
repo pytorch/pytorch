@@ -16,16 +16,18 @@ struct AtomicAddIntegerImpl<T, 1> {
     uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
     uint32_t old = *address_as_ui;
     uint32_t shift = offset * 8;
-    uint32_t sum;
+    uint32_t old_bytes;
     uint32_t newval;
     uint32_t assumed;
 
     do {
       assumed = old;
-      sum = (old >> shift) & 0xff;
-      T tmp = THCNumerics<T>::add(val, sum);
-      sum = *reinterpret_cast<uint8_t*>(&tmp);
-      newval = (old & ~(0x000000ff << shift)) | (sum << shift);
+      old_bytes = (old >> shift) & 0xff;
+      T tmp = THCNumerics<T>::add(val, old_bytes);
+      // maintain same size in initial cast to avoid padding negative values with 1s
+      uint8_t cast = tmp;
+      newval = cast;
+      newval = (old & ~(0x000000ff << shift)) | (newval << shift);
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
@@ -38,16 +40,18 @@ struct AtomicAddIntegerImpl<T, 2> {
     uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
     bool is_32_align = offset;
     uint32_t old = *address_as_ui;
-    uint32_t sum;
+    uint32_t old_bytes;
     uint32_t newval;
     uint32_t assumed;
 
     do {
       assumed = old;
-      sum = is_32_align ? old >> 16 : old & 0xffff;
-      T tmp = THCNumerics<T>::add(val, sum);
-      sum = *reinterpret_cast<uint16_t*>(&tmp);
-      newval = is_32_align ? (old & 0xffff) | (sum << 16) : (old & 0xffff0000) | sum;
+      old_bytes = is_32_align ? old >> 16 : old & 0xffff;
+      T tmp = THCNumerics<T>::add(val, old_bytes);
+      // maintain same size in initial cast to avoid padding negative values with 1s
+      uint16_t cast = tmp;
+      newval = cast;
+      newval = is_32_align ? (old & 0xffff) | (newval << 16) : (old & 0xffff0000) | newval;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
