@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/nested_tensor/python_nested_tensor.h>
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -16,6 +17,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   // NOTE: "leaks" THPVariableClass
   THPVariableClass = PyObject_GetAttrString(tensor_module, "Tensor");
   if (!THPVariableClass)
+    throw python_error();
+
+  // NOTE: "leaks" _ListNestedTensorVariableClass
+  torch::nested_tensor::_ListNestedTensorVariableClass = PyObject_GetAttrString(tensor_module, "_ListNestedTensor");
+  if (!torch::nested_tensor::_ListNestedTensorVariableClass)
     throw python_error();
 
   auto autograd_module = THPObjectPtr(PyImport_ImportModule("torch.autograd"));

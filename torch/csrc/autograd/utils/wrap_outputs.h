@@ -11,6 +11,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/DynamicTypes.h>
