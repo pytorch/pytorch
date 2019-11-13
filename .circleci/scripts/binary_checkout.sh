@@ -39,7 +39,7 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT" -b pr/torch-cpu-cxx11
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
