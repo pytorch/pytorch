@@ -139,7 +139,7 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   git clone --recursive https://github.com/pytorch/xla.git
   # FIXME(AILING): intentionally make XLA test fail.
-  ./xla/scripts/apply_patches.sh
+  #./xla/scripts/apply_patches.sh
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
