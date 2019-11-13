@@ -32,66 +32,96 @@ class NestedModel : public torch::nn::Module {
 struct ModulesTest : torch::test::SeedingFixture {};
 
 TEST_F(ModulesTest, Conv1d) {
-  Conv1d model(Conv1dOptions(3, 2, 3).stride(2));
-  auto x = torch::randn({2, 3, 5}, torch::requires_grad());
+  Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
+  model->weight.set_data(torch::arange(18, torch::dtype(torch::kFloat)).reshape({2, 3, 3}));
+  auto x = torch::arange(30, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 5});
   auto y = model(x);
+  auto expected = torch::tensor({{{ 312.,  348.,  384.},
+                                  { 798.,  915., 1032.}},
+
+                                 {{ 852.,  888.,  924.},
+                                  {2553., 2670., 2787.}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
   torch::Tensor s = y.sum();
-
   s.backward();
-  ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 3; i++) {
-    ASSERT_EQ(y.size(i), 2);
-  }
-
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dEven) {
-  Conv2d model(Conv2dOptions(3, 2, 3).stride(2));
-  auto x = torch::randn({2, 3, 5, 5}, torch::requires_grad());
+  Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
+  model->weight.set_data(torch::arange(54, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3}));
+  auto x = torch::arange(75, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5});
   auto y = model(x);
+  auto expected = torch::tensor({{{{15219., 15570., 15921.},
+                                   {16974., 17325., 17676.},
+                                   {18729., 19080., 19431.}},
+
+                                  {{37818., 38898., 39978.},
+                                   {43218., 44298., 45378.},
+                                   {48618., 49698., 50778.}}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
   torch::Tensor s = y.sum();
-
   s.backward();
-  ASSERT_EQ(y.ndimension(), 4);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 4; i++) {
-    ASSERT_EQ(y.size(i), 2);
-  }
-
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dUneven) {
-  Conv2d model(Conv2dOptions(3, 2, {3, 2}).stride({2, 2}));
-  auto x = torch::randn({2, 3, 5, 4}, torch::requires_grad());
+  Conv2d model(Conv2dOptions(3, 2, {3, 2}).stride({1, 1}).bias(false));
+  model->weight.set_data(torch::arange(36, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 2}));
+  auto x = torch::arange(60, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 4});
   auto y = model(x);
+  auto expected = torch::tensor({{{{ 5289.,  5442.,  5595.},
+                                   { 5901.,  6054.,  6207.},
+                                   { 6513.,  6666.,  6819.}},
+
+                                  {{13227., 13704., 14181.},
+                                   {15135., 15612., 16089.},
+                                   {17043., 17520., 17997.}}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
   torch::Tensor s = y.sum();
-
   s.backward();
-  ASSERT_EQ(y.ndimension(), 4);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 4; i++) {
-    ASSERT_EQ(y.size(i), 2);
-  }
-
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
 TEST_F(ModulesTest, Conv3d) {
-  Conv3d model(Conv3dOptions(3, 2, 3).stride(2));
-  auto x = torch::randn({2, 3, 5, 5, 5}, torch::requires_grad());
+  Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
+  model->weight.set_data(torch::arange(162, torch::dtype(torch::kFloat)).reshape({2, 3, 3, 3, 3}));
+  auto x = torch::arange(375, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5, 5});
   auto y = model(x);
+  auto expected = torch::tensor({{{{{ 700704.,  703944.,  707184.},
+                                    { 716904.,  720144.,  723384.},
+                                    { 733104.,  736344.,  739584.}},
+
+                                   {{ 781704.,  784944.,  788184.},
+                                    { 797904.,  801144.,  804384.},
+                                    { 814104.,  817344.,  820584.}},
+
+                                   {{ 862704.,  865944.,  869184.},
+                                    { 878904.,  882144.,  885384.},
+                                    { 895104.,  898344.,  901584.}}},
+
+                                  {{{1724220., 1734021., 1743822.},
+                                    {1773225., 1783026., 1792827.},
+                                    {1822230., 1832031., 1841832.}},
+
+                                   {{1969245., 1979046., 1988847.},
+                                    {2018250., 2028051., 2037852.},
+                                    {2067255., 2077056., 2086857.}},
+
+                                   {{2214270., 2224071., 2233872.},
+                                    {2263275., 2273076., 2282877.},
+                                    {2312280., 2322081., 2331882.}}}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
   torch::Tensor s = y.sum();
-
   s.backward();
-  ASSERT_EQ(y.ndimension(), 5);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 5; i++) {
-    ASSERT_EQ(y.size(i), 2);
-  }
-
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
@@ -646,7 +676,7 @@ TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
   input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8, 9}}}, torch::kFloat);
   std::tie(output, indices) = pool->forward_with_indices(input);
   ASSERT_TRUE(torch::allclose(
-    unpool(output, indices, input.sizes()),
+    unpool(output, indices, input.sizes().vec()),
     torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8, 0}}} , torch::kFloat)));
   ASSERT_TRUE(torch::allclose(
     unpool(output, indices),
@@ -1458,7 +1488,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, SmoothL1LossNoReduction) {
-  SmoothL1Loss loss(/*reduction=*/torch::Reduction::None);
+  SmoothL1Loss loss(/*reduction=*/torch::kNone);
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
@@ -2551,19 +2581,48 @@ TEST_F(ModulesTest, PrettyPrintBilinear) {
 TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv1d(3, 4, 5)),
-      "torch::nn::Conv1d(input_channels=3, output_channels=4, kernel_size=5, stride=1)");
+      "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1)");
+
   ASSERT_EQ(
       c10::str(Conv2d(3, 4, 5)),
-      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[1, 1])");
+      "torch::nn::Conv2d(3, 4, kernel_size=[5, 5], stride=[1, 1])");
   ASSERT_EQ(
       c10::str(Conv2d(Conv2dOptions(3, 4, 5).stride(2))),
-      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
+      "torch::nn::Conv2d(3, 4, kernel_size=[5, 5], stride=[2, 2])");
+  {
+    const auto options =
+        Conv2dOptions(3, 4, std::vector<int64_t>{5, 6}).stride({1, 2});
+    ASSERT_EQ(
+        c10::str(Conv2d(options)),
+        "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 2])");
+  }
 
-  const auto options =
-      Conv2dOptions(3, 4, std::vector<int64_t>{5, 6}).stride({1, 2});
   ASSERT_EQ(
-      c10::str(Conv2d(options)),
-      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+      c10::str(Conv3d(4, 4, std::vector<int64_t>{5, 6, 7})),
+      "torch::nn::Conv3d(4, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1])");
+  {
+    const auto options =
+        Conv3dOptions(4, 4, std::vector<int64_t>{5, 6, 7})
+          .stride({1, 2, 3})
+          .padding(1)
+          .dilation(0)
+          .groups(2)
+          .bias(false)
+          .padding_mode(torch::kCircular);
+    ASSERT_EQ(
+        c10::str(
+          Conv3d(options)),
+          "torch::nn::Conv3d("
+          "4, "
+          "4, "
+          "kernel_size=[5, 6, 7], "
+          "stride=[1, 2, 3], "
+          "padding=[1, 1, 1], "
+          "dilation=[0, 0, 0], "
+          "groups=2, "
+          "bias=false, "
+          "padding_mode=kCircular)");
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintUpsample) {
