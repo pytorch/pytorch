@@ -431,7 +431,7 @@ void initJITBindings(PyObject* module) {
   // that the buffer implement `seek()`, `tell()`, and `read()`.
   class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
    public:
-    BufferAdapter(const py::object& buffer) : buffer_(std::move(buffer)) {
+    BufferAdapter(const py::object& buffer) : buffer_(buffer) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
       buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));

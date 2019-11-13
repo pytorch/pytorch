@@ -3933,7 +3933,7 @@ class _TestTorchMixin(object):
 
         with tempfile.NamedTemporaryFile() as f:
             test(f)
-        
+
         with tempfile.NamedTemporaryFile() as f:
             test(f.name)
 
