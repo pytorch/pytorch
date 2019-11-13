@@ -634,15 +634,13 @@ void InsertQuantDeQuantImpl(
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
   std::string linear_with_quant = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+graph(%linear, %a_dequant, %w_quant, %b):
         %w_dequant = aten::dequantize(%w_quant)
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
         return (%r) )";
 
   std::string linear_with_quant_prepack = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+graph(%linear, %a_dequant, %w_quant, %b):
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
@@ -662,21 +660,20 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   };
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
+  rewriter.RegisterRewritePattern(linear_with_quant,
+                                  linear_with_quant_prepack);
   rewriter.runOnGraph(graph, filter);
 }
 
 void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
   std::string conv_with_quant = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   std::string conv_with_quant_prepack = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
