@@ -68,10 +68,12 @@ TESTS = [
 # skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
-        'rpc_fork',
-        'rpc_spawn',
-        'dist_autograd_fork',
-        'dist_autograd_spawn',
+        'distributed/rpc/process_group/rpc_fork',
+        'distributed/rpc/process_group/rpc_spawn',
+        'distributed/rpc/process_group/dist_autograd_fork',
+        'distributed/rpc/process_group/dist_autograd_spawn',
+        'distributed/rpc/process_group/dist_optimizer_fork',
+        'distributed/rpc/process_group/dist_optimizer_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -82,19 +84,23 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
-    'rpc_fork',
-    'rpc_spawn',
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
+    'distributed/rpc/process_group/rpc_fork',
+    'distributed/rpc/process_group/rpc_spawn',
+    'distributed/rpc/process_group/dist_autograd_fork',
+    'distributed/rpc/process_group/dist_autograd_spawn',
+    'distributed/rpc/process_group/dist_optimizer_fork',
+    'distributed/rpc/process_group/dist_optimizer_spawn',
 ]
 
 ROCM_BLACKLIST = [
     'cpp_extensions',
     'multiprocessing',
-    'rpc_fork',
-    'rpc_spawn',
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
+    'distributed/rpc/process_group/rpc_fork',
+    'distributed/rpc/process_group/rpc_spawn',
+    'distributed/rpc/process_group/dist_autograd_fork',
+    'distributed/rpc/process_group/dist_autograd_spawn',
+    'distributed/rpc/process_group/dist_optimizer_fork',
+    'distributed/rpc/process_group/dist_optimizer_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
@@ -427,6 +433,10 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
+        splits = test.rsplit("/")
+        relative_path = splits[:-1].join("/")
+        module_name =
+
         test_name = 'test_{}'.format(test)
         test_module = parse_test_module(test)
 

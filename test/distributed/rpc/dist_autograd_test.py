@@ -7,7 +7,8 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+from distributed.rpc.dist_utils import dist_init
+from distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 import threading
 
@@ -153,7 +154,7 @@ class ExecMode(Enum):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
-class DistAutogradTest(object):
+class DistAutogradTest(RpcAgentTestFixture):
 
     def _initialize_pg(self):
         # This is for tests using `dist.barrier`.
@@ -193,14 +194,6 @@ class DistAutogradTest(object):
 
     def _check_rpc_done(self, rank_distance):
         _check_rpc_done(rank_distance)
-
-    @property
-    def world_size(self):
-        return 4
-
-    @property
-    def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
     @dist_init
     def test_autograd_context(self):
@@ -1016,37 +1009,6 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
-                     "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
-    @dist_init(clean_shutdown=False)
-    def test_backward_node_failure(self):
-        self._initialize_pg()
-
-        with dist_autograd.context() as context_id:
-            t1 = torch.rand((3, 3), requires_grad=True)
-            t2 = torch.rand((3, 3), requires_grad=True)
-
-            res = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
-                               args=(t1, t2))
-
-            # Wait for all RPCs to be done.
-            dist.barrier()
-
-            # Kill all odd rank nodes.
-            if self.rank % 2 == 0:
-                # Wait for all other nodes to die.
-                for rank in range(self.world_size):
-                    if rank % 2 != 0:
-                        wait_until_node_failure(rank)
-
-                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
-                    # Run backwards, and validate we receive an error since all
-                    # other nodes are dead.
-                    dist_autograd.backward([res.sum()])
-            else:
-                # Exit all other nodes.
-                pass
-
     @dist_init
     def test_backward_without_context(self):
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -1186,44 +1148,6 @@ class DistAutogradTest(object):
     def _wait_backward_done():
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
-
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
-                     "Skipping this test temporarily since ProcessGroupAgent " +
-                     "does not report errors on node failures")
-    @dist_init(clean_shutdown=False)
-    def test_backward_node_failure_python_udf(self):
-        self._initialize_pg()
-
-        with dist_autograd.context() as context_id:
-            t1 = torch.rand((3, 3), requires_grad=True)
-            t2 = torch.rand((3, 3), requires_grad=True)
-
-            dst = self._next_rank()
-            res = rpc.rpc_sync('worker{}'.format(dst), my_py_nested_call,
-                               args=(t1, t2, dst, self.world_size, 1))
-
-            # Wait for all RPCs to be done.
-            dist.barrier()
-
-            # Kill rank 2 (last hop of nested rpc) and verify rank 0 receives an error.
-            if self.rank == 2:
-                return
-
-            if self.rank == 0:
-                # Wait for rank 2 to die.
-                wait_until_node_failure(2)
-
-                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
-                    # Run backwards, and validate we receive an error since rank 2 is dead.
-                    dist_autograd.backward([res.sum()])
-
-                # Tell other nodes RPC is done.
-                for i in range(self.world_size):
-                    if i != self.rank and i != 2:
-                        rpc.rpc_sync('worker{}'.format(i), DistAutogradTest._set_backward_done, args=())
-            else:
-                # Wait for backward to finish on rank 0.
-                DistAutogradTest._wait_backward_done()
 
     def _nested_python_udf(t1, t2, dst):
         t3 = t1 * t2
