@@ -30,6 +30,7 @@
   cname: maskedFill
   variants: function
   return: self
+  scalar_check: false
   options:
     - arguments:
       - arg: THTensor* self
@@ -45,6 +46,7 @@
   cname: maskedFillBool
   variants: function
   return: self
+  scalar_check: false
   options:
     - arguments:
       - arg: THTensor* self
@@ -60,6 +62,7 @@
   cname: maskedCopy
   variants: function
   return: self
+  scalar_check: false
   arguments:
     - arg: THTensor* self
       broadcast: mask inplace fallback types:Byte
@@ -74,6 +77,7 @@
   cname: maskedCopyBool
   variants: function
   return: self
+  scalar_check: false
   arguments:
     - arg: THTensor* self
       broadcast: mask inplace fallback types:Bool
