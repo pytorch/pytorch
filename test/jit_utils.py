@@ -305,7 +305,7 @@ class JitTestCase(TestCase):
         return defined_vars
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
+                               outputs=None, capture_output=False):
         """
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the AST frontend
@@ -341,13 +341,11 @@ class JitTestCase(TestCase):
                     optimize=True,
                     inputs_requires_grad=False,
                     capture_output=False,
-                    frames_up=1,
-                    profiling=ProfilingMode.PROFILING):
+                    frames_up=1):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode():
                 if isinstance(script, str):
                     # Compile the string to a Script function
-                    # with enable_profiling_mode():
                     cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
 
                     # Execute the Python function so we can run it later and get its
@@ -369,7 +367,6 @@ class JitTestCase(TestCase):
                         inputs,
                         script.__name__,
                         capture_output,
-                        profiling=profiling,
                         frames_up=2)
 
                     # Continue checking the Python frontend
