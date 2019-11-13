@@ -1592,6 +1592,22 @@ class TestNN(NNTestCase):
         parameters.clear()
         check()
 
+    def test_ResidualBlock(self):
+        net = nn.ResidualBlock(nn.ReLU(inplace=True))
+        input = torch.tensor([-2., -1., 0., 1., 2.])
+        expected = torch.tensor([-2., -1., 0., 2., 4.])
+        self.assertEqual(net(input), expected)
+
+    def test_ResidualBlockWithShortcut(self):
+        net = nn.ResidualBlockWithShortcut(
+            nn.ReLU(inplace=True),
+            nn.AvgPool1d(2),
+            shortcut=nn.AvgPool1d(2)
+        )
+        input = torch.tensor([[[-2., 0., 0., 2.]]])
+        expected = torch.tensor([[[-1., 2.]]])
+        self.assertEqual(net(input), expected)
+
     def test_add_module(self):
         l = nn.Linear(10, 20)
         net = nn.Module()

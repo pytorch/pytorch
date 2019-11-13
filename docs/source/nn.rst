@@ -52,6 +52,21 @@ Containers
 .. autoclass:: ParameterDict
     :members:
 
+Residual blocks
+----------------------------------
+
+:hidden:`ResidualBlock`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ResidualBlock
+    :members:
+
+:hidden:`ResidualBlockWithShortcut`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ResidualBlockWithShortcut
+    :members:
+
 Convolution layers
 ----------------------------------
 
