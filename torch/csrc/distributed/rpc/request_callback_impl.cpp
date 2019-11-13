@@ -96,7 +96,11 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
-      ctx.addForkOfOwner(rrefId, forkId);
+
+      if (rrefId != forkId) {
+        // This is not owner calling to self
+        ctx.addForkOfOwner(rrefId, forkId);
+      }
       return RemoteRet(rrefId, forkId).toMessage();
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {

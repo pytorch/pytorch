@@ -3,6 +3,7 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
+#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -42,6 +43,10 @@ using AvgPool2dOptions = AvgPoolOptions<2>;
 /// `AvgPoolOptions` specialized for 3-D avgpool.
 using AvgPool3dOptions = AvgPoolOptions<3>;
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool1d, AvgPool1dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool2d, AvgPool2dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AvgPool3d, AvgPool3dFuncOptions)
+
 // ============================================================================
 
 /// Options for a `D`-dimensional maxpool functional and module.
@@ -75,6 +80,10 @@ using MaxPool2dOptions = MaxPoolOptions<2>;
 /// `MaxPoolOptions` specialized for 3-D maxpool.
 using MaxPool3dOptions = MaxPoolOptions<3>;
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool1d, MaxPool1dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool2d, MaxPool2dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxPool3d, MaxPool3dFuncOptions)
+
 // ============================================================================
 
 /// Options for a `D`-dimensional adaptive maxpool functional and module.
@@ -96,6 +105,10 @@ using AdaptiveMaxPool2dOptions = AdaptiveMaxPoolOptions<2>;
 /// `AdaptiveMaxPoolOptions` specialized for 3-D adaptive maxpool.
 using AdaptiveMaxPool3dOptions = AdaptiveMaxPoolOptions<3>;
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool1d, AdaptiveMaxPool1dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool2d, AdaptiveMaxPool2dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveMaxPool3d, AdaptiveMaxPool3dFuncOptions)
+
 // ============================================================================
 
 /// Options for a `D`-dimensional adaptive avgpool functional and module.
@@ -116,6 +129,10 @@ using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 
 /// `AdaptiveAvgPoolOptions` specialized for 3-D adaptive avgpool.
 using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool1d, AdaptiveAvgPool1dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool2d, AdaptiveAvgPool2dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool3d, AdaptiveAvgPool3dFuncOptions)
 
 // ============================================================================
 
@@ -144,6 +161,10 @@ using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
 /// `MaxUnpoolOptions` specialized for 3-D maxunpool.
 using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxUnpool1d, MaxUnpool1dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxUnpool2d, MaxUnpool2dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxUnpool3d, MaxUnpool3dFuncOptions)
+
 // ============================================================================
 
 /// Options for a `D`-dimensional lppool functional and module.
@@ -169,6 +190,9 @@ using LPPool1dOptions = LPPoolOptions<1>;
 
 /// `LPPoolOptions` specialized for 2-D lppool.
 using LPPool2dOptions = LPPoolOptions<2>;
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LPPool1d, LPPool1dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LPPool2d, LPPool2dFuncOptions)
 
 } // namespace nn
 } // namespace torch

@@ -1,13 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.distributed.autograd as dist_autograd
+import torch.optim as optim
 import torch.distributed.rpc as rpc
-# from torch.distributed.optim import DistributedOptimizer
-# from torch.distributed.rpc import RRef
+from torch.distributed.optim import DistributedOptimizer
+from torch.distributed.rpc import RRef
 
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
 
 import unittest
+
 
 def _call_method(method, obj_rref, *args, **kwargs):
     return method(obj_rref.local_value(), *args, **kwargs)
@@ -21,26 +23,17 @@ def _remote_method(method, obj_rref, *args, **kwargs):
         kwargs=kwargs
     )
 
-class RemoteModule(nn.Module):
-    def __init__(self):
-        super(RemoteModule, self).__init__()
 
-    def remote_parameters(self):
-        param_rrefs = []
-        for param in self.parameters():
-            param_rrefs.append(RRef(param))
-        return param_rrefs
+def _parameter_rrefs(module):
+    param_rrefs = []
+    for param in module.parameters():
+        param_rrefs.append(RRef(param))
+    return param_rrefs
 
-def _get_remote_parameters(remote_module_rref):
-    return rpc.rpc_sync(
-        remote_module_rref.owner(),
-        _call_method,
-        args=[RemoteModule.remote_parameters, remote_module_rref]
-    )
 
-class Encoder(RemoteModule):
+class EmbeddingTable(nn.Module):
     def __init__(self, ntoken, ninp, dropout):
-        super(Encoder, self).__init__()
+        super(EmbeddingTable, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
         self.encoder.weight.data.uniform_(-0.1, 0.1)
@@ -49,7 +42,7 @@ class Encoder(RemoteModule):
         return self.drop(self.encoder(input))
 
 
-class RNN(RemoteModule):
+class RNN(nn.Module):
     def __init__(self, ninp, nhid, nlayers, dropout):
         super(RNN, self).__init__()
         self.lstm = nn.LSTM(ninp, nhid, nlayers, dropout=dropout)
@@ -58,7 +51,7 @@ class RNN(RemoteModule):
         return self.lstm(emb, hidden)
 
 
-class Decoder(RemoteModule):
+class Decoder(nn.Module):
     def __init__(self, ntoken, nhid, dropout):
         super(Decoder, self).__init__()
         self.drop = nn.Dropout(dropout)
@@ -74,22 +67,22 @@ class RNNModel(nn.Module):
     def __init__(self, ps, ntoken, ninp, nhid, nlayers, dropout=0.5):
         super(RNNModel, self).__init__()
 
-        self.encoder_rref = rpc.remote(ps, Encoder, args=(ntoken, ninp, dropout))
+        self.emb_table_rref = rpc.remote(ps, EmbeddingTable, args=(ntoken, ninp, dropout))
         self.rnn = nn.LSTM(ninp, nhid, nlayers, dropout=dropout)
         self.decoder_rref = rpc.remote(ps, Decoder, args=(ntoken, nhid, dropout))
 
     def forward(self, input, hidden):
-        emb = _remote_method(Encoder.forward, self.encoder_rref, input)
+        emb = _remote_method(EmbeddingTable.forward, self.emb_table_rref, input)
         output, hidden = self.rnn(emb, hidden)
         decoded = _remote_method(Decoder.forward, self.decoder_rref, output)
         return decoded, hidden
 
-    def remote_parameters(self):
+    def parameter_rrefs(self):
         remote_params = []
-        remote_params.extend(_get_remote_parameters(self.encoder_rref))
+        remote_params.extend(_remote_method(_parameter_rrefs, self.emb_table_rref))
         for p in self.rnn.parameters():
             remote_params.append(RRef(p))
-        remote_params.extend(_get_remote_parameters(self.decoder_rref))
+        remote_params.extend(_remote_method(_parameter_rrefs, self.decoder_rref))
         return remote_params
 
 
@@ -122,12 +115,11 @@ class DistModelParallelTest(object):
         )
 
         rnn = RNNModel(ps, ntoken, ninp, nhid, nlayers)
-        # Depends on #29304 and #28948
-        # opt = DistributedOptimizer(
-        #    optim.SGD,
-        #    rnn.remote_parameters(),
-        #    lr=0.05,
-        # )
+        opt = DistributedOptimizer(
+            optim.SGD,
+            rnn.parameter_rrefs(),
+            lr=0.05,
+        )
         for _ in range(2):
             with dist_autograd.context() as ctx_id:
                 inp = torch.LongTensor(batch, nindices) % ntoken
@@ -135,4 +127,4 @@ class DistModelParallelTest(object):
                 hidden[1].detach_()
                 output, hidden = rnn(inp, hidden)
                 dist_autograd.backward([output.sum()])
-                # opt.step()
+                opt.step()
