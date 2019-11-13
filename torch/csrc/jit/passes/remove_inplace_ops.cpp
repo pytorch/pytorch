@@ -11,9 +11,9 @@ static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::zero_, aten::zeros_like},
     {aten::fill_, aten::full_like}};
 
-static const std::unordered_map<NodeKind, size_t> additionalNoneArgumentCount = {
-    {aten::zero_, 1},
-    {aten::fill_, 1}};
+static const std::unordered_map<NodeKind, int> expectedInputCount = {
+    {aten::zero_, 2},
+    {aten::fill_, 3}};
 
 bool isInplaceOp(const Node* node) {
   return inPlaceToOutOfPlace.count(node->kind()) != 0;
@@ -48,12 +48,12 @@ void RemoveInplaceOps(Block* block) {
         newNode->addInput(input);
       }
 
-      size_t additionalInputCount = 0;
-      if (additionalNoneArgumentCount.find(node->kind()) != additionalNoneArgumentCount.end()) {
-        additionalInputCount = additionalNoneArgumentCount.at(node->kind());
+      int additionalInputCount = 0;
+      if (expectedInputCount.find(node->kind()) != expectedInputCount.end()) {
+        additionalInputCount = static_cast<int>(expectedInputCount.at(node->kind())) - newNode->inputs().size();
       }
 
-      for (size_t i = 0; i < additionalInputCount; ++i) {
+      for (int i = 0; i < additionalInputCount; ++i) {
         auto noneNode = graph->createNone();
         noneNode->insertBefore(newNode);
         newNode->addInput(noneNode->output());
