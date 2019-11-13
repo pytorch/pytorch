@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/passes/inliner.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -518,7 +519,8 @@ void GraphEncoder::EncodeTensor(
   tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
   at::Tensor t;
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  // Temporary solution as aten::empty does not work on quantized tensor
+  // TODO We don't call .cpu() on quantized tensors as it fails when calling
+  // aten::empty() on quantized tensors beyond certain size. Issue #29435.
   if (tensor.is_quantized()) {
     t = tensor.contiguous();
   }
@@ -660,7 +662,9 @@ class ScriptModuleSerializer {
     std::vector<c10::IValue> elements;
     for (const auto& method : methods) {
       const auto& func = method.function();
-      torch::jit::Code code(func.graph());
+      auto graph = func.graph()->copy();
+      Inline(*graph);
+      torch::jit::Code code(graph);
       // Make a copy of opnames. Some of them may be changed for mobile later.
       std::vector<c10::OperatorName> opnames;
       for (size_t i = 0; i < code.instructions().size(); ++i) {

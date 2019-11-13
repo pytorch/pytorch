@@ -34,6 +34,7 @@ def conv2d(g, input, weight, bias, stride, padding, dilation, groups, scale, zer
         "pads_i": padding + padding,
         "dilations_i": dilation,
         "group_i": groups,
+        "order_s": "NHWC",
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }

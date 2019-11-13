@@ -47,48 +47,60 @@ void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
   }
 }
 
+// Get the scale of the input to quantized op. There are two cases here
+// 1. For ops with output_scale specified in op signature, we get the output
+// scale
+// 2. For ops with no output scale in op signature (like quantized::relu)
+// we traverse up the graph to get the scale from its input until we hit a node
+// where scale is explicitly specified.
 double getScaleFromInput(Node* input_node) {
   c10::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
-  if (input_name.find("quantize_per_tensor") != std::string::npos) {
+
+  if (input_name == "aten::quantize_per_tensor") {
+    TORCH_CHECK(
+        input_node->inputs().size() > 1,
+        "aten::quantize_per_tensor expected scale to be 2nd input");
     scale = toIValue(input_node->inputs()[1]);
-    if (scale.value().isDouble()) {
-      return scale.value().toDouble();
-    }
-  } else if (input_name.find("quantized::linear") != std::string::npos) {
+    return scale.value().toDouble();
+  } else if (input_name == "quantized::linear") {
     // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale,
     // %w_zero_point)
+    TORCH_CHECK(
+        input_node->inputs().size() > 3,
+        "quantized::linear expected scale to be 4th input");
     scale = toIValue(input_node->inputs()[3]);
-    if (scale.value().isDouble()) {
-      return scale.value().toDouble();
-    }
-  } else if (input_name.find("quantized::conv2d") != std::string::npos) {
+    return scale.value().toDouble();
+  } else if (input_name == "quantized::conv2d") {
     // %r = quantized::conv2d(%input, %unpacked_weight, %bias, %stride,
     // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    TORCH_CHECK(
+        input_node->inputs().size() > 7,
+        "quantized::conv2d expected scale to be 8th input");
     scale = toIValue(input_node->inputs()[7]);
-    if (scale.value().isDouble()) {
-      return scale.value().toDouble();
-    }
-  } else if (input_name.find("quantized::conv2d_relu") != std::string::npos) {
-    // %r = quantized::conv2d_relu(%input, %unpacked_weight, %bias, %stride,
+    return scale.value().toDouble();
+  } else if (input_name == "quantized::conv2d_relu") {
+    // %r = quantized::conv2d_relu(%input, %unpacked_weight, %stride,
     // %padding, %dilation, %groups, %w_scale, %w_zero_point)
-    scale = toIValue(input_node->inputs()[7]);
-    if (scale.value().isDouble()) {
-      return scale.value().toDouble();
-    }
-  } else if (input_name.find("quantized::add") != std::string::npos) {
+    TORCH_CHECK(
+        input_node->inputs().size() > 6,
+        "quantized::conv2d_relu expected scale to be 7th input");
+    scale = toIValue(input_node->inputs()[6]);
+    return scale.value().toDouble();
+  } else if (input_name == "quantized::add") {
     // %r = quantized::add(%input_a, %input_b, %w_scale, %w_zero_point)
+    TORCH_CHECK(
+        input_node->inputs().size() > 2,
+        "quantized::add expected scale to be 3rd input");
     scale = toIValue(input_node->inputs()[2]);
-    if (scale.value().isDouble()) {
-      return scale.value().toDouble();
-    }
+    return scale.value().toDouble();
   }
   // For the ops below the scale is not part of the op signature, so we traverse
   // up the graph to get the scale from its input when defined in the graph.
-  else if (input_name.find("quantized::max_pool2d") != std::string::npos) {
+  else if (input_name == "quantized::max_pool2d") {
     auto tmp = input_node->inputs()[0]->node();
     return getScaleFromInput(tmp);
-  } else if (input_name.find("aten::relu") != std::string::npos) {
+  } else if (input_name == "aten::relu") {
     auto tmp = input_node->inputs()[0]->node();
     return getScaleFromInput(tmp);
   }
@@ -101,12 +113,12 @@ Node* CreateQuantizedWeights(
     std::vector<int64_t> shapes,
     double scale,
     int64_t zero_point) {
-  Node* cast_node = graph->create(Symbol::caffe2("Int8GivenTensorFill"));
-  cast_node->is_(Symbol::attr("shape"), shapes);
-  cast_node->i_(Symbol::attr("Y_zero_point"), zero_point);
-  cast_node->f_(Symbol::attr("Y_scale"), scale);
-  cast_node->s_(Symbol::attr("values"), data);
-  return cast_node;
+  Node* const_node = graph->create(Symbol::caffe2("Int8GivenTensorFill"));
+  const_node->is_(Symbol::attr("shape"), shapes);
+  const_node->i_(Symbol::attr("Y_zero_point"), zero_point);
+  const_node->f_(Symbol::attr("Y_scale"), scale);
+  const_node->s_(Symbol::attr("values"), data);
+  return const_node;
 }
 
 Node* CreateQuantizedBias(
@@ -115,12 +127,12 @@ Node* CreateQuantizedBias(
     std::vector<int64_t> shapes,
     double scale,
     int64_t zero_point) {
-  Node* cast_node = graph->create(Symbol::caffe2("Int8GivenIntTensorFill"));
-  cast_node->is_(Symbol::attr("shape"), shapes);
-  cast_node->i_(Symbol::attr("Y_zero_point"), zero_point);
-  cast_node->f_(Symbol::attr("Y_scale"), scale);
-  cast_node->is_(Symbol::attr("values"), data);
-  return cast_node;
+  Node* const_node = graph->create(Symbol::caffe2("Int8GivenIntTensorFill"));
+  const_node->is_(Symbol::attr("shape"), shapes);
+  const_node->i_(Symbol::attr("Y_zero_point"), zero_point);
+  const_node->f_(Symbol::attr("Y_scale"), scale);
+  const_node->is_(Symbol::attr("values"), data);
+  return const_node;
 }
 
 // This is called before the onnx pass. Using pattern matching we
@@ -160,10 +172,8 @@ void unpackQuantizedWeightsHelper(
     // Permute weights?
     /*
     if (unpacked_weight.ndimension() == 2) {
-      std::cout << "2 dim weight ... permuting \n";
       unpacked_weight.permute({1, 0});
     } else if (unpacked_weight.ndimension() == 4) {
-      std::cout << "4 dim weight ... permuting \n";
       unpacked_weight.permute({0, 2, 3, 1});
     }
     */
@@ -173,17 +183,17 @@ void unpackQuantizedWeightsHelper(
 
     // Convert from int8 to uint8
     int8_t* inp_data = (int8_t*)unpacked_weight.data_ptr<c10::qint8>();
-    auto weight_zp = unpacked_weight.q_zero_point() + 128;
-    auto wt_numel = unpacked_weight.numel();
+    const int64_t weight_zp = unpacked_weight.q_zero_point() + 128;
+    const int64_t wt_numel = unpacked_weight.numel();
 
     // Create caffe2::Int8GivenTensorFill node
-    std::string w_data;
+    std::ostringstream os;
     for (int64_t i = 0; i < wt_numel; ++i) {
-      w_data += static_cast<char>(inp_data[i] + 128);
+      os << static_cast<char>(inp_data[i] + 128);
     }
 
     Node* c2_weight = CreateQuantizedWeights(
-        w_data,
+        os.str(),
         graph,
         unpacked_weight.sizes().vec(),
         unpacked_weight.q_scale(),

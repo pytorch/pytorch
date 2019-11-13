@@ -1685,13 +1685,23 @@ void ConvertIntegralValueToCaffe2(caffe2::OperatorDef* c2_op,
                                   caffe2::Argument* c2_values,
                                   const TensorProto& onnx_tensor) {
   std::string c2_op_type;
-  if (onnx_tensor.data_type() == TensorProto::BOOL) {
-    c2_op_type = "GivenTensorBoolFill";
-  } else if (onnx_tensor.data_type() == TensorProto::UINT8 || onnx_tensor.data_type() == TensorProto::INT8) {
-    c2_op_type = "Int8GivenIntTensorFill";
-  }
-  else {
+  switch (onnx_tensor.data_type()) {
+    case TensorProto::BOOL: {
+      c2_op_type = "GivenTensorBoolFill";
+      break;
+    }
+    case TensorProto::UINT8: {
+      c2_op_type = "Int8GivenTensorFill";
+      break;
+    }
+    case TensorProto::INT8: {
+      c2_op_type = "Int8GivenIntTensorFill";
+      break;
+    }
+    default: {
     c2_op_type = "GivenTensorIntFill";
+    break;
+    }
   }
   c2_op->set_type(c2_op_type);
 
