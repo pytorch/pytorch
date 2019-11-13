@@ -501,7 +501,7 @@ GraphEncoder::GraphEncoder(
   for (const std::string& domain : domains_) {
     auto* opset = model_proto_.add_opset_import();
     opset->set_domain(domain);
-    opset->set_version(0);
+    opset->set_version(1);
   }
 }
 
