@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/core/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/script/method.h>
 
 namespace torch {
