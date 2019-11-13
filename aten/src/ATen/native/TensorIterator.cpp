@@ -235,7 +235,7 @@ void TensorIterator::compute_types() {
       }
     }
 
-    if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype_ && (!op.is_output || !compute_common_dtype_only_for_inputs)) {
+    if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype_) {
       have_differing_types_ = true;
     }
 
