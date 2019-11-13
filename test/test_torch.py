@@ -5219,9 +5219,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
     def test_comparison_ops_must_take_bool_output(self):
-        with self.assertRaisesRegex(RuntimeError, 'The output tensor of a comparison or logical op must be a bool'):
-            for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne, torch.logical_xor]:
-                op(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
+        for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne, torch.logical_xor]:
+            self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
 
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
