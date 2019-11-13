@@ -120,6 +120,8 @@ TORCH_ENUM_DECLARE(Max)
 TORCH_ENUM_DECLARE(None)
 TORCH_ENUM_DECLARE(BatchMean)
 TORCH_ENUM_DECLARE(Zeros)
+TORCH_ENUM_DECLARE(Border)
+TORCH_ENUM_DECLARE(Reflection)
 
 namespace torch {
 namespace enumtype {
@@ -153,6 +155,8 @@ struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(None)
   TORCH_ENUM_PRETTY_PRINT(BatchMean)
   TORCH_ENUM_PRETTY_PRINT(Zeros)
+  TORCH_ENUM_PRETTY_PRINT(Border)
+  TORCH_ENUM_PRETTY_PRINT(Reflection)
 };
 
 template <typename V>

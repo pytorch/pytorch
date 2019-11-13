@@ -111,7 +111,7 @@ def conv2d(input, weight, bias,
     padding = _pair(padding)
     dilation = _pair(dilation)
 
-    prepacked_weight = torch.ops.quantized.conv_prepack(
+    prepacked_weight = torch.ops.quantized.conv2d_prepack(
         weight, bias, stride, padding, dilation, groups)
     return torch.ops.quantized.conv2d(input,
                                       prepacked_weight,

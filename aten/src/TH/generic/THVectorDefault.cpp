@@ -146,7 +146,7 @@ static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
     const scalar_t theta = 2.0f * M_PI * u2;
 
     data[j] = radius * cos(theta) * stddev + mean;
-    data[j + 8] = radius * sin(theta) * stddev + mean;
+    data[j + 8] = radius * std::sin(theta) * stddev + mean;
   }
 }
 
@@ -221,19 +221,6 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
       y[i] = CFUNC(x[i], c);  \
   } \
 
-#if defined(TH_REAL_IS_LONG)
-VECTOR_IMPLEMENT_FUNCTION(abs,std::abs)
-#endif /* long only part */
-
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
-VECTOR_IMPLEMENT_FUNCTION(abs,abs)
-#endif /* int only part */
-
-#if defined(TH_REAL_IS_BYTE)
-VECTOR_IMPLEMENT_FUNCTION(abs,)
-#endif /* unsigned, so identity */
-
-
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
@@ -244,26 +231,14 @@ VECTOR_IMPLEMENT_FUNCTION(abs,)
 #endif
 
 VECTOR_IMPLEMENT_FUNCTION(sigmoid_DEFAULT,TH_MATH_NAME(TH_sigmoid))
-VECTOR_IMPLEMENT_FUNCTION(exp,TH_MATH_NAME(exp))
 VECTOR_IMPLEMENT_FUNCTION(erf,TH_MATH_NAME(erf))
 VECTOR_IMPLEMENT_FUNCTION(erfc,TH_MATH_NAME(erfc))
 VECTOR_IMPLEMENT_FUNCTION(cos,TH_MATH_NAME(cos))
-VECTOR_IMPLEMENT_FUNCTION(acos,TH_MATH_NAME(acos))
 VECTOR_IMPLEMENT_FUNCTION(cosh,TH_MATH_NAME(cosh))
-VECTOR_IMPLEMENT_FUNCTION(sin,TH_MATH_NAME(sin))
-VECTOR_IMPLEMENT_FUNCTION(asin,TH_MATH_NAME(asin))
-VECTOR_IMPLEMENT_FUNCTION(sinh,TH_MATH_NAME(sinh))
 VECTOR_IMPLEMENT_FUNCTION(tan,TH_MATH_NAME(tan))
 VECTOR_IMPLEMENT_FUNCTION(atan,TH_MATH_NAME(atan))
 VECTOR_IMPLEMENT_FUNCTION(tanh,TH_MATH_NAME(tanh))
 VECTOR_IMPLEMENT_FUNCTION_VALUE(pow,TH_MATH_NAME(pow))
-VECTOR_IMPLEMENT_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt))
-VECTOR_IMPLEMENT_FUNCTION(ceil,TH_MATH_NAME(ceil))
-VECTOR_IMPLEMENT_FUNCTION(floor,TH_MATH_NAME(floor))
-VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(nearbyint))
-VECTOR_IMPLEMENT_FUNCTION(abs,TH_MATH_NAME(fabs))
-VECTOR_IMPLEMENT_FUNCTION(trunc,TH_MATH_NAME(trunc))
-VECTOR_IMPLEMENT_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
 #undef TH_MATH_NAME
