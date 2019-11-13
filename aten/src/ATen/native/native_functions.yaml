@@ -4979,6 +4979,7 @@
     CPU: legacy::cpu::_th_equal
     CUDA: legacy::cuda::_th_equal
     QuantizedCPU: quantized_equal
+  supports_named_tensor: True
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True

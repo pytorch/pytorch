@@ -513,6 +513,13 @@ std::vector<Dimname> compute_baddbmm_outnames(
   return baddbmm_names;
 }
 
+bool are_names_equal(TensorImpl* self, TensorImpl* other) {
+  if (!impl::has_names(self) && !impl::has_names(other)) {
+    return true;
+  }
+  return impl::get_names(self) == impl::get_names(other);
+}
+
 } // namespace namedinference
 } // namespace at
 #endif
