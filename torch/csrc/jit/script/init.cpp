@@ -573,15 +573,11 @@ void initJitScriptBindings(PyObject* module) {
             return bool(self.find_method(name));
           })
       .def(
-          "_method_names",
-          [](Object& self) {
+          "_method_names", [](Object& self) {
             return fmap(self.get_methods(), [](const Method& method) {
               return method.name();
             });
-          })
-      .def_property_readonly("name", [](const Module& self) {
-        return self.type()->name()->name();
-      });
+          });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
