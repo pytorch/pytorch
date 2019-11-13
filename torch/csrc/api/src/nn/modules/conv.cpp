@@ -96,7 +96,7 @@ void ConvImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 
 Conv1dImpl::Conv1dImpl(
     ConvOptions<1> options_)
-    : ConvImpl(std::move(options_.transposed(false).output_padding(0))) {}
+    : ConvImpl(options_.transposed(false).output_padding(0)) {}
 
 Tensor Conv1dImpl::forward(const Tensor& input) {
   if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
@@ -121,7 +121,7 @@ Tensor Conv1dImpl::forward(const Tensor& input) {
 
 Conv2dImpl::Conv2dImpl(
     ConvOptions<2> options_)
-    : ConvImpl(std::move(options_.transposed(false).output_padding(0))) {}
+    : ConvImpl(options_.transposed(false).output_padding(0)) {}
 
 Tensor Conv2dImpl::forward(const Tensor& input) {
   if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
@@ -148,7 +148,7 @@ Tensor Conv2dImpl::forward(const Tensor& input) {
 
 Conv3dImpl::Conv3dImpl(
     ConvOptions<3> options_)
-    : ConvImpl(std::move(options_.transposed(false).output_padding(0))) {}
+    : ConvImpl(options_.transposed(false).output_padding(0)) {}
 
 Tensor Conv3dImpl::forward(const Tensor& input) {
   if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
