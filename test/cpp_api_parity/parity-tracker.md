@@ -9,9 +9,9 @@ torch.nn.ModuleList|Yes|No
 torch.nn.ModuleDict|No|No
 torch.nn.ParameterList|No|No
 torch.nn.ParameterDict|No|No
-torch.nn.Conv1d|No|No
-torch.nn.Conv2d|No|No
-torch.nn.Conv3d|No|No
+torch.nn.Conv1d|Yes|No
+torch.nn.Conv2d|Yes|No
+torch.nn.Conv3d|Yes|No
 torch.nn.ConvTranspose1d|No|No
 torch.nn.ConvTranspose2d|No|No
 torch.nn.ConvTranspose3d|No|No
