@@ -62,35 +62,37 @@ PyObject *_ListNestedTensorVariableClass = nullptr;
 //   });
 // }
 //
-std::vector<_NestedNode> _NestedNode_unbind(const _NestedNode &nested_node) {
-  return nested_node._children;
-}
 
-// PyObject *_ListNestedTensorVariable_unbind(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   if (THPVariable_Check(var)) {
-//     return var;
-//   } else {
-//     std::vector<_NestedNode> meta_nodes;
-//     Py_ssize_t i, n;
-//     n = PyObject_Length(var);
-//     PyObject *item;
-//     if (n < 0) {
-//       throw python_error();
-//     }
-//     for (i = 0; i < n; i++) {
-//       item = PyList_GetItem(var, i);
-//       _NestedNode node = _get_structure(item);
-//       meta_nodes.push_back(node);
-//     }
-//   }
-//   return result;
-// }
+PyObject *_ListNestedTensorVariable_unbind(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  auto children = self.get_structure()._children;
+  PyObject *return_list = PyList_New(children.size());
+  if (return_list == NULL) {
+    throw python_error();
+  }
+  for (size_t i = 0; i < children.size(); i++) {
+    if (children[i]._children.size() == 0) {
+      if (PyList_SetItem(
+              return_list, i,
+              THPVariable_Wrap(children[i]._variable_node._variable)) == -1) {
+        throw python_error();
+      }
+    } else {
+      if (PyList_SetItem(return_list, i, _ListNestedTensorVariable_Wrap(
+                                             _ListNestedTensor(children[i]))) ==
+          -1) {
+        throw python_error();
+      }
+    }
+  }
+  return return_list;
+}
 
 std::string _NestedNode___str__(const _NestedNode &nested_node) {
   std::stringstream result;
   if (nested_node._children.size() == 0) {
-    PyObject* objectsRepresentation = PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
+    PyObject *objectsRepresentation =
+        PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
     result << PyBytes_AsString(PyUnicode_AsUTF8String(objectsRepresentation));
     return result.str();
   } else {
@@ -111,6 +113,31 @@ PyObject *_ListNestedTensorVariable___str__(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
   std::string str = _NestedNode___str__(self.get_structure());
   return PyUnicode_FromStringAndSize(str.c_str(), str.size());
+}
+
+PyObject *_ListNestedTensorVariable_requires_grad(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return torch::autograd::utils::wrap(self.requires_grad());
+}
+
+PyObject *_ListNestedTensorVariable_is_pinned(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return torch::autograd::utils::wrap(self.is_pinned());
+}
+
+PyObject *_ListNestedTensorVariable_is_contiguous(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return torch::autograd::utils::wrap(self.is_contiguous());
+}
+
+PyObject *_ListNestedTensorVariable_dim(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return torch::autograd::utils::wrap(self.dim());
+}
+
+PyObject *_ListNestedTensorVariable_numel(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return torch::autograd::utils::wrap(self.numel());
 }
 
 PyObject *_ListNestedTensorVariable___repr__(PyObject *self_) {
@@ -197,6 +224,19 @@ static PyObject *_ListNestedTensorVariable_detach(PyObject *self_) {
   return _ListNestedTensorVariable_Wrap(self.detach());
 }
 
+static PyObject *_ListNestedTensorVariable_requires_grad_(PyObject *self_,
+                                                          PyObject *bool_arg) {
+  if (not PyBool_Check(bool_arg)) {
+    throw std::runtime_error("Argument must be bool.");
+  }
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  if (PyObject_IsTrue(bool_arg)) {
+    return _ListNestedTensorVariable_Wrap(self.requires_grad_(true));
+  } else {
+    return _ListNestedTensorVariable_Wrap(self.requires_grad_(false));
+  }
+}
+
 static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {"element_size", (PyCFunction)_ListNestedTensorVariable_element_size,
      METH_NOARGS, "Return element size."},
@@ -206,6 +246,20 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      "Returns grad."},
     {"detach", (PyCFunction)_ListNestedTensorVariable_detach, METH_NOARGS,
      "Detaches and returns."},
+    {"requires_grad_", (PyCFunction)_ListNestedTensorVariable_requires_grad_,
+     METH_O, "requires_grad_ and returns."},
+    {"requires_grad", (PyCFunction)_ListNestedTensorVariable_requires_grad,
+     METH_NOARGS, "Returns requires_grad."},
+    {"is_pinned", (PyCFunction)_ListNestedTensorVariable_is_pinned, METH_NOARGS,
+     "Returns is_pinned."},
+    {"is_contiguous", (PyCFunction)_ListNestedTensorVariable_is_contiguous,
+     METH_NOARGS, "Returns is_contiguous."},
+    {"numel", (PyCFunction)_ListNestedTensorVariable_numel, METH_NOARGS,
+     "Returns numel."},
+    {"dim", (PyCFunction)_ListNestedTensorVariable_dim, METH_NOARGS,
+     "Returns dim."},
+    {"unbind", (PyCFunction)_ListNestedTensorVariable_unbind, METH_NOARGS,
+     "Returns unbound components."},
     {NULL} /* Sentinel */
 };
 
