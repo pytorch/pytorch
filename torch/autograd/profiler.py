@@ -8,8 +8,10 @@ from operator import attrgetter
 class EventList(list):
     """A list of Events (for pretty printing)"""
     def __init__(self, *args, **kwargs):
+        use_cuda = kwargs.pop('use_cuda', True)
         super(EventList, self).__init__(*args, **kwargs)
         self._cpu_children_populated = False
+        self._use_cuda = use_cuda
 
     def __str__(self):
         return self.table()
@@ -89,7 +91,7 @@ class EventList(list):
             A string containing the table.
         """
         return build_table(
-            self, sort_by=sort_by, row_limit=row_limit, header=header)
+            self, sort_by=sort_by, row_limit=row_limit, header=header, use_cuda=self._use_cuda)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -171,7 +173,7 @@ class EventList(list):
         for evt in self:
             stats[get_key(evt, group_by_input_shapes)].add(
                 evt, group_by_input_shapes)
-        return EventList(stats.values())
+        return EventList(stats.values(), use_cuda=self._use_cuda)
 
     def total_average(self):
         """Averages all events.
@@ -260,7 +262,7 @@ class profile(object):
         if not self.enabled:
             return
         records = torch.autograd._disable_profiler()
-        self.function_events = EventList(parse_cpu_trace(records))
+        self.function_events = EventList(parse_cpu_trace(records), use_cuda=self.use_cuda)
         return False
 
     def __repr__(self):
@@ -776,7 +778,7 @@ def parse_nvprof_trace(path):
 # Pretty printer
 
 
-def build_table(events, sort_by=None, header=None, row_limit=100):
+def build_table(events, sort_by=None, header=None, row_limit=100, use_cuda=True):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -784,7 +786,7 @@ def build_table(events, sort_by=None, header=None, row_limit=100):
     if sort_by is not None:
         events = EventList(sorted(
             events, key=lambda evt: getattr(evt, sort_by), reverse=True
-        ))
+        ), use_cuda=use_cuda)
 
     has_input_shapes = any(
         [event.input_shapes is not None for event in events])
@@ -799,11 +801,16 @@ def build_table(events, sort_by=None, header=None, row_limit=100):
         'CPU total %',
         'CPU total',
         'CPU time avg',
-        'CUDA total %',
-        'CUDA total',
-        'CUDA time avg',
-        'Number of Calls',
     ]
+    if use_cuda:
+        headers.extend([
+            'CUDA total %',
+            'CUDA total',
+            'CUDA time avg',
+        ])
+    headers.append(
+        'Number of Calls'
+    )
 
     # Have to use a list because nonlocal is Py3 only...
     SPACING_SIZE = 2
@@ -857,17 +864,23 @@ def build_table(events, sort_by=None, header=None, row_limit=100):
             format_time_share(evt.cpu_time_total, self_cpu_time_total),
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
-            # CUDA time total %
-            format_time_share(evt.cuda_time_total, cuda_time_total),
-            evt.cuda_time_total_str,
-            evt.cuda_time_str,  # Cuda time avg
-            evt.count,  # Number of calls
         ]
+        if use_cuda:
+            row_values.extend([
+                # CUDA time total %
+                format_time_share(evt.cuda_time_total, cuda_time_total),
+                evt.cuda_time_total_str,
+                evt.cuda_time_str,  # Cuda time avg
+            ])
+        row_values.append(
+            evt.count,  # Number of calls
+        )
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
         append(row_format.format(*row_values))
 
     append(header_sep)
     append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))
-    append("CUDA time total: {}".format(format_time(cuda_time_total)))
+    if use_cuda:
+        append("CUDA time total: {}".format(format_time(cuda_time_total)))
     return ''.join(result)

@@ -54,8 +54,7 @@ default_set = set([
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
     # PyTorch Android gradle
-    # disabled until fixing https://github.com/pytorch/pytorch/issues/29159
-    #'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32',
+    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32',
     # Pytorch iOS builds
     'pytorch-ios-10.2.1-x86_64_build',
     'pytorch-ios-10.2.1-arm64_build',
