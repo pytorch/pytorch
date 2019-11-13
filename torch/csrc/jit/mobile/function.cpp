@@ -51,8 +51,8 @@ void tupleUnpack(int num_inputs, Stack& stack) {
      tuple->elements().end());
 }
 
-static const std::regex unsupported_options("\\{(.*?)\\}");
 void format(int num_inputs, Stack& stack) {
+  static const std::regex unsupported_options("\\{(.*?)\\}");
   auto format = peek(stack, 0, num_inputs).toStringRef();
 
   if (std::regex_search(format, unsupported_options)) {

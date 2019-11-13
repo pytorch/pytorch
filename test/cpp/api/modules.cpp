@@ -646,7 +646,7 @@ TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
   input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8, 9}}}, torch::kFloat);
   std::tie(output, indices) = pool->forward_with_indices(input);
   ASSERT_TRUE(torch::allclose(
-    unpool(output, indices, input.sizes()),
+    unpool(output, indices, input.sizes().vec()),
     torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8, 0}}} , torch::kFloat)));
   ASSERT_TRUE(torch::allclose(
     unpool(output, indices),
@@ -1458,7 +1458,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, SmoothL1LossNoReduction) {
-  SmoothL1Loss loss(/*reduction=*/torch::Reduction::None);
+  SmoothL1Loss loss(/*reduction=*/torch::kNone);
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
