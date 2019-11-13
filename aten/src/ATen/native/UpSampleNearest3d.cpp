@@ -21,9 +21,9 @@ static void upsample_nearest3d_out_frame(
     double scales_1,
     double scales_2,
     double scales_3) {
-  float depth_scale = compute_scales_value<float>(scales_1, input_depth, output_depth);
-  float height_scale = compute_scales_value<float>(scales_2, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_3, input_width, output_width);
+  const float depth_scale = compute_scales_value<float>(scales_1, input_depth, output_depth);
+  const float height_scale = compute_scales_value<float>(scales_2, input_height, output_height);
+  const float width_scale = compute_scales_value<float>(scales_3, input_width, output_width);
 
   channels = channels * nbatch;
 
@@ -96,9 +96,9 @@ static void upsample_nearest3d_backward_out_frame(
     double scales_1,
     double scales_2,
     double scales_3) {
-  float depth_scale = compute_scales_value<float>(scales_1, input_depth, output_depth);
-  float height_scale = compute_scales_value<float>(scales_2, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_3, input_width, output_width);
+  const float depth_scale = compute_scales_value<float>(scales_1, input_depth, output_depth);
+  const float height_scale = compute_scales_value<float>(scales_2, input_height, output_height);
+  const float width_scale = compute_scales_value<float>(scales_3, input_width, output_width);
 
   channels = channels * nbatch;
 

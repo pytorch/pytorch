@@ -15,7 +15,7 @@ static void upsample_nearest1d_out_frame(
     int64_t nbatch,
     int64_t channels,
     double scales_1) {
-  float scale = compute_scales_value<float>(scales_1, input_width, output_width);
+  const float scale = compute_scales_value<float>(scales_1, input_width, output_width);
   channels = channels * nbatch;
 
   // special case: just copy
@@ -58,7 +58,7 @@ static void upsample_nearest1d_backward_out_frame(
     int64_t nbatch,
     int64_t channels,
     double scales_1) {
-  float scale = compute_scales_value<float>(scales_1, input_width, output_width);
+  const float scale = compute_scales_value<float>(scales_1, input_width, output_width);
   channels = channels * nbatch;
 
   // special case: same-size matching grids

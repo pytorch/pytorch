@@ -23,7 +23,7 @@ __global__ void upsample_nearest1d_out_frame(
     size_t dst_dim_w,
     scalar_t* output,
     double scales_1) {
-  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
 
@@ -34,7 +34,7 @@ __global__ void upsample_nearest1d_out_frame(
   int dst_x = dst_idx % dst_dim_w;
   int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 
-  size_t src_idx = c * src_dim_w + src_x;
+  int src_idx = c * src_dim_w + src_x;
   int src_stride = dim_c * src_dim_w;
   int dst_stride = dim_c * dst_dim_w;
 
@@ -57,11 +57,11 @@ __global__ void upsample_nearest1d_backward_out_frame(
     scalar_t* grad_i,
     double scales_1) {
 
-  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
 
-  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_w / dst_dim_w;
+  float scale_factor = (scales_1 > 0.) ? (float)scales_1 : (float)src_dim_w / dst_dim_w;
 
   int c = (dst_idx / (dst_dim_w)) % dim_c;
 
@@ -71,7 +71,7 @@ __global__ void upsample_nearest1d_backward_out_frame(
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
-    size_t src_idx = b * dim_c * src_dim_w + c * src_dim_w + src_x;
+    int src_idx = b * dim_c * src_dim_w + c * src_dim_w + src_x;
     for (int x = src_x; x < src_x_up; x++) {
       grad += grad_o[src_idx++];
     }
@@ -112,6 +112,9 @@ static void upsample_nearest1d_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  // safe check for int32 indexing; implicitly restrict launch config for kernel
+  TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
+
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_nearest1d_out_frame", [&] {
@@ -166,6 +169,9 @@ static void upsample_nearest1d_backward_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  // safe check for int32 indexing; implicitly restrict launch config for kernel
+  TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
+
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest1d_backward_out_frame", [&] {

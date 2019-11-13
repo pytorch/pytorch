@@ -133,7 +133,9 @@ Tensor quantized_upsample_bilinear2d_cpu(
         output_width,
         nbatch,
         channels,
-        align_corners);
+        align_corners,
+        scales_1,
+        scales_2);
     return output;
   } else {
     Tensor output = at::_empty_affine_quantized(

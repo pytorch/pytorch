@@ -26,7 +26,7 @@ __global__ void upsample_nearest2d_out_frame(
     const size_t width2,
     double scales_1,
     double scales_2) {
-  int nc_iter = threadIdx.z + blockIdx.z * blockDim.z;
+  size_t nc_iter = threadIdx.z + blockIdx.z * blockDim.z;
   int w2 = threadIdx.x + blockIdx.x * blockDim.x;
   int h2 = threadIdx.y + blockIdx.y * blockDim.y;
 
@@ -72,7 +72,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     scalar_t* grad_i,
     double scales_1,
     double scales_2) {
-  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
     return;
 
@@ -81,14 +81,14 @@ __global__ void upsample_nearest2d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_h / dst_dim_h;
+  float scale_factor = (scales_1 > 0.) ? (float)scales_1 : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y =
       nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
   int src_y_up = nearest_neighbor_compute_source_index(
       scale_factor, dst_y + 1, src_dim_h + 1);
 
-  scale_factor = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)src_dim_w / dst_dim_w;
+  scale_factor = (scales_2 > 0.) ? (float)scales_2 : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x =
       nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
@@ -99,7 +99,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     accscalar_t grad = 0;
     for (int y = src_y; y < src_y_up; y++) {
       for (int x = src_x; x < src_x_up; x++) {
-        size_t src_idx =
+        int src_idx =
             b * dim_c * src_c_stride + c * src_c_stride + y * src_dim_w + x;
         grad += grad_o[src_idx];
       }
@@ -155,6 +155,7 @@ static void upsample_nearest2d_out_cuda_template(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS);
 
   int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+  int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
 
   // upsample_2d_shape_check makes sure input/output tensor is not empty;
   int block_x = std::min<int>(
@@ -168,8 +169,17 @@ static void upsample_nearest2d_out_cuda_template(
 
   int grid_x = cuda::ATenCeilDiv(output_width, block_x);
   int grid_y = cuda::ATenCeilDiv(output_height, block_y);
-  int grid_z = cuda::ATenCeilDiv(nc, block_z * 4);
+  int grid_z = std::min<int>(
+      maxGridSize[2], cuda::ATenCeilDiv(nc, block_z * 4));
   const dim3 grid(grid_x, grid_y, grid_z);
+  // Error out on cases where grid_x & grid_y exceeds limit of launch config, as
+  // the current kernel implementation doesn't loop over the two dimensions.
+  // This is unlikely to happen.
+  // TODO: kernel implementation could stride on spatial dimension. We probably
+  //       need to overhaul the kernel.
+  TORCH_CHECK(
+      grid_x <= maxGridSize[0] && grid_y <= maxGridSize[1],
+      "input tensor has spatial dimension larger than the kernel capacity");
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -244,6 +254,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  // safe check for int32 indexing; implicitly restrict launch config for kernel
+  TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
+
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {

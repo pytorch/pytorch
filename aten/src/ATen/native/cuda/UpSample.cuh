@@ -128,12 +128,8 @@ __host__ __forceinline__ static accscalar_t compute_scales_value(
     const double scale,
     int64_t input_size,
     int64_t output_size) {
-  if (output_size > 1) {
-    return (scale > 0.) ? (accscalar_t)(1. / (accscalar_t)(scale))
-                        : (accscalar_t)input_size / output_size;
-  } else {
-    return static_cast<accscalar_t>(0);
-  }
+  return (scale > 0.) ? (accscalar_t)(1. / (accscalar_t)(scale))
+                      : (accscalar_t)input_size / output_size;
 }
 
 template <typename accscalar_t>
