@@ -2,7 +2,7 @@
 
 namespace at { namespace native {
 
-Tensor one_hot(const Tensor &self, int64_t num_classes, c10::optional<ScalarType> dtype) {
+Tensor one_hot(const Tensor &self, int64_t num_classes, ScalarType dtype) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
     auto shape = self.sizes().vec();
 
@@ -26,11 +26,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes, c10::optional<ScalarType
     }
 
     shape.push_back(num_classes);
-    auto ret_opt = self.options();
-    if (dtype) {
-        ret_opt = ret_opt.dtype(dtype);
-    }
-    Tensor ret = at::zeros(shape, ret_opt);
+    Tensor ret = at::zeros(shape, self.options().dtype(dtype));
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }

@@ -832,7 +832,7 @@
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
 
-- name: one_hot(Tensor self, int num_classes=-1, *, ScalarType? dtype=None) -> Tensor
+- name: one_hot(Tensor self, int num_classes=-1, *, ScalarType dtype=ScalarType::Long) -> Tensor
   self: non_differentiable
 
 - name: flip(Tensor self, int[] dims) -> Tensor

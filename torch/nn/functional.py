@@ -2961,12 +2961,12 @@ Example::
 
 
 one_hot = _add_docstr(torch._C._nn.one_hot, r"""
-one_hot(tensor, num_classes=-1, *, dtype=None) -> Tensor
+one_hot(tensor, num_classes=-1, *, dtype=torch.int64) -> Tensor
 
-Takes LongTensor with index values of shape ``(*)`` and returns a tensor
-of shape ``(*, num_classes)`` that have zeros everywhere except where the
+Takes LongTensor with index values of arbitrary shape ``(*)`` and returns a
+tensor of shape ``(*, num_classes)`` that have ``0`` everywhere except where the
 index of last dimension matches the corresponding value of the input tensor,
-in which case it will be 1.
+in which case it will be ``1``. The returned tensor will be of :attr:`dtype`.
 
 See also `One-hot on Wikipedia`_ .
 
@@ -2979,12 +2979,11 @@ Arguments:
         of classes will be inferred as one greater than the largest class
         value in the input tensor.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-      If specified, the output tensor will have :attr:`dtype`. Default: None.
+      If specified, the output tensor will have :attr:`dtype`. Default: ``torch.int64``.
 
 Returns:
-    LongTensor that has one more dimension with ``1`` values at the
-    index of last dimension indicated by the input, and ``0`` everywhere
-    else.
+    Tensor of :attr:`dtype` that has one more dimension with ``1`` values at the
+    index of last dimension indicated by the input, and ``0`` everywhere else.
 
 Examples:
     >>> F.one_hot(torch.arange(0, 5) % 3)
