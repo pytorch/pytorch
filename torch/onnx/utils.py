@@ -48,7 +48,7 @@ def set_training(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True,
+           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None):
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -244,7 +244,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
-                    _retain_param_name=False, do_constant_folding=False,
+                    _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
@@ -348,7 +348,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
-                             do_constant_folding=False, keep_initializers_as_inputs=None, fixed_batch_size=False):
+                             do_constant_folding=True, keep_initializers_as_inputs=None, fixed_batch_size=False):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -376,7 +376,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-            opset_version=None, _retain_param_name=False, do_constant_folding=False,
+            opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None, fixed_batch_size=False):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '

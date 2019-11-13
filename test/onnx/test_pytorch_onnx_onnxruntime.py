@@ -106,7 +106,7 @@ class TestONNXRuntime(unittest.TestCase):
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=False,
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
         return run_model_test(self, model, batch_size=batch_size,

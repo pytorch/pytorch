@@ -161,7 +161,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None, do_constant_folding=False):
+                        example_outputs=None, do_constant_folding=True):
         """
         This is what the user facing version will look like
         """
