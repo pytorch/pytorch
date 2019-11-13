@@ -3159,6 +3159,30 @@ graph(%Ra, %Rb):
         model = Bar()
         self.checkTrace(model, x)
 
+    def test_trace_named_tuple(self):
+        MyTuple = namedtuple('MyTuple', ['a', 'b'])
+
+        class NamedTupleInput(nn.Module):
+            def __init__(self):
+                super(NamedTupleInput, self).__init__()
+
+            def forward(self, my):
+                return my.a + my.b
+
+        def test_traced_named_tuple_input_output(my):
+            return my
+
+        def test_trace_named_tuple_construction(a, b):
+            return MyTuple(a, b)
+
+        a = torch.randn(2, 3)
+        b = torch.randn(2, 3)
+        x = MyTuple(a, b)
+        model = NamedTupleInput()
+        self.checkTrace(model, (x,))
+        self.checkTrace(test_traced_named_tuple_input_output, (x,))
+        self.checkTrace(test_trace_named_tuple_construction, (a, b))
+
     def test_trace_variable_instantiation(self):
         def random_foo(x):
             return Variable(Variable(x) + 1.0)

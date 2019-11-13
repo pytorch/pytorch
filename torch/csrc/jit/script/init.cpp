@@ -89,7 +89,6 @@ struct PythonResolver : public Resolver {
     }
     return toSugaredValue(obj, m, loc);
   }
-
   static bool isNamedTupleClass(py::object obj) {
     auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
     return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
@@ -135,9 +134,8 @@ struct PythonResolver : public Resolver {
           throw ErrorReport(loc) << error_msg;
         }
       }
-
       py::object props = py::module::import("torch.jit")
-                             .attr("_get_named_tuple_properties")(obj);
+                              .attr("_get_named_tuple_properties")(obj);
       std::string unqualName;
       std::vector<std::string> fields;
       std::vector<TypePtr> annotations;

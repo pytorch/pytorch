@@ -732,7 +732,7 @@ def trace(func,
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
     that will be optimized using just-in-time compilation. Tracing is ideal for
-    code that operates only on ``Tensor``\\s and lists, dictionaries, and tuples of ``Tensor``\\s.
+    code that operates only on ``Tensor``\\s and lists, dictionaries, and tuples (or named tuples) of ``Tensor``\\s.
 
     Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
     function into a TorchScript :class:`ScriptFunction` or :class:`ScriptModule`. You must provide example inputs,
