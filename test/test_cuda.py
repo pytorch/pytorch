@@ -1907,18 +1907,18 @@ t2.start()
 
         found_inf = torch.tensor([0.0], dtype=dtype, device=device)
         g = torch.tensor([4.0], dtype=dtype, device=device)
-        torch._amp_unscale_inf_check_(g, inv_scale, found_inf)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
         self.assertTrue(found_inf.item() == 0.0)
         self.assertTrue(torch.allclose(g, torch.ones(10, dtype=torch.float32, device="cuda"), atol=1e-7))
 
         found_inf.zero_()
         g = torch.tensor([float('inf')], dtype=dtype, device=device)
-        torch._amp_unscale_inf_check_(g, inv_scale, found_inf)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
         self.assertTrue(found_inf.item() == 1.0)
 
         found_inf.zero_()
         g = torch.tensor([float('nan')], dtype=dtype, device=device)
-        torch._amp_unscale_inf_check_(g, inv_scale, found_inf)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
         self.assertTrue(found_inf.item() == 1.0)
 
         growth_factor = 4.0

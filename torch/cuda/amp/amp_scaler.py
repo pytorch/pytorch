@@ -138,9 +138,9 @@ class AmpScaler(object):
                         raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for "
                                          "infs/nans without unscaling, use optimizer.check_infs() instead.")
                     else:
-                        torch._amp_unscale_inf_check_(param.grad,
-                                                      per_device_inv_scale.get(param.grad.device),
-                                                      per_device_found_inf.get(param.grad.device))
+                        torch._amp_non_finite_check_and_unscale_(param.grad,
+                                                                 per_device_found_inf.get(param.grad.device),
+                                                                 per_device_inv_scale.get(param.grad.device))
 
         return per_device_found_inf._per_device_tensors
 

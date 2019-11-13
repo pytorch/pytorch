@@ -5100,10 +5100,10 @@
     CUDA: legacy::cuda::_th_std
   supports_named_tensor: True
 
-- func: _amp_unscale_inf_check_(Tensor(a!) self, Tensor inv_scale, Tensor found_inf) -> Tensor(a!)
+- func: _amp_non_finite_check_and_unscale_(Tensor(a!) self, Tensor(b!) found_inf, Tensor inv_scale) -> (Tensor(a!), Tensor(b!))
   variants: function
   dispatch:
-    CUDA: _amp_unscale_inf_check_cuda
+    CUDA: _amp_non_finite_check_and_unscale_cuda
 
 - func: _amp_update_scale(Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor) -> Tensor
   variants: function

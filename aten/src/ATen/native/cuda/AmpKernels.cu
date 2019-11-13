@@ -11,18 +11,20 @@
 namespace at {
 namespace native {
 
-// Multiplies scaled_grad in-place by inv_scale.  If an element of scaled_grad was inf or NaN sets found_inf to 1.
+// Multiplies scaled_grad in-place by inv_scale.  If an element of scaled_grad was inf or NaN sets found_inf to 1.0.
 //
 // Args:
 // scaled_grad:  A (scaled) gradient tensor.  May contain infs or NaNs.
-// inv_scale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
 // found_inf:  A single-element float tensor to which 1.0 will be written if any gradients contain infs/nans.
 //             Pre-zeroing found_inf, if appropriate, is the responsibility of the caller.
+// inv_scale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
+//
 // Returns:
-// A reference to the grad, which was unscaled in place.
-Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
-                                     const Tensor& inv_scale,
-                                     const Tensor& found_inf)
+// A tuple with references to scaled_grad, which is now unscaled in place, and found_inf,
+// which is now guaranteed to contain 1.0 if an inf or NaN was found in scaled_grad.
+std::tuple<Tensor&, Tensor&> _amp_non_finite_check_and_unscale_cuda(Tensor& scaled_grad,
+                                                                    Tensor& found_inf,
+                                                                    const Tensor& inv_scale)
 {
   TORCH_CHECK(scaled_grad.is_cuda(), "scaled_grad must be a CUDA tensor.");
   TORCH_CHECK(inv_scale.is_cuda(), "inv_scale must be a CUDA tensor.");
@@ -38,13 +40,14 @@ Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     iter.dtype(),
-    "_amp_unscale_inf_check_kernel",
+    "_amp_non_finite_check_and_unscale_cuda",
     [&] {
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t val) -> scalar_t {
           auto fval = static_cast<float>(val);
+          // std::isfinite caused an "unspecified launch failure" at runtime with cuda 9 on Windows.
           if (!isfinite(fval)) {
             *found_inf_ptr = 1.f;
           }
@@ -53,11 +56,12 @@ Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
         });
     });
 
-  return scaled_grad;
+  return std::tuple<Tensor&, Tensor&>{scaled_grad, found_inf} ;
 }
 
 
 // amp_update_scale_kernel is launched with a single thread to compute the new scale.
+// The scale factor is maintained and updated on the GPU to avoid synchronization.
 __global__ void amp_update_scale_kernel(float* current_scale,
                                         float* found_inf,
                                         float* new_scale,
@@ -68,12 +72,12 @@ __global__ void amp_update_scale_kernel(float* current_scale,
 }
 
 
-// amp_update_scale_kernel asynchronously updates the scale factor.
+// _amp_update_scale_cuda asynchronously updates the scale factor.
 //
 // Args:
 // current_scale:  A one-element torch.cuda.FloatTensor containing the current scale value.
 // found_inf:  A one-element torch.cuda.FloatTensor. If > 0, indicates that infs/nans were found by the relevant
-//             prior _amp_unscale_inf_check_cuda call, and 0 if no infs/nans were found.
+//             prior _amp_non_finite_check_and_unscale_cuda call, and 0 if no infs/nans were found.
 // scale_growth_factor:  Multiplier if no infs/NaNs were found (typically slightly > 1).
 // scale_backoff_factor:  Multiplier if infs/NaNs were found (typically 0.5).
 //
