@@ -11,7 +11,10 @@
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
+  auto _torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!tensor_module)
+    throw python_error();
+  if (!_torch_module)
     throw python_error();
 
   // NOTE: "leaks" THPVariableClass
@@ -20,7 +23,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     throw python_error();
 
   // NOTE: "leaks" _ListNestedTensorVariableClass
-  torch::nested_tensor::_ListNestedTensorVariableClass = PyObject_GetAttrString(tensor_module, "_ListNestedTensor");
+  torch::nested_tensor::_ListNestedTensorVariableClass = PyObject_GetAttrString(_torch_module, "_ListNestedTensor");
   if (!torch::nested_tensor::_ListNestedTensorVariableClass)
     throw python_error();
 

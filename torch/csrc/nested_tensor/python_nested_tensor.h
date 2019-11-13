@@ -11,8 +11,8 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <typeinfo>
 #include <torch/include/torch/csrc/Exceptions.h>
+#include <typeinfo>
 
 namespace torch {
 namespace nested_tensor {
@@ -65,7 +65,8 @@ static int64_t _numel(const _NestedNode &meta_node) {
 
 static _NestedNode _get_structure(PyObject *tensors) {
   if (THPVariable_Check(tensors)) {
-    auto variable = THPVariable_Unpack(tensors);
+    auto variable_ = THPVariable_Unpack(tensors);
+    auto variable = make_variable_view(variable_, variable_);
     return _NestedNode(_VariableNode(variable));
   } else {
     std::vector<_NestedNode> meta_nodes;
@@ -125,7 +126,8 @@ template <class F> static _NestedNode map(_NestedNode nested_node, F fn) {
 template <class F>
 static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
   if (nested_node1._children.size() == 0) {
-    fn(nested_node1._variable_node._variable, nested_node2._variable_node._variable);
+    fn(nested_node1._variable_node._variable,
+       nested_node2._variable_node._variable);
   } else {
     for (size_t i = 0; i < nested_node1._children.size(); i++) {
       apply2(nested_node1._children[i], nested_node2._children[i], fn);
@@ -139,14 +141,15 @@ TORCH_API extern PyTypeObject _ListNestedTensorVariableType;
 
 struct TORCH_API _ListNestedTensor {
   _ListNestedTensor() = delete;
-  // _ListNestedTensor(const _ListNestedTensor&) = delete;
+  // _ListNestedTensor(_ListNestedTensor& other) : _structure(other._structure), _first_variable(_get_first_variable(_structure)) {}
   // _ListNestedTensor(_ListNestedTensor&&) = delete;
 
   // _ListNestedTensor(std::vector<py::object> tensors)
   //     : _ListNestedTensor(_get_structure(tensors)) {}
   _ListNestedTensor(_NestedNode structure)
       : _structure(structure), _first_variable(_get_first_variable(_structure)) {}
-  int64_t element_size() { return _first_variable.element_size(); }
+  int64_t element_size() {
+    return _first_variable.element_size(); }
   // py::tuple size(int64_t dim) { return py::make_tuple(py::none(),
   // py::none()); }
   _ListNestedTensor pin_memory() {
@@ -163,8 +166,7 @@ struct TORCH_API _ListNestedTensor {
   _ListNestedTensor detach() {
     return _ListNestedTensor(
         map(_structure,
-            [](at::Tensor tensor) -> at::Tensor { return tensor.detach();
-            }));
+            [](at::Tensor tensor) -> at::Tensor { return tensor.detach(); }));
   }
   // _ListNestedTensor requires_grad_(bool requires_grad) {
   //   return _ListNestedTensor(
@@ -211,7 +213,8 @@ struct TORCH_API _ListNestedTensor {
   // int64_t numel() { return _numel(_structure); }
   // bool is_pinned() { return _first_tensor.is_pinned(); }
   // bool is_contiguous() { return true; }
-  // _NestedNode get_structure() { return _structure; }
+  _NestedNode get_structure() {
+    return _structure; }
   // std::string __str__();
   // std::string __repr__();
 

@@ -31,7 +31,7 @@ using namespace at;
 using namespace torch::autograd;
 namespace py = pybind11;
 
-// PyObject *_ListNestedTensorVariableClass = nullptr;
+PyObject *_ListNestedTensorVariableClass = nullptr;
 
 // template <class F> std::vector<py::object> map_fn(_ListNestedTensor nt, F fn)
 // {
@@ -77,82 +77,37 @@ namespace py = pybind11;
 //   return result;
 // }
 
-// std::string _ListNestedTensor::__str__() {
-//   std::stringstream result;
-//   if (nested_dim() == 1) {
-//     for (_NestedNode node : _structure._children) {
-//       result << "  ";
-//       result << node._tensor_node._tensor;
-//       result << ",";
-//       result << std::endl;
-//     }
-//   } else {
-//     for (_NestedNode node : _structure._children) {
-//       _ListNestedTensor nt(node);
-//       result << "  ";
-//       result << nt.__str__();
-//       result << ",";
-//       result << std::endl;
-//     }
-//   }
-//   result << "])";
-//   return result.str();
-// }
+PyObject *_NestedNode___str__(const _NestedNode &nested_node) {
+  std::stringstream result;
+  result << "[)";
+  if (nested_node._children.size()) {
+    // TODO: Why can't we use Variable directly?
+    result << nested_node._variable_node._variable;
+  } else {
+    for (_NestedNode node : nested_node._children) {
+      result << "  ";
+      result << _NestedNode___str__(node);
+      result << ",";
+      result << std::endl;
+    }
+  }
+  result << "])";
+  std::string str = result.str().c_str();
+  return PyUnicode_FromStringAndSize(str.c_str(), str.size());
+}
 
-// std::string _ListNestedTensor::__repr__() {
-//   std::stringstream result;
-//   if (nested_dim() == 1) {
-//     for (_NestedNode node : _structure._children) {
-//       result << "  ";
-//       // TODO: There appears to be no difference between
-//       // __str__ and __repr__ for torch.Tensor.
-//       result << node._tensor_node._tensor;
-//       result << ",";
-//       result << std::endl;
-//     }
-//   } else {
-//     for (_NestedNode node : _structure._children) {
-//       _ListNestedTensor nt(node);
-//       result << "  ";
-//       result << nt.__repr__();
-//       result << ",";
-//       result << std::endl;
-//     }
-//   }
-//   result << "])";
-//   return result.str();
-// }
+PyObject *_ListNestedTensorVariable___str__(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return _NestedNode___str__(self.get_structure());
+}
 
-// PyTypeObject *_init_ListNestedTensorVariableTypeObject(PyTypeObject &type) {
-//   // TODO: Necessary for NestedTensor as well?
-//   // NOTE: we don't use the typical static declaration of PyTypeObject
-//   because
-//   // we need to initialize as many types as there are VariableType instances.
-//   // The typical PyVarObject_HEAD_INIT(nullptr, 0) is described in the Python
-//   // documentation: it initializes the refcnt to 1 and the other object
-//   header
-//   // fields to zero.
-//   memset(&type, 0, sizeof(PyTypeObject));
-//   ((PyObject *)&type)->ob_refcnt = 1;
-//   ((PyObject *)&type)->ob_type = &_ListNestedTensorVariableType;
-//   type.tp_basicsize = sizeof(_ListNestedTensorVariableType);
-//   type.tp_flags = Py_TPFLAGS_DEFAULT;
-//   type.tp_name = "torch._ListNestedTensorVariable";
-//   type.tp_new = PyType_GenericNew;
-//
-//   // type.tp_doc = "Custom objects";
-//   // type.tp_itemsize = 0;
-//
-//   // type.tp_basicsize = sizeof(_ListNestedTensorVariableType);
-//   // type.tp_flags = Py_TPFLAGS_DEFAULT;
-//   // type.tp_name = "_ListNestedTensorVariable";
-//   // type.tp_new = PyType_GenericNew;
-//   if (PyType_Ready(&type) < 0) {
-//     throw python_error();
-//   }
-//   return &type;
-// }
-//
+PyObject *_ListNestedTensorVariable___repr__(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  // TODO: Assuming that there is no difference in __str__ and __repr__ for
+  // torch.Tensor.
+  return _NestedNode___str__(self.get_structure());
+}
+
 static void _ListNestedTensorVariable_dealloc(_ListNestedTensorVariable *self) {
   // PyObject_GC_UnTrack(self);
   // THPVariable_clear(self);
@@ -162,8 +117,9 @@ static void _ListNestedTensorVariable_dealloc(_ListNestedTensorVariable *self) {
 
 // Creates a new Python object for a Variable. The Variable must not already
 // have a PyObject* associated with it.
-static PyObject* _ListNestedTensorVariable_NewWithVar(PyTypeObject* type, _ListNestedTensor nested_tensor) 
-{
+static PyObject *
+_ListNestedTensorVariable_NewWithVar(PyTypeObject *type,
+                                     _ListNestedTensor nested_tensor) {
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (_ListNestedTensorVariable *)obj;
@@ -182,22 +138,7 @@ static PyObject *_ListNestedTensorVariable_pynew(PyTypeObject *type,
   if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &listObj)) {
     throw std::runtime_error("invalid arguments");
   }
-  _NestedNode structure = _get_structure(listObj);
-  auto nested_tensor = _ListNestedTensor(structure);
-
-  return _ListNestedTensorVariable_NewWithVar(type, nested_tensor);
-
-  // PyObject *obj = type->tp_alloc(type, 0);
-  // if (obj) {
-  //   auto v = (_ListNestedTensorVariable *)obj;
-  //   new (&v->cdata) _ListNestedTensor(std::move(nested_tensor));
-  //   // v->cdata.set_pyobj(obj);
-  //   return obj;
-  // } else {
-  //   throw python_error();
-  // }
-  // return THPVariable_NewWithVar(type, std::move(tensor));
-  // throw std::runtime_error("new(): invalid arguments");
+  return _ListNestedTensorVariable_NewWithVar(type, std::move(_ListNestedTensor(_get_structure(listObj))));
 }
 
 // inline Tensor dispatch_sigmoid(const Tensor & self, Tensor out) {
@@ -215,9 +156,9 @@ static PyObject *_ListNestedTensorVariable_pynew(PyTypeObject *type,
 //   END_HANDLE_TH_ERRORS
 // }
 //
-PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor var)
-{
-  return _ListNestedTensorVariable_NewWithVar((PyTypeObject *)_ListNestedTensorVariableClass, std::move(var));
+PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
+  return _ListNestedTensorVariable_NewWithVar(
+      (PyTypeObject *)_ListNestedTensorVariableClass, std::move(var));
 }
 
 static PyObject *_ListNestedTensorVariable_element_size(PyObject *self_) {
@@ -243,6 +184,12 @@ static PyObject *_ListNestedTensorVariable_detach(PyObject *self_) {
 static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {"element_size", (PyCFunction)_ListNestedTensorVariable_element_size,
      METH_NOARGS, "Return element size."},
+    {"pin_memory", (PyCFunction)_ListNestedTensorVariable_pin_memory,
+     METH_NOARGS, "Pins memory."},
+    {"grad", (PyCFunction)_ListNestedTensorVariable_grad, METH_NOARGS,
+     "Returns grad."},
+    {"detach", (PyCFunction)_ListNestedTensorVariable_detach, METH_NOARGS,
+     "Detaches and returns."},
     {NULL} /* Sentinel */
 };
 
@@ -258,13 +205,13 @@ PyTypeObject _ListNestedTensorVariableType = {
     nullptr,                                       /* tp_getattr */
     nullptr,                                       /* tp_setattr */
     nullptr,                                       /* tp_reserved */
-    nullptr,                                       /* tp_repr */
+    (reprfunc)_ListNestedTensorVariable___repr__,  /* tp_repr */
     nullptr,                                       /* tp_as_number */
     nullptr,                                       /* tp_as_sequence */
     nullptr,                                       /* tp_as_mapping */
     nullptr,                                       /* tp_hash  */
     nullptr,                                       /* tp_call */
-    nullptr,                                       /* tp_str */
+    (reprfunc)_ListNestedTensorVariable___str__,   /* tp_str */
     nullptr,                                       /* tp_getattro */
     nullptr,                                       /* tp_setattro */
     nullptr,                                       /* tp_as_buffer */
