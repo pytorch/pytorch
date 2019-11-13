@@ -57,6 +57,18 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
+Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
+Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
+Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
+
+Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
+Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
+
+Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, abs_stub); }
+Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
+Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
+
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
@@ -68,6 +80,10 @@ Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
 Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
+
+Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
+Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
+Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
 
 Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
@@ -105,9 +121,21 @@ Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
+Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
+Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
+Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
+
+Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
+Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
+Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
+
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
+
+Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sigmoid_stub);  }
+Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
+Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
 Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
@@ -275,13 +303,10 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(angle)
 IMPLEMENT_UNARY_OP_VEC(real)
 IMPLEMENT_UNARY_OP_VEC(imag)
 IMPLEMENT_UNARY_OP_VEC(conj)
-IMPLEMENT_UNARY_OP_VEC(acos)
-IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
@@ -289,11 +314,7 @@ IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(frac)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
-IMPLEMENT_UNARY_OP_VEC(sigmoid)
-IMPLEMENT_UNARY_OP_VEC(sin)
-IMPLEMENT_UNARY_OP_VEC(sinh)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)

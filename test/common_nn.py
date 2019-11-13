@@ -1,10 +1,13 @@
+import math
 import sys
 import tempfile
 import unittest
+
 from copy import deepcopy
-from itertools import product
 from functools import reduce
+from itertools import product
 from operator import mul
+from math import pi
 
 
 import torch
@@ -280,10 +283,11 @@ def wrap_functional(fn, **kwargs):
 def poissonnllloss_no_reduce_test():
     t = torch.randn(10, 10)
     return dict(
-        fullname='PoissonNLLLLoss_no_reduce',
+        fullname='PoissonNLLLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.poisson_nll_loss(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda i, *_: i.exp() - t.mul(i),
         pickle=False)
 
 
@@ -1126,6 +1130,14 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([5], 1e-3),
+        input_size=(0, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_empty_elementwise_affine',
     ),
     dict(
         module_name='GroupNorm',
@@ -2148,6 +2160,17 @@ new_module_tests = [
         desc='dim',
     ),
     dict(
+        module_name='GELU',
+        input_size=(),
+        desc='scalar',
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
+    ),
+    dict(
+        module_name='GELU',
+        input_size=(3, 2, 5),
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
+    ),
+    dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='softmax_lastdim',
@@ -3137,17 +3160,37 @@ new_criterion_tests = [
         desc='dim_is_3',
     ),
     dict(
-        module_name='PoissonNLLLoss',
+        module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='no_full_loss',  # without sterling approx
+        reference_fn=lambda i, t, _: (i.exp() - t.mul(i)).mean(),
+        desc='no_full_loss',
     ),
     dict(
         module_name='PoissonNLLLoss',
-        constructor_args=(False,),
+        constructor_args=(False, False),  # log_input=False, full=False
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='full_loss',  # with sterling approx
+        reference_fn=lambda i, t, _: (i - t.mul((i + 1e-8).log())).mean(),
+        desc='no_full_loss_no_log_input',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(True, True),  # log_input=True, full=True
+        input_size=(2, 3, 4, 5),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
+        reference_fn=lambda i, t, _:
+            (i.exp() - t.mul(i) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
+        desc='full_loss',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(False, True),  # log_input=False, full=True
+        input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
+        reference_fn=lambda i, t, _:
+            (i - t.mul((i + 1e-8).log()) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
+        desc='full_loss_no_log_input',
     ),
     dict(
         module_name='L1Loss',
@@ -3560,7 +3603,9 @@ class ModuleTest(TestBase):
         nc_grad_output = self.noncontiguize(grad_output)
         for contig_i, contig_g in product((True, False), repeat=2):
             i = input if contig_i else nc_input
-            go = grad_output if contig_g else nc_grad_output
+            # Some ops, e.g., nn.Flatten, return gradient that shares
+            # storage with the grad_output. Hence we copy here.
+            go = deepcopy(grad_output if contig_g else nc_grad_output)
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():

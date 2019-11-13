@@ -161,6 +161,7 @@ class QuantizationTestCase(TestCase):
             self.assertEqual(scripted_output, ref_output)
 
 # Below are a series of neural net models to use in testing quantization
+# Single layer models
 class SingleLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(SingleLayerLinearModel, self).__init__()
@@ -198,6 +199,56 @@ class LSTMDynamicModel(torch.nn.Module):
 
     def forward(self, x):
         x = self.lstm(x)
+        return x
+
+class ConvModel(torch.nn.Module):
+    def __init__(self):
+        super(ConvModel, self).__init__()
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
+class AnnotatedConvModel(torch.nn.Module):
+    def __init__(self):
+        super(AnnotatedConvModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv(x)
+        x = self.dequant(x)
+        return x
+
+class ConvBnModel(torch.nn.Module):
+    def __init__(self):
+        super(ConvBnModel, self).__init__()
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return x
+
+class AnnotatedConvBnModel(torch.nn.Module):
+    def __init__(self):
+        super(AnnotatedConvBnModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.dequant(x)
         return x
 
 class TwoLayerLinearModel(torch.nn.Module):

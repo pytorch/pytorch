@@ -125,7 +125,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/pybind11/include
+    ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -364,7 +364,7 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE
     )
 
-target_compile_definitions(torch_python PUBLIC _THP_CORE)
+target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
