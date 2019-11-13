@@ -3,7 +3,7 @@
 namespace torch {
 namespace nn {
 
-DropoutOptions::DropoutOptions(double p, bool inplace) : p_(p), inplace_(inplace) {}
+DropoutOptions::DropoutOptions(double p) : p_(p) {}
 
 } // namespace nn
 } // namespace torch

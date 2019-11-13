@@ -10,12 +10,12 @@ namespace nn {
 
 /// Options for `Dropout` and `FeatureDropout`.
 struct TORCH_API DropoutOptions {
-  /* implicit */ DropoutOptions(double p = 0.5, bool inplace = false);
+  /* implicit */ DropoutOptions(double p = 0.5);
   /// The probability with which a particular component of the input is set to
   /// zero.
   /// Changes to this parameter at runtime are effective.
   TORCH_ARG(double, p);
-  TORCH_ARG(bool, inplace);
+  TORCH_ARG(bool, inplace) = false;
 };
 
 } // namespace nn

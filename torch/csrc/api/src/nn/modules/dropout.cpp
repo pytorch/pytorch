@@ -19,8 +19,10 @@ namespace detail {
 template <typename Derived>
 DropoutImplBase<Derived>::DropoutImplBase(const DropoutOptions& options_)
     : options(options_) {
-  TORCH_CHECK(options.p() >= 0, "Dropout rate must not be less than zero");
-  TORCH_CHECK(options.p() <= 1, "Dropout rate must not be greater than one");
+  TORCH_CHECK(
+    options.p() >= 0 && options.p() <= 1,
+    "dropout probability has to be between 0 and 1, but got ", options.p()
+  );
 }
 
 template <typename Derived>
@@ -33,7 +35,7 @@ template class DropoutImplBase<AlphaDropoutImpl>;
 
 DropoutImpl::DropoutImpl(const DropoutOptions& options_) : DropoutImplBase(options_) {}
 
-Tensor DropoutImpl::forward(const Tensor& input) {
+Tensor DropoutImpl::forward(Tensor input) {
   return torch::dropout(input, options.p(), this->is_training());
 }
 
@@ -45,7 +47,7 @@ void DropoutImpl::pretty_print(std::ostream& stream) const {
 FeatureDropoutImpl::FeatureDropoutImpl(const DropoutOptions& options_)
     : DropoutImplBase(options_) {}
 
-Tensor FeatureDropoutImpl::forward(const Tensor& input) {
+Tensor FeatureDropoutImpl::forward(Tensor input) {
   return torch::feature_dropout(input, options.p(), this->is_training());
 }
 
@@ -57,7 +59,7 @@ void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {
 AlphaDropoutImpl::AlphaDropoutImpl(const AlphaDropoutOptions& options_)
     : DropoutImplBase(options_) {}
 
-Tensor AlphaDropoutImpl::forward(const Tensor& input) {
+Tensor AlphaDropoutImpl::forward(Tensor input) {
   return F::alpha_dropout(input, options.p(), this->is_training());
 }
 

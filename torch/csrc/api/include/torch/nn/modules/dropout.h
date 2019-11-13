@@ -39,7 +39,7 @@ class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor input);
 
   /// Pretty prints the `Dropout` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -61,7 +61,7 @@ class TORCH_API FeatureDropoutImpl
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor input);
 
   /// Pretty prints the `FeatureDropout` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -74,7 +74,7 @@ class TORCH_API AlphaDropoutImpl
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor input);
 
   /// Pretty prints the `FeatureDropout` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
