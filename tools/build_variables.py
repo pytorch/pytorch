@@ -115,6 +115,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
+    "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/guard_elimination.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
@@ -234,11 +235,11 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/container/named_any.cpp",
         "torch/csrc/api/src/nn/options/activation.cpp",
         "torch/csrc/api/src/nn/options/batchnorm.cpp",
-        "torch/csrc/api/src/nn/options/normalization.cpp",
         "torch/csrc/api/src/nn/options/conv.cpp",
         "torch/csrc/api/src/nn/options/dropout.cpp",
         "torch/csrc/api/src/nn/options/linear.cpp",
         "torch/csrc/api/src/nn/options/normalization.cpp",
+        "torch/csrc/api/src/nn/options/embedding.cpp",
         "torch/csrc/api/src/nn/options/padding.cpp",
         "torch/csrc/api/src/nn/options/pooling.cpp",
         "torch/csrc/api/src/nn/options/rnn.cpp",
@@ -357,7 +358,6 @@ def add_torch_libs():
     ]
 
     compiler_flags_cpu = [
-        "-D_THP_CORE",
         "-DUSE_C10D",
         "-DUSE_DISTRIBUTED",
         "-DUSE_NUMPY",
