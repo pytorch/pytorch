@@ -2620,6 +2620,26 @@ class _TestTorchMixin(object):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
 
+    # add coverage for issue with atomic add that appeared only for 
+    # specific dtypes on cuda:
+    # https://github.com/pytorch/pytorch/issues/29153
+    def test_dtypes_for_index_add(self):
+        def is_signed(dtype):
+            return torch.is_signed(torch.tensor([], dtype=dtype))
+        for device in torch.testing.get_all_device_types():
+            for dtype in torch.testing.get_all_math_dtypes(device):
+                size = [5, 5]
+                if dtype.is_floating_point:
+                    tensor = torch.rand(size, dtype=dtype, device=device)
+                elif is_signed(dtype):
+                    tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
+                else:
+                    tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
+                # index_add calls atomicAdd on cuda.
+                empty = torch.zeros(size, dtype=dtype, device=device)
+                added = empty.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
+                self.assertEqual(added, tensor)
+
     def test_t(self):
         # Test 0D tensors
         x = torch.randn(())
@@ -6237,6 +6257,36 @@ class TestTorchDeviceType(TestCase):
             # in-place
             with self.assertRaises(RuntimeError):
                 a.bitwise_not_()
+
+    def test_bitwise_xor(self, device):
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
+            expected_res = torch.tensor([3, -1, 0], dtype=dtype, device=device)
+            b_scalar = 2
+            expected_res_scalar = torch.tensor([3, -4, 1], dtype=dtype, device=device)
+
+            # standard version
+            self.assertEqual(torch.bitwise_xor(a, b), expected_res)
+            self.assertEqual(torch.bitwise_xor(a, b_scalar), expected_res_scalar)
+
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_xor(a, b, out=c)
+            self.assertEqual(c, expected_res)
+            torch.bitwise_xor(a, b_scalar, out=c)
+            self.assertEqual(c, expected_res_scalar)
+
+            # in-place
+            a1 = a.clone()
+            a1.bitwise_xor_(b)
+            self.assertEqual(a1, expected_res)
+            a.bitwise_xor_(b_scalar)
+            self.assertEqual(a, expected_res_scalar)
+
+        self.assertEqual(torch.tensor([True, False, False], device=device),
+                         torch.bitwise_xor(torch.tensor([True, True, False], device=device),
+                                           torch.tensor([False, True, False], device=device)))
 
     def test_logical_not(self, device):
         for dtype in torch.testing.get_all_dtypes():
@@ -13414,27 +13464,6 @@ class TestTorchDeviceType(TestCase):
         concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8, device=device))
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
-
-    def test_index_add(self, device):
-        # test coverage for issue with atomic add:
-        # https://github.com/pytorch/pytorch/issues/29475
-        def is_signed(dtype):
-            return torch.is_signed(torch.tensor(0, dtype=dtype))
-        for dtype in torch.testing.get_all_math_dtypes(device):
-            # print(dtype)
-            size = [5, 5]
-            if dtype.is_floating_point:
-                tensor = torch.rand(size, dtype=dtype, device=device)
-            elif is_signed(dtype):
-                tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
-            else:
-                tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
-
-            # index_add calls atomicAdd on cuda.
-            empty = torch.zeros(size, dtype=dtype, device=device)
-            added = empty.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
-            self.assertEqual(added, tensor)
-
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
