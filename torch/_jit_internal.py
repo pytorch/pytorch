@@ -217,6 +217,8 @@ class FunctionModifiers(object):
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
     DEFAULT = "default (compile if called from a exported function / forward)"
+    COPY_TO_SCRIPT_WRAPPER = \
+        "if this method is not scripted, copy the python method onto the scripted model"
 
 
 def export(fn):
@@ -397,6 +399,10 @@ def ignore(drop=False, **kwargs):
         return fn
     return decorator
 
+
+def _copy_to_script_wrapper(fn):
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+    return fn
 
 def module_has_exports(mod):
     for name in dir(mod):
