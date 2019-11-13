@@ -3,6 +3,17 @@ project(pytorch_jni CXX)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+set(TRACE_ENABLED OFF)
+if(DEFINED ENV{TRACE_ENABLED})
+  if($ENV{TRACE_ENABLED} STREQUAL "1")
+    message(STATUS "TRACE_ENABLED ON")
+    set(TRACE_ENABLED ON)
+  endif()
+endif()
+if(NOT TRACE_ENABLED)
+  message(STATUS "TRACE_ENABLED OFF")
+endif()
+
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 
 if (ANDROID_ABI)
@@ -19,6 +30,10 @@ else()
 endif()
 
 message(STATUS "libtorch dir:${libtorch_DIR}")
+
+configure_file(
+    ${pytorch_android_DIR}/cmake_macros.h.in
+    ${pytorch_android_DIR}/cmake_macros.h)
 
 file(GLOB pytorch_android_SOURCES
   ${pytorch_android_DIR}/*.cpp
