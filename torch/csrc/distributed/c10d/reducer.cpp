@@ -167,6 +167,9 @@ Reducer::Reducer(
     local_used_maps_.resize(replica_count);
     for (size_t i = 0; i < local_used_maps_.size(); i++) {
       at::TensorOptions options;
+      // This tensor needs to be on the same device as replica because backend
+      // such as NCCL may not support CPU tensors, and hence it might not work
+      // if we always put it on CPU.
       options = options.device(replicas_[i][0].device());
       options = options.dtype(at::kInt);
       local_used_maps_[i] =
