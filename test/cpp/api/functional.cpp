@@ -117,7 +117,7 @@ TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
-      F::smooth_l1_loss(input, target, /*reduction=*/torch::Reduction::None);
+      F::smooth_l1_loss(input, target, /*reduction=*/torch::kNone);
   auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -322,8 +322,8 @@ TEST_F(FunctionalTest, GridSample) {
 
   // bilinear, zeros, true
   auto options = F::GridSampleFuncOptions()
-                    .mode("bilinear")
-                    .padding_mode("zeros")
+                    .mode(torch::kBilinear)
+                    .padding_mode(torch::kZeros)
                     .align_corners(true);
   auto output = F::grid_sample(input, grid, options);
   auto expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
@@ -332,8 +332,8 @@ TEST_F(FunctionalTest, GridSample) {
 
   // bilinear, zeros, false
   options = F::GridSampleFuncOptions()
-                .mode("bilinear")
-                .padding_mode("zeros")
+                .mode(torch::kBilinear)
+                .padding_mode(torch::kZeros)
                 .align_corners(false);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{0., 0., 0.5}, {1.5, 4., 2.5}, {3.5, 2., 0.}}}}, torch::kFloat);
@@ -347,8 +347,8 @@ TEST_F(FunctionalTest, GridSample) {
 
   // nearest, zeros, true
   options = F::GridSampleFuncOptions()
-                .mode("nearest")
-                .padding_mode("zeros")
+                .mode(torch::kNearest)
+                .padding_mode(torch::kZeros)
                 .align_corners(true);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
@@ -357,8 +357,8 @@ TEST_F(FunctionalTest, GridSample) {
 
   // bilinear, border, true
   options = F::GridSampleFuncOptions()
-                .mode("bilinear")
-                .padding_mode("border")
+                .mode(torch::kBilinear)
+                .padding_mode(torch::kBorder)
                 .align_corners(true);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 8.}}}}, torch::kFloat);
@@ -367,8 +367,8 @@ TEST_F(FunctionalTest, GridSample) {
 
   // bilinear, reflection, true
   options = F::GridSampleFuncOptions()
-                .mode("bilinear")
-                .padding_mode("reflection")
+                .mode(torch::kBilinear)
+                .padding_mode(torch::kReflection)
                 .align_corners(true);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{1., 0., 1.}, {3., 4., 5.}, {7., 8., 7.}}}}, torch::kFloat);
@@ -550,7 +550,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(
-      x, indices, F::MaxUnpool1dFuncOptions(3), std::vector<int64_t>({1, 1, 9}));
+      x, indices, F::MaxUnpool1dFuncOptions(3).output_size(std::vector<int64_t>({1, 1, 9})));
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(
@@ -971,6 +971,32 @@ TEST_F(FunctionalTest, Linear) {
   }
 }
 
+TEST_F(FunctionalTest, Embedding) {
+  const auto input = torch::tensor({{1,2,4,5}, {4,3,2,9}}, torch::kLong);
+  auto weight = torch::empty({10, 3});
+  torch::nn::init::normal_(weight);
+  auto y = F::embedding(input, weight);
+  auto y_exp = torch::embedding(weight, input.contiguous(), -1, false, false);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, EmbeddingBag) {
+  const auto input = torch::tensor({1,2,4,5,4,3,2,9}, torch::kLong);
+  auto offsets = torch::tensor({0,4}, torch::kLong);
+  auto weight = torch::empty({10, 3});
+  torch::nn::init::normal_(weight);
+  auto y = F::embedding_bag(input, weight, EmbeddingBagOptions().mode(torch::kSum), offsets);
+  auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor()));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+
+  // no options test
+  const auto input_ = torch::tensor({{1,2,4,5}, {4,3,2,9}}, torch::kLong);
+  auto offsets_ = torch::arange(0, input_.numel(), input_.size(1), torch::TensorOptions().dtype(torch::kLong).device(input.device()));
+  y = F::embedding_bag(input_, weight);
+  y_exp = std::get<0>(torch::embedding_bag(weight, input_.reshape(-1), offsets_, false, 1, false, torch::Tensor()));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, Bilinear) {
   auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
   auto input2 = torch::tensor({{7, 4}, {8 ,9}});
@@ -1011,7 +1037,7 @@ TEST_F(FunctionalTest, Normalize) {
     auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
     auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
     // non-null output argument
-    F::normalize(input, F::NormalizeFuncOptions().p(1).dim(-1), output);
+    F::normalize(input, F::NormalizeFuncOptions().p(1).dim(-1).out(output));
     // default options
     F::normalize(input);
 
@@ -1345,8 +1371,7 @@ TEST_F(FunctionalTest, BatchNorm1d) {
   auto bias = torch::zeros({num_features});
   auto output = F::batch_norm(
     input, mean, variance,
-    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
-    /*training=*/false);
+    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
   auto expected = (input - mean) / torch::sqrt(variance + eps);
   ASSERT_TRUE(output.allclose(expected));
 }
@@ -1372,8 +1397,7 @@ TEST_F(FunctionalTest, BatchNorm2d) {
   auto bias = torch::zeros({num_features});
   auto output = F::batch_norm(
     input, mean, variance,
-    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
-    /*training=*/false);
+    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
   auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
   ASSERT_TRUE(output.allclose(expected));
 }
@@ -1402,8 +1426,7 @@ TEST_F(FunctionalTest, BatchNorm3d) {
   auto bias = torch::zeros({num_features});
   auto output = F::batch_norm(
     input, mean, variance,
-    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
-    /*training=*/false);
+    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
   auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
   ASSERT_TRUE(output.allclose(expected));
 }

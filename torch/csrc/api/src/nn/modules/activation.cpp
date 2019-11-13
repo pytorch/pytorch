@@ -233,7 +233,7 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
 RReLUImpl::RReLUImpl(const RReLUOptions& options_) : options(options_) {}
 
 Tensor RReLUImpl::forward(Tensor input) {
-  return F::detail::rrelu(input, options.lower(), options.upper(), options.inplace(), is_training());
+  return F::detail::rrelu(input, options.lower(), options.upper(), is_training(), options.inplace());
 }
 
 void RReLUImpl::reset() {}

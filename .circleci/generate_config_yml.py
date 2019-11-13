@@ -93,6 +93,7 @@ YAML_SOURCES = [
     File("workflows-pytorch-macos-builds.yml"),
     File("workflows-pytorch-android-gradle-build.yml"),
     File("workflows-pytorch-ios-builds.yml"),
+    File("workflows-pytorch-ge-config-tests.yml"),
     Listgen(caffe2_build_definitions.get_workflow_jobs, 3),
     File("workflows-binary-builds-smoke-subset.yml"),
     Listgen(binary_build_definitions.get_binary_smoke_test_jobs, 3),
