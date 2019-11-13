@@ -123,11 +123,11 @@ Node* CreateQuantizedBias(
   return cast_node;
 }
 
-// This is called after onnx optimize_graph so the graph already contains
-// "_caffe2" nodes at this point for quantized ops. Using pattern matching we
-// find the relevant nodes and extract the packed_params The packed_params are
+// This is called before the onnx pass. Using pattern matching we
+// find the relevant nodes and extract the packed_params. The packed_params are
 // passed to the appropriate unpack function using c10::Dispatcher. We insert
-// the unpacked weights and bias into the graph using prim::Constant nodes.
+// the unpacked weights and bias into the graph using
+// caffe2::Int8GivenTensorFill nodes.
 void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, at::Tensor>& paramsDict,
@@ -156,6 +156,7 @@ void unpackQuantizedWeightsHelper(
         std::tuple<at::Tensor, c10::optional<at::Tensor>>,
         at::Tensor>(*op, packed_weight);
     at::Tensor unpacked_weight = std::get<0>(result);
+
     // Permute weights?
     /*
     if (unpacked_weight.ndimension() == 2) {
@@ -166,6 +167,7 @@ void unpackQuantizedWeightsHelper(
       unpacked_weight.permute({0, 2, 3, 1});
     }
     */
+
     // Remove packed_params
     qlinear_node->removeInput(1);
 
@@ -231,7 +233,6 @@ void unpackQuantizedWeightsHelper(
     auto b = graph->block();
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
     eraseUnusedValuesFromMap(valsToParamsMap);
-
   }
 }
 void UnpackQuantizedWeights(
