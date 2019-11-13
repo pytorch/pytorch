@@ -29,7 +29,7 @@ def merge_dicts(*dicts):
 
 common_args = parse_kwargs("""
     input (Tensor): the input tensor.
-    generator (:class:`torch.Generator`, optional): a pseudorandom generator for sampling
+    generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     out (Tensor, optional): the output tensor.
 """)
 
