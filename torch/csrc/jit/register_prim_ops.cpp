@@ -690,8 +690,8 @@ RegisterOperators reg(
                allow_unused);
 
            c10::impl::GenericList res_list{OptionalType::ofTensor()};
-           for (at::Tensor ten: res) {
-             res_list.emplace_back(ten.defined()? ten: IValue());
+           for (const at::Tensor& t : res) {
+             res_list.emplace_back(t.defined() ? t : IValue());
            }
            push(stack, res_list);
            return 0;
