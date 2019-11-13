@@ -1960,18 +1960,19 @@ class _DistTestBase(object):
         loss = nn.MSELoss()
 
         # check two model parameters over 5 iterations
-        self._test_DDP_5iter(
-            model_gpu,
-            model_DDP,
-            input_cpu.cuda(gpus[0]),
-            target.cuda(gpus[0]),
-            loss,
-            local_bs,
-            rank,
-            global_bs,
-            True
-        )
-        self._barrier()
+        with torch.backends.cudnn.flags(False):
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_cpu.cuda(gpus[0]),
+                target.cuda(gpus[0]),
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True
+            )
+            self._barrier()
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
