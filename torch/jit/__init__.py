@@ -11,7 +11,7 @@ from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import PY2, PY37, with_metaclass, string_classes
+from torch._six import PY2, PY37, with_metaclass, string_classes, get_function_from_type
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 from torch.utils import set_module
@@ -1696,6 +1696,45 @@ if _enabled:
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
+        # Python magic methods do method lookups on an object's class type, instead of looking up
+        # the method defines on the class instance. In order to continue to expose the magic methods
+        # of builtin-containers (ModuleList, Sequential, ModuleDict) to python we
+        # define magic methods here as a shim to the correct attribute.
+        def forward_magic_method(self, method_name, *args, **kwargs):
+            self_method = getattr(self, method_name)
+            if getattr(self_method, "__func__", None) == getattr(RecursiveScriptModule, method_name):
+                raise NotImplementedError()
+            return self_method(*args, **kwargs)
+
+        def __iter__(self):
+            return self.forward_magic_method("__iter__")
+
+        def __getitem__(self, idx):
+            return self.forward_magic_method("__getitem__", idx)
+
+        def __len__(self):
+            return self.forward_magic_method("__len__")
+
+        def __contains__(self, key):
+            return self.forward_magic_method("__contains__", key)
+
+        # dir is defined by the base nn.Module, so instead of throwing if
+        # it is not overriden, we call into the nn.Module __dir__ method
+        def __dir__(self):
+            self_method = getattr(self, "__dir__")
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__dir__"):
+                return super(RecursiveScriptModule, self).__dir__()
+            return self_method()
+
+        # to resolve bool(value), python looks if __bool__ is defined then __iter__
+        # is defined then returns true for classes. because __iter__() on this
+        # class throws if it isn't overriden, we define __bool__ to preserve default behavior
+        def __bool__(self):
+            self_method = getattr(self, "__bool__")
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__bool__"):
+                return True
+            return self_method()
+
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
     # This is because `super(MyScriptModule, self).foo()` does not use
@@ -1810,101 +1849,6 @@ class TracedModule(ScriptModule):
 if _enabled:
     class TopLevelTracedModule(TracedModule):
         forward = _CachedForward()
-
-
-class _ConstModuleList(ScriptModule):
-    def __init__(self, modules):
-        super(_ConstModuleList, self).__init__()
-
-        if isinstance(modules, OrderedDict):
-            for key, module in modules.items():
-                if isinstance(module, torch.nn.Module):
-                    module = torch.jit._recursive.recursive_script(module)
-                self.add_module(key, module)
-        else:
-            for i, module in enumerate(modules):
-                if isinstance(module, torch.nn.Module):
-                    module = torch.jit._recursive.recursive_script(module)
-                self.add_module(str(i), module)
-
-    def __getitem__(self, idx):
-        if isinstance(idx, slice):
-            return _ConstModuleList(list(self._modules.values())[idx])
-        else:
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            return self._modules[str(idx)]
-
-    def __len__(self):
-        return len(self._modules)
-
-    def __iter__(self):
-        return iter(self._modules.values())
-
-    def __dir__(self):
-        keys = super(_ConstModuleList, self).__dir__()
-        keys = [key for key in keys if not key.isdigit()]
-        return keys
-
-class _ConstModuleDict(ScriptModule):
-    def __init__(self, modules):
-        super(_ConstModuleDict, self).__init__()
-
-        assert isinstance(modules, OrderedDict)
-
-        for key, module in modules.items():
-            if isinstance(module, torch.nn.Module):
-                module = torch.jit._recursive.recursive_script(module)
-            self.add_module(key, module)
-
-
-    def __getitem__(self, key):
-        return self._modules[key]
-
-    def __contains__(self, key):
-        return key in self._modules
-
-    def keys(self):
-        r"""Return an iterable of the ModuleDict keys.
-        """
-        return self._modules.keys()
-
-    def items(self):
-        r"""Return an iterable of the ModuleDict key/value pairs.
-        """
-        return self._modules.items()
-
-    def values(self):
-        r"""Return an iterable of the ModuleDict values.
-        """
-        return self._modules.values()
-
-    def __len__(self):
-        return len(self._modules)
-
-    def __iter__(self):
-        return iter(self._modules.values())
-
-    def forward(self):
-        raise NotImplementedError()
-
-class _ConstSequential(_ConstModuleList):
-    def __init__(self, mods):
-        super(_ConstSequential, self).__init__(mods._modules)
-
-        # we define the forward method via self.define rather than
-        # making it a direct class member (with a @script) annotation
-        # because, in optimized runtime environments where only .pyc files
-        # are shipped, we cant retrieve the source code.
-        # TODO: find a workaround for this and remove this hack
-        self.define("""
-        def forward(self, input):
-            for m in self:
-                input = m(input)
-            return input
-        """)
 
 def is_scripting():
     r"""

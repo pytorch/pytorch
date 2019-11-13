@@ -82,7 +82,23 @@ struct TORCH_API SoftmaxOptions {
   TORCH_ARG(int64_t, dim);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softmax, SoftmaxFuncOptions)
+// ============================================================================
+
+namespace functional {
+
+struct TORCH_API SoftmaxFuncOptions {
+  SoftmaxFuncOptions(int64_t dim);
+
+  /// Dimension along which Softmax will be computed.
+  TORCH_ARG(int64_t, dim);
+
+  /// the desired data type of returned tensor.
+  /// If specified, the input tensor is casted to `dtype` before the operation
+  /// is performed. This is useful for preventing data type overflows. Default: None.
+  TORCH_ARG(c10::optional<torch::Dtype>, dtype) = c10::nullopt;
+};
+
+} // namespace functional
 
 // ============================================================================
 
@@ -94,7 +110,23 @@ struct TORCH_API SoftminOptions {
   TORCH_ARG(int64_t, dim);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softmin, SoftminFuncOptions)
+// ============================================================================
+
+namespace functional {
+
+struct TORCH_API SoftminFuncOptions {
+  SoftminFuncOptions(int64_t dim);
+
+  /// Dimension along which Softmin will be computed.
+  TORCH_ARG(int64_t, dim);
+
+  /// the desired data type of returned tensor.
+  /// If specified, the input tensor is casted to `dtype` before the operation
+  /// is performed. This is useful for preventing data type overflows. Default: None.
+  TORCH_ARG(c10::optional<torch::Dtype>, dtype) = c10::nullopt;
+};
+
+} // namespace functional
 
 // ============================================================================
 
@@ -106,7 +138,23 @@ struct TORCH_API LogSoftmaxOptions {
   TORCH_ARG(int64_t, dim);
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LogSoftmax, LogSoftmaxFuncOptions)
+// ============================================================================
+
+namespace functional {
+
+struct TORCH_API LogSoftmaxFuncOptions {
+  LogSoftmaxFuncOptions(int64_t dim);
+
+  /// Dimension along which LogSoftmax will be computed.
+  TORCH_ARG(int64_t, dim);
+
+  /// the desired data type of returned tensor.
+  /// If specified, the input tensor is casted to `dtype` before the operation
+  /// is performed. This is useful for preventing data type overflows. Default: None.
+  TORCH_ARG(c10::optional<torch::Dtype>, dtype) = c10::nullopt;
+};
+
+} // namespace functional
 
 // ============================================================================
 
@@ -160,7 +208,24 @@ struct TORCH_API RReLUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(RReLU, RReLUFuncOptions)
+// ============================================================================
+
+namespace functional {
+
+struct TORCH_API RReLUFuncOptions {
+  /// lower bound of the uniform distribution. Default: 1/8
+  TORCH_ARG(double, lower) = 1.0 / 8.0;
+
+  /// upper bound of the uniform distribution. Default: 1/3
+  TORCH_ARG(double, upper) = 1.0 / 3.0;
+
+  TORCH_ARG(bool, training) = false;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
+} // namespace functional
 
 // ============================================================================
 
@@ -203,7 +268,7 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softshrink, SoftshrinkFuncOptions)
 // ============================================================================
 
 /// Options for Threshold functional and module.
-struct ThresholdOptions {
+struct TORCH_API ThresholdOptions {
   ThresholdOptions(double threshold, double value)
    : threshold_(threshold), value_(value) {}
 
@@ -224,7 +289,7 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Threshold, ThresholdFuncOptions)
 namespace functional {
 
 /// Options for Gumbel Softmax functional.
-struct GumbelSoftmaxFuncOptions {
+struct TORCH_API GumbelSoftmaxFuncOptions {
   /// non-negative scalar temperature
   TORCH_ARG(double, tau) = 1.0;
 
