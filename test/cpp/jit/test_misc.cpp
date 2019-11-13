@@ -1001,7 +1001,10 @@ graph(%a):
     return stack;
   };
   run(graph, stack);
-  AT_ASSERT(testPassValue);
+  // we will not run fusion in simple mode
+  if (!getExecutorMode()) {
+    AT_ASSERT(testPassValue);
+  }
 }
 
 static void checkShape(
