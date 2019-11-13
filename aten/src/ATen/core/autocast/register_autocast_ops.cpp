@@ -149,6 +149,7 @@ namespace {
 // I guess I could have used a complex set of macros instead of templates above.
 
 auto registerer = torch::RegisterOperators()
+  /* FP16 OPS */
   .op(torch::RegisterOperators::options()
     .schema("aten::cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
     .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool),
@@ -209,6 +210,8 @@ auto registerer = torch::RegisterOperators()
                             PATCH(at::cudnn_convolution_transpose_backward_weight, fp16)>
                            (TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+  /* FP32 OPS */
+  /* PROMOTE OPS */
 }
 #endif
 
