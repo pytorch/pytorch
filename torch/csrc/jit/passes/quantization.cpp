@@ -454,7 +454,7 @@ class QuantizeHelper {
     // O(N) where N is number of observer moduels with this optimization
     for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
       auto observer_name = observer_modules_to_remove_[i];
-      module_.module_object()->unsafeRemoveAttr(observer_name);
+      module_._ivalue()->unsafeRemoveAttr(observer_name);
       module_.type()->unsafeRemoveAttribute(observer_name);
     }
     // Destroy observer forward calls
