@@ -54,7 +54,7 @@ def process_group_init_backend_handler(
     # Initialize ProcessGroup.
     if dist.is_initialized():
         raise RuntimeError(
-            "Default process group must not be initialized before `init_rpc`."
+            "Default process group must not be initialized before init_rpc."
         )
 
     world_size = len(worker_name_to_id)
