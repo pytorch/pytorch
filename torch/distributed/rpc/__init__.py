@@ -21,7 +21,7 @@ if is_available():
     from .api import *  # noqa: F401
     import torch.distributed.autograd
 
-    def init_model_parallel(
+    def init_rpc(
         self_name,
         backend=backend_registry.BackendType.PROCESS_GROUP,
         init_method=None,

@@ -256,7 +256,7 @@ class RpcTest(object):
                 backend_name, stub_start_rpc_backend_handler
             )
 
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker1",
             backend=backend,
             init_method=self.init_method,
@@ -282,7 +282,7 @@ class RpcTest(object):
 
     @dist_init(setup_model_parallel=False)
     def test_reinit(self):
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker{}".format(self.rank),
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
@@ -304,7 +304,7 @@ class RpcTest(object):
         dist.barrier()
 
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
-            rpc.init_model_parallel(
+            rpc.init_rpc(
                 self_name="worker{}".format(self.rank),
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
@@ -478,7 +478,7 @@ class RpcTest(object):
     @dist_init(setup_model_parallel=False)
     def test_join_rpc(self):
         # Initialize RPC.
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
@@ -1032,7 +1032,7 @@ class RpcTest(object):
     @dist_init(setup_model_parallel=False)
     def test_set_rpc_timeout(self):
         timeout = timedelta(seconds=1)
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker{}".format(self.rank),
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,

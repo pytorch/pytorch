@@ -83,7 +83,7 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
             _ALL_NODE_NAMES = self.worker_name_to_id.keys()
 
             # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
-            rpc.init_model_parallel(
+            rpc.init_rpc(
                 self_name="worker%d" % self.rank,
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
