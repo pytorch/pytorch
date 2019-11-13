@@ -509,7 +509,7 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
 // this is a specialization of the indexSelectLargeIndex kernel for ROCm which
 // uses fast unsigned int24 computations
 template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
-	  bool IndexIsMajor>
+          bool IndexIsMajor>
 __global__ void indexSelectLargeIndex24(TensorInfo<T, IndexType> dst,
                                       TensorInfo<T, IndexType> src,
                                       TensorInfo<int64_t, IndexType> indices,
