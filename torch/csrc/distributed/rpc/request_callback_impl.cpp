@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
@@ -10,10 +11,10 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
+#include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/python_udf_call.h>
-#include <torch/csrc/distributed/rpc/python_udf_resp.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
@@ -55,12 +56,12 @@ Message RequestCallbackImpl::processRpc(
       return std::move(ScriptResp(std::move(stack.front()))).toMessage();
     }
     case MessageType::PYTHON_CALL: {
-      auto& pyCall = static_cast<PythonUDFCall&>(rpc);
+      auto& pyCall = static_cast<PythonCall&>(rpc);
       std::vector<torch::Tensor> responseTensorTable;
       auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
           pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
-      return std::move(PythonUDFResp(
-                           std::move(payload), std::move(responseTensorTable)))
+      return std::move(
+                 PythonResp(std::move(payload), std::move(responseTensorTable)))
           .toMessage();
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
@@ -82,7 +83,7 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       ctx.addForkOfOwner(src.retRRefId(), src.retForkId());
-      return std::move(RemoteRet(src.retRRefId(), src.retForkId())).toMessage();
+      return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -92,10 +93,11 @@ Message RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef<py::object>(rrefId);
+
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
       ctx.addForkOfOwner(rrefId, forkId);
-      return std::move(RemoteRet(rrefId, forkId)).toMessage();
+      return RemoteRet(rrefId, forkId).toMessage();
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
@@ -103,8 +105,7 @@ Message RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return std::move(RRefFetchRet(RRefFetchRet({rref->getValue()})))
-          .toMessage();
+      return ScriptRRefFetchRet({rref->getValue()}).toMessage();
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -114,8 +115,7 @@ Message RequestCallbackImpl::processRpc(
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return std::move(RRefFetchRet(RRefFetchRet(result.toIValues())))
-          .toMessage();
+      return PythonRRefFetchRet(result.toIValues()).toMessage();
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
@@ -133,7 +133,7 @@ Message RequestCallbackImpl::processRpc(
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return std::move(RRefAck()).toMessage();
+      return RRefAck().toMessage();
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);

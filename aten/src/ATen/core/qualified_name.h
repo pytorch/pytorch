@@ -118,7 +118,7 @@ struct QualifiedName {
     out.reserve(reserve);
     for (size_t i = 0; i < v.size(); ++i) {
       if (i != 0) {
-        out.push_back(delimiter_);
+        out.push_back(delimiter);
       }
       out.append(v[i]);
     }
