@@ -780,17 +780,23 @@ struct PythonPrintImpl {
 
   void printMaybeAnnotatedConstantList(
       std::ostream& stmt,
-      const char* the_type,
+      TypePtr element_type,
       size_t list_size,
       const IValue& the_list) {
     if (list_size == 0) {
-      stmt << "annotate(List[" << the_type << "], [])";
+      TORCH_INTERNAL_ASSERT(
+          element_type,
+          "Expected an element to print an empty list but got nullptr");
+      stmt << "annotate(List[" << element_type->python_str() << "], [])";
     } else {
       stmt << the_list;
     }
   }
 
-  void printConstant(TaggedStringStream& stmt, const IValue& v) {
+  void printConstant(
+      TaggedStringStream& stmt,
+      const IValue& v,
+      TypePtr type = nullptr) {
     std::stringstream ss;
     if (v.isTensor()) {
       ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
@@ -811,12 +817,20 @@ struct PythonPrintImpl {
       }
       ss << "]";
     } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
+      printMaybeAnnotatedConstantList(
+          ss, BoolType::get(), v.toBoolList().size(), v);
     } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
+      printMaybeAnnotatedConstantList(
+          ss, IntType::get(), v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
+          ss, FloatType::get(), v.toDoubleListRef().size(), v);
+    } else if (v.isGenericList()) {
+      printMaybeAnnotatedConstantList(
+          ss,
+          type->expect<ListType>()->getElementType(),
+          v.toGenericListRef().size(),
+          v);
     } else {
       ss << v;
     }
@@ -1128,7 +1142,7 @@ struct PythonPrintImpl {
       return;
     }
     stmt << "=";
-    printConstant(stmt, value);
+    printConstant(stmt, value, typ);
   }
   void printBody(Block* body) {
     // we always print constants at the top of the function, in the order

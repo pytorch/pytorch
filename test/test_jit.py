@@ -3956,6 +3956,15 @@ def foo(x):
                 o2 = cu.f()
             self.assertEqual(o1, o2)
 
+    def test_generic_list_default_value_python_print(self):
+        class M(torch.nn.Module):
+            def forward(self, lst: List[str]=[]):
+                return lst[0]
+
+        script = torch.jit.script(M())
+
+        FileCheck().check("annotate(List[str], [])").run(script.code)
+
     def test_cpp_module_iterator(self):
         a = nn.Module()
         a.name = 'a'
