@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -18,33 +19,6 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   return c10::Dispatcher::singleton().template callUnboxed<Result, Args...>(
       op, std::forward<Args>(args)...);
-}
-using ValueToParamPairMap =
-    std::map<Value*, std::pair<std::string, at::Tensor>>;
-
-using ParamMap = std::map<std::string, at::Tensor>;
-ValueToParamPairMap buildValueToParamsMap(
-    Block* b,
-    const ParamMap& paramsDict) {
-  ValueToParamPairMap valsToParamsMap;
-  for (auto& input : b->inputs()) {
-    auto it = paramsDict.find(input->debugName());
-    if (it != paramsDict.end()) {
-      valsToParamsMap.emplace(input, *it);
-    }
-  }
-  return valsToParamsMap;
-}
-
-void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
-  auto it = valsToParamsMap.begin();
-  while (it != valsToParamsMap.end()) {
-    if (!it->first->hasUses()) {
-      it = valsToParamsMap.erase(it);
-    } else {
-      ++it;
-    }
-  }
 }
 
 // Get the scale of the input to quantized op. There are two cases here
