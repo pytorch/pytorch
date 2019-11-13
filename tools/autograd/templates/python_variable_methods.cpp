@@ -346,6 +346,11 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
   return self.to(self.options().device(device), non_blocking, copy, optional_memory_format);
 }
 
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  AutoNoGIL no_gil;
+  return self.to(self.options(), non_blocking, copy, optional_memory_format);
+}
+
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AutoNoGIL no_gil;
   return self.to(dtype, non_blocking, copy, optional_memory_format);
@@ -732,9 +737,12 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   if (device && device->is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
-  if (!device && !scalarType && !copy) {
+  if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
+  } else if (!device && !scalarType) {
+    return THPVariable_Wrap(
+        dispatch_to(self_, non_blocking, copy, opt_memory_format));
   } else if (!device) {
     return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format));
   } else if (!scalarType) {
