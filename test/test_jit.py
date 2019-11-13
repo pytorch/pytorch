@@ -62,7 +62,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -432,6 +432,18 @@ class TestJit(JitTestCase):
             return (x,)
         jit_f2 = torch.jit.trace(f2, x)
         assert f2(x) == jit_f2(x)  # fails
+
+    def test_trace_namedtuple(self):
+        Point = namedtuple('point', ['x', 'y'])
+
+        def f(p):
+            if type(p) is tuple:
+                p = Point(*p)
+            return p.x + p.y
+
+        p = Point(torch.randn(1), torch.randn(1))
+        traced = torch.jit.trace(f, (p,))
+        self.assertEqual(f(p), traced(p))
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
@@ -1116,9 +1128,9 @@ graph(%x : Tensor,
         data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
         get_forward(m._c)(data)
-        # right now the result will have extra observer modules
-        # will fix later when we figure out how to remove modules
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
+        assert len(m._modules._c.items()) == 1, \
+            'Expected to have single submodule of conv'
 
         get_forward(m._c)(data)
         FileCheck().check_not("aten::quantize_per_tensor") \
@@ -1159,8 +1171,8 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK: quantized::conv_prepack
-        # CHECK: quantized::conv_unpack
+        # CHECK: quantized::conv2d_prepack
+        # CHECK: quantized::conv2d_unpack
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r)"""
@@ -1177,7 +1189,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype,
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         %a_dequant = aten::dequantize(%a_quant)
         %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
-        %w_quant : Tensor, %b : Tensor? = quantized::conv_unpack(%packed_params)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
@@ -1431,8 +1443,8 @@ graph(%input, %weight):
                 xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
                 wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
                 stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
-                packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
-                w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
+                packed = torch.ops.quantized.conv2d_prepack(wq, self.bias, stride, padding, dilation, groups)
+                w_unpacked, b_unpacked = torch.ops.quantized.conv2d_unpack(packed)
                 r = torch.nn.functional.conv2d(xq.dequantize(),
                                                w_unpacked.dequantize(),
                                                b_unpacked,
@@ -2174,6 +2186,72 @@ graph(%Ra, %Rb):
         with torch.random.fork_rng(devices=[]):
             m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
+
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    def test_dropout_module_requires_grad(self):
+        with enable_profiling_mode():
+            class MyModule(torch.nn.Module):
+                def __init__(self, M):
+                    super(MyModule, self).__init__()
+                    self.dropout = torch.nn.Dropout(0.5)
+                    self.linear = torch.nn.Linear(M, M)
+
+                def forward(self, input):
+                    input = self.dropout(input)
+                    output = self.linear(input)
+                    return output
+
+            def profile(func, X):
+                with torch.autograd.profiler.profile() as prof:
+                    func(X)
+                return [e.name for e in prof.function_events]
+
+            M = 1000
+            scripted = torch.jit.script(MyModule(M))
+            # To reduce confusion about expected behaviors:
+            #   requires_grad controls whether dropout is symbolically differentiated.
+            #   training controls whether bernoulli_ is called inside symbolic differentiation of dropout.
+            # * When requires_grad == training, the expected behaviors are obvious.
+            # * When requires_grad=True and training=False, bernoulli_ might still show up in the graph.
+            #   But it's in a branch that's not called. That's why we have separate checks for autograd
+            #   profiler to make sure it's not run.
+            # * When requires_grad=False and training=True, bernoulli_ must be run since it's the expected
+            #   behavior for the dropout layer in training mode. It's independent of whether graph requires
+            #   gradient. In fact bernoulli_ comes from autograd instead of autodiff in this case.
+            for training in (True, False):
+                if training:
+                    scripted.train()
+                else:
+                    scripted.eval()
+                for requires_grad in (True, False):
+                    X = torch.randn(M, M, requires_grad=requires_grad)
+                    if requires_grad:
+                        FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
+                    self.assertEqual(training, 'bernoulli_' in profile(scripted, X))
+
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    def test_dropout_func_requires_grad(self):
+        def dropout_training(input):
+            return F.dropout(input, 0.5, training=True)
+
+        def dropout_eval(input):
+            return F.dropout(input, 0.5, training=False)
+
+        def profile(func, X):
+            with torch.autograd.profiler.profile() as prof:
+                func(X)
+            return [e.name for e in prof.function_events]
+
+        M = 1000
+        scripted_training = torch.jit.script(dropout_training)
+        scripted_eval = torch.jit.script(dropout_eval)
+        # See comments in test_dropout_module_requires_grad.
+        for requires_grad in (True, False):
+            X = torch.randn(M, M, requires_grad=requires_grad)
+            if requires_grad:
+                FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
+            self.assertIn('bernoulli_', profile(scripted_training, X))
+            self.assertNotIn('bernoulli_', profile(scripted_eval, X))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
@@ -8596,8 +8674,6 @@ a")
             self.assertEqual(m(), 10)
 
     def test_moduledict(self):
-        from collections import OrderedDict
-
         class Inner(torch.nn.Module):
             def forward(self, x):
                 return x + 10
@@ -8685,6 +8761,80 @@ a")
             self.checkModule(M(), (inp, name))
             self.checkModule(M2(), (inp, name))
 
+    def test_custom_container_forward(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        class CustomSequential(nn.Sequential):
+            def __init__(self):
+                super(CustomSequential, self).__init__(
+                    nn.ReLU(), Inner())
+
+            def forward(self, x):
+                x = x + 3
+                for mod in self:
+                    x = mod(x)
+                return x - 5
+
+        self.checkModule(CustomSequential(), (torch.tensor(.5),))
+
+        class CustomModuleList(nn.ModuleList):
+            def __init__(self):
+                super(CustomModuleList, self).__init__(
+                    [nn.ReLU(), Inner()])
+
+            def forward(self, x):
+                x = x + 3
+                for mod in self:
+                    x = mod(x)
+                return x - 5
+
+        self.checkModule(CustomModuleList(), (torch.tensor(.5),))
+
+        class CustomModuleDict(nn.ModuleDict):
+            def __init__(self):
+                super(CustomModuleDict, self).__init__(
+                    OrderedDict([
+                        ('one', Inner()),
+                        ('two', nn.ReLU()),
+                        ('three', Inner()),
+                    ]))
+
+            def forward(self, x):
+                x = x + 3
+                names = torch.jit.annotate(List[str], [])
+                for name, mod in self.items():
+                    x = mod(x)
+                    names.append(name)
+                return names, x - 5
+
+        self.checkModule(CustomModuleDict(), (torch.tensor(.5),))
+
+    def test_override_magic(self):
+        class OverrideMagic(nn.Module):
+            def __init__(self):
+                super(OverrideMagic, self).__init__()
+
+            @torch.jit.export
+            def __len__(self):
+                return 10
+
+        mod = OverrideMagic()
+        self.assertEqual(len(mod), len(torch.jit.script(mod)))
+
+        class OverrideMagicSeq(nn.Sequential):
+            def __init__(self):
+                super(OverrideMagicSeq, self).__init__()
+
+            @torch.jit.export
+            def __len__(self):
+                return 10
+
+        mod = OverrideMagicSeq()
+        self.assertEqual(len(mod), len(torch.jit.script(mod)))
+        self.assertTrue(torch.jit.script(mod))
+
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -8716,6 +8866,9 @@ a")
             for sub in m.mods:
                 v = sub(v)
             self.assertEqual(o, v)
+
+            with self.assertRaisesRegex(Exception, "object is not iterable"):
+                print([val for val in m])
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
@@ -9019,8 +9172,6 @@ a")
             self.assertEqual(o2, v)
 
     def test_script_sequential_orderdict(self):
-        from collections import OrderedDict
-
         class M(torch.jit.ScriptModule):
             __constants__ = ['mods']
 

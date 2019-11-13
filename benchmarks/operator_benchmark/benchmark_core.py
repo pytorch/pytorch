@@ -124,11 +124,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
             op.set_module_name(op_name)
 
         op._set_backward_test(run_backward)
-        try:
-            op.init(**init_dict)
-        except SkipInputShape:
-            print("Skipping: Config<{}> is not valid for op<{}>".format(input_config, op.module_name()))
-            continue
+        op.init(**init_dict)
 
         input_name = None
 
@@ -174,7 +170,7 @@ class BenchmarkRunner(object):
         self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.predefined_minimum_secs = 2
+        self.predefined_minimum_secs = 1
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
