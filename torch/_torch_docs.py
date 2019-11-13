@@ -3556,7 +3556,7 @@ Example::
 
 add_docstr(torch.multinomial,
            r"""
-multinomial(input, num_samples, replacement=False, out=None) -> LongTensor
+multinomial(input, num_samples, replacement=False, *, generator=None, out=None) -> LongTensor
 
 Returns a tensor where each row contains :attr:`num_samples` indices sampled
 from the multinomial probability distribution located in the corresponding row
@@ -3589,6 +3589,7 @@ Args:
     input (Tensor): the input tensor containing probabilities
     num_samples (int): number of samples to draw
     replacement (bool, optional): whether to draw with replacement or not
+    {generator}
     {out}
 
 Example::
@@ -3796,7 +3797,7 @@ Example::
 
 add_docstr(torch.normal,
            r"""
-.. function:: normal(mean, std, out=None) -> Tensor
+.. function:: normal(mean, std, *, generator=None, out=None) -> Tensor
 
 Returns a tensor of random numbers drawn from separate normal distributions
 whose mean and standard deviation are given.
@@ -3816,6 +3817,7 @@ total number of elements in each tensor need to be the same.
 Args:
     mean (Tensor): the tensor of per-element means
     std (Tensor): the tensor of per-element standard deviations
+    {generator}
     {out}
 
 Example::
