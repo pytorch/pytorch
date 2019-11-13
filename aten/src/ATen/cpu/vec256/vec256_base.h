@@ -179,38 +179,74 @@ public:
     }
     return ret;
   }
-  template <typename other_t = T,
-            typename std::enable_if<!std::is_floating_point<other_t>::value && !std::is_complex_t<other_t>::value, int>::type = 0>
+  template <typename other_t_abs = T,
+            typename std::enable_if<!std::is_floating_point<other_t_abs>::value && !std::is_complex_t<other_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
-    // other_t is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<other_t, T>::value, "other_t must be T");
-    return map([](T x) -> T { return x < static_cast<other_t>(0) ? -x : x; });
+    // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
+    return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
-  template <typename float_t = T,
-            typename std::enable_if<std::is_floating_point<float_t>::value, int>::type = 0>
+  template <typename float_t_abs = T,
+            typename std::enable_if<std::is_floating_point<float_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
-    // float_t is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<float_t, T>::value, "float_t must be T");
+    // float_t_abs is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<float_t_abs, T>::value, "float_t_abs must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
     return map(std::abs);
   }
-  template <typename complex_t = T,
-            typename std::enable_if<std::is_complex_t<complex_t>::value, int>::type = 0>
+  template <typename complex_t_abs = T,
+            typename std::enable_if<std::is_complex_t<complex_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
-    // complex_t is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
+    // complex_t_abs is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t_abs, T>::value, "complex_t_abs must be T");
     // Specifically map() does not perform the type conversion needed by abs.
-    return map([](T x) { return (T)std::abs(x); });
+    return map([](T x) { return static_cast<T>(std::abs(x)); });
   }
+  template <typename other_t_angle = T,
+            typename std::enable_if<!std::is_complex_t<other_t_angle>::value, int>::type = 0>
   Vec256<T> angle() const {
+    // other_t_angle is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t_angle, T>::value, "other_t_angle must be T");
     return *this;
   }
+  template <typename complex_t_angle = T,
+            typename std::enable_if<std::is_complex_t<complex_t_angle>::value, int>::type = 0>
+  Vec256<T> angle() const {
+    // complex_t_angle is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t_angle, T>::value, "complex_t_angle must be T");
+    // Specifically map() does not perform the type conversion needed by abs.
+    return map([](T x) { return static_cast<T>(std::arg(x)); });
+  }
+  template <typename other_t_real = T,
+            typename std::enable_if<!std::is_complex_t<other_t_real>::value, int>::type = 0>
   Vec256<T> real() const {
+    // other_t_real is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t_real, T>::value, "other_t_real must be T");
     return *this;
   }
+  template <typename complex_t_real = T,
+            typename std::enable_if<std::is_complex_t<complex_t_real>::value, int>::type = 0>
+  Vec256<T> real() const {
+    // complex_t_real is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t_real, T>::value, "complex_t_real must be T");
+    // Specifically map() does not perform the type conversion needed by abs.
+    return map([](T x) { return static_cast<T>(x.real()); });
+  }
+  template <typename other_t_imag = T,
+            typename std::enable_if<!std::is_complex_t<other_t_imag>::value, int>::type = 0>
   Vec256<T> imag() const {
+    // other_t_imag is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t_imag, T>::value, "other_t_imag must be T");
     return *this;
+  }
+  template <typename complex_t_imag = T,
+            typename std::enable_if<std::is_complex_t<complex_t_imag>::value, int>::type = 0>
+  Vec256<T> imag() const {
+    // complex_t_imag is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t_imag, T>::value, "complex_t_imag must be T");
+    // Specifically map() does not perform the type conversion needed by abs.
+    return map([](T x) { return static_cast<T>(x.imag()); });
   }
   Vec256<T> conj() const {
     return *this;
