@@ -381,50 +381,6 @@
         - THTensor* other
 ]]
 [[
-  name: _th_xor
-  cname: __xor__
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: bitxor
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: cbitxor
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_ixor_
-  cname: __ixor__
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: bitxor
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-    - cname: cbitxor
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
   name: _th_lshift
   cname: __lshift__
   variants:

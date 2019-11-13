@@ -109,7 +109,7 @@ inline Tensor interpolate(
 }
 } // namespace detail
 
-inline Tensor interpolate(const Tensor& input, InterpolateFuncOptions options = {}) {
+inline Tensor interpolate(const Tensor& input, const InterpolateFuncOptions& options = {}) {
   return detail::interpolate(
     input,
     options.size(),
