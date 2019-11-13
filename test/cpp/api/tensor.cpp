@@ -643,7 +643,7 @@ void test_Arange_expected_dtype(c10::ScalarType default_dtype) {
 TEST(TensorTest, Arange) {
   {
     auto x = torch::arange(0, 5);
-    ASSERT_EQ(x.dtype() == torch::kLong);
+    ASSERT_EQ(x.dtype(), torch::kLong);
   }
   test_Arange_expected_dtype(torch::kFloat);
   test_Arange_expected_dtype(torch::kDouble);
