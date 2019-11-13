@@ -23,7 +23,7 @@ void UpsampleImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor UpsampleImpl::forward(const Tensor& input) {
-  InterpolateOptions::mode_t mode;
+  F::InterpolateFuncOptions::mode_t mode;
   if (c10::get_if<enumtype::kNearest>(&options.mode())) {
     mode = torch::kNearest;
   } else if (c10::get_if<enumtype::kLinear>(&options.mode())) {

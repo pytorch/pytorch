@@ -135,8 +135,14 @@ class TestQuantizedOps(TestCase):
         }
 
         for name, op in ops_under_test.items():
-            qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+            for inplace in (True, False):
+                if hasattr(op, 'inplace'):
+                    op.inplace = inplace
+                    qY_hat = op(qX)
+                else:
+                    qY_hat = op(qX, inplace=inplace)
+                self.assertEqual(qY, qY_hat,
+                                 message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
     @no_deadline
@@ -656,6 +662,7 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
@@ -1505,7 +1512,7 @@ class TestQuantizedConv(unittest.TestCase):
             qconv = torch.ops.quantized.conv2d
             if use_relu:
                 qconv = torch.ops.quantized.conv2d_relu
-            qconv_prepack = torch.ops.quantized.conv_prepack
+            qconv_prepack = torch.ops.quantized.conv2d_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels,
                 output_channels,
@@ -1553,8 +1560,8 @@ class TestQuantizedConv(unittest.TestCase):
             channelwise = False
 
         with override_quantized_engine(qengine):
-            qconv_prepack = torch.ops.quantized.conv_prepack
-            qconv_unpack = torch.ops.quantized.conv_unpack
+            qconv_prepack = torch.ops.quantized.conv2d_prepack
+            qconv_unpack = torch.ops.quantized.conv2d_unpack
             self._test_qconv_unpack_impl(
                 qconv_prepack, qconv_unpack, inputs, (stride_h, stride_w),
                 (pad_h, pad_w), channelwise)
