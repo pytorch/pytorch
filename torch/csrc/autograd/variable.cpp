@@ -21,21 +21,6 @@
 
 namespace torch {
 namespace autograd {
-AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {
-  grad_fn_ = std::move(gradient_edge.function);
-  requires_grad_ = false;
-  is_view_ = false;
-  output_nr_ = gradient_edge.input_nr;
-
-  // set_requires_grad also checks error conditions.
-  if (requires_grad) {
-    TORCH_INTERNAL_ASSERT(self_impl);
-    set_requires_grad(requires_grad, self_impl);
-  }
-  TORCH_CHECK(
-      !grad_fn_ || !requires_grad_,
-      "requires_grad should be false if grad_fn is set");
-}
 
 std::shared_ptr<Node> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();

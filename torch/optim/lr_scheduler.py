@@ -117,7 +117,7 @@ class _LRScheduler(object):
                 warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
                               "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
                               "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
-                              "will result in PyTorch skipping the first value of the learning rate schedule."
+                              "will result in PyTorch skipping the first value of the learning rate schedule. "
                               "See more details at "
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
