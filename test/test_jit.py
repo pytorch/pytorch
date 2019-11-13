@@ -4854,7 +4854,6 @@ a")
                     self.checkScript(func5, (x, y))
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't support backward")
     def test_pow_scalar_backward_cuda(self):
         # see that scalar exponent works with cuda base (#19253)
         with enable_profiling_mode():
@@ -5581,7 +5580,7 @@ a")
             m()
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "NYI: fuser support for Sandcastle")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't use requires_grad information")
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -11125,8 +11124,6 @@ a")
         self.run_pass('erase_number_types', graph)
         FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
 
-
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't support gradients")
     def test_mm_batching(self):
 
         with enable_profiling_mode():
@@ -11145,8 +11142,8 @@ a")
                 slstm(*inputs, profile_and_replay=True).sum().backward()
 
             fw_graph = slstm.graph_for(*inputs)
-            bw_graph = backward_graph(slstm, diff_graph_idx=0)
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                bw_graph = backward_graph(slstm, diff_graph_idx=0)
                 self.assertTrue('prim::MMBatchSide' in str(fw_graph))
                 self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
 
