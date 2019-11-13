@@ -62,22 +62,25 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
   }
 }
 
-TensorNames TensorNames::unifyFromRight(const TensorNames& other, const char* op_name) const {
-  const auto longer_size = std::max(names_.size(), other.names_.size());
-  TensorNameVec result;
-  result.reserve(longer_size);
+TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
+  int64_t size_diff = std::labs(names_.size() - other.names_.size());
 
-  const auto& longer = names_.size() == longer_size ? names_ : other.names_;
-  const auto& shorter = names_.size() == longer_size ? other.names_ : names_;
-  const auto size_difference = longer_size - shorter.size();
-
-  result.insert(result.begin(), longer.begin(), longer.begin() + size_difference);
-
-  for (int64_t idx = size_difference; idx < longer_size; ++idx) {
-    result.push_back(longer[idx].unify(shorter[idx - size_difference], op_name));
+  if (names_.size() > other.names_.size()) {
+    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+      names_[idx] = names_[idx].unify(other.names_[idx - size_diff], op_name);
+    }
+  } else {
+    // pad names_ to the same length as other.names_ before unification
+    names_.insert(
+        names_.begin(),
+        other.names_.begin(),
+        other.names_.begin() + size_diff);
+    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+      names_[idx] = names_[idx].unify(other.names_[idx], op_name);
+    }
   }
 
-  return TensorNames(std::move(result));
+  return *this;
 }
 
 void TensorNames::append(TensorName&& name) {
@@ -97,9 +100,9 @@ void TensorNames::checkUnique(const char* op_name) const {
         [&](const TensorName& other) { return other.toDimname() == name; });
     TORCH_CHECK(dup == names_.end(),
         op_name, ": ",
-        "Attempted to propagate dims ", *it, " and ", dup, " to the output, ",
-        "but that would create a tensor with duplicate names ", toDimnameVec(),
-        ". Please rename your inputs with Tensor.rename to prevent this.");
+        "Attempted to propagate dims ", *it, " and ", *dup, " to the output, ",
+        "but that would create a tensor with duplicate names [", toDimnameVec(),
+        "]. Please rename your inputs with Tensor.rename to prevent this.");
   }
 }
 
@@ -107,7 +110,8 @@ void TensorNames::checkUnique(const char* op_name) const {
 // It should print like:
 // 'C' (index 1 of ['N', 'C', 'H', 'W'])
 std::ostream& operator<<(std::ostream& out, const TensorName& tensorname) {
-  out << tensorname.name_ << " (index " << tensorname.origin_idx_ << " of ";
+  out << tensorname.name_ << " (index ";
+  out << tensorname.origin_idx_ << " of ";
   out << tensorname.origin_ << ")";
   return out;
 }

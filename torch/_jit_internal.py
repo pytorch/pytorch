@@ -7,7 +7,7 @@ circular dependency problems
 import inspect
 import weakref
 import warnings
-import torch
+import torch._C
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
@@ -676,7 +676,7 @@ for i in range(2, 7):
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.ScriptFunction):
+    if isinstance(obj, torch.jit.ScriptFunction):
         return obj.qualified_name
 
     name = obj.__name__
