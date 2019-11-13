@@ -1788,3 +1788,29 @@ TEST_F(FunctionalTest, MarginRankingLoss) {
     ));
   }
 }
+
+TEST_F(FunctionalTest, ConvTranspose1d) {
+  int64_t batch_size = 1;
+  int64_t in_channels = 1;
+  int64_t out_channels = 1;
+  int64_t kernel_size = 8;
+  int groups = 1;
+  int64_t l_in_size = 2;
+  std::vector<int64_t> stride({4});
+  std::vector<int64_t> padding({0});
+  std::vector<int64_t> output_padding({0});
+  std::vector<int64_t> dilation({1});
+
+  auto input = torch::ones({batch_size, in_channels, l_in_size});
+  auto weight = torch::ones({in_channels, out_channels / groups, kernel_size});
+  auto bias = torch::ones({out_channels});
+  auto output = F::conv_transpose1d(
+      input, weight, bias, stride, padding, output_padding, groups, dilation);
+
+  int64_t expected_l_out_size = (l_in_size - 1) * stride[0] - 2 * padding[0] + dilation[0] * (kernel_size - 1) + output_padding[0] + 1;
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>({batch_size, out_channels, expected_l_out_size}));
+  ASSERT_TRUE(torch::allclose(output, torch::tensor({{{
+    2.f,  2.f,  2.f,  2.f,  3.f,  3.f,  3.f,  3.f,  2.f,  2.f,  2.f,  2.f
+  }}})));
+}
+

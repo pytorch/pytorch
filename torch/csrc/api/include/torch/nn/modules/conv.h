@@ -92,5 +92,55 @@ class TORCH_API Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
 /// module storage semantics.
 TORCH_MODULE(Conv3d);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~ ConvTranspose ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Base class for all (dimension-specialized) convolution transpose modules.
+template <size_t D, typename Derived>
+class TORCH_API ConvTransposeImplBase : public torch::nn::Cloneable<Derived> {
+ protected:
+  ExpandingArray<D> _output_padding(
+      const Tensor& input, const std::vector<int64_t>& output_size,
+      const ExpandingArray<D>& stride, const ExpandingArray<D>& padding,
+      const ExpandingArray<D>& kernel_size);
+
+  void reset_parameters();
+
+ public:
+  ConvTransposeImplBase(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<D> kernel_size)
+      : ConvTransposeImplBase(ConvTransposeOptionsBase<D>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit ConvTransposeImplBase(const ConvTransposeOptionsBase<D>& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `ConvTranspose{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ConvTransposeOptionsBase<D> options;
+
+  /// The learned kernel (or "weight").
+  Tensor weight;
+
+  /// The learned bias. Only defined if the `with_bias` option was true.
+  Tensor bias;
+};
+
+/// Applies the ConvTranspose1d function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose1d to
+/// learn about the exact behavior of this module.
+class TORCH_API ConvTranspose1dImpl : public ConvTransposeImplBase<1, ConvTranspose1dImpl> {
+ public:
+  using ConvTransposeImplBase<1, ConvTranspose1dImpl>::ConvTransposeImplBase;
+
+  Tensor forward(const Tensor& input,
+                 const std::vector<int64_t>& output_size = {});
+};
+
+TORCH_MODULE(ConvTranspose1d);
+
 } // namespace nn
 } // namespace torch

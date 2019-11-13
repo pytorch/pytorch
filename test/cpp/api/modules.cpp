@@ -95,6 +95,22 @@ TEST_F(ModulesTest, Conv3d) {
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
+TEST_F(ModulesTest, ConvTranspose1d) {
+  int64_t batch_size = 2;
+  int64_t in_channels = 3;
+  int64_t out_channels = 2;
+  int64_t l_in_size = 5;
+  std::vector<int64_t> kernel_size({8});
+  std::vector<int64_t> stride({2});
+  ConvTranspose1d model(ConvTranspose1dOptions(in_channels, out_channels, kernel_size).stride(stride).bias(true));
+  auto x = torch::randn({batch_size, in_channels, l_in_size}, torch::requires_grad());
+  auto y = model(x);
+
+  int64_t expected_l_out_size = (l_in_size - 1) * stride[0] - 2 * 0 /* padding */ + 1 /* dilation */ * (kernel_size[0] - 1) + 0 /* output_padding */ + 1;
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({batch_size, out_channels, expected_l_out_size}));
+}
+
 TEST_F(ModulesTest, MaxPool1d) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
@@ -2565,6 +2581,12 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
 }
+
+TEST_F(ModulesTest, PrettyPrintConvTranspose) {
+  ASSERT_EQ(
+      c10::str(ConvTranspose1d(3, 4, std::vector<int64_t>{5})),
+      "torch::nn::ConvTranspose1d(input_channels=3, output_channels=4, kernel_size=5, stride=1, padding=0, output_padding=0, groups=1, bias=true, dilation=1, padding_mode=zeros)");
+};
 
 TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(

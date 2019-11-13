@@ -12,7 +12,7 @@ torch.nn.ParameterDict|No|No
 torch.nn.Conv1d|No|No
 torch.nn.Conv2d|No|No
 torch.nn.Conv3d|No|No
-torch.nn.ConvTranspose1d|No|No
+torch.nn.ConvTranspose1d|Yes|No
 torch.nn.ConvTranspose2d|No|No
 torch.nn.ConvTranspose3d|No|No
 torch.nn.Unfold|Yes|No
