@@ -462,7 +462,7 @@ TEST_F(FunctionalTest, GridSample) {
 TEST_F(FunctionalTest, AffineGrid) {
   {
     // 2D affine.
-    auto theta = torch::arange(1, 13, torch::kDouble)
+    auto theta = torch::arange(1., 13)
                      .view(std::vector<int64_t>({2, 2, 3}));
     auto size = std::vector<int64_t>({2, 3, 2, 2});
     auto align_corners = true;
@@ -480,7 +480,7 @@ TEST_F(FunctionalTest, AffineGrid) {
   }
   {
     // 3D affine.
-    auto theta = torch::arange(1, 13, torch::kDouble)
+    auto theta = torch::arange(1., 13)
                      .view(std::vector<int64_t>({1, 3, 4}));
     auto size = std::vector<int64_t>({1, 1, 3, 2, 2});
     auto align_corners = true;
