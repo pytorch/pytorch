@@ -62,7 +62,6 @@ if is_available():
         )
         store, _, _ = next(rendezvous_iterator)
 
-        # Initialize Autograd.
         # Initialize autograd before RPC since _init_rpc guarantees all
         # processes sync via the store. If we initialize autograd after RPC,
         # there could be a race where some nodes might have initialized autograd

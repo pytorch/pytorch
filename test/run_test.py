@@ -54,6 +54,9 @@ TESTS = [
     'utils',
     'namedtuple_return_api',
     'jit_fuser',
+    'jit_simple',
+    'jit_legacy',
+    'jit_fuser_legacy',
     'tensorboard',
     'namedtensor',
     'type_promotion',
@@ -65,10 +68,12 @@ TESTS = [
 # skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
-        'rpc_fork',
-        'rpc_spawn',
-        'dist_autograd_fork',
-        'dist_autograd_spawn',
+        'distributed/rpc/process_group/rpc_fork',
+        'distributed/rpc/process_group/rpc_spawn',
+        'distributed/rpc/process_group/dist_autograd_fork',
+        'distributed/rpc/process_group/dist_autograd_spawn',
+        'distributed/rpc/process_group/dist_optimizer_fork',
+        'distributed/rpc/process_group/dist_optimizer_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -79,27 +84,30 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
-    'rpc_fork',
-    'rpc_spawn',
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
+    'distributed/rpc/process_group/rpc_fork',
+    'distributed/rpc/process_group/rpc_spawn',
+    'distributed/rpc/process_group/dist_autograd_fork',
+    'distributed/rpc/process_group/dist_autograd_spawn',
+    'distributed/rpc/process_group/dist_optimizer_fork',
+    'distributed/rpc/process_group/dist_optimizer_spawn',
 ]
 
 ROCM_BLACKLIST = [
     'cpp_extensions',
-    'distributed',
     'multiprocessing',
-    'rpc_fork',
-    'rpc_spawn',
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
+    'distributed/rpc/process_group/rpc_fork',
+    'distributed/rpc/process_group/rpc_spawn',
+    'distributed/rpc/process_group/dist_autograd_fork',
+    'distributed/rpc/process_group/dist_autograd_spawn',
+    'distributed/rpc/process_group/dist_optimizer_fork',
+    'distributed/rpc/process_group/dist_optimizer_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
-    if dist.is_mpi_available():
+    if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3'
         }
@@ -107,7 +115,7 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
-    if dist.is_gloo_available():
+    if not TEST_WITH_ROCM and dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
@@ -135,14 +143,12 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
-
     command = executable + argv
     return shell(command, test_directory)
 
 
 def test_cuda_primary_ctx(executable, test_module, test_directory, options):
     return run_test(executable, test_module, test_directory, options, '--subprocess')
-
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
@@ -427,6 +433,10 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
+        splits = test.rsplit("/")
+        relative_path = splits[:-1].join("/")
+        module_name =
+
         test_name = 'test_{}'.format(test)
         test_module = parse_test_module(test)
 
@@ -444,7 +454,6 @@ def main():
                 signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
                 message += ' Received signal: {}'.format(signal_name)
             raise RuntimeError(message)
-
     if options.coverage:
         shell(['coverage', 'combine'])
         shell(['coverage', 'html'])

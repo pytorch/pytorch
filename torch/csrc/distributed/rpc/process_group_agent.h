@@ -13,7 +13,7 @@ namespace distributed {
 namespace rpc {
 
 struct ProcessGroupRpcAgentOptions : public RpcAgentOptions {
-  ProcessGroupRpcAgentOptions() {}
+  ProcessGroupRpcAgentOptions = default;
   int numSendRecvThreads;
 };
 

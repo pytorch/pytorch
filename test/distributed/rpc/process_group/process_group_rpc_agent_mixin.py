@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-import torch.distributed.rpc as rpc
 
-
-class ProcessGroupRpcAgentTestFixture(object):
+class ProcessGroupRpcAgentMixin(object):
     @property
     def rpc_backend_name(self):
         return "PROCESS_GROUP"

@@ -63,7 +63,7 @@ def init_backend(backend, *args, **kwargs):
     return backend.value.init_backend_handler(*args, **kwargs)
 
 
-def process_group_construct_rpc_agent_options_handler(
+def _process_group_construct_rpc_agent_options_handler(
     rpc_timeout, num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS, **kwargs
 ):
     from . import ProcessGroupRpcAgentOptions
@@ -74,7 +74,7 @@ def process_group_construct_rpc_agent_options_handler(
     return rpc_agent_options
 
 
-def process_group_init_backend_handler(
+def _process_group_init_backend_handler(
     store, self_name, self_rank, world_size, rpc_agent_options
 ):
     from . import ProcessGroupAgent
@@ -119,6 +119,6 @@ def process_group_init_backend_handler(
 
 register_backend(
     "PROCESS_GROUP",
-    process_group_construct_rpc_agent_options_handler,
-    process_group_init_backend_handler,
+    _process_group_construct_rpc_agent_options_handler,
+    _process_group_init_backend_handler,
 )
