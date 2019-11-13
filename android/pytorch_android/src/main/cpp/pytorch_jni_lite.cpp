@@ -41,10 +41,10 @@ public:
 
   static void registerNatives() {
     registerHybrid({
-                       makeNativeMethod("initHybrid", PytorchJni::initHybrid),
-                       makeNativeMethod("forward", PytorchJni::forward),
-                       makeNativeMethod("runMethod", PytorchJni::runMethod),
-                   });
+      makeNativeMethod("initHybrid", PytorchJni::initHybrid),
+      makeNativeMethod("forward", PytorchJni::forward),
+      makeNativeMethod("runMethod", PytorchJni::runMethod),
+    });
   }
 
   facebook::jni::local_ref<JIValue> forward(
