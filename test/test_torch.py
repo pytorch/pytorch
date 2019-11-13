@@ -12653,12 +12653,12 @@ class TestTorchDeviceType(TestCase):
         nhwc = input_generator_fn(device)
         clone = transformation_fn(nhwc)
 
-        if default_is_preserve:
-            self.assertFalse(clone.is_contiguous())
-            self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
-        else:
-            self.assertTrue(clone.is_contiguous())
-            self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
+        #if default_is_preserve:
+            #self.assertFalse(clone.is_contiguous())
+            #self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
+        #else:
+        self.assertTrue(clone.is_contiguous())
+        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
         if compare_data:
             self.assertEqual(nhwc, clone)
 
