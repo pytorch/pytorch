@@ -11,7 +11,7 @@ std::unordered_map<std::string, std::string> quant_fusion_pattern_and_replacemen
   std::string conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant : Tensor, %b : Tensor? = quantized::conv_unpack(%packed_params)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
