@@ -141,26 +141,20 @@ template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
 template <typename T>
-std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef(
-    bool retainInContext) {
+std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
   // Don't add this OnwerRRef to the owners_ map yet by default, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
   // to another worker.
-  auto ownerRRef = std::shared_ptr<OwnerRRef<T>>(
+  return std::shared_ptr<OwnerRRef<T>>(
       new OwnerRRef<T>(getWorkerId(), genGloballyUniqueId()));
-  if (retainInContext) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    owners_[ownerRRef->rrefId()] = ownerRRef;
-  }
-  return ownerRRef;
 }
 
 template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
-    IValue>(bool retainInContext);
+    IValue>();
 
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
-    py::object>(bool retainInContext);
+    py::object>();
 
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
@@ -212,7 +206,8 @@ void RRefContext::notifyOwnerAndParentOfFork(
       // If the parent is the owner, this fork has already been added into the
       // forks_ map when the owner sends the message to the callee user. Hence,
       // it is not necessary to send another RREF_CHILD_ACCEPT or
-      // RREF_FORK_REQUEST back to the owner. See Note [Early Fork Registration].
+      // RREF_FORK_REQUEST back to the owner. See Note [Early Fork
+      // Registration].
     }
     return;
   }
@@ -288,6 +283,25 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
 
   fm->addCallback([](const Message& message) { handleException(message); });
 }
+
+template <typename T>
+void RRefContext::addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto& rrefId = rref->rrefId();
+  owners_[rrefId] = rref;
+  auto& rrefForks = forks_[rrefId];
+  TORCH_INTERNAL_ASSERT(
+      rrefForks.find(rrefId) == rrefForks.end(),
+      "Attempt to add self as fork twice ",
+      rrefId);
+  rrefForks.insert(rrefId);
+}
+
+template void RRefContext::addSelfAsFork<IValue>(
+    std::shared_ptr<OwnerRRef<IValue>>& rref);
+
+template void RRefContext::addSelfAsFork<py::object>(
+    std::shared_ptr<OwnerRRef<py::object>>& rref);
 
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
