@@ -1194,6 +1194,47 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
 
 }
 
+std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
+      const Tensor& data, const Tensor& batch_sizes, TensorList hx,
+      TensorList _params, bool has_biases,
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      c10::optional<ScalarType> dtype, bool use_dynamic) {
+  TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  if (at::cudnn_is_acceptable(data)) {
+    Tensor output, hy, cy;
+    lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
+            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+  }
+
+  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
+
+  PackedSequence input { data, batch_sizes };
+  std::tuple<PackedSequence, Tensor, Tensor> results;
+  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    if (use_dynamic) {
+      auto params = gather_quantized_params_dynamic(_params);
+      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    } else {
+      auto params = gather_quantized_params(_params);
+      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    }
+  } else {
+    auto params = gather_quantized_params_fp16(_params);
+    results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+        input, params, hx[0], hx[1], num_layers,
+        dropout_p, train, bidirectional);
+  }
+  auto & packed_output = std::get<0>(results);
+  return std::make_tuple(std::move(packed_output.data),
+                         std::move(std::get<1>(results)),
+                         std::move(std::get<2>(results)));
+}
+
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \
 return_type name( \
     const Tensor& input, \
