@@ -172,8 +172,7 @@ Reducer::Reducer(
       // if we always put it on CPU.
       options = options.device(replicas_[i][0].device());
       options = options.dtype(at::kInt);
-      local_used_maps_[i] =
-          torch::autograd::make_variable(at::empty({variable_count}, options));
+      local_used_maps_[i] = at::empty({variable_count}, options);
     }
   }
 }
