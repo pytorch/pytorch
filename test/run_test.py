@@ -376,7 +376,7 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
     tests_copy = selected_tests[:]
     for exclude_test in exclude_list:
         for test in tests_copy:
-            if test.startswith(exclude_test):
+            if test == exclude_test:
                 if exclude_message is not None:
                     print_to_stderr('Excluding {} {}'.format(test, exclude_message))
                 selected_tests.remove(test)
@@ -436,20 +436,20 @@ def main():
         splits = test.rsplit("/", 1)
         if len(splits) > 1:
             relative_path, test = splits
-            current_test_directory = os.path.join(test_directory, relative_path)
         else:
-            current_test_directory = test_directory
-        test_name = 'test_{}'.format(test)
+            relative_path = ""
+        # path_to_module is like "distributed/rpc/process_group/test_rpc_fork".
+        path_to_module = os.path.join(relative_path, 'test_{}'.format(test))
         test_module = parse_test_module(test)
 
         # Printing the date here can help diagnose which tests are slow
-        print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
+        print_to_stderr('Running {} ... [{}]'.format(path_to_module, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(executable, test_name, current_test_directory, options)
+        return_code = handler(executable, path_to_module, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
-            message = '{} failed!'.format(test_name)
+            message = '{} failed!'.format(path_to_module)
             if return_code < 0:
                 # subprocess.Popen returns the child process' exit signal as
                 # return code -N, where N is the signal number.
