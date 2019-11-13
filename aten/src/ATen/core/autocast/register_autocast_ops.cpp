@@ -6,14 +6,29 @@ namespace at {
 namespace autocast {
 
 namespace {
-// Imitate Apex and cache some of the casts for performance (see caching_caster below).
-// The key type is a proxy for a Tensor uuid.
-// The value type is Tensor to make sure cached Tensors stay alive.
-thread_local std::unordered_map<TensorImpl*, Tensor> cached_casts;
+// Imitate Apex and cache some of the casts to streamline parameter reuse.
+// Our heuristic is to cache FP16 casts of FP32 model weights (see caching_caster below).
+//
+// After discussion with @ezyang, the cache uses the following structure:
+// The key is the source tensor's TensorImpl*, a proxy for a Tensor uuid that's unchanged across shallow copies.
+// The value is a tuple of two Tensors:  the source tensor and the casted tensor.  Both are stored as full
+// Tensors to ensure their TensorImpls stay alive if other references to them die.
+//
+// We must keep the source tensor alive because if the source tensor were deallocated, another random Tensor
+// could be allocated whose TensorImpl* happened to have the same value.  This TensorImpl* would then mistakenly
+// hit in cache, which would be a nasty bug (rare, intermittent, unpredictable).
+//
+// Since our heuristic caches casts for model weights only, the source Tensors should always stay alive anyway,
+// because the model stores them explicitly.  So in the common case, storing a live reference to the
+// source tensor in cached_casts is unnecessary but also does no harm (does not increase memory use).
+//
+// When the autocast context manager exits, which should occur at the end of each forward pass, it calls
+// clear_cache to ensure cached Tensors don't leak outside the autocasting region.
+thread_local std::unordered_map<TensorImpl*, std::tuple<Tensor, Tensor>> cached_casts;
 }
 
-std::unordered_map<TensorImpl*, Tensor> & get_cache() {
-  return cached_casts;
+void clear_cache() {
+  cached_casts.clear();
 }
 
 enum class CastPolicy : uint8_t {
@@ -68,7 +83,7 @@ at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
 // Overload to catch Tensor args, and cast if necessary.
 Tensor caching_caster(at::ScalarType to_type, const Tensor & arg) {
   if (arg.is_floating_point() && arg.scalar_type() != to_type) {
-    // Heuristic:  Do what Apex does, and cache FP16 casts of FP32 leaves.
+    // Heuristic:  Do what Apex does, and cache FP16 casts of FP32 model weights (leaves).
     bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat);
     // If arg is a variable, explicitly check is_leaf().  Non-variable Tensors do not permit an is_leaf() call,
     // so if arg is not a variable, assume it is a frozen leaf.
@@ -76,12 +91,12 @@ Tensor caching_caster(at::ScalarType to_type, const Tensor & arg) {
       can_try_cache = (can_try_cache || arg.is_leaf());
     }
     if (can_try_cache) {
-      auto it = cached_casts.find(arg.unsafeGetTensorImpl()); // Use the owned TensorImpl* as a Tensor's uuid.
+      auto it = cached_casts.find(arg.unsafeGetTensorImpl()); // See cached_casts declaration for detailed strategy.
       if (it != cached_casts.end()) {
-        return it->second; // Return the cached value.
+        return std::get<1>(it->second); // Return the cached cast.
       } else {
         auto casted_arg = arg.to(to_type);
-        cached_casts.emplace(arg.unsafeGetTensorImpl(), casted_arg);
+        cached_casts.emplace(arg.unsafeGetTensorImpl(), std::tuple<Tensor, Tensor>{arg, casted_arg});
         return casted_arg;
       }
     } else {

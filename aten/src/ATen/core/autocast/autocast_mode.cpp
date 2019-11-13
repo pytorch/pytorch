@@ -4,7 +4,6 @@
 
 #include <stdexcept>
 #include <memory>
-#include <unordered_map>
 
 namespace at {
 namespace autocast {
@@ -34,10 +33,10 @@ void AutocastMode::set_enabled(bool enabled) {
 
 // I'd like the cache to reside in the same .cpp file that actually does the casting, for quicker access.
 // Clearing the cache is something that happens relatively rarely.
-std::unordered_map<TensorImpl*, Tensor> & get_cache();
+void clear_cache();
 
 void AutocastMode::clear_cache() {
-  at::autocast::get_cache().clear();
+  at::autocast::clear_cache();
 }
 
 #else
