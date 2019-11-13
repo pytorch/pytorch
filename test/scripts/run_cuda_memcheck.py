@@ -136,7 +136,7 @@ async def run1(coroutine_id):
         progressbar.update(1)
 
 async def main():
-    tasks = [asyncio.create_task(run1(i)) for i in range(args.nproc)]
+    tasks = [asyncio.ensure_future(run1(i)) for i in range(args.nproc)]
     for t in tasks:
         await t
 
