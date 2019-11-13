@@ -168,7 +168,6 @@ if (USE_CUDA)
       ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
