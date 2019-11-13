@@ -502,6 +502,7 @@ _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
 _(aten, bitwise_not) \
+_(aten, bitwise_xor) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
