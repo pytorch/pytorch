@@ -21,7 +21,7 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   // Retrieve original SourceRange, if present.
   if (auto orig_source_range = findSourceRangeThatGenerated()) {
     orig_source_range->highlight(out);
-    return;
+    out << "Serialized as";
   }
   const std::string& str = source_->text();
   if (size() == str.size()) {
