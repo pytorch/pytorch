@@ -15,7 +15,6 @@ import threading
 import itertools
 from torch._six import queue, string_classes
 
-
 get_worker_info = _utils.worker.get_worker_info
 
 # This function used to be defined in this file. However, it was moved to
@@ -197,26 +196,27 @@ class DataLoader(object):
                                  'drop_last')
             batch_size = None
             drop_last = False
-        elif batch_size is None:
-            # no auto_collation
-            if shuffle or drop_last:
-                raise ValueError('batch_size=None option disables auto-batching '
-                                 'and is mutually exclusive with '
-                                 'shuffle, and drop_last')
+        else:
+            if sampler is None:  # give default samplers
+                if self._dataset_kind == _DatasetKind.Iterable:
+                    # See NOTE [ Custom Samplers and IterableDataset ]
+                    sampler = _InfiniteConstantSampler()
+                else:  # map-style
+                    if shuffle:
+                        sampler = RandomSampler(dataset)
+                    else:
+                        sampler = SequentialSampler(dataset)
 
-        if sampler is None:  # give default samplers
-            if self._dataset_kind == _DatasetKind.Iterable:
-                # See NOTE [ Custom Samplers and IterableDataset ]
-                sampler = _InfiniteConstantSampler()
-            else:  # map-style
-                if shuffle:
-                    sampler = RandomSampler(dataset)
-                else:
-                    sampler = SequentialSampler(dataset)
+            if batch_size is None:
+                # no auto_collation
+                if shuffle or drop_last:
+                    raise ValueError('batch_size=None option disables auto-batching '
+                                     'and is mutually exclusive with '
+                                     'shuffle, and drop_last')
 
-        if batch_size is not None and batch_sampler is None:
-            # auto_collation without custom batch_sampler
-            batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+            else:
+                # auto_collation without custom batch_sampler
+                batch_sampler = BatchSampler(sampler, batch_size, drop_last)
 
         self.batch_size = batch_size
         self.drop_last = drop_last
