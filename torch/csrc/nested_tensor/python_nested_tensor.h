@@ -14,6 +14,9 @@
 #include <torch/include/torch/csrc/Exceptions.h>
 #include <typeinfo>
 
+// TODO:
+// - HANDLE_TH_ERRORS
+
 namespace torch {
 namespace nested_tensor {
 
@@ -198,18 +201,9 @@ struct TORCH_API _ListNestedTensor {
     }
     return depth;
   }
-  // py::object get_dtype() {
-  //   return py::reinterpret_borrow<py::object>(torch::autograd::utils::wrap(
-  //       torch::getDtype(_first_tensor.scalar_type())));
-  // }
-  // py::object get_layout() {
-  //   return py::reinterpret_borrow<py::object>(torch::autograd::utils::wrap(
-  //       torch::getLayout(_first_tensor.type().backend())));
-  // }
-  // py::object get_device() {
-  //   return py::reinterpret_borrow<py::object>(
-  //       THPDevice_New(_first_tensor.device()));
-  // }
+  at::ScalarType scalar_type() { return _first_variable.scalar_type(); }
+  at::Backend backend() { return _first_variable.type().backend(); }
+  at::Device device() { return _first_variable.device(); }
   bool requires_grad() { return _first_variable.requires_grad(); }
   int64_t dim() { return _first_variable.dim() + nested_dim(); }
   int64_t numel() { return _numel(_structure); }

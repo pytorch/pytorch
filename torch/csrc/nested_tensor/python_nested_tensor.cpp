@@ -184,21 +184,6 @@ static PyObject *_ListNestedTensorVariable_pynew(PyTypeObject *type,
       type, std::move(_ListNestedTensor(_get_structure(listObj))));
 }
 
-// inline Tensor dispatch_sigmoid(const Tensor & self, Tensor out) {
-//
-//   AutoNoGIL no_gil;
-//   return at::sigmoid_out(out, self);
-// }
-//
-// static PyObject * THPVariable_sigmoid(PyObject* self_, PyObject* args)
-// {
-//   HANDLE_TH_ERRORS
-//
-//   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-//   return wrap(dispatch_sigmoid(self));
-//   END_HANDLE_TH_ERRORS
-// }
-//
 PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
   return _ListNestedTensorVariable_NewWithVar(
       (PyTypeObject *)_ListNestedTensorVariableClass, std::move(var));
@@ -237,13 +222,49 @@ static PyObject *_ListNestedTensorVariable_requires_grad_(PyObject *self_,
   }
 }
 
+static PyObject *
+_ListNestedTensorVariable_dtype(_ListNestedTensorVariable *self, void *unused) {
+  HANDLE_TH_ERRORS
+  auto &self_ = self->cdata;
+  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *
+_ListNestedTensorVariable_layout(_ListNestedTensorVariable *self,
+                                 void *unused) {
+  HANDLE_TH_ERRORS
+  auto &self_ = self->cdata;
+  return torch::autograd::utils::wrap(torch::getLayout(self_.backend()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *
+_ListNestedTensorVariable_device(_ListNestedTensorVariable *self,
+                                 void *unused) {
+  HANDLE_TH_ERRORS
+  auto &self_ = self->cdata;
+  return THPDevice_New(self_.device());
+  END_HANDLE_TH_ERRORS
+}
+
+static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
+    {"dtype", (getter)_ListNestedTensorVariable_dtype, nullptr, nullptr,
+     nullptr},
+    {"layout", (getter)_ListNestedTensorVariable_layout, nullptr, nullptr,
+     nullptr},
+    {"device", (getter)_ListNestedTensorVariable_device, nullptr, nullptr,
+     nullptr},
+    {"grad", (getter)_ListNestedTensorVariable_grad, nullptr, nullptr,
+     nullptr},
+    {nullptr}
+};
+
 static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {"element_size", (PyCFunction)_ListNestedTensorVariable_element_size,
      METH_NOARGS, "Return element size."},
     {"pin_memory", (PyCFunction)_ListNestedTensorVariable_pin_memory,
      METH_NOARGS, "Pins memory."},
-    {"grad", (PyCFunction)_ListNestedTensorVariable_grad, METH_NOARGS,
-     "Returns grad."},
     {"detach", (PyCFunction)_ListNestedTensorVariable_detach, METH_NOARGS,
      "Detaches and returns."},
     {"requires_grad_", (PyCFunction)_ListNestedTensorVariable_requires_grad_,
@@ -295,7 +316,7 @@ PyTypeObject _ListNestedTensorVariableType = {
     nullptr,                                       /* tp_iternext */
     _ListNestedTensorVariable_methods,             /* tp_methods */
     nullptr,                                       /* tp_members */
-    nullptr,                                       /* tp_getset */
+    _ListNestedTensorVariable_properties,          /* tp_getset */
     nullptr,                                       /* tp_base */
     nullptr,                                       /* tp_dict */
     nullptr,                                       /* tp_descr_get */
