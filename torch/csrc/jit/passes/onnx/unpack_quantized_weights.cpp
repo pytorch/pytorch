@@ -131,8 +131,8 @@ Node* CreateQuantizedBias(
 void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, at::Tensor>& paramsDict,
-    std::string pattern,
-    std::string unpack_fn) {
+    const std::string& pattern,
+    const std::string& unpack_fn) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
@@ -166,23 +166,18 @@ void unpackQuantizedWeightsHelper(
       unpacked_weight.permute({0, 2, 3, 1});
     }
     */
+    // Remove packed_params
+    qlinear_node->removeInput(1);
+
     // Convert from int8 to uint8
     int8_t* inp_data = (int8_t*)unpacked_weight.data_ptr<c10::qint8>();
     auto weight_zp = unpacked_weight.q_zero_point() + 128;
     auto wt_numel = unpacked_weight.numel();
-    uint8_t* caffe2_w_data =
-        static_cast<uint8_t*>(malloc(sizeof(uint8_t) * wt_numel));
-    for (int i = 0; i < wt_numel; ++i) {
-      caffe2_w_data[i] = inp_data[i] + 128;
-    }
-    // Remove packed_params
-    qlinear_node->removeInput(1);
 
     // Create caffe2::Int8GivenTensorFill node
-    graph->setInsertPoint(qlinear_node);
     std::string w_data;
-    for (int i = 0; i < wt_numel; ++i) {
-      w_data = w_data + static_cast<char>(caffe2_w_data[i]);
+    for (int64_t i = 0; i < wt_numel; ++i) {
+      w_data += static_cast<char>(inp_data[i] + 128);
     }
 
     Node* c2_weight = CreateQuantizedWeights(
@@ -191,6 +186,7 @@ void unpackQuantizedWeightsHelper(
         unpacked_weight.sizes().vec(),
         unpacked_weight.q_scale(),
         weight_zp);
+    graph->setInsertPoint(qlinear_node);
     c2_weight->insertBefore(qlinear_node);
     qlinear_node->insertInput(1, c2_weight->output());
 
@@ -218,8 +214,9 @@ void unpackQuantizedWeightsHelper(
         original_bias, weight_scale * input_scale, 0, at::kQInt32);
 
     std::vector<int64_t> bias_values;
+    bias_values.reserve(q_bias.numel());
     auto bias_data = (int32_t*)q_bias.data_ptr<c10::qint32>();
-    for (int i = 0; i < q_bias.numel(); ++i) {
+    for (int64_t i = 0; i < q_bias.numel(); ++i) {
       bias_values.push_back(bias_data[i]);
     }
     Node* c2_bias = CreateQuantizedBias(
@@ -235,8 +232,6 @@ void unpackQuantizedWeightsHelper(
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
     eraseUnusedValuesFromMap(valsToParamsMap);
 
-    // Delete original node??
-    // packed_node->destroy();
   }
 }
 void UnpackQuantizedWeights(
