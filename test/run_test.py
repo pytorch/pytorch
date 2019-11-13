@@ -433,17 +433,19 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
-        splits = test.rsplit("/")
-        relative_path = splits[:-1].join("/")
-        module_name =
-
+        splits = test.rsplit("/", 1)
+        if len(splits) > 1:
+            relative_path, test = splits
+            current_test_directory = os.path.join(test_directory, relative_path)
+        else:
+            current_test_directory = test_directory
         test_name = 'test_{}'.format(test)
         test_module = parse_test_module(test)
 
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(executable, test_name, test_directory, options)
+        return_code = handler(executable, test_name, current_test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
