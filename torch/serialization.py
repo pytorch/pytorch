@@ -196,7 +196,11 @@ class _open_file(_opener):
         self.file_like.close()
 
 
-class _open_buffer(_opener):
+class _open_buffer_reader(_opener):
+    pass
+
+
+class _open_buffer_writer(_opener):
     def __exit__(self, *args):
         self.file_like.flush()
 
@@ -205,7 +209,13 @@ def _open_file_like(name_or_buffer, mode):
     if _is_path(name_or_buffer):
         return _open_file(name_or_buffer, mode)
     else:
-        return _open_buffer(name_or_buffer)
+        if 'w' in mode:
+            return _open_buffer_writer(name_or_buffer)
+        elif 'r' in mode:
+            return _open_buffer_reader(name_or_buffer)
+        else:
+            raise RuntimeError("Expected 'r' or 'w' in mode but got {}".format(mode))
+
 
 
 class _open_zipfile_reader(_opener):
