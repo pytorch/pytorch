@@ -29,6 +29,7 @@ def merge_dicts(*dicts):
 
 common_args = parse_kwargs("""
     input (Tensor): the input tensor.
+    generator (:class:`torch.Generator`, optional): a pseudorandom generator for sampling
     out (Tensor, optional): the output tensor.
 """)
 
@@ -705,6 +706,7 @@ point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
+    {generator}
     {out}
 
 Example::
@@ -4244,7 +4246,7 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint(low=0, high, size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -4259,6 +4261,7 @@ Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
+    {generator}
     {out}
     {dtype}
     {layout}
