@@ -1119,8 +1119,10 @@ graph(%x : Tensor,
                       if x.startswith('_observer_')])
         assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
 
-    @_tmp_donotuse_dont_inline_everything
-    def test_insert_quant_dequant(self):
+    @given(
+        is_per_channel=st.booleans()
+    )
+    def test_insert_quant_dequant(self, is_per_channel):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1129,40 +1131,37 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.conv(x)
 
-        for is_per_channel in [True, False]:
-            m = torch.jit.script(M())
-            observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
-                if is_per_channel else default_observer
-            qconfig = QConfig(activation=observer, weight=observer)
-            qconfig_dict = {
-                '': script_qconfig(qconfig)
-            }
-            # Since we didn't remove observer modules yet, we have to copy, otherwise
-            # this call will change the ClassType of M
-            # TODO: remove after remove module PR is landed
-            m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
-            data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+        m = torch.jit.script(M())
+        observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
+            if is_per_channel else default_observer
+        qconfig = QConfig(activation=observer, weight=observer)
+        qconfig_dict = {
+            '': script_qconfig(qconfig)
+        }
+        # TODO: debug why inplace doesn't work
+        m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
+        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
-            get_forward(m._c)(data)
-            torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
-            assert len(m._modules._c.items()) == 1, \
-                'Expected to have single submodule of conv'
+        get_forward(m._c)(data)
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False)
+        assert len(m._modules._c.items()) == 1, \
+            'Expected to have single submodule of conv'
 
-            get_forward(m._c)(data)
-            quant_func = "aten::quantize_per_channel" if is_per_channel \
-                else "aten::quantize_per_tensor"
-            FileCheck().check_not(quant_func) \
-                       .check("prim::CallMethod[name=\"forward\"]") \
-                       .check_not(quant_func) \
-                       .check("return") \
-                       .run(str(get_forward_graph(m._c)))
-            FileCheck().check(quant_func) \
-                       .check_next("aten::dequantize") \
-                       .check("aten::conv2d") \
-                       .check(quant_func) \
-                       .check_next("aten::dequantize") \
-                       .check("return") \
-                       .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
+        get_forward(m._c)(data)
+        quant_func = "aten::quantize_per_channel" if is_per_channel \
+            else "aten::quantize_per_tensor"
+        FileCheck().check_not(quant_func) \
+                   .check("prim::CallMethod[name=\"forward\"]") \
+                   .check_not(quant_func) \
+                   .check("return") \
+                   .run(str(get_forward_graph(m._c)))
+        FileCheck().check(quant_func) \
+                   .check_next("aten::dequantize") \
+                   .check("aten::conv2d") \
+                   .check(quant_func) \
+                   .check_next("aten::dequantize") \
+                   .check("return") \
+                   .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_prepack_unpack(self):
