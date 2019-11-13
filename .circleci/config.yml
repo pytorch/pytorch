@@ -647,8 +647,10 @@ jobs:
             POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
             for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
               if [[ -e "$JH/include/jni.h" ]] ; then
+                echo "Found jni.h under $JH"
                 echo "export JAVA_HOME=$JH" >> /env
                 echo "export BUILD_JNI=ON" >> /env
+                break
               fi
             done
     - run:
