@@ -381,7 +381,7 @@ class Module(object):
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
             memory_format (:class:`torch.memory_format`): the desired memory
-                format  for all parametes and buffers in this module (keyword
+                format for 4D parameters and buffers in this module (keyword
                 only argument)
 
         Returns:
@@ -417,23 +417,17 @@ class Module(object):
 
         """
 
-        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
                 raise TypeError('nn.Module.to only accepts floating point '
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
-        # memory_format handled separately as we can't call `to` operator with
-        # only memory_format, and we want to keep ability to convert layouts,
-        # without converting dtype or device
-        convert_to_format = kwargs.get('memory_format', None)
-
         def convert(t):
-            result = t
             if convert_to_format is not None and t.dim() == 4:
-                result = t.contiguous(memory_format=convert_to_format)
-            return result.to(device, dtype if t.is_floating_point() else None, non_blocking)
+                return t.to(device, dtype if t.is_floating_point() else None, non_blocking, memory_format=convert_to_format)
+            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
 
