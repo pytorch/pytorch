@@ -21,8 +21,14 @@ from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 VALUE_FUTURE = concurrent.futures.Future()
 
 
-def stub_start_rpc_backend_handler(
-    store, self_name, self_rank, worker_name_to_id, *args, **kwargs
+def _stub_construct_rpc_agent_options_handler(
+    **kwargs
+):
+    return mock.Mock()  # RpcAgentOptions.
+
+
+def _stub_init_rpc_backend_handler(
+    store, self_name, self_rank, world_size, rpc_agent_options
 ):
     return mock.Mock()  # RpcAgent.
 
@@ -231,14 +237,18 @@ class RpcTest(RpcAgentTestFixture):
         backend_name = "stub_backend"
 
         backend = rpc.backend_registry.register_backend(
-            backend_name, stub_start_rpc_backend_handler
+            backend_name,
+            _stub_construct_rpc_agent_options_handler,
+            _stub_init_rpc_backend_handler,
         )
 
         with self.assertRaisesRegex(
             RuntimeError, "^RPC backend .+: already registered$"
         ):
             rpc.backend_registry.register_backend(
-                backend_name, stub_start_rpc_backend_handler
+                backend_name,
+                _stub_construct_rpc_agent_options_handler,
+                _stub_init_rpc_backend_handler,
             )
 
         rpc.init_model_parallel(
@@ -246,7 +256,8 @@ class RpcTest(RpcAgentTestFixture):
             backend=backend,
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
     @dist_init(setup_model_parallel=False)
@@ -256,7 +267,8 @@ class RpcTest(RpcAgentTestFixture):
             backend=self.rpc_backend,
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
         # This is for the below `dist.barrier`.
@@ -278,7 +290,8 @@ class RpcTest(RpcAgentTestFixture):
                 backend=self.rpc_backend,
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
         rpc.join_rpc()
 
@@ -293,8 +306,8 @@ class RpcTest(RpcAgentTestFixture):
                 store=store,
                 self_name="abc*",
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         base_file_name = self.file_name
@@ -310,8 +323,8 @@ class RpcTest(RpcAgentTestFixture):
                 store=store,
                 self_name=" ",
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         # Use a different file path for FileStore to avoid rendezvous mismatch.
@@ -325,8 +338,8 @@ class RpcTest(RpcAgentTestFixture):
                 store=store,
                 self_name="",
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         # Use a different file path for FileStore to avoid rendezvous mismatch.
@@ -342,8 +355,8 @@ class RpcTest(RpcAgentTestFixture):
                 store=store,
                 self_name="".join(["a" for i in range(500)]),
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         from torch.distributed.rpc.api import _agent
@@ -452,7 +465,8 @@ class RpcTest(RpcAgentTestFixture):
             backend=self.rpc_backend,
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
         n = self.rank + 1
@@ -1001,13 +1015,19 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init(setup_model_parallel=False)
     def test_set_rpc_timeout(self):
         timeout = timedelta(seconds=1)
+
+        # A new `RpcAgentOptions` is constructed
+        # when accessing `self.rpc_agent_options`.
+        rpc_agent_options = self.rpc_agent_options
+        rpc_agent_options.rpc_timeout = timeout
+
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
             backend=self.rpc_backend,
             init_method=self.init_method,
             self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
-            rpc_timeout=timeout
+            world_size=self.world_size,
+            rpc_agent_options=rpc_agent_options,
         )
         set_timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, set_timeout)

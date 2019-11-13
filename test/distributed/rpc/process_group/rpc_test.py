@@ -40,7 +40,8 @@ class ProcessGroupRpcTest(ProcessGroupRpcAgentMixin, RpcTest):
                 store=store,
                 self_name="duplicate_name",
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
         rpc.join_rpc()
 

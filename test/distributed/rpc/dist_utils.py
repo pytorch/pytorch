@@ -88,8 +88,8 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         return_value = old_test_method(self, *arg, **kwargs)

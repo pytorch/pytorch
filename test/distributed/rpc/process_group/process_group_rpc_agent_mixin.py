@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import torch.distributed.rpc as rpc
+
 
 class ProcessGroupRpcAgentMixin(object):
     @property

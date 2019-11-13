@@ -13,7 +13,7 @@ namespace distributed {
 namespace rpc {
 
 struct RpcAgentOptions {
-  RpcAgentOptions = default;
+  RpcAgentOptions() = default;
   std::chrono::milliseconds rpcTimeout;
 };
 
