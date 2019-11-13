@@ -531,6 +531,13 @@ Functional interface
 .. autofunction:: linear
 .. autofunction:: conv2d
 .. autofunction:: max_pool2d
+.. autofunction:: adaptive_avg_pool2d
+.. autofunction:: avg_pool2d
+.. autofunction:: interpolate
+.. autofunction:: upsample
+.. autofunction:: upsample_bilinear
+.. autofunction:: upsample_nearest
+
 
 .. automodule:: torch.nn.quantized
 
