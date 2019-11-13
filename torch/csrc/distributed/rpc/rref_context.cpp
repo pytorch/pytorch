@@ -204,10 +204,16 @@ void RRefContext::notifyOwnerAndParentOfFork(
     worker_id_t parent,
     const std::shared_ptr<RRef>& rref) {
   if (parent == rref->owner()) {
-    // If the parent is the owner, this fork has already been added into the
-    // forks_ map when the owner sends the message to the callee user. Hence,
-    // it is not necessary to send another RREF_CHILD_ACCEPT or
-    // RREF_FORK_REQUEST back to the owner. See Note [Early Fork Registration].
+    if (parent == agent_->getWorkerInfo().id_) {
+      // Owner sending RRef to self, remove the forkId as it was added during
+      // pickling
+      delForkOfOwner(rref->rrefId(), forkId);
+    } else {
+      // If the parent is the owner, this fork has already been added into the
+      // forks_ map when the owner sends the message to the callee user. Hence,
+      // it is not necessary to send another RREF_CHILD_ACCEPT or
+      // RREF_FORK_REQUEST back to the owner. See Note [Early Fork Registration].
+    }
     return;
   }
 
