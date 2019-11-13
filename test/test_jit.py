@@ -425,26 +425,6 @@ class TestJit(JitTestCase):
             with self.assertRaisesRegex(pickle.PickleError, "not supported"):
                 torch.save(FooToPickle(), fname)
 
-    def test_single_tuple_trace(self):
-        x = torch.tensor(2.)
-
-        def f2(x):
-            return (x,)
-        jit_f2 = torch.jit.trace(f2, x)
-        assert f2(x) == jit_f2(x)  # fails
-
-    def test_trace_namedtuple(self):
-        Point = namedtuple('point', ['x', 'y'])
-
-        def f(p):
-            if type(p) is tuple:
-                p = Point(*p)
-            return p.x + p.y
-
-        p = Point(torch.randn(1), torch.randn(1))
-        traced = torch.jit.trace(f, (p,))
-        self.assertEqual(f(p), traced(p))
-
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
         class MyModule(torch.jit.ScriptModule):
@@ -1933,6 +1913,87 @@ graph(%Ra, %Rb):
             .run(str(traced_fn.graph))
         self.assertExportImport(traced_fn.graph, (x, y))
 
+    def test_trace_single_tuple(self):
+        x = torch.tensor(2.)
+
+        def f2(x):
+            return (x,)
+        jit_f2 = torch.jit.trace(f2, x)
+        assert f2(x) == jit_f2(x)  # fails
+
+    def test_trace_named_tuple_input(self):
+        MyTuple = namedtuple('MyTuple', ['x', 'y'])
+
+        class NamedTupleInput(nn.Module):
+            def __init__(self):
+                super(NamedTupleInput, self).__init__()
+
+            def forward(self, my):
+                return my.x + my.y
+
+        my_tuple = MyTuple(torch.randn(2, 3), torch.randn(2, 3))
+        model = NamedTupleInput()
+        self.checkTrace(model, (my_tuple,))
+
+    def test_trace_named_tuple_input_output(self):
+        MyTuple = namedtuple('MyTuple', ['x', 'y'])
+
+        def trace_named_tuple(my):
+            return my
+
+        my_tuple = MyTuple(torch.randn(2, 3), torch.randn(2, 3))
+        traced_fn = torch.jit.trace(trace_named_tuple, (my_tuple,))
+        self.assertEqual(traced_fn(my_tuple), my_tuple)
+        FileCheck().check("NamedTuple(").check("TupleUnpack").run(str(traced_fn.graph))
+
+    def test_trace_named_tuple_construction(self):
+        MyTuple = namedtuple('MyTuple', ['x', 'y'])
+
+        def trace_named_tuple_construct(a, b):
+            return MyTuple(a, b)
+
+        a = torch.randn(2, 3)
+        b = torch.randn(2, 3)
+        self.checkTrace(trace_named_tuple_construct, (a, b))
+
+    def test_trace_nested_named_tuple(self):
+        MyTuple = namedtuple('MyTuple', ['x', 'y'])
+        MyNestTuple = namedtuple("MyNestTuple", ['a', 'b'])
+        MyTuple.__annotations__ = {"x": MyNestTuple, "y": torch.Tensor}
+
+        def trace_named_tuple(my):
+            return MyNestTuple(my.x.a, my.x.b)
+
+        my_tuple = MyTuple(MyNestTuple(torch.randn(2, 3), torch.randn(2, 3)), torch.randn(2, 3))
+        traced_fn = torch.jit.trace(trace_named_tuple, (my_tuple,))
+        self.assertEqual(traced_fn(my_tuple), my_tuple.x)
+        FileCheck().check("NamedTuple(").check("NamedTuple(").check("TupleUnpack").run(str(traced_fn.graph))
+
+    def test_trace_named_tuple_list_dict(self):
+        MyTuple = namedtuple('MyTuple', ['x', 'y'])
+        MyTuple.__annotations__ = {"x": List[torch.Tensor], "y": Dict[str, torch.Tensor]}
+
+        def trace_named_tuple(my):
+            return (my.x[0], my.y["dk"])
+
+        my_tuple = MyTuple([torch.randn(2, 3), torch.randn(2, 3)], {"dk": torch.randn(2, 3)})
+        traced_fn = torch.jit.trace(trace_named_tuple, (my_tuple,))
+        self.assertEqual(traced_fn(my_tuple), (my_tuple.x[0], my_tuple.y["dk"]))
+        FileCheck().check("NamedTuple(").check("Dict(").check("ListUnpack").run(str(traced_fn.graph))
+
+    def test_trace_named_tuple_non_tensor(self):
+        MyTuple = namedtuple('MyTuple', ['x', 'y'])
+        MyTuple.__annotations__ = {"x": int, "y": torch.Tensor}
+
+        def trace_named_tuple(my):
+            return my
+
+        my_tuple = MyTuple(2, torch.randn(2, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "Only Tensors and "):
+            traced_fn = torch.jit.trace(trace_named_tuple, (my_tuple,))
+
+
     def test_trace_random(self):
         def f(mean, std):
             return torch.normal(mean, std)
@@ -3158,30 +3219,6 @@ graph(%Ra, %Rb):
         x = (torch.rand(3), torch.rand(3))
         model = Bar()
         self.checkTrace(model, x)
-
-    def test_trace_named_tuple(self):
-        MyTuple = namedtuple('MyTuple', ['a', 'b'])
-
-        class NamedTupleInput(nn.Module):
-            def __init__(self):
-                super(NamedTupleInput, self).__init__()
-
-            def forward(self, my):
-                return my.a + my.b
-
-        def test_traced_named_tuple_input_output(my):
-            return my
-
-        def test_trace_named_tuple_construction(a, b):
-            return MyTuple(a, b)
-
-        a = torch.randn(2, 3)
-        b = torch.randn(2, 3)
-        x = MyTuple(a, b)
-        model = NamedTupleInput()
-        self.checkTrace(model, (x,))
-        self.checkTrace(test_traced_named_tuple_input_output, (x,))
-        self.checkTrace(test_trace_named_tuple_construction, (a, b))
 
     def test_trace_variable_instantiation(self):
         def random_foo(x):
