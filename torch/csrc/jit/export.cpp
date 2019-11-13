@@ -13,7 +13,6 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/instruction.h>
-#include <torch/csrc/jit/passes/inliner.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -197,6 +196,12 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT64;
     case at::kBool:
       return onnx::TensorProto_DataType_BOOL;
+    case at::kQInt8:
+      return onnx::TensorProto_DataType_INT8;
+    case at::kQUInt8:
+      return onnx::TensorProto_DataType_UINT8;
+    case at::kQInt32:
+      return onnx::TensorProto_DataType_INT32;
     default:
       AT_ERROR("unexpected tensor scalar type");
   }
@@ -511,8 +516,15 @@ void GraphEncoder::EncodeTensor(
     tensor_proto->add_dims(d);
   }
   tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
+  at::Tensor t;
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  auto t = tensor.contiguous().cpu();
+  // Temporary solution as aten::empty does not work on quantized tensor
+  if (tensor.is_quantized()) {
+    t = tensor.contiguous();
+  }
+  else {
+    t = tensor.contiguous().cpu();
+  }
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
   // the contiguous data into the protobuf itself
@@ -648,9 +660,7 @@ class ScriptModuleSerializer {
     std::vector<c10::IValue> elements;
     for (const auto& method : methods) {
       const auto& func = method.function();
-      auto graph = func.graph()->copy();
-      Inline(*graph);
-      torch::jit::Code code(graph);
+      torch::jit::Code code(func.graph());
       // Make a copy of opnames. Some of them may be changed for mobile later.
       std::vector<c10::OperatorName> opnames;
       for (size_t i = 0; i < code.instructions().size(); ++i) {

@@ -85,7 +85,7 @@ def _split_tensor_list_constants(g, block):
                 node.output().replaceAllUsesWith(lc)
 
 
-def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False):
+def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None):
     # Inline everyting
     torch._C._jit_pass_inline(graph)
 
@@ -125,6 +125,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_remove_print(graph)
 
         torch._C._jit_pass_onnx_preprocess_caffe2(graph)
+
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
 
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
@@ -182,7 +185,7 @@ def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type
     # should be listed as ONNX graph inputs (i.e., whether to choose ONNX IR v3 or v4).
     # If keep_initializers_as_inputs is not specified (None), then we decide whether to keep
     # intializers as graph inputs (val_keep_init_as_ip) based on export type. If export type
-    # is ONNX, then do not keep initializers as input (val_keep_init_as_ip=False). For all other 
+    # is ONNX, then do not keep initializers as input (val_keep_init_as_ip=False). For all other
     # export types keep initializers as input (val_keep_init_as_ip=True).
     # If keep_initializers_as_inputs is specified, then respect it. Unless opset version <= 8,
     # in which case it must be ignored because for opset version <= 8, all initializers MUST be
@@ -284,9 +287,13 @@ def _model_to_graph(model, args, verbose=False, training=False,
                 if i >= user_input_num:
                     inp.setDebugName(param_names[i - user_input_num])
 
+    input_and_param_names = [val.debugName() for val in graph.inputs()]
+    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
+    params_dict = dict(zip(param_names, params))
+
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
-                            fixed_batch_size=fixed_batch_size)
+                            fixed_batch_size=fixed_batch_size, params_dict=params_dict)
 
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         out_vars, _ = torch.jit._flatten(tuple(example_outputs))
@@ -611,6 +618,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
         import torch.onnx.symbolic_registry as sym_registry
 
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            sym_registry.register_quantized_ops('caffe2', opset_version)
         sym_registry.register_version('', opset_version)
 
         # See Note [Export inplace]
@@ -620,7 +629,6 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         else:
             ns_op_name = n.kind()
         ns, op_name = ns_op_name.split("::")
-
         if ns == "onnx":
             # Use the original node directly
             return None
@@ -682,6 +690,19 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 symbolic_fn = sym_registry.get_registered_op(symbolic_name, '', opset_version)
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
+
+        elif ns == "quantized":
+            domain = ''
+            if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+                domain = 'caffe2'
+            attrs = {k: n[k] for k in n.attributeNames()}
+
+            if not sym_registry.is_registered_op(op_name, domain, opset_version):
+                warnings.warn("ONNX export failed on quantized operator {}::{} because "
+                              "torch.onnx.symbolic_opset{}.{} does not exist. "
+                              .format(ns, op_name, opset_version, op_name))
+            op_fn = sym_registry.get_registered_op(op_name, domain, opset_version)
+            return op_fn(g, *inputs, **attrs)
 
         # custom ops
         elif sym_registry.is_registered_version(ns, opset_version):

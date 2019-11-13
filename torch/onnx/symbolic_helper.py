@@ -513,3 +513,5 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["ComplexDouble"],
     cast_pytorch_to_onnx["Bool"],
 ]
+
+_quantized_ops = set()
