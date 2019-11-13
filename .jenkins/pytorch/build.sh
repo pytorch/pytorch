@@ -61,17 +61,22 @@ if ! which conda; then
   fi
 fi
 
-POSSIBLE_JAVA_HOMES=()
-POSSIBLE_JAVA_HOMES+=(/usr/local)
-POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-  if [[ -e "$JH/include/jni.h" ]] ; then
-    echo "Found jni.h under $JH"
-    export JAVA_HOME="$JH"
-    export BUILD_JNI=ON
-    break
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      export JAVA_HOME="$JH"
+      export BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
   fi
-done
+fi
 
 # Use special scripts for Android builds
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
