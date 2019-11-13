@@ -13,7 +13,7 @@ struct FunctionalTest : torch::test::SeedingFixture {};
 TEST_F(FunctionalTest, Conv1d) {
   auto x = torch::arange(30, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 5});
   auto weight = torch::arange(18, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3});
-  auto y = F::conv1d(x, weight, {}, Conv1dOptions().stride(1));
+  auto y = F::conv1d(x, weight, F::Conv1dFuncOptions().stride(1));
   auto expected = torch::tensor({{{ 312.,  348.,  384.},
                                   { 798.,  915., 1032.}},
 
@@ -28,7 +28,7 @@ TEST_F(FunctionalTest, Conv1d) {
 TEST_F(FunctionalTest, Conv2dEven) {
   auto x = torch::arange(75, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5});
   auto weight = torch::arange(54, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 3});
-  auto y = F::conv2d(x, weight, {}, Conv2dOptions().stride(1));
+  auto y = F::conv2d(x, weight, F::Conv2dFuncOptions().stride(1));
   auto expected = torch::tensor({{{{15219., 15570., 15921.},
                                    {16974., 17325., 17676.},
                                    {18729., 19080., 19431.}},
@@ -45,7 +45,7 @@ TEST_F(FunctionalTest, Conv2dEven) {
 TEST_F(FunctionalTest, Conv2dUneven) {
   auto x = torch::arange(60, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 4});
   auto weight = torch::arange(36, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 2});
-  auto y = F::conv2d(x, weight, {}, Conv2dOptions().stride(1));
+  auto y = F::conv2d(x, weight, F::Conv2dFuncOptions().stride(1));
   auto expected = torch::tensor({{{{ 5289.,  5442.,  5595.},
                                    { 5901.,  6054.,  6207.},
                                    { 6513.,  6666.,  6819.}},
@@ -62,7 +62,7 @@ TEST_F(FunctionalTest, Conv2dUneven) {
 TEST_F(FunctionalTest, Conv3d) {
   auto x = torch::arange(375, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5, 5});
   auto weight = torch::arange(162, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 3, 3});
-  auto y = F::conv3d(x, weight, {}, Conv3dOptions().stride(1));
+  auto y = F::conv3d(x, weight, F::Conv3dFuncOptions().stride(1));
   auto expected = torch::tensor({{{{{ 700704.,  703944.,  707184.},
                                     { 716904.,  720144.,  723384.},
                                     { 733104.,  736344.,  739584.}},

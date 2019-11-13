@@ -18,7 +18,7 @@ namespace nn {
 template <size_t D, typename Derived>
 class TORCH_API ConvImpl : public torch::nn::Cloneable<Derived> {
  public:
-  explicit ConvImpl(const ConvOptions<D>& options_);
+  explicit ConvImpl(ConvOptions<D> options_);
 
   void reset() override;
 
