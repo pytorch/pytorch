@@ -565,6 +565,10 @@ at::Tensor _convolution(
   check_shape_forward(input, weight, bias, params, input_is_mkldnn);
 
   if (k == 3) {
+    // avoid accidentally going through NHWC for permuted 3d input.
+    if (!input_is_mkldnn) {
+      input = input.contiguous();
+    }
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -731,7 +735,7 @@ at::Tensor _convolution_nogroup(
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
-      return at::thnn_conv3d(
+      return at::slow_conv3d(
           input, weight, kernel_size, bias,
           stride, padding);
     }

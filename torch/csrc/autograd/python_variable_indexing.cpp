@@ -139,7 +139,7 @@ static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
-  options = options.is_variable(true);
+  at::AutoNonVariableTypeMode guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), options);
   }
@@ -149,7 +149,7 @@ static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   throw TypeError(
     "can't assign a %s to a %s",
     Py_TYPE(value)->tp_name,
-    torch::utils::type_to_string(getNonVariableDeprecatedTypeProperties(options.backend(), typeMetaToScalarType(options.dtype()))).c_str());
+    torch::utils::type_to_string(getDeprecatedTypeProperties(options.backend(), typeMetaToScalarType(options.dtype()))).c_str());
 }
 
 static Variable boolToIndexingTensor(const Variable& self, bool value) {
