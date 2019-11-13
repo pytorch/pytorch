@@ -56,10 +56,10 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   options = TensorOptions(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
-  options = TensorOptions(getNonVariableDeprecatedTypeProperties(Backend::SparseCPU, kFloat));
+  options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kFloat));
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
 
-  options = TensorOptions(getNonVariableDeprecatedTypeProperties(Backend::SparseCPU, kByte));
+  options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kByte));
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
@@ -67,7 +67,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
   auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
-  options = empty(5, getNonVariableDeprecatedTypeProperties(Backend::SparseCPU, kByte)).options();
+  options = empty(5, getDeprecatedTypeProperties(Backend::SparseCPU, kByte)).options();
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
