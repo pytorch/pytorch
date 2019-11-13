@@ -6,14 +6,14 @@ namespace at {
 
 static inline Tensor call_AA_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::AA", "ignored"}).value();
+      .findSchema({"aten::AA", ""}).value();
   return c10::Dispatcher::singleton().callUnboxedOnly<Tensor, const Tensor&>(
       op, self, self);
 }
 
 static inline Tensor call_BB_op(const Tensor& self) {
   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-      .findSchema({"aten::BB", "out"}).value();
+      .findSchema({"aten::BB", ""}).value();
   return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor&>(
       op, self, self);
 }

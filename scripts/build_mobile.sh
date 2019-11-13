@@ -22,6 +22,7 @@ cd $BUILD_ROOT
 
 CMAKE_ARGS=()
 CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
 CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
@@ -47,7 +48,7 @@ if [ "${VERBOSE:-}" == '1' ]; then
 fi
 
 # Use-specified CMake arguments go last to allow overridding defaults
-CMAKE_ARGS+=($@)
+CMAKE_ARGS+=("$@")
 
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \

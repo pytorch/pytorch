@@ -12,13 +12,19 @@ namespace at {
 // AA -> BB
 Tensor AA_op(const Tensor& self) {
   std::cout << "AA op" << std::endl;
-  return call_BB_op(self);
+  if (self.ndimension() >= 4) {
+    return call_BB_op(self);
+  }
+  return self;
 }
 
 // BB -> AA
 Tensor BB_op(const Tensor& self) {
   std::cout << "BB op" << std::endl;
-  return global_helper_call_AA_op_1(self);
+  if (self.ndimension() < 4) {
+    return global_helper_call_AA_op_1(self);
+  }
+  return self;
 }
 
 // CC -> (AA -> BB)
@@ -30,7 +36,7 @@ Tensor CC_op(const Tensor& self) {
 // DD -> (AA -> BB) / (EE -> FF)
 Tensor DD_op(const Tensor& self) {
   std::cout << "DD op" << std::endl;
-  if (self.sizes().size() < 4) {
+  if (self.ndimension() < 4) {
     return global_helper_call_AA_op_3(self);
   }
   return call_EE_op(self);
@@ -39,13 +45,19 @@ Tensor DD_op(const Tensor& self) {
 // EE -> FF
 Tensor EE_op(const Tensor& self) {
   std::cout << "EE op" << std::endl;
-  return call_FF_op(self);
+  if (self.ndimension() >= 4) {
+    return call_FF_op(self);
+  }
+  return self;
 }
 
 // FF -> EE
 Tensor FF_op(const Tensor& self) {
   std::cout << "FF op" << std::endl;
-  return call_EE_op(self);
+  if (self.ndimension() < 4) {
+    return call_EE_op(self);
+  }
+  return self;
 }
 
 namespace {
