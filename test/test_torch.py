@@ -3910,6 +3910,7 @@ class _TestTorchMixin(object):
         rootview = c[8]
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile(self):
         data = {
             'a': b'12039810948234589',
