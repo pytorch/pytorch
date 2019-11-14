@@ -1820,6 +1820,7 @@ class SetAffinityDataset(torch.utils.data.IterableDataset):
 class TestSetAffinity(TestCase):
     def test_set_affinity_in_worker_init(self):
         dataset = SetAffinityDataset()
+
         def worker_init_fn(_):
             os.sched_setaffinity(0, [2])
 
