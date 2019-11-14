@@ -333,9 +333,9 @@ static std::vector<Dimname> compute_matmul_outnames(
   // last dim of the first tensor with the first feature dimension of the second.
 
   // Get the output's batch dimension names
-  const auto wrapped_self_names = TensorNames(self_names, 0, num_batch_dims(self_names));
+  auto wrapped_self_names = TensorNames(self_names, 0, num_batch_dims(self_names));
   const auto wrapped_other_names = TensorNames(other_names, 0, num_batch_dims(other_names));
-  auto working_names = wrapped_self_names.unifyFromRight(wrapped_other_names, "matmul");
+  auto& working_names = wrapped_self_names.unifyFromRightInplace(wrapped_other_names, "matmul");
 
   // Append the result of each individual (non-batched) matmul.
   // If either of self or other have dim 1, that means they are a vector. Vectors get
@@ -471,10 +471,10 @@ std::vector<Dimname> compute_cdist_outnames(
   const auto self_names = self.names();
   const auto other_names = other.names();
 
-  const auto self_batch = TensorNames(self_names, 0, num_batch_dims(self_names));
+  auto self_batch = TensorNames(self_names, 0, num_batch_dims(self_names));
   const auto other_batch = TensorNames(other_names, 0, num_batch_dims(other_names));
 
-  auto result = self_batch.unifyFromRight(other_batch, "cdist");
+  auto& result = self_batch.unifyFromRightInplace(other_batch, "cdist");
 
   // cdist treats self and other like batches of M x D and N X D tensors, respectively.
   // It computes the pairwise distance between each of the M vectors (of size D)
@@ -511,6 +511,13 @@ std::vector<Dimname> compute_baddbmm_outnames(
       impl::get_names(batch1), impl::get_names(batch2));
   auto baddbmm_names = unify_from_right(impl::get_names(bias), bmm_names);
   return baddbmm_names;
+}
+
+bool are_names_equal(TensorImpl* self, TensorImpl* other) {
+  if (!impl::has_names(self) && !impl::has_names(other)) {
+    return true;
+  }
+  return impl::get_names(self) == impl::get_names(other);
 }
 
 } // namespace namedinference
