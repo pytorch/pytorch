@@ -81,7 +81,8 @@ double getScaleFromInput(Node* input_node) {
   }
   std::cerr
       << "Warning: unrecognized quantized operator while trying to compute q_scale. "
-      << "Returning default scale of 1.0 for operator " << input_name << std::endl;
+      << "Returning default scale of 1.0 for operator " << input_name
+      << std::endl;
   return 1.0;
 }
 
@@ -151,14 +152,18 @@ void unpackQuantizedWeightsHelper(
     std::vector<int64_t> wt_sizes = unpacked_weight.sizes().vec();
     if (unpacked_weight.ndimension() == 4) {
       unpacked_weight.permute({0, 2, 3, 1});
-      wt_sizes = {unpacked_weight.size(0), unpacked_weight.size(2), unpacked_weight.size(3), unpacked_weight.size(1)};
+      wt_sizes = {unpacked_weight.size(0),
+                  unpacked_weight.size(2),
+                  unpacked_weight.size(3),
+                  unpacked_weight.size(1)};
     }
 
     // Remove packed_params
     qlinear_node->removeInput(1);
 
     // Convert from int8 to uint8
-    int8_t* inp_data = reinterpret_cast<int8_t*>(unpacked_weight.data_ptr<c10::qint8>());
+    int8_t* inp_data =
+        reinterpret_cast<int8_t*>(unpacked_weight.data_ptr<c10::qint8>());
     const int64_t weight_zp = unpacked_weight.q_zero_point() + 128;
     const int64_t wt_numel = unpacked_weight.numel();
 
@@ -169,11 +174,7 @@ void unpackQuantizedWeightsHelper(
     }
 
     Node* c2_weight = CreateQuantizedWeights(
-        os.str(),
-        graph,
-        wt_sizes,
-        unpacked_weight.q_scale(),
-        weight_zp);
+        os.str(), graph, wt_sizes, unpacked_weight.q_scale(), weight_zp);
     graph->setInsertPoint(qlinear_node);
     c2_weight->insertBefore(qlinear_node);
     qlinear_node->insertInput(1, c2_weight->output());
@@ -194,8 +195,10 @@ void unpackQuantizedWeightsHelper(
     auto weight_scale = unpacked_weight.q_scale();
 
     auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
-    TORCH_INTERNAL_ASSERT(input_val->type()->isSubtypeOf(TensorType::get()),
-    "Unsupported input type. Expected TensorType, got ", input_val->type()->str());
+    TORCH_INTERNAL_ASSERT(
+        input_val->type()->isSubtypeOf(TensorType::get()),
+        "Unsupported input type. Expected TensorType, got ",
+        input_val->type()->str());
 
     auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
     auto input_scale = getScaleFromInput(input_node);
