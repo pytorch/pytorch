@@ -576,7 +576,7 @@ void Engine::evaluate_function(
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && output.ne(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());

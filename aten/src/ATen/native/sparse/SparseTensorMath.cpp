@@ -1174,4 +1174,10 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 }
 
+Tensor isnan_sparse(const Tensor & self){
+  AT_ASSERT(self.is_sparse());
+
+  return at::isnan(self._values());
+}
+
 }} // namespace at::native
