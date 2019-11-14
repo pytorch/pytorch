@@ -36,7 +36,8 @@ SKIP_PYTHON_BINDINGS = [
     'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_',
+    'nbytes', 'itemsize'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
