@@ -183,7 +183,8 @@ Node* InsertObserversHelper::insertObserverFor(
     return nullptr;
   }
 
-  script::Module observer_module;
+  script::Module observer_module(
+      "Module", std::make_shared<script::CompilationUnit>());
   if (isWeightOfConvOrLinear(v)) {
     TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
@@ -338,7 +339,8 @@ void InsertObserversHelper::insertObservers(
         // the child module.
         auto module_instance = n->inputs()[0];
         auto module_method_name = n->s(attr::name);
-        script::Module callee_module;
+        script::Module callee_module(
+            "Module", std::make_shared<script::CompilationUnit>());
         if (module_instance->node()->kind() == prim::GetAttr) {
           auto child_module_name = module_instance->node()->s(attr::name);
           callee_module = module.attr(child_module_name).toModule();
