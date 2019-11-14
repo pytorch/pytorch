@@ -60,7 +60,7 @@ _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cpu_template<scalar_t, float>(self.contiguous(), weights.contiguous(), minlength);
     return _bincount_cpu_template<scalar_t, double>(
-        self.contiguous(), weights.contiguous().to(kDouble), minlength);
+        self.contiguous(), weights.contiguous().to(kDouble, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), minlength);
   });
 }
 

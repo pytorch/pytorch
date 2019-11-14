@@ -154,7 +154,7 @@ static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType commo
     op.dtype = common_dtype;
     op.original_tensor = op.tensor;
     if (!op.is_output) {
-      op.tensor = op.tensor.to(common_dtype);
+      op.tensor = op.tensor.to(common_dtype, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
     } else {
       op.tensor =
           at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -244,7 +244,7 @@ void TensorIterator::compute_types() {
         AT_ERROR("output with device ", op.tensor.device(),
                   " doesn't match the desired device ", op.device);
       } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(op.options());
+        op.tensor = op.tensor.to(op.options(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
       } else {
         AT_ERROR("expected device ", op.device,
                   " but got device ", op.tensor.device());

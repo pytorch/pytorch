@@ -182,7 +182,7 @@ Tensor& empty_out(
   Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
     if (self.scalar_type() == ScalarType::n)                     \
       return self;                                               \
-    return self.to(ScalarType::n, non_blocking);                 \
+    return self.to(ScalarType::n, non_blocking, /*copy*/false, at::MemoryFormat::Preserve); \
   }
 
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)

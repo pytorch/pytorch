@@ -65,7 +65,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // It is also possible for parameters to be 'wrapped_number's, in which case
   // max_error could be promoted to double when actual error is still a float.
   if (actual_error.scalar_type() != max_error.scalar_type()) {
-    actual_error = actual_error.to(max_error.scalar_type());
+    actual_error = actual_error.to(max_error.scalar_type(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
   }
 
   auto close = actual_error <= max_error;

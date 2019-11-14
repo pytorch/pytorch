@@ -41,7 +41,7 @@ bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
-  return self.to(other.options());
+  return self.to(other.options(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
 }
 
 static inline ScalarType promote_skip_undefined(ScalarType a, ScalarType b) {

@@ -354,7 +354,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
     // GPU as a service for the user)
     res = std::get<0>(at::_ctc_loss(
         log_probs,
-        targets.to(log_probs.device(), kLong),
+        targets.to(log_probs.device(), kLong, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve),
         input_lengths,
         target_lengths,
         BLANK,

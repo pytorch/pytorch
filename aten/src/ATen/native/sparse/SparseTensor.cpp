@@ -163,8 +163,8 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
     LongTensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
     LongTensor computed_indices_sizes = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     computed_indices_sizes.add_(1); // len = max_index + 1
-    LongTensor cpu_min_indices = min_indices.to(at::DeviceType::CPU);
-    LongTensor cpu_computed_indices_sizes = computed_indices_sizes.to(at::DeviceType::CPU);
+    LongTensor cpu_min_indices = min_indices.to(at::DeviceType::CPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
+    LongTensor cpu_computed_indices_sizes = computed_indices_sizes.to(at::DeviceType::CPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
     auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
     auto cpu_computed_indices_sizes_accessor = cpu_computed_indices_sizes.accessor<int64_t, 1>();
     for (int64_t d = 0; d < sparse_dim; d++) {
@@ -210,8 +210,8 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
     LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     LongTensor cpu_min_indices, cpu_max_indices;
     if (indices.is_cuda()) {
-      cpu_min_indices = min_indices.to(at::DeviceType::CPU);
-      cpu_max_indices = max_indices.to(at::DeviceType::CPU);
+      cpu_min_indices = min_indices.to(at::DeviceType::CPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
+      cpu_max_indices = max_indices.to(at::DeviceType::CPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
     } else {
       cpu_min_indices = min_indices;
       cpu_max_indices = max_indices;

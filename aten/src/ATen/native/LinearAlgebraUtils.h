@@ -109,7 +109,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
  */
 static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false) {
   auto batch_size = infos.numel();
-  auto infos_cpu = infos.to(at::kCPU);
+  auto infos_cpu = infos.to(at::kCPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
   auto infos_data = infos_cpu.data_ptr<int>();
   for (int64_t i = 0; i < batch_size; i++) {
     auto info = infos_data[i];

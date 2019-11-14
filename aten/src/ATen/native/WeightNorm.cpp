@@ -89,7 +89,7 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
 
   // ...but saved_norms might be Float when saved_g and saved_v are half.
   // To consider:  saved_norms.to(..., True /*non_blocking*/);
-  auto norms = saved_norms.to(saved_g.scalar_type());
+  auto norms = saved_norms.to(saved_g.scalar_type(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
 
   std::vector<int64_t> bcast_size(saved_v.dim(), 1);
 

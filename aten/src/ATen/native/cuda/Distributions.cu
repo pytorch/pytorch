@@ -403,7 +403,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen_) 
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_engine_inputs(10);
   }
-  auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
+  auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve)));
   AT_DISPATCH_ALL_TYPES_AND2(
     at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       using self_t = scalar_t;

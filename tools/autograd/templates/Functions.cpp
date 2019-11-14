@@ -399,7 +399,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
 }
 
 Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, optional<ScalarType> dtype) {
-  return cumprod_backward(grad.to(input.scalar_type()), input, dim);
+  return cumprod_backward(grad.to(input.scalar_type(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), input, dim);
 }
 
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
@@ -2240,10 +2240,10 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? save_mean.to(input.scalar_type()) : running_mean, input);
+  auto mu = unsqueeze_dim1(training ? save_mean.to(input.scalar_type(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve) : running_mean, input);
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? save_invstd.to(input.scalar_type())
+      training ? save_invstd.to(input.scalar_type(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve)
                : running_var.add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);

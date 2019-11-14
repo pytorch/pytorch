@@ -651,9 +651,9 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
         }
       }
     }
-    auto zIndices = at::from_blob(zindices.data(), {new_nnz}, at::kLong).to(indices.device());
+    auto zIndices = at::from_blob(zindices.data(), {new_nnz}, at::kLong).to(indices.device(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
     auto new_indices = indices.index_select(1, zIndices);
-    new_indices[dim] = at::from_blob(iindices.data(), {new_nnz}, at::kLong).to(indices.device());
+    new_indices[dim] = at::from_blob(iindices.data(), {new_nnz}, at::kLong).to(indices.device(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
     auto new_values = values.index_select(0, zIndices);
     return _sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim, dense_dim, new_sizes, new_indices, new_values, self.options());

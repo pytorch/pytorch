@@ -239,7 +239,7 @@ static Tensor apply_bag_size_backward(const Tensor &offsets,
       auto bag_size_ = indices.size(0);
       output /= bag_size_;
     } else {
-      auto inv_bag_size_ = (1 / bag_size.to(output.options()))
+      auto inv_bag_size_ = (1 / bag_size.to(output.options(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve))
                              .unsqueeze(1)
                              .index_select(0, offset2bag);
       output *= inv_bag_size_;

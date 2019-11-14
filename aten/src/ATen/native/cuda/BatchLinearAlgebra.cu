@@ -973,7 +973,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
           */
           auto batch_size = infos_tensor.numel();
           auto infos_array = infos_tensor.view({batch_size});
-          auto infos_cpu = infos_array.to(at::kCPU);
+          auto infos_cpu = infos_array.to(at::kCPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve);
           auto infos_data = infos_cpu.data_ptr<int>();
           auto input_array = self.view({batch_size, m, n});
           auto working_array = self_working_copy.view({batch_size, m, n});
@@ -1265,9 +1265,9 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     singleCheckErrors(infos[0], "symeig_cuda");
   }
   if (eigenvectors) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), self_working_copy, );
   } else {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), at::empty({0}, self.options()));
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), at::empty({0}, self.options()));
   }
 }
 

@@ -142,7 +142,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
     if (p_.scalar_type() == kDouble) {
-      auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+      auto p = std::get<0>(expand_inplace(self, p_.to(kCPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve)));
       CPU_tensor_apply2<self_t, double>(
         self, p, [generator](self_t& ret_val, double& p_val) {
           at::bernoulli_distribution<double> bernoulli(p_val);
@@ -150,7 +150,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
         });
     } else {
       AT_DISPATCH_FLOATING_TYPES(p_.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
-        auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+        auto p = std::get<0>(expand_inplace(self, p_.to(kCPU, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve)));
         using p_t = scalar_t;
         CPU_tensor_apply2<self_t, p_t>(
           self, p, [generator](self_t& ret_val, p_t& p_val) {

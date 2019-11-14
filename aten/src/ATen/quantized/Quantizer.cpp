@@ -460,8 +460,8 @@ QuantizerPtr make_per_channel_affine_quantizer(
   TORCH_CHECK(
       isIntegralType(zero_points.scalar_type(), false /*includeBool*/),
       "zero_points tensor must have integral type");
-  Tensor scales_double = scales.to(kDouble).contiguous();
-  Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
+  Tensor scales_double = scales.to(kDouble, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve).contiguous();
+  Tensor zero_points_int64 = zero_points.to(kLong, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve).contiguous();
   double* scales_data = scales_double.data_ptr<double>();
   int64_t* zero_points_data = zero_points_int64.data_ptr<int64_t>();
   std::vector<double> scale_vals(scales_data, scales_data + scales.numel());

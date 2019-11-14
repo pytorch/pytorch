@@ -35,8 +35,8 @@ inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indice
 inline void copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
   alias_into_sparse(
       self,
-      indices.to(self._indices().options(), non_blocking, /*copy=*/true),
-      values.to(self._values().options(), non_blocking, /*copy=*/true));
+      indices.to(self._indices().options(), non_blocking, /*copy=*/true, at::MemoryFormat::Contiguous),
+      values.to(self._values().options(), non_blocking, /*copy=*/true, at::MemoryFormat::Contiguous));
 }
 
 // TODO: put this into the public API
@@ -93,7 +93,7 @@ inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, 
         indices.options().device(kCPU));
     // NB: must be blocking because this blob may be freed after this closure,
     //     and non_blocking copy will see garbage.
-    auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
+    auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false, /*copy*/false, at::MemoryFormat::Contiguous);
     // Ideally we want matmul but matmul is slow on CPU Long and not implemented
     // on CUDA Long. So mul is faster.
     return indices.mul(indices_mult).sum(0);
