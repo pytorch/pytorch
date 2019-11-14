@@ -702,39 +702,41 @@ class HistogramObserver(_ObserverBase):
         return new_min, new_max
 
     @torch.jit.ignore
-    def _adjust_min_max(self, combined_min, combined_max, L):
-        # We ensure that: s = (combined_max - combined_min)/(M*Nbins) = (max - min)/(L*Nbins)
+    def _adjust_min_max(self, combined_min, combined_max, upsample_rate):
+        # We ensure that:
+        # (combined_max - combined_min)/(downsample_rate*Nbins) = (max - min)/(upsample_rate*Nbins)
         # This allows us to have a common grid of resolution s, where we can align
         # the input histogram
         # start_idx maps min_val to the histogram bin index.
 
-        hist_bin_width = (self.max_val - self.min_val)/(self.bins*L)
-        M = torch.ceil((combined_max-combined_min)/(self.bins*hist_bin_width)).to(torch.int)
-        e = M*(self.bins*hist_bin_width) - (combined_max-combined_min)
-        combined_max = combined_max+e/2
-        combined_min = combined_min-e/2
-        start_idx = torch.round((self.min_val-combined_min)/hist_bin_width).to(torch.int)
-        return combined_min, combined_max, M,start_idx
+        hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
+        downsample_rate = torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).to(torch.int)
+        e = downsample_rate * (self.bins * hist_bin_width) - (combined_max - combined_min)
+        combined_max = combined_max + e / 2
+        combined_min = combined_min - e / 2
+        start_idx = torch.round((self.min_val - combined_min) / hist_bin_width).to(torch.int)
+        return combined_min, combined_max, downsample_rate, start_idx
 
     @torch.jit.ignore
-    def _combine_histograms(self, orig_hist, new_hist, L, M, start_idx,Nbins):
+    def _combine_histograms(self, orig_hist, new_hist, upsample_rate, downsample_rate, start_idx, Nbins):
         # First up-sample the histogram with new data by a factor of L
         # This creates an approximate probability density thats piecwise constant
-        upsampled_histogram = new_hist.repeat_interleave(L)
+        upsampled_histogram = new_hist.repeat_interleave(upsample_rate)
         # Now insert the upsampled histogram into the output
         # histogram, which is initialized with zeros.
         # The offset at which the histogram is introduced is determined
         # by the start index as the output histogram can cover a wider range
-        histogram_with_output_range = torch.zeros((Nbins * M.item()))
-        histogram_with_output_range[start_idx.item():Nbins * L + start_idx.item()] = upsampled_histogram
+        histogram_with_output_range = torch.zeros((Nbins * downsample_rate.item()))
+        histogram_with_output_range[start_idx.item():Nbins * upsample_rate + start_idx.item()] = upsampled_histogram
         # Compute integral histogram, double precision is needed to ensure
         # that there are no overflows
-        integral_histogram = torch.cumsum(histogram_with_output_range, 0, dtype = torch.double)[M-1::M]
+        integral_histogram = torch.cumsum(histogram_with_output_range, 0,
+                                          dtype=torch.double)[downsample_rate - 1 :: downsample_rate]
         # Finally perform interpolation
         shifted_integral_histogram = torch.zeros((Nbins))
         shifted_integral_histogram[0] = 0
         shifted_integral_histogram[1:Nbins] = integral_histogram[0:-1]
-        interpolated_histogram = (integral_histogram - shifted_integral_histogram) / L
+        interpolated_histogram = (integral_histogram - shifted_integral_histogram) / upsample_rate
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)
         return orig_hist
 
@@ -758,8 +760,7 @@ class HistogramObserver(_ObserverBase):
             # We do this by first upsampling the histogram to a dense grid
             # and then downsampling the histogram efficiently
             upsample_rate = 128
-            combined_min, combined_max, downsample_rate, start_idx =
-            self._adjust_min_max(combined_min, combined_max, upsample_rate)
+            combined_min, combined_max, downsample_rate, start_idx = self._adjust_min_max(combined_min, combined_max, upsample_rate)
             combined_histogram = torch.histc(x, self.bins, min=combined_min, max=combined_max)
             if combined_min == self.min_val and combined_max == self.max_val:
                 combined_histogram += self.histogram
