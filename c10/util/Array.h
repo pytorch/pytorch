@@ -278,10 +278,10 @@ constexpr const _Tp& get(const array<_Tp, _Nm>& __arr) noexcept
  *  prepend(2, {3, 4}) == {2, 3, 4}
  */
 namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr inline array<T, N-1> tail_(const array<T, N>& arg, guts::index_sequence<I...>) {
-  static_assert(sizeof...(I) == N-1, "invariant");
-  return {{get<I+1>(arg)...}};
+template<class T, size_t N, size_t... INDEX>
+constexpr inline array<T, N-1> tail_(const array<T, N>& arg, guts::index_sequence<INDEX...>) {
+  static_assert(sizeof...(INDEX) == N-1, "invariant");
+  return {{get<INDEX+1>(arg)...}};
 }
 }
 template<class T, size_t N>
@@ -291,9 +291,9 @@ constexpr inline array<T, N-1> tail(const array<T, N>& arg) {
 }
 
 namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr inline array<T, N+1> prepend_(T&& head, const array<T, N>& tail, guts::index_sequence<I...>) {
-  return {{guts::forward<T>(head), get<I>(tail)...}};
+template<class T, size_t N, size_t... INDEX>
+constexpr inline array<T, N+1> prepend_(T&& head, const array<T, N>& tail, guts::index_sequence<INDEX...>) {
+  return {{guts::forward<T>(head), get<INDEX>(tail)...}};
 }
 }
 template<class T, size_t N>
@@ -309,9 +309,9 @@ constexpr inline array<T, N+1> prepend(T&& head, const array<T, N>& tail) {
  */
 
 namespace detail {
-template<class T, size_t N, size_t... I>
-constexpr array<T, N> to_array_(const T (&arr)[N], guts::index_sequence<I...>) {
-  return {{arr[I]...}};
+template<class T, size_t N, size_t... INDEX>
+constexpr array<T, N> to_array_(const T (&arr)[N], guts::index_sequence<INDEX...>) {
+  return {{arr[INDEX]...}};
 }
 }
 

@@ -97,15 +97,6 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const Tenso
   return torch::arange(start, end, step, options);
 }
 
-static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
-  for (Scalar& s : l) {
-    if (!s.isIntegral(true)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -121,7 +112,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
     if (r.isNone(1)) {
       auto end = r.scalar(0);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(2) && allIntegral({end}) ? at::ScalarType::Long : r.scalartype(2);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(2);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(4))
@@ -141,7 +132,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       auto end = r.scalar(1);
       auto step = r.scalar(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(4) && allIntegral({start, end, step}) ? at::ScalarType::Long : r.scalartype(4);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(4);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(6))
@@ -350,8 +341,7 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.from_numpy", jit::tracer::WARN_CONSTRUCTOR);
-  auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
+  return THPVariable_Wrap(torch::utils::tensor_from_numpy(arg));
   END_HANDLE_TH_ERRORS
 }
 
@@ -447,6 +437,19 @@ static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
+// Wrapper converts a raised TypeError into returning NotImplemented
+// Used to implement binary arithmetic operators
+template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
+static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, PyObject* kwargs) {
+  PyObject* ret = Func(self, args, kwargs);
+  if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
+    PyErr_Clear();
+    Py_INCREF(Py_NotImplemented);
+    ret = Py_NotImplemented;
+  }
+  return ret;
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -476,7 +479,7 @@ static PyTypeObject THPVariableFunctions = {
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
-  0,                                     /* tp_print */
+  0,                                     /* tp_vectorcall_offset */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */
