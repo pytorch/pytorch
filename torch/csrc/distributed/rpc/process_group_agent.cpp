@@ -187,7 +187,8 @@ void ProcessGroupAgent::join() {
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
   shutdown_.store(true);
-  // This is needed in case no futures were created, otherwise the future timeout watchdog would sleep forever.
+  // This is needed in case no futures were created, otherwise the future
+  // timeout watchdog would sleep forever.
   {
     std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
     futureTimeoutCV_.notify_one();
@@ -254,8 +255,9 @@ bool ProcessGroupAgent::hasPendingMessage() {
       // It is possible that the sender reads its send count before sending, but
       // the receive reads its recv count after receiving. Hence, both > and <
       // are valid states.
-      fprintf(stderr, "%d %d %d \n", sentCnt, recvCnt, numTimedOutFutures_);
-      if (sentCnt != recvCnt + numTimedOutFutures_) {
+      // fprintf(stderr, "%d %d %d \n", sentCnt, recvCnt, numTimedOutFutures_);
+      fprintf(stderr, "sentCnt: %d, recvCnt %d\n", sentCnt, recvCnt);
+      if (sentCnt != recvCnt) {
         return true;
       }
     }
@@ -294,6 +296,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
+  future->setDst(to.id_);
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime =
@@ -558,7 +561,10 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           Message({}, {}, MessageType::EXCEPTION), "future timed out.");
       for (const auto& timedOutFuture : timedOutFutures) {
         timedOutFuture->markCompleted(exceptionMsg);
-        numTimedOutFutures_++; // need to encode dst into the future, and then decrement recvCounts instead of doing this.
+        int dst = timedOutFuture->dst();
+
+        recvCounts_.increment(dst); // need to encode dst into the future, and then
+                               // decrement recvCounts instead of doing this.
         // should we notify on every future or just once?
         futureCV_.notify_all();
       }
