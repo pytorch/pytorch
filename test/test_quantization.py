@@ -1343,13 +1343,6 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         y = torch.tensor([5.0, 6.0, 7.0, 8.0])
         myobs(x)
         myobs(y)
-        z = torch.rand(100,10,30,30).to(torch.float32)
-        import time
-        start = time.time()
-        for i in range(100):
-            myobs(z)
-        print('T elapsed', time.time()-start)
-
         self.assertEqual(myobs.min_val, 2.0)
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
@@ -1370,7 +1363,6 @@ class RecordHistogramObserverTest(QuantizationTestCase):
             else:
                 ref_scale = 0.0235294
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
-        print('Obs params %f %f'%(qparams[0], ref_scale))
         self.assertEqual(qparams[1].item(), ref_zero_point)
         self.assertAlmostEqual(qparams[0].item(), ref_scale, delta=1e-5)
         # Test for serializability
