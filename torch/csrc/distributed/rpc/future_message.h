@@ -26,7 +26,6 @@ struct TORCH_API FutureMessage final {
   // Get the destination rank of this future.
   inline int dst() const {
     return dst_;
-
   }
   // Set the destination rank of this future.
   inline void setDst(int dst) {

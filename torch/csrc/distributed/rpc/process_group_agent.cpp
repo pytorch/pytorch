@@ -186,6 +186,8 @@ void ProcessGroupAgent::join() {
   shutdown_.store(true);
   // This is needed in case no futures were created, otherwise the future
   // timeout watchdog would sleep forever.
+
+  fprintf(stderr, "join is notifying watchdog.\n");
   {
     std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
     futureTimeoutCV_.notify_one();
@@ -300,6 +302,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       futureTimeouts_[futureStartTime].push_back(requestId);
     }
     // Signal watchdog for future timeouts to begin
+    fprintf(stderr, "SEND is notifying watchdog.\n");
     {
       std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
       futureTimeoutCV_.notify_one();
@@ -477,27 +480,47 @@ void ProcessGroupAgent::listenLoop() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  // TODO separate w helper methods
+  // Sleep until a future is available, or there are no futures and we are
+  // shutting down.
   {
     std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
     futureTimeoutCV_.wait(lock);
   }
 
   while (!shutdown_.load()) {
-    // std::chrono::milliseconds sleepTime;
-    // {
-    //   std::lock_guard<std::mutex> lock{futureMutex_};
-    //   // Estimate amount of time the first future will time out in, and sleep
-    //   // for that long.
-    //   auto runningTime =
-    //       std::chrono::duration_cast<std::chrono::milliseconds>(
-    //           std::chrono::steady_clock::now().time_since_epoch()) -
-    //       futureTimeouts_.begin()->first;
-    //   sleepTime =
-    //       std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
-    // }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    // TODO inefficient probably.
+    std::chrono::milliseconds sleepTime;
+    {
+      std::lock_guard<std::mutex> lock{futureMutex_};
+      // Estimate amount of time the first future will time out in, and sleep
+      // for that long.
+      if (futureTimeouts_.empty()) {
+        continue;
+      }
+      auto runningTime =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch()) -
+          futureTimeouts_.begin()->first;
+      sleepTime =
+          std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
+    }
+
+    fprintf(stderr, "sleeping for %d milliseconds\n", sleepTime.count());
+
+    // Sleep for the ETA for the next future to time out, or until we are told
+    // to shut down. This is to avoid the case where we sleep for a long time
+    // due to a future with a high timeout.
+    {
+      std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
+      if (futureTimeoutCV_.wait_for(
+              lock, sleepTime, [this] { return shutdown_.load(); })) {
+        // We were told to shutdown, so exit.
+        return;
+      }
+    }
+
+    // TODO inefficient, either when futureTimeouts_ map is empty or when we
+    // have timeout of 0, this thread will continaully contend for the lock
+    // without sleeping.
     if (rpcTimeout_.count() == 0) {
       continue;
     }

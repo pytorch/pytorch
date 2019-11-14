@@ -1053,20 +1053,16 @@ class RpcTest(object):
         print('started')
         with self.assertRaisesRegex(RuntimeError, "future timed out"):
             fut.wait()
-        print("done")
 
-        # futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(200)]
-        # for fut in futs:
-        #     with self.assertRaisesRegex(RuntimeError, "future timed out"):
-        #         fut.wait()
-        #         print("passed!!!")
+        # future should run to completion if the timeout is longer.
+        dist.barrier()
+        rpc.set_rpc_timeout(timedelta(seconds=5))
+        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 
-        # TODO test no futures created
-        # TODO test the case where other worker eventually responds
-        # TODO test the case where the worker just drops the RPC.
-
-
-
+        # future should run to completion if the timeout is zero.
+        dist.barrier()
+        rpc.set_rpc_timeout(timedelta(seconds=0))
+        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 
 
 
