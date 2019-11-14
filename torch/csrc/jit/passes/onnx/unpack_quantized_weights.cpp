@@ -158,7 +158,7 @@ void unpackQuantizedWeightsHelper(
     qlinear_node->removeInput(1);
 
     // Convert from int8 to uint8
-    int8_t* inp_data = (int8_t*)unpacked_weight.data_ptr<c10::qint8>();
+    int8_t* inp_data = reinterpret_cast<int8_t*>(unpacked_weight.data_ptr<c10::qint8>());
     const int64_t weight_zp = unpacked_weight.q_zero_point() + 128;
     const int64_t wt_numel = unpacked_weight.numel();
 
