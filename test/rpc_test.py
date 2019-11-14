@@ -1065,6 +1065,10 @@ class RpcTest(object):
         #         fut.wait()
         #         print("passed!!!")
 
+        # TODO test no futures created
+        # TODO test the case where other worker eventually responds
+        # TODO test the case where the worker just drops the RPC.
+
 
 
 
