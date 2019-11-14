@@ -5,6 +5,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/container/modulelist.h>
 #include <torch/nn/modules/container/sequential.h>
+#include <torch/nn/functional/activation.h> 
 #include <torch/nn/options/adaptive.h>
 
 namespace torch {
@@ -90,7 +91,7 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
 
   Linear head = nullptr;
 
-  ModuleList tail = nullptr;
+  ModuleList tail;
 };
 
 TORCH_MODULE(AdaptiveLogSoftmaxWithLoss);
