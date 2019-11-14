@@ -78,7 +78,7 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 #endif
 
-static const char* glooDevice = getenv("gloo_device");
+static const char* glooDevice = getenv("GLOO_DEVICE");
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForInterface(const std::string& interface) {
@@ -94,7 +94,7 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
   return GlooDeviceRegistry()->Create("APPLE", interface, "");
 #endif
 
-  return nullptr;
+  throw std::runtime_error("makeDeviceForInterface(): unsupported gloo device");
 }
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
@@ -111,7 +111,7 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
   return GlooDeviceRegistry()->Create("APPLE", "", hostname);
 #endif
 
-  return nullptr;
+  throw std::runtime_error("makeDeviceForHostname(): unsupported gloo device");
 }
 
 } // namespace c10d
