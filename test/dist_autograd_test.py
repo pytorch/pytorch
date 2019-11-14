@@ -626,6 +626,7 @@ class DistAutogradTest(object):
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
             grads = dist_autograd.get_gradients(ctx_ids[1])
+            self.assertEqual(1, len(grads))
             self.assertIn(requires_grad_tensor, grads)
             self.assertEqual(torch.ones_like(ret), grads[requires_grad_tensor])
 
