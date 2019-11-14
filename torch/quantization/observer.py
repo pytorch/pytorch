@@ -703,6 +703,11 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit.ignore
     def _adjust_min_max(self, combined_min, combined_max, L):
+        # We ensure that: s = (combined_max - combined_min)/(M*Nbins) = (max - min)/(L*Nbins)
+        # This allows us to have a common grid of resolution s, where we can align
+        # the input histogram
+        # start_idx maps min_val to the histogram bin index.
+
         hist_bin_width = (self.max_val - self.min_val)/(self.bins*L)
         M = torch.ceil((combined_max-combined_min)/(self.bins*hist_bin_width)).to(torch.int)
         e = M*(self.bins*hist_bin_width) - (combined_max-combined_min)
@@ -735,7 +740,6 @@ class HistogramObserver(_ObserverBase):
 
     def forward(self, x_orig):
         # type: (Tensor) -> Tensor
-#        print('New forward')
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
@@ -754,7 +758,8 @@ class HistogramObserver(_ObserverBase):
             # We do this by first upsampling the histogram to a dense grid
             # and then downsampling the histogram efficiently
             upsample_rate = 128
-            combined_min, combined_max, downsample_rate, start_idx = self._adjust_min_max(combined_min, combined_max, upsample_rate)
+            combined_min, combined_max, downsample_rate, start_idx =
+            self._adjust_min_max(combined_min, combined_max, upsample_rate)
             combined_histogram = torch.histc(x, self.bins, min=combined_min, max=combined_max)
             if combined_min == self.min_val and combined_max == self.max_val:
                 combined_histogram += self.histogram
