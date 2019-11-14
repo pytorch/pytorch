@@ -15,9 +15,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qavg_pool2d_nhwc_stub);
+
+namespace {
 
 template <typename scalar_t>
 static void avg_pool2d_out_frame(
