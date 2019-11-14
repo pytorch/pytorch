@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/script/module.h>
+#include <aten/src/ATen/core/ivalue.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -9,6 +10,23 @@
 namespace torch {
 namespace jit {
 namespace script {
+
+bool isSimpleConstant(const IValue& v);
+
+IValue getValidConstantFromTuple(const IValue& v);
+
+IValue getValidConstant(const std::string& attr_name,
+                        const IValue& v);
+
+template <typename T>
+IValue getValidConstant(const std::string& attr_name,
+                        const c10::List<T>& vs) {
+  std::vector<IValue> valid_list;
+  std::transform(vs.begin(), vs.end(), std::back_inserter(valid_list),
+                 [attr_name](T v) -> IValue { return getValidConstant(attr_name, v); });
+  return c10::ivalue::Tuple::create(valid_list);
+}
+
 enum class IterableModuleKind { NONE, LIST, DICT };
 
 // You can think of an nn.Module as a template that corresponds to a family of
@@ -91,7 +109,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   ClassTypePtr getJitType() const;
   py::object getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
-  c10::optional<py::object> findConstant(const std::string& name) const;
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;
   c10::optional<Function*> findFunctionAttribute(const std::string& name) const;
