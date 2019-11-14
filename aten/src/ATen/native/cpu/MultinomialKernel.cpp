@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/core/DistributionsHelper.h>
+#include <ATen/native/UnaryOps.h>
 
 namespace at {
 namespace native {
@@ -121,15 +122,14 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
   }
 }
 
+} // anonymous namespace
+
 static void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, Generator *gen) {
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "multinomial", [&] {
     multinomial_apply<scalar_t>(result, self, n_sample, with_replacement, gen);
   });
 }
 
-}
-
 REGISTER_DISPATCH(multinomial_stub, &multinomial_kernel_impl);
 
-}
-}
+}} // namespace at::native

@@ -66,9 +66,7 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
   template <typename... ArgTypes>
   rT operator()(DeviceType device_type, ArgTypes&&... args) {
     if (device_type == DeviceType::CPU) {
-      if (!cpu_dispatch_ptr) {
-        cpu_dispatch_ptr = choose_cpu_impl();
-      }
+      auto cpu_dispatch_ptr = choose_cpu_impl();
       return (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {
       AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
@@ -86,40 +84,59 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     (void)capability;
 #ifdef HAVE_AVX2_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX2)) {
-      AT_ASSERTM(AVX2, "DispatchStub: missing AVX2 kernel");
-      return AVX2;
+      AT_ASSERTM(cpu_avx2_dispatch_ptr, "DispatchStub: missing AVX2 kernel");
+      return cpu_avx2_dispatch_ptr;
     }
 #endif
 #ifdef HAVE_AVX_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX)) {
-      AT_ASSERTM(AVX, "DispatchStub: missing AVX kernel");
-      return AVX;
+      AT_ASSERTM(cpu_avx_dispatch_ptr, "DispatchStub: missing AVX kernel");
+      return cpu_avx_dispatch_ptr;
     }
 #endif
-    AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
-    return DEFAULT;
+    AT_ASSERTM(cpu_default_dispatch_ptr, "DispatchStub: missing default kernel");
+    return cpu_default_dispatch_ptr;
   }
 
 // Fixing dispatch error in Windows debug builds.
 // See https://github.com/pytorch/pytorch/issues/22681 for more details.
 #if defined(_MSC_VER) && defined(_DEBUG)
-  FnPtr cpu_dispatch_ptr;
+  FnPtr cpu_default_dispatch_ptr;
+  FnPtr cpu_avx_dispatch_ptr;
+  FnPtr cpu_avx2_dispatch_ptr;
   FnPtr cuda_dispatch_ptr;
   FnPtr hip_dispatch_ptr;
 #else
-  FnPtr cpu_dispatch_ptr = nullptr;
+  FnPtr cpu_default_dispatch_ptr = nullptr;
+  FnPtr cpu_avx_dispatch_ptr = nullptr;
+  FnPtr cpu_avx2_dispatch_ptr = nullptr;
   FnPtr cuda_dispatch_ptr = nullptr;
   FnPtr hip_dispatch_ptr = nullptr;
 #endif
-  CAFFE2_API static FnPtr DEFAULT;
-// NB: these are only used when HAVE_AVX_CPU_DEFINITION
-// and/or HAVE_AVX2_CPU_DEFINITION are defined, but we unconditionally
-// define them to make the definition of DEFINE_DISPATCH macro easier
-  CAFFE2_API static FnPtr AVX;
-  CAFFE2_API static FnPtr AVX2;
 };
 
 namespace {
+template <typename FnPtr, typename T>
+struct RegisterCPUDEFAULTDispatch {
+  RegisterCPUDEFAULTDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
+    stub.cpu_default_dispatch_ptr = value;
+  }
+};
+
+template <typename FnPtr, typename T>
+struct RegisterCPUAVXDispatch {
+  RegisterCPUAVXDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
+    stub.cpu_avx_dispatch_ptr = value;
+  }
+};
+
+template <typename FnPtr, typename T>
+struct RegisterCPUAVX2Dispatch {
+  RegisterCPUAVX2Dispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
+    stub.cpu_avx2_dispatch_ptr = value;
+  }
+};
+
 template <typename FnPtr, typename T>
 struct RegisterCUDADispatch {
   RegisterCUDADispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
@@ -149,29 +166,27 @@ struct RegisterHIPDispatch {
   };                                       \
   extern CAFFE2_API struct name name
 
-// NB: Static members need to be explicitly instantiated
-#define DEFINE_DISPATCH(name) struct name name; \
-  template<> name::FnPtr DispatchStub<name::FnPtr, struct name>::DEFAULT; \
-  template<> name::FnPtr DispatchStub<name::FnPtr, struct name>::AVX; \
-  template<> name::FnPtr DispatchStub<name::FnPtr, struct name>::AVX2
+#define DEFINE_DISPATCH(name) struct name name
 
-#define REGISTER_ARCH_DISPATCH(name, arch, fn) \
-  template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
+#define REGISTER_CPU_DEFAULT_DISPATCH(name, fn) \
+  static RegisterCPUDEFAULTDispatch<decltype(fn), struct name> name ## __register__DEFAULT(name, fn);
 
 #ifdef HAVE_AVX_CPU_DEFINITION
-#define REGISTER_AVX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX, fn)
+#define REGISTER_AVX_DISPATCH(name, fn) \
+  static RegisterCPUAVXDispatch<decltype(fn), struct name> name ## __register__AVX(name, fn);
 #else
 #define REGISTER_AVX_DISPATCH(name, fn)
 #endif
 
 #ifdef HAVE_AVX2_CPU_DEFINITION
-#define REGISTER_AVX2_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, AVX2, fn)
+#define REGISTER_AVX2_DISPATCH(name, fn) \
+  static RegisterCPUAVX2Dispatch<decltype(fn), struct name> name ## __register__AVX2(name, fn);
 #else
 #define REGISTER_AVX2_DISPATCH(name, fn)
 #endif
 
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
-  REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
+  REGISTER_CPU_DEFAULT_DISPATCH(name, static_cast<fn_type>(nullptr))         \
   REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
   REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))
 
@@ -191,7 +206,16 @@ struct RegisterHIPDispatch {
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
-#define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+// Ensure that CPU_CAPABILITY is expanded before we do token pasting
+#if CPU_CAPABILITY == AVX
+#define REGISTER_DISPATCH(name, fn) REGISTER_AVX_DISPATCH(name, fn)
+#elif CPU_CAPABILITY == AVX2
+#define REGISTER_DISPATCH(name, fn) REGISTER_AVX2_DISPATCH(name, fn)
+#elif CPU_CAPABILITY == DEFAULT
+#define REGISTER_DISPATCH(name, fn) REGISTER_CPU_DEFAULT_DISPATCH(name, fn)
+#else
+#error "unrecognized CPU_CAPABILITY"
+#endif
 #endif
 
 
