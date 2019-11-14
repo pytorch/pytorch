@@ -10,12 +10,12 @@ file("../gradle.properties").withInputStream { props.load(it) }
 def buildConfigProps = { k -> "\"${props.get(k)}\"" }
 
 android {
-    compileSdkVersion 28
-    buildToolsVersion "29.0.2"
+    compileSdkVersion rootProject.compileSdkVersion
+    buildToolsVersion rootProject.buildToolsVersion
     defaultConfig {
         applicationId "org.pytorch.testapp"
-        minSdkVersion 21
-        targetSdkVersion 28
+        minSdkVersion rootProject.minSdkVersion
+        targetSdkVersion rootProject.targetSdkVersion
         versionCode 1
         versionName "1.0"
         ndk {
@@ -54,7 +54,7 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.1.0'
+    implementation 'com.android.support:appcompat-v7:28.0.0'
 
     implementation project(':pytorch_android')
     implementation project(':pytorch_android_torchvision')
