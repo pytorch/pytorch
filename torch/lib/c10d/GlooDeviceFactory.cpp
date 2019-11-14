@@ -1,5 +1,7 @@
 #include <c10d/GlooDeviceFactory.hpp>
 
+#include <stdlib.h>
+
 #include <c10/util/Exception.h>
 
 #if GLOO_HAVE_TRANSPORT_TCP
@@ -50,6 +52,7 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
   return ::gloo::transport::tcp::CreateDevice(attr);
 }
 
+C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
 #endif
 
@@ -71,17 +74,24 @@ static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
   return ::gloo::transport::uv::CreateDevice(attr);
 }
 
+C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 #endif
 
+static const char* glooDevice = getenv("gloo_device");
+
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForInterface(const std::string& interface) {
+  if (glooDevice) {
+    return GlooDeviceRegistry()->Create(glooDevice, interface, "");
+  }
+
 #ifdef __linux__
-  return GlooDeviceRegistry()->Create("TCP", interface, "");
+  return GlooDeviceRegistry()->Create("LINUX", interface, "");
 #endif
 
 #ifdef __APPLE__
-  return GlooDeviceRegistry()->Create("UV", interface, "");
+  return GlooDeviceRegistry()->Create("APPLE", interface, "");
 #endif
 
   return nullptr;
@@ -89,12 +99,16 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForHostname(const std::string& hostname) {
+  if (glooDevice) {
+    return GlooDeviceRegistry()->Create(glooDevice, "", hostname);
+  }
+
 #ifdef __linux__
-  return GlooDeviceRegistry()->Create("TCP", "", hostname);
+  return GlooDeviceRegistry()->Create("LINUX", "", hostname);
 #endif
 
 #ifdef __APPLE__
-  return GlooDeviceRegistry()->Create("UV", "", hostname);
+  return GlooDeviceRegistry()->Create("APPLE", "", hostname);
 #endif
 
   return nullptr;
