@@ -2066,6 +2066,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     axes = [i for i in range(1, len(input_sizes) - 1)]
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
 
+
 @parse_args('v', 'v', 'i')
 def _weight_norm(g, weight_v, weight_g, dim):
     rank = weight_v.type().dim()

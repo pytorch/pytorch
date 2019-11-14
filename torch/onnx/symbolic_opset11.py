@@ -9,6 +9,7 @@ from torch.onnx.symbolic_helper import _black_list_in_opset
 from torch.onnx.symbolic_opset9 import expand
 from torch.nn.modules.utils import _single, _pair, _triple
 
+
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
@@ -44,6 +45,7 @@ def pixel_shuffle(g, self, upscale_factor):
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
+
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
