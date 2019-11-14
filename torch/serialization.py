@@ -320,7 +320,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
         >>> torch.save(x, buffer)
     """
     if _use_new_zipfile_serialization:
-        with _open_zipfile_writer(f, 'wb') as opened_file:
+        with _open_zipfile_writer(f) as opened_file:
             _save(obj, opened_file, pickle_module, pickle_protocol)
             return
 
@@ -524,7 +524,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     with _open_file_like(f, 'rb') as opened_file:
         if _is_zipfile(opened_file):
-            with _open_zipfile_reader(f, 'rb') as opened_zipfile:
+            with _open_zipfile_reader(f) as opened_zipfile:
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
