@@ -1074,6 +1074,23 @@ TEST_F(ModulesTest, Dropout3d) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
+TEST_F(ModulesTest, FeatureDropout) {
+  FeatureDropout dropout(0.5);
+  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
+  torch::Tensor y = dropout(x);
+
+  y.backward(torch::ones_like(y));
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 10);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 70); // Probably
+
+  dropout->eval();
+  y = dropout(x);
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->named_parameters();
@@ -2771,6 +2788,12 @@ TEST_F(ModulesTest, PrettyPrintDropout3d) {
   ASSERT_EQ(c10::str(Dropout3d()), "torch::nn::Dropout3d(p=0.5, inplace=false)");
   ASSERT_EQ(c10::str(Dropout3d(0.42)), "torch::nn::Dropout3d(p=0.42, inplace=false)");
   ASSERT_EQ(c10::str(Dropout3d(Dropout3dOptions().p(0.42).inplace(true))), "torch::nn::Dropout3d(p=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFeatureDropout) {
+  ASSERT_EQ(c10::str(FeatureDropout()), "torch::nn::FeatureDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureDropout(0.42)), "torch::nn::FeatureDropout(p=0.42, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureDropout(FeatureDropoutOptions().p(0.42).inplace(true))), "torch::nn::FeatureDropout(p=0.42, inplace=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintFunctional) {
