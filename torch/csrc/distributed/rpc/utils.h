@@ -18,11 +18,11 @@ TORCH_API std::unique_ptr<RpcCommandBase> deserializeResponse(
 
 // Note: format is subject to change and intended for RPCs.
 // For saving persistently to disk, use torch::save().
-std::string wireSerialize(
+TORCH_API std::string wireSerialize(
     const std::vector<char>& payload,
     const std::vector<at::Tensor>& tensors);
 
-std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
+TORCH_API std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     const void* data,
     size_t data_size);
 
