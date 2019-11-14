@@ -156,7 +156,8 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', False))
+TEST_REPORT_FILE_OVERRIDE = os.environ.get('TEST_REPORT_FILE_OVERRIDE')
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
@@ -183,7 +184,11 @@ def run_tests(argv=UNITTEST_ARGS):
     else:
         if IS_PYTORCH_CI:
             import xmlrunner
-            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output='test-reports'))
+            if TEST_REPORT_FILE_OVERRIDE is not None:
+                with open(TEST_REPORT_FILE_OVERRIDE, 'wb') as output:
+                    unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=output))
+            else:
+                unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output='test-reports'))
         else:
             unittest.main(argv=argv)
 

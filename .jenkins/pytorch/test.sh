@@ -12,7 +12,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch"
 
 # Make directory for test reports
-sudo mkdir /var/lib/jenkins/workspace/test/test_reports
+sudo mkdir /var/lib/jenkins/workspace/test/test-reports
 
 if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
