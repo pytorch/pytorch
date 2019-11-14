@@ -195,8 +195,8 @@ Operation createTensorFromList(const Node* node) {
       pop(stack, data, dtype, device);
     }
     auto sizes = compute_sizes(data);
-    auto tensor = autograd::make_variable(at::empty(
-        sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
+    auto tensor = at::empty(
+        sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
     recursiveStore(
         (char*)tensor.data_ptr(),
@@ -350,7 +350,7 @@ RegisterOperators reg({
         IValue device;                                                     \
         bool requires_grad;                                                \
         pop(stack, scalar_val, dtype, device, requires_grad);              \
-        auto tensor = autograd::make_variable(tensor_creation_op);         \
+        auto tensor = tensor_creation_op;                                  \
         tensor = castTensorTo(tensor, dtype, device);                      \
         tensor.set_requires_grad(requires_grad);                           \
         push(stack, std::move(tensor));                                    \
@@ -365,7 +365,7 @@ RegisterOperators reg({
             IValue dtype;                                                  \
             IValue device;                                                 \
             pop(stack, scalar_val, dtype, device);                         \
-            auto tensor = autograd::make_variable(tensor_creation_op);     \
+            auto tensor = tensor_creation_op;                              \
             tensor = castTensorTo(tensor, dtype, device);                  \
             push(stack, std::move(tensor));                                \
             return 0;                                                      \
