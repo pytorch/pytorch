@@ -2465,7 +2465,7 @@ class TestQuantizedOps(unittest.TestCase):
 
         x = np.random.random((1, 2)).astype("float32")
         self.generic_test(QModule(op), (x,), input_names=["x"])
-
+    '''
     def test_quantized_add(self):
         class QAddModule(torch.nn.Module):
             def __init__(self):
@@ -2505,6 +2505,39 @@ class TestQuantizedOps(unittest.TestCase):
         x_numpy = np.random.rand(1, 2, 5).astype(np.float32)
         x = torch.from_numpy(x_numpy).to(dtype=torch.float)
         outputs = model(x)
+        traced = torch.jit.trace(model, x)
+        buf = io.BytesIO()
+        torch.jit.save(traced, buf)
+        buf.seek(0)
+        torch.backends.quantized.engine = "qnnpack"
+        model = torch.jit.load(buf)
+        input_names = ["x"]
+        torch.onnx.export(model, x, os.path.join("model.onnx"), verbose=True, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        onnx_model = onnx.load('model.onnx')
+        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, x_numpy)))[0]
+        np.testing.assert_almost_equal(np.squeeze(outputs.numpy()), caffe_res, decimal=3)
+    '''
+    def test_qconv_model(self):
+        class ConvModel(torch.nn.Module):
+            def __init__(self):
+                super(ConvModel, self).__init__()
+                self.qconfig = torch.quantization.default_qconfig
+                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=False).to(dtype=torch.float))
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        qconfig = torch.quantization.default_qconfig
+        model = ConvModel()
+        model.qconfig = qconfig
+        model = torch.quantization.prepare(model)
+        model = torch.quantization.convert(model)
+
+        x_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
+        x = torch.from_numpy(x_numpy).to(dtype=torch.float)
+        outputs = model(x)
+        print(outputs, outputs.shape)
         traced = torch.jit.trace(model, x)
         buf = io.BytesIO()
         torch.jit.save(traced, buf)
