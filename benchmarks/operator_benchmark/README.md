@@ -136,6 +136,7 @@ Filter and run an operator (use add as an example):
 ```
 $ python -m benchmark_all_test --operator add --omp_num_threads 1 --mkl_num_threads 1
 ```
+Note: this filter is based on the operator name rather than the file name.
 
 Run torch.add benchmark with tag 'long':
 ```
