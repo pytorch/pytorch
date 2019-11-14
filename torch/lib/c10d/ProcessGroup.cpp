@@ -35,7 +35,7 @@ void ProcessGroup::Work::synchronize() {}
 
 bool ProcessGroup::Work::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
-  cv_.wait(lock, [&] { return completed_; });
+  cv_.wait(lock, [&] { return aborted_ | completed_; });
   if (exception_) {
     std::rethrow_exception(exception_);
   }

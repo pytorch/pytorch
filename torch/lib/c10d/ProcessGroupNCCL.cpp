@@ -215,7 +215,12 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 // Same as calling synchronize().
 bool ProcessGroupNCCL::WorkNCCL::wait() {
   synchronize();
+  // Always return true, because abort API is not implemented.
   return true;
+}
+
+void ProcessGroupNCCL::WorkNCCL::abort() {
+  AT_ASSERT(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(

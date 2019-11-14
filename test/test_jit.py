@@ -10380,6 +10380,33 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs)
 
+    def test_trace_autograd_function(self):
+        class TestFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return torch.neg(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return torch.neg(grad_output)
+
+
+
+        class TracedModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(TestFunc.apply(x))
+
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.tm = TracedModule()
+
+            def forward(self, x):
+                return self.tm(x)
+
+        traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
+
     def test_interpolate_trace(self):
         class test(nn.Module):
             def __init__(self):

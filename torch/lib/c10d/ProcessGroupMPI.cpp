@@ -141,7 +141,7 @@ int ProcessGroupMPI::AsyncWork::sourceRank() const {
   return status_.MPI_SOURCE;
 }
 
-void ProcessGroupMPI::AsyncWork::wait() {
+bool ProcessGroupMPI::AsyncWork::wait() {
   if (request_ == MPI_REQUEST_NULL) {
     return;
   }
@@ -153,6 +153,12 @@ void ProcessGroupMPI::AsyncWork::wait() {
     populateException();
     std::rethrow_exception(exception_);
   }
+  // Always return true, because abort API is not implemented.
+  return true;
+}
+
+void ProcessGroupMPI::AsyncWork::abort() {
+  AT_ASSERT(false, "ProcessGroupMPI::AsyncWork::abort not implemented.")
 }
 
 void ProcessGroupMPI::AsyncWork::populateException() {
