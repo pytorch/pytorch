@@ -2549,27 +2549,15 @@ class TestQuantizedOps(unittest.TestCase):
         buf.seek(0)
         model = torch.jit.load(buf)
         input_names = ["x"]
-        torch.onnx.export(model, x, "model.onnx", input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        onnx_model = onnx.load('model.onnx')
+        f = io.BytesIO()
+        torch.onnx.export(model, x, f, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        f.seek(0)
+        onnx_model = onnx.load(f)
         x_c2 = np.transpose(x_numpy, [0, 2, 3, 1])
         y = np.expand_dims(x_c2, axis=0)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, y)))[0]
         np.testing.assert_almost_equal(outputs.permute(0, 2, 3, 1).numpy(), caffe_res, decimal=3)
 
-    '''
-    def test_mobilenet_v2(self):
-        module_quant = torch.jit.load("/home/supriyar/test/mobilenet_traced.pth")
-        x_numpy = np.random.rand(1, 3, 224, 224).astype(np.float32)
-        inputs = torch.from_numpy(x_numpy).to(dtype=torch.float)
-        input_names = ["x"]
-        module_quant.eval()
-        output = module_quant(inputs)
-        torch.onnx.export(module_quant, (inputs), 'quant.onnx', verbose=False, input_names=input_names, example_outputs=output, opset_version=9, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        onnx_model = onnx.load('quant.onnx')
-        x_c2 = np.transpose(x_numpy, [0, 2, 3, 1])
-        y = np.expand_dims(x_c2, axis=0)
-        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, y)))[0]
-    '''
 
 if __name__ == '__main__':
     unittest.main()
