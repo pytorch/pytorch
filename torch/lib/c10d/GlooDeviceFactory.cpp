@@ -52,6 +52,9 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
   return ::gloo::transport::tcp::CreateDevice(attr);
 }
 
+// Registry priority is per key identifier. We register TCP to `LINUX` for
+// the flexibility of other application to override by priority. Register
+// TCP to `TCP` for env "GLOO_DEVICE_TRANSPORT" override.
 C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
 #endif
@@ -74,11 +77,14 @@ static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
   return ::gloo::transport::uv::CreateDevice(attr);
 }
 
+// Registry priority is per key identifier. We register UV to `APPLE` for
+// the flexibility of other application to override by priority. Register
+// UV to `UV` for env "GLOO_DEVICE_TRANSPORT" override.
 C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice);
 C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 #endif
 
-static const char* glooDevice = getenv("GLOO_DEVICE");
+static const char* glooDevice = getenv("GLOO_DEVICE_TRANSPORT");
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForInterface(const std::string& interface) {
