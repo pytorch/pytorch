@@ -23,8 +23,7 @@ inline Tensor& resize_named_tensor_(
       "). This may be caused by passing a named tensor ",
       "as an `out=` argument; please ensure that the sizes are the same. ");
   TORCH_CHECK(
-      optional_memory_format.value_or(MemoryFormat::Contiguous) ==
-          MemoryFormat::Contiguous,
+      !optional_memory_format.has_value(),
       "Unsupported memory format for named tensor resize ",
       optional_memory_format.value());
   return self;

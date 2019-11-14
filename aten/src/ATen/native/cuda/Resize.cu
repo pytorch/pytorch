@@ -21,7 +21,7 @@ Tensor& resize_cuda_(
   self_->maybe_zero_dim(size.size() == 0);
   if (optional_memory_format.has_value()) {
     auto memory_format =
-        optional_memory_format.value_or(MemoryFormat::Contiguous);
+        optional_memory_format.value();
     TORCH_CHECK(
         memory_format != MemoryFormat::Preserve,
         "Unsupported memory format",
