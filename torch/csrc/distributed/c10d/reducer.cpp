@@ -172,7 +172,8 @@ Reducer::Reducer(
       // if we always put it on CPU.
       options = options.device(replicas_[i][0].device());
       options = options.dtype(at::kInt);
-      local_used_maps_[i] = at::empty({variable_count}, options);
+      local_used_maps_[i] =
+          at::empty({static_cast<long>(variable_count)}, options);
     }
   }
 }
