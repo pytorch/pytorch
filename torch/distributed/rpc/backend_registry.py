@@ -39,7 +39,7 @@ def init_backend(backend, *args, **kwargs):
     return backend.value.init_backend_handler(*args, **kwargs)
 
 
-def process_group_init_backend_handler(
+def _process_group_init_backend_handler(
     store,
     self_name,
     self_rank,
@@ -91,4 +91,4 @@ def process_group_init_backend_handler(
 
 
 
-register_backend("PROCESS_GROUP", process_group_init_backend_handler)
+register_backend("PROCESS_GROUP", _process_group_init_backend_handler)
