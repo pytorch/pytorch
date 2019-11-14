@@ -45,16 +45,23 @@ Working with a Single Optimizer
 Working with Unscaled Gradients
 -------------------------------
 
-The gradients resulting from ``scaler.scale(loss).backward()`` are scaled.  ``scaler.unscale`` can be
-used to unscale an optimizer's owned gradients in-place prior to ``scaler.step``.
+Gradients resulting from ``scaler.scale(loss).backward()`` are scaled.  If you wish to modify or inspect
+these gradients between ``backward()`` and ``scaler.step(optimizer)``,  you should unscale them first.
+For example, gradient clipping manipulates a set of gradients such that their global norm
+(see :func:`torch.nn.utils.clip_grad_norm_`) or maximum magnitude (see :func:`torch.nn.utils.clip_grad_value_`)
+is :math:`<=` some user-imposed threshold.  If you attempted to clip _without_ unscaling, the gradients' norm/maximum
+magnitude would also be scaled, so your requested threshold (which was meant to be the threshold for _unscaled_ gradients)
+would be invalid.
+
+``scaler.unscale(optimizer)`` unscales gradients held by ``optimizer``'s assigned parameters.
+If your model or models contain other parameters that were assigned to another optimizer
+(say ``optimizer1``), you may call ``scaler.unscale(optimizer1)`` separately to unscale those
+parameters' gradients as well.
 
 Gradient clipping
 """""""""""""""""
 
-Gradient clipping involves manipulating a set of gradients such that their global norm
-(see :func:`torch.nn.utils.clip_grad_norm_`) or maximum magnitude (see :func:`torch.nn.utils.clip_grad_value_`)
-is :math:`<=` some user-imposed threshold.  Calling ``scaler.unscale(optimizer)`` before clipping enables you
-to clip unscaled gradients as usual::
+Calling ``scaler.unscale(optimizer)`` before clipping enables you to clip unscaled gradients as usual::
 
     scaler = AmpScaler()
     ...

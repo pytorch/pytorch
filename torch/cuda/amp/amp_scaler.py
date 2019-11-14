@@ -200,7 +200,7 @@ class AmpScaler(object):
         1.  , :meth:`step` invokes :meth:`unscale` for ``optimizer`` before calling ``optimizer.step()``
             (unless :meth:`unscale` was explicitly called for ``optimizer`` earlier in the iteration).
             This ensures ``optimizer.step()`` is carried out using unscaled gradients.
-        2.  If inf/NaN gradients are found, :meth:`step` skips ``optimizer.step()`` to avoid polluting the params.
+        2.  If inf/NaN gradients are found, :meth:`step` skips ``optimizer.step()`` to avoid corrupting the params.
 
         ``*args`` and ``**kwargs`` are forwarded to ``optimizer.step()``.
 
