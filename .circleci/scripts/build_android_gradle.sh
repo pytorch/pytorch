@@ -70,7 +70,7 @@ echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
 echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
 
-"$GRADLE_PATH" "$GRADLE_PARAMS"
+$GRADLE_PATH $GRADLE_PARAMS
 
 find . -type f -name "*.a" -exec ls -lh {} \;
 
