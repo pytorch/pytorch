@@ -12653,7 +12653,10 @@ class TestTorchDeviceType(TestCase):
         nhwc = input_generator_fn(device)
         clone = transformation_fn(nhwc)
 
-        if not default_is_preserve:
+        if default_is_preserve:
+            self.assertFalse(clone.is_contiguous())
+            self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
+        else:
             self.assertTrue(clone.is_contiguous())
             self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
         if compare_data:
@@ -12691,7 +12694,7 @@ class TestTorchDeviceType(TestCase):
         def transformation_fn(tensor, **kwargs):
             return tensor.clone(**kwargs)
 
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, True)
+        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, default_is_preserve=True)
 
     @onlyCPU
     @dtypes(torch.double)
