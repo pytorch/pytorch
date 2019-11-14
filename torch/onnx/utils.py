@@ -618,9 +618,10 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
         import torch.onnx.symbolic_registry as sym_registry
 
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            sym_registry.register_quantized_ops('caffe2', opset_version)
         sym_registry.register_version('', opset_version)
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            import torch.onnx.symbolic_caffe2
+            torch.onnx.symbolic_caffe2.register_quantized_ops('caffe2', opset_version)
 
         # See Note [Export inplace]
         # TODO: I think this is not necessary anymore

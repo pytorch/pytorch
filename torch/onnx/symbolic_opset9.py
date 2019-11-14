@@ -17,7 +17,6 @@ from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
-import torch.onnx.symbolic_caffe2 as sym_caffe2
 
 import numpy
 import math
@@ -448,9 +447,6 @@ def prelu(g, self, weight):
 
 
 def relu(g, input):
-    if input in sym_help._quantized_ops:
-        return sym_caffe2.relu(g, input)
-
     return g.op("Relu", input)
 
 
@@ -2090,16 +2086,3 @@ def _weight_norm(g, weight_v, weight_g, dim):
         return g.op("Mul", div, weight_g)
     else:
         return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
-
-# Ops below are for PyTorch Quantization conversion process.
-@parse_args('v', 'f', 'i', 't')
-def quantize_per_tensor(g, input, scale, zero_point, dtype):
-    return sym_caffe2.quantize_per_tensor(g, input, scale, zero_point)
-
-@parse_args('v')
-def dequantize(g, input):
-    return sym_caffe2.dequantize(g, input)
-
-@parse_args('v', 't', 't', 't', 't', 't', 't', 't')
-def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
-    return input

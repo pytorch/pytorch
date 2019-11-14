@@ -144,13 +144,11 @@ void unpackQuantizedWeightsHelper(
     at::Tensor unpacked_weight = std::get<0>(result);
 
     // Permute weights?
-    /*
     if (unpacked_weight.ndimension() == 2) {
       unpacked_weight.permute({1, 0});
     } else if (unpacked_weight.ndimension() == 4) {
       unpacked_weight.permute({0, 2, 3, 1});
     }
-    */
 
     // Remove packed_params
     qlinear_node->removeInput(1);
