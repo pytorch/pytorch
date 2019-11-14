@@ -2446,8 +2446,10 @@ class TestQuantizedOps(unittest.TestCase):
         q_model = torch.quantization.prepare(model, inplace=False)
         q_model = torch.quantization.convert(q_model, inplace=False)
         pytorch_res = q_model(*pt_inputs)
-        torch.onnx.export(q_model, pt_inputs, "model.onnx", verbose=True, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        onnx_model = onnx.load('model.onnx')
+        f = io.BytesIO()
+        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        f.seek(0)
+        onnx_model = onnx.load(f)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
         np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=3)
 
@@ -2496,6 +2498,7 @@ class TestQuantizedOps(unittest.TestCase):
                 x = self.fc1(x)
                 return x
 
+        torch.backends.quantized.engine = "qnnpack"
         qconfig = torch.quantization.default_qconfig
         model = LinearModel()
         model.qconfig = qconfig
@@ -2509,11 +2512,13 @@ class TestQuantizedOps(unittest.TestCase):
         buf = io.BytesIO()
         torch.jit.save(traced, buf)
         buf.seek(0)
-        torch.backends.quantized.engine = "qnnpack"
+
         model = torch.jit.load(buf)
         input_names = ["x"]
-        torch.onnx.export(model, x, "model.onnx", verbose=True, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        onnx_model = onnx.load('model.onnx')
+        f = io.BytesIO()
+        torch.onnx.export(model, x, f, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        f.seek(0)
+        onnx_model = onnx.load(f)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, x_numpy)))[0]
         np.testing.assert_almost_equal(np.squeeze(outputs.numpy()), caffe_res, decimal=3)
 

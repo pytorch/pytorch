@@ -615,6 +615,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
+        import torch
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
         import torch.onnx.symbolic_registry as sym_registry
 
