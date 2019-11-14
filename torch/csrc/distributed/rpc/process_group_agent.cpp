@@ -500,11 +500,12 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::steady_clock::now().time_since_epoch()) -
           futureTimeouts_.begin()->first;
+      // TODO: will sleep for 0 ms when rpcTimeout_ is 0 (meaning infinite),
+      // which will result in busy polling for the lock If rpcTimeout_ is 0,
+      // should we have a default sleep interval here?
       sleepTime =
           std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
     }
-
-    fprintf(stderr, "sleeping for %d milliseconds\n", sleepTime.count());
 
     // Sleep for the ETA for the next future to time out, or until we are told
     // to shut down. This is to avoid the case where we sleep for a long time
