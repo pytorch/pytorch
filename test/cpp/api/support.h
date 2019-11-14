@@ -4,6 +4,9 @@
 
 #include <gtest/gtest.h>
 
+// TODO: Move the include into `ATen/ATen.h`, once C++ tensor indexing
+// is ready to ship.
+#include <ATen/native/TensorIndexing.h>
 #include <torch/nn/cloneable.h>
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -47,6 +50,70 @@ private:
 
 inline bool pointer_equal(at::Tensor first, at::Tensor second) {
   return first.data_ptr<float>() == second.data_ptr<float>();
+}
+
+#define TENSOR(T, S) \
+inline void assert_tensor_equal(at::Tensor a, T b) { \
+  ASSERT_TRUE(std::abs(a.item<T>() - b) < 1e-4); \
+}
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+#undef TENSOR
+
+inline void assert_tensor_equal(at::Tensor a, at::Tensor b) {
+  ASSERT_TRUE(a.sizes() == b.sizes());
+  if (a.numel() > 0) {
+    if (a.device().type() == torch::kCPU && (a.dtype() == torch::kFloat16 || a.dtype() == torch::kBFloat16)) {
+      // CPU half and bfloat16 tensors don't have the methods we need below
+      a = a.to(torch::kFloat32);
+    }
+    b = b.to(a);
+
+    if ((a.dtype() == torch::kBool) != (b.dtype() == torch::kBool)) {
+      TORCH_CHECK(false, "Was expecting both tensors to be bool type.");
+    } else {
+      if (a.dtype() == torch::kBool && b.dtype() == torch::kBool) {
+        // we want to respect precision but as bool doesn't support substraction,
+        // boolean tensor has to be converted to int
+        a = a.to(torch::kInt);
+        b = b.to(torch::kInt);
+      }
+
+      auto diff = a - b;
+      if (a.is_floating_point()) {
+        // check that NaNs are in the same locations
+        auto nan_mask = torch::isnan(a);
+        ASSERT_TRUE(torch::equal(nan_mask, torch::isnan(b)));
+        diff.idx_put_({nan_mask}, 0);
+      }
+      // TODO: implement abs on CharTensor (int8)
+      if (diff.is_signed() && diff.scalar_type() != torch::kInt8) {
+        diff = diff.abs();
+      }
+      auto max_err = diff.max().item<double>();
+      ASSERT_LE(max_err, 1e-5);
+    }
+  }
+}
+
+inline void assert_tensor_not_equal(at::Tensor x, at::Tensor y) {
+  if (x.sizes() != y.sizes()) {
+    return;
+  }
+  ASSERT_GT(x.numel(), 0);
+  y = y.type_as(x);
+  y = x.is_cuda() ? y.to({torch::kCUDA, x.get_device()}) : y.cpu();
+  auto nan_mask = x != x;
+  if (torch::equal(nan_mask, y != y)) {
+    auto diff = x - y;
+    if (diff.is_signed()) {
+      diff = diff.abs();
+    }
+    diff.idx_put_({nan_mask}, 0);
+    // Use `item()` to work around:
+    // https://github.com/pytorch/pytorch/issues/22301
+    auto max_err = diff.max().item<double>();
+    ASSERT_GE(max_err, 1e-5);
+  }
 }
 
 inline int count_substr_occurrences(const std::string& str, const std::string& substr) {
