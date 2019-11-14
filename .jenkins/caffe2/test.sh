@@ -114,8 +114,10 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
 fi
 
 pip install --user pytest-sugar
+pip install --user pytest-xdist
 "$PYTHON" \
   -m pytest \
+  -n 2
   -x \
   -v \
   --disable-warnings \
