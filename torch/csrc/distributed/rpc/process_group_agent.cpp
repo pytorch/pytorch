@@ -196,7 +196,6 @@ void ProcessGroupAgent::join() {
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
-
   pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(

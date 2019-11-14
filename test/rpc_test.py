@@ -1064,9 +1064,6 @@ class RpcTest(object):
         rpc.set_rpc_timeout(timedelta(seconds=0))
         rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 
-
-
-
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")
         def test_func():
