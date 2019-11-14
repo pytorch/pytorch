@@ -71,7 +71,7 @@ bool Tensor::is_view() const noexcept {
   }
 }
 
-const Tensor& Variable::base() const {
+const Tensor& Tensor::base() const {
   if (is_view()) {
     // is_view() implies get_autograd_meta()
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(*this));
@@ -94,13 +94,13 @@ const std::string& Tensor::name() const noexcept {
 }
 
 namespace {
-  std::shared_ptr<Node> singleton_shared_ptr;
+  std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
 }
 
-const std::shared_ptr<Node>& Tensor::grad_fn() const {
+const std::shared_ptr<torch::autograd::Node>& Tensor::grad_fn() const {
   if (is_view()) {
     // NB: is_view() ==> get_autograd_meta()
-    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(*this));
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(*this));
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
@@ -108,12 +108,12 @@ const std::shared_ptr<Node>& Tensor::grad_fn() const {
     auto current_version = this->_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
-      auto fn = std::make_shared<generated::AsStridedBackward>();
+      auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = sizes().vec();
       fn->stride = strides().vec();
       fn->storage_offset = storage_offset();
-      fn->set_next_edges(collect_next_edges(diff_view_meta->base_));
+      fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
         diff_view_meta->base_.type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
