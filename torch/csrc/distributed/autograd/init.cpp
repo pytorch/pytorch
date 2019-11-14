@@ -133,6 +133,7 @@ Arguments:
         computation. All the tensors should be scalars.
 
 Example::
+
     >> import torch.distributed.autograd as dist_autograd
     >> with dist_autograd.context() as context_id:
     >>      pred = model.forward()
@@ -158,6 +159,7 @@ Arguments:
                 gradients.
 
 Example::
+
     >> import torch.distributed.autograd as dist_autograd
     >> with dist_autograd.context() as context_id:
     >>      t1 = torch.rand((3, 3), requires_grad=True)
