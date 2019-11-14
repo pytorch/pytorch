@@ -142,18 +142,12 @@ struct VISIBILITY_HIDDEN ConcreteModuleTypeData {
 
   struct ModuleInfo {
     ModuleInfo(std::string name, std::shared_ptr<ConcreteModuleType> meta)
-        : name_(std::move(name)), meta_(std::move(meta)), type_(nullptr) {}
+        : name_(std::move(name)), meta_(std::move(meta)) {}
 
-    ModuleInfo(std::string name, const TypePtr& type)
-        : name_(std::move(name)), meta_(nullptr), type_(type) {}
-    TypePtr getJitType() const;
-    std::string name_;
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs);
 
-    // Module Info contains either an ConcreateModuleType or a type (which is
-    // a Module Interface), these two are union relationship.
+    std::string name_;
     std::shared_ptr<ConcreteModuleType> meta_;
-    TypePtr type_;
   };
 
   // If true, this type will never compare equally to anything else. This is
@@ -202,10 +196,7 @@ class VISIBILITY_HIDDEN RawConcreteModuleType {
       const TypePtr& type,
       py::object pyFunction);
 
-  // add a submodule to the ConcreteModuleType can either be ConcreteModuleType
-  // that get constructed recursively, or InterfaceType (Module)
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
-  void addModuleInterface(std::string name, const TypePtr& type);
 
   void addOverload(
       std::string methodName,
@@ -231,7 +222,10 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
  public:
   explicit ConcreteModuleType(ConcreteModuleTypeData data);
 
-  ClassTypePtr getJitType() const;
+  static std::shared_ptr<ConcreteModuleType> fromInterface(
+      InterfaceTypePtr interface);
+
+  TypePtr getJitType() const;
   py::object getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
   c10::optional<py::object> findConstant(const std::string& name) const;
@@ -265,9 +259,11 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void dump() const;
 
  private:
+  ConcreteModuleType() {}
+
   // The JIT type derived from this ConcreteModuleType.
   ConcreteModuleTypeData data_;
-  ClassTypePtr jitType_;
+  TypePtr jitType_;
 
   friend RawConcreteModuleType;
 };
