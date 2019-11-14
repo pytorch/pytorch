@@ -1,6 +1,6 @@
 
-#include <aten/src/ATen/core/ivalue.h>
-#include <aten/src/ATen/core/stack.h>
+#include <ATen/core/ivalue.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/jit/function.h>
 
 namespace torch {
