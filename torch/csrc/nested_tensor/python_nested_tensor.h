@@ -115,17 +115,17 @@ static std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
   }
 }
 
-template <class F> static _NestedNode map(_NestedNode nested_node, F fn) {
+template <typename T, class F> static T map(_NestedNode nested_node, F fn) {
   if (nested_node._children.size() == 0) {
-    _NestedNode new_nested_node(
+    T new_nested_node(
         _VariableNode(fn(nested_node._variable_node._variable)));
     return new_nested_node;
   } else {
-    std::vector<_NestedNode> new_children;
+    std::vector<T> new_children;
     for (size_t i = 0; i < nested_node._children.size(); i++) {
-      new_children.push_back(_NestedNode(map(nested_node._children[i], fn)));
+      new_children.push_back(T(map<T>(nested_node._children[i], fn)));
     }
-    return _NestedNode(new_children);
+    return T(new_children);
   }
 }
 
@@ -161,23 +161,23 @@ struct TORCH_API _ListNestedTensor {
   // py::none()); }
   _ListNestedTensor pin_memory() {
     return _ListNestedTensor(
-        map(_structure, [](at::Tensor tensor) -> at::Tensor {
+        map<_NestedNode>(_structure, [](at::Tensor tensor) -> at::Tensor {
           return tensor.pin_memory();
         }));
   }
   _ListNestedTensor grad() {
     return _ListNestedTensor(
-        map(_structure,
+        map<_NestedNode>(_structure,
             [](at::Tensor tensor) -> at::Tensor { return tensor.grad(); }));
   }
   _ListNestedTensor detach() {
     return _ListNestedTensor(
-        map(_structure,
+        map<_NestedNode>(_structure,
             [](at::Tensor tensor) -> at::Tensor { return tensor.detach(); }));
   }
   _ListNestedTensor requires_grad_(bool requires_grad) {
     return _ListNestedTensor(
-        map(_structure, [requires_grad](at::Tensor tensor) -> at::Tensor {
+        map<_NestedNode>(_structure, [requires_grad](at::Tensor tensor) -> at::Tensor {
           return tensor.requires_grad_(requires_grad);
         }));
   }
@@ -190,9 +190,7 @@ struct TORCH_API _ListNestedTensor {
            });
   }
   // // Only works if nested_dim() higher than 1.
-  // std::vector<py::object> nested_size();
-  // std::vector<py::object> nested_stride();
-  // int64_t __len__() { return _structure._children.size(); }
+  int64_t __len__() { return _structure._children.size(); }
   int64_t nested_dim() {
     const _NestedNode *start_structure = &_structure;
     int64_t depth = 0;
@@ -212,6 +210,8 @@ struct TORCH_API _ListNestedTensor {
   bool is_contiguous() { return false; }
   _NestedNode get_structure() { return _structure; }
   // TODO: Implement these and call into them isntead of implementing them
+  // std::vector<py::object> nested_size();
+  // std::vector<py::object> nested_stride();
   // separately in Variable dispatch functions.
   // std::vector<py::object> unbind();
   // std::string __str__();

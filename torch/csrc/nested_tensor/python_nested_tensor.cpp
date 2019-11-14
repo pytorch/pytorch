@@ -55,6 +55,33 @@ PyObject *_ListNestedTensorVariableClass = nullptr;
 //   });
 // }
 
+template <class F> static PyObject *_map_member(_NestedNode nested_node, F fn) {
+  if (nested_node._children.size() == 0) {
+    return torch::autograd::utils::wrap(
+        nested_node._variable_node._variable.sizes());
+  } else {
+    std::vector<PyObject *> new_children;
+    for (size_t i = 0; i < nested_node._children.size(); i++) {
+      new_children.push_back(_map_member(nested_node._children[i], fn));
+    }
+    return torch::autograd::utils::wrap(new_children);
+  }
+}
+
+PyObject *_ListNestedTensorVariable_nested_size(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return _map_member(self.get_structure(), [](at::Tensor tensor) -> PyObject * {
+    return torch::autograd::utils::wrap(tensor.sizes());
+  });
+}
+
+PyObject *_ListNestedTensorVariable_nested_stride(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return _map_member(self.get_structure(), [](at::Tensor tensor) -> PyObject * {
+    return torch::autograd::utils::wrap(tensor.strides());
+  });
+}
+
 // std::vector<py::object> _ListNestedTensor::nested_stride() {
 //   return map_fn(*this, [](at::Tensor tensor) -> py::object {
 //     return py::reinterpret_borrow<py::object>(
@@ -224,7 +251,8 @@ static void _ListNestedTensorVariable_backward(PyObject *self_,
   PyObject *gradient_;
   PyObject *retain_graph_;
   PyObject *create_graph_;
-  if (!PyArg_ParseTuple(args, "OOO", &gradient_, &retain_graph_, &create_graph_)) {
+  if (!PyArg_ParseTuple(args, "OOO", &gradient_, &retain_graph_,
+                        &create_graph_)) {
     throw std::runtime_error("tuple parsing failed");
   }
   if (!_ListNestedTensorVariable_Check(gradient_)) {
@@ -270,6 +298,11 @@ _ListNestedTensorVariable_device(_ListNestedTensorVariable *self,
   END_HANDLE_TH_ERRORS
 }
 
+static Py_ssize_t _ListNestedTensorVariable_len(PyObject *self_) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return PyLong_AsSsize_t(PyLong_FromLong(self.__len__()));
+}
+
 static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
     {"dtype", (getter)_ListNestedTensorVariable_dtype, nullptr, nullptr,
      nullptr},
@@ -283,6 +316,10 @@ static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
 static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {"element_size", (PyCFunction)_ListNestedTensorVariable_element_size,
      METH_NOARGS, "Return element size."},
+    {"nested_size", (PyCFunction)_ListNestedTensorVariable_nested_size,
+     METH_NOARGS, "Return nested_size."},
+    {"nested_stride", (PyCFunction)_ListNestedTensorVariable_nested_stride,
+     METH_NOARGS, "Return nested_stride."},
     {"pin_memory", (PyCFunction)_ListNestedTensorVariable_pin_memory,
      METH_NOARGS, "Pins memory."},
     {"detach", (PyCFunction)_ListNestedTensorVariable_detach, METH_NOARGS,
@@ -306,6 +343,17 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {NULL} /* Sentinel */
 };
 
+static PySequenceMethods _ListNestedTensorVariable_as_sequence = {
+    (lenfunc)_ListNestedTensorVariable_len, /* sq_length */
+    nullptr,                                /* sq_concat */
+    nullptr,                                /* sq_repeat */
+    nullptr,                                /* sq_item */
+    nullptr,                                /* sq_slice */
+    nullptr,                                /* sq_ass_item */
+    nullptr,                                /* sq_ass_slice */
+    nullptr                                 /* sq_contains */
+};
+
 // TODO: "Py_TPFLAGS_DEFAULT enables all memebers defined until Python 3.3"
 // https://docs.python.org/3/extending/newtypes_tutorial.html
 // Does that mean it won't work before Python 3.3?
@@ -320,7 +368,7 @@ PyTypeObject _ListNestedTensorVariableType = {
     nullptr,                                       /* tp_reserved */
     (reprfunc)_ListNestedTensorVariable___repr__,  /* tp_repr */
     nullptr,                                       /* tp_as_number */
-    nullptr,                                       /* tp_as_sequence */
+    &_ListNestedTensorVariable_as_sequence,        /* tp_as_sequence */
     nullptr,                                       /* tp_as_mapping */
     nullptr,                                       /* tp_hash  */
     nullptr,                                       /* tp_call */
@@ -373,28 +421,11 @@ void initialize_python_bindings() {
 
   // py::class_<_ListNestedTensor>(m, "_ListNestedTensor")
   //     .def(py::init<std::vector<py::object>>())
-  //     .def_property_readonly("dtype", &_ListNestedTensor::get_dtype)
-  //     .def_property_readonly("layout", &_ListNestedTensor::get_layout)
-  //     .def_property_readonly("device", &_ListNestedTensor::get_device)
-  //     .def_property_readonly("requires_grad",
   //     &_ListNestedTensor::requires_grad)
-  //     .def_property_readonly("grad", &_ListNestedTensor::grad)
-  //     .def("detach", &_ListNestedTensor::detach)
-  //     .def("pin_memory", &_ListNestedTensor::pin_memory)
-  //     .def("backward", &_ListNestedTensor::backward)
-  //     .def("requires_grad_", &_ListNestedTensor::requires_grad_)
-  //     .def("element_size", &_ListNestedTensor::element_size)
   //     .def("size", &_ListNestedTensor::size)
-  //     .def("unbind", &_ListNestedTensor::unbind)
   //     .def("nested_size", &_ListNestedTensor::nested_size)
   //     .def("nested_stride", &_ListNestedTensor::nested_stride)
-  //     .def("is_pinned", &_ListNestedTensor::is_contiguous)
-  //     .def("is_contiguous", &_ListNestedTensor::is_contiguous)
   //     .def("__len__", &_ListNestedTensor::__len__)
-  //     .def("__str__", &_ListNestedTensor::__str__)
-  //     .def("dim", &_ListNestedTensor::dim)
-  //     .def("numel", &_ListNestedTensor::numel)
-  //     .def("nested_dim", &_ListNestedTensor::nested_dim);
 }
 }
 }

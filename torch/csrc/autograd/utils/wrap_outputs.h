@@ -186,4 +186,13 @@ inline PyObject* wrap(at::IntArrayRef list) {
   }
   return r.release();
 }
+
+inline PyObject* wrap(std::vector<PyObject*> list) {
+  auto r = THPObjectPtr{PyTuple_New(list.size())};
+  if (!r) throw python_error();
+  for (size_t i = 0; i < list.size(); ++i) {
+    PyTuple_SET_ITEM(r.get(), i, list[i]);
+  }
+  return r.release();
+}
 }}} // namespace torch::autograd::utils
