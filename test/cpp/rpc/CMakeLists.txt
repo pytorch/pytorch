@@ -9,13 +9,13 @@ target_include_directories(test_cpp_rpc PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_cpp_rpc PRIVATE torch gtest)
 
 if (USE_CUDA)
-  target_link_libraries(test_cpp_rcp PRIVATE
+  target_link_libraries(test_cpp_rpc PRIVATE
     ${CUDA_LIBRARIES}
     ${CUDA_NVRTC_LIB}
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
 
-  target_compile_definitions(test_cpp_rcpc PRIVATE "USE_CUDA")
+  target_compile_definitions(test_cpp_rpc PRIVATE "USE_CUDA")
 endif()
 
 if (INSTALL_TEST)
