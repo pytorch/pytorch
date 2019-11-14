@@ -558,7 +558,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           Message({}, {}, MessageType::EXCEPTION), "future timed out.");
       for (const auto& timedOutFuture : timedOutFutures) {
         timedOutFuture->markCompleted(exceptionMsg);
-        numTimedOutFutures_++;
+        numTimedOutFutures_++; // need to encode dst into the future, and then decrement recvCounts instead of doing this.
         // should we notify on every future or just once?
         futureCV_.notify_all();
       }
