@@ -63,12 +63,10 @@ Tensor& quantized_resize_cpu_(
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
   TORCH_CHECK(
-      memory_format == MemoryFormat::Contiguous,
+      !optional_memory_format.has_value(),
       "Unsupported memory format for quantized tensor resize ",
-      memory_format);
+      optional_memory_format.value());
   auto qscheme = self.quantizer()->qscheme();
   TORCH_CHECK(
       qscheme == QScheme::PER_TENSOR_AFFINE ||
