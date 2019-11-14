@@ -47,7 +47,6 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
     ConvPoolOpBase<CPUContext>::SetOutputSize(X.t, &(Y->t), W.t.dim32(0));
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
-    std::cout << "Int8ConvOp " << X.t.sizes() << " weight " << W.t.sizes() << std::endl;
     const auto M = W.t.size(0);
     const auto KH = W.t.size(1);
     const auto KW = W.t.size(2);

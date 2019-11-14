@@ -1685,8 +1685,8 @@ void ConvertIntegralValueToCaffe2(caffe2::OperatorDef* c2_op,
                                   caffe2::Argument* c2_values,
                                   const TensorProto& onnx_tensor) {
   c2_op->set_type(
-     onnx_tensor.data_type() == TensorProto::BOOL ? "GivenTensorBoolFill"
-                                                  : "GivenTensorIntFill");
+      onnx_tensor.data_type() == TensorProto::BOOL ? "GivenTensorBoolFill"
+                                                   : "GivenTensorIntFill");
   ::google::protobuf::RepeatedField<T> tmp;
   const ::google::protobuf::RepeatedField<T>* src =
       &tmp;
