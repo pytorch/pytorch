@@ -34,7 +34,7 @@ class TestTypePromotion(TestCase):
     # `int+float -> float` but `int.add_(float)` is rejected as an error.
     # Promoting inplace would require re-allocating and copying the memory of the
     # tensor data, since element size could change.
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_inplace(self, device):
         int_tensor = torch.ones([4, 4, 4], dtype=torch.int32, device=device)
 
@@ -63,14 +63,14 @@ class TestTypePromotion(TestCase):
         int16_tensor = torch.tensor([1, 1, 1], dtype=torch.int16, device=device)
         uint8_tensor *= int16_tensor
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_unsinged(self, device):
         dont_promote = torch.ones(3, dtype=torch.uint8, device=device) + 5
         self.assertEqual(dont_promote.dtype, torch.uint8)
 
     # some basic examples
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_int_promotion(self, device):
         a = torch.ones([4, 4, 4], dtype=torch.int32, device=device)
         b = torch.ones([4, 4, 4], dtype=torch.int64, device=device)
@@ -78,7 +78,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(c, b + b)
         self.assertEqual(c.dtype, torch.int64)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_float_promotion(self, device):
         a = torch.ones([4, 4, 4], dtype=torch.float, device=device)
         b = torch.ones([4, 4, 4], dtype=torch.double, device=device)
@@ -89,7 +89,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(c, b + b)
         self.assertEqual(c.dtype, torch.double)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_add_wrapped(self, device):
         a = torch.ones([4, 4, 4], dtype=torch.int, device=device)
         b = 1
@@ -97,7 +97,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(c, a + a)
         self.assertEqual(c.dtype, torch.int)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_int_to_float(self, device):
         a = torch.ones([4, 4, 4], dtype=torch.int32, device=device)
         b = torch.ones([4, 4, 4], dtype=torch.float, device=device)
@@ -107,7 +107,7 @@ class TestTypePromotion(TestCase):
     # some examples from:
     # https://github.com/pytorch/pytorch/issues/9515
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_from_issue(self, device):
         a = torch.rand(3, dtype=torch.float32, device=device)
         u = torch.tensor([0, 0, 1], dtype=torch.uint8, device=device)
@@ -124,7 +124,7 @@ class TestTypePromotion(TestCase):
         # type was integral.
         self.assertEqual((a + other).dtype, torch.float32)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_half(self, device):
         half = torch.tensor(5.5, dtype=torch.float16, device=device)
         if(self.device_type == 'cpu'):
@@ -136,7 +136,7 @@ class TestTypePromotion(TestCase):
             default_tensor = torch.tensor(100000.0, device=device)
             self.assertEqual((half + default_tensor).dtype, torch.get_default_dtype())
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_alternate_result(self, device):
         f = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=device)
         o = torch.tensor([0, 0, 0, 0], dtype=torch.long, device=device)
@@ -148,7 +148,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(d.dtype, torch.double)
         self.assertEqual(f + f, d)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_mixed_type_backward(self, device):
         f = torch.ones([3, 3], dtype=torch.float, requires_grad=True, device=device)
         ten = torch.tensor([10.], dtype=torch.double, device=device)
@@ -188,7 +188,7 @@ class TestTypePromotion(TestCase):
 
     # verifies that torch.<op>(first, second) is the same as 
     # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_many_promotions(self, device):
         # Can also include half on CPU in cases where it will be promoted to a
         # supported dtype
@@ -218,7 +218,7 @@ class TestTypePromotion(TestCase):
                 self.assertEqual(result.dtype, expected.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
                 self.assertEqual(result, expected, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_non_promoting_ops(self, device):
         x = torch.ones(4, dtype=torch.double, device=device)
         self.assertRaises(RuntimeError,
@@ -226,7 +226,7 @@ class TestTypePromotion(TestCase):
         self.assertRaises(RuntimeError,
                           lambda: torch.lerp(x, torch.ones(4, dtype=torch.float, device=device), 1))
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_alpha_mismatch(self, device):
         x = torch.ones(4, dtype=torch.int, device=device)
         err = 'alpha must not be'
@@ -237,7 +237,7 @@ class TestTypePromotion(TestCase):
                                lambda: torch.add(x, x, alpha=1.1))
         self.assertEqual(x + x, torch.add(x, x, alpha=True))
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_booleans(self, device):
         onedim = torch.tensor([True], device=device)
 
@@ -251,7 +251,7 @@ class TestTypePromotion(TestCase):
                                lambda: torch.add(1, 1, alpha=True))
         self.assertEqual(torch.add(torch.tensor(True, device=device), torch.tensor(True, device=device), True), torch.tensor(True, device=device))
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_create_bool_tensors(self, device):
         expected = torch.tensor([0], dtype=torch.int64, device=device)
         self.assertEqual(torch.arange(False, True, device=device), expected)
@@ -267,7 +267,7 @@ class TestTypePromotion(TestCase):
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False, device=device), torch.tensor(0., device=device))
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_result_type(self, device):
         self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.int, device=device), 1), torch.int)
         self.assertEqual(torch.result_type(1, torch.tensor(1, dtype=torch.int, device=device)), torch.int)
@@ -277,12 +277,12 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float, device=device), 1.), torch.float)
         self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float, device=device), torch.tensor(1, dtype=torch.double, device=device)), torch.double)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_can_cast(self, device):
         self.assertTrue(torch.can_cast(torch.double, torch.float))
         self.assertFalse(torch.can_cast(torch.float, torch.int))
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_comparison_ops_with_type_promotion(self, device):
         value_for_type = {
             torch.uint8: (1 << 5),
@@ -370,7 +370,7 @@ class TestTypePromotion(TestCase):
                     self.assertTrue(t1.dtype == dt1)
                     self.assertTrue(t2.dtype == dt2)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_lt_with_type_promotion(self, device):
         for dt in torch.testing.get_all_math_dtypes(device):
             x = torch.tensor([0], dtype=dt, device=device)
@@ -394,18 +394,18 @@ class TestTypePromotion(TestCase):
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_promote_types(self, device):
         self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
         self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
         self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_promote_self(self, device):
         for dtype in torch.testing.get_all_dtypes():
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_indexing(self, device):
         a = torch.ones(5, 2, dtype=torch.double, device=device)
         b = torch.zeros(5, dtype=torch.int, device=device)
@@ -424,7 +424,7 @@ class TestTypePromotion(TestCase):
         expected = torch.full([9, 9], 2., dtype=torch.float, device=device).fill_(2.)
         self.assertEqual(result, expected)
 
-    @multiple_default_dtypes
+    @float_double_default_dtype
     def test_transpose(self, device):
         # https://github.com/pytorch/pytorch/issues/28502
         a = torch.tensor([[True, True], [False, True]], device=device)
