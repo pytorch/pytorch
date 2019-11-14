@@ -31,6 +31,13 @@ struct Type;
 class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
+namespace at {
+namespace indexing {
+struct TensorIndex;
+} // namespace indexing
+} // namespace at
+
+using namespace at::indexing;
 
 namespace at {
 
@@ -378,6 +385,15 @@ class CAFFE2_API Tensor {
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
+
+  Tensor idx(ArrayRef<TensorIndex> indices) const;
+  Tensor idx(std::initializer_list<TensorIndex> indices) const;
+  Tensor & idx_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs);
+  Tensor & idx_put_(ArrayRef<TensorIndex> indices, Tensor && rhs);
+  Tensor & idx_put_(ArrayRef<TensorIndex> indices, Scalar v);
+  Tensor & idx_put_(std::initializer_list<TensorIndex> indices, Tensor const & rhs);
+  Tensor & idx_put_(std::initializer_list<TensorIndex> indices, Tensor && rhs);
+  Tensor & idx_put_(std::initializer_list<TensorIndex> indices, Scalar v);
 
   Tensor cpu() const;
   Tensor cuda() const;
