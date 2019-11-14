@@ -1,4 +1,4 @@
-#include <ATen/native/Indexing.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 
 #include <cmath>
 #include <iostream>

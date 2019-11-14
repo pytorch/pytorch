@@ -24,6 +24,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/static.cpp
   ${TORCH_API_TEST_DIR}/support.cpp
   ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
+  ${TORCH_API_TEST_DIR}/tensor_indexing.cpp
   ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
   ${TORCH_API_TEST_DIR}/tensor_options.cpp
   ${TORCH_API_TEST_DIR}/tensor.cpp
