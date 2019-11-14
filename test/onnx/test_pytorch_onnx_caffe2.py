@@ -75,9 +75,9 @@ def skipIfEmbed(func):
 #    return caffe2_out
 
 
-def do_export(model, inputs, *args, **kwargs):
+def do_export(model, inputs, do_constant_folding=False, *args, **kwargs):
     f = io.BytesIO()
-    out = torch.onnx._export(model, inputs, f, *args, **kwargs)
+    out = torch.onnx._export(model, inputs, f, do_constant_folding=do_constant_folding, *args, **kwargs)
     if isinstance(model, torch.jit.ScriptModule):
         # Special case for common case of passing a single Tensor
         if isinstance(inputs, torch.Tensor):
