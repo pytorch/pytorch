@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.testing import FileCheck
+from collections import OrderedDict
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -235,8 +236,38 @@ class TestRecursiveScript(JitTestCase):
         f.check('Submodule')
         f.run(out[0])
 
-
         self.assertEqual(m.original_name, 'MyModule')
+
+    def test_dir(self):
+        def test_module_dir(mod):
+            dir_set = dir(mod)
+            scripted_mod = torch.jit.script(mod)
+            dir_scripted = set(dir(scripted_mod))
+            # set not currently copied over
+            ignore_set = ["training", "__delitem__", "__setitem__", "clear", "items",
+                          "keys", "pop", "update", "values"]
+            for attr in dir_set:
+                if attr in ignore_set:
+                    continue
+                self.assertTrue(attr in dir_scripted, attr)
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = nn.Conv2d(10, 10, 3)
+                self.lin = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin(x) + self.conv(x)
+
+        test_module_dir(MyModule())
+
+        # test custom __dir__ for containers
+        conv = nn.Conv2d(10, 10, 3)
+        linear = nn.Linear(10, 10)
+
+        test_module_dir(nn.Sequential(conv, linear))
+        test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
         def other_fn(a, b):

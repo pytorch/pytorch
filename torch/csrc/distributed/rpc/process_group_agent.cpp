@@ -402,16 +402,14 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               return;
             }
             std::tie(fm, futureStartTime) = futures_[id];
-          }
-          // Not holding lock on markCompleted as this could run callbacks that
-          // call agent_->send
-          fm->markCompleted(std::move(message));
-          {
-            std::lock_guard<std::mutex> lock{futureMutex_};
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
             auto& futuresAtTime = futureTimeouts_[futureStartTime];
+            TORCH_CHECK(
+                std::find(futuresAtTime.begin(), futuresAtTime.end(), id) !=
+                    futuresAtTime.end(),
+                "Error: could not find future in futureTimeouts map, race condition.");
             futuresAtTime.erase(
                 std::find(futuresAtTime.begin(), futuresAtTime.end(), id));
             if (futuresAtTime.empty()) {
@@ -419,6 +417,9 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               futureTimeouts_.erase(futureStartTime);
             }
           }
+          // Not holding lock on markCompleted as this could run callbacks that
+          // call agent_->send
+          fm->markCompleted(std::move(message));
           futureCV_.notify_all();
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
@@ -460,12 +461,29 @@ void ProcessGroupAgent::listenLoop() {
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
   while (!shutdown_.load()) {
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+    std::chrono::milliseconds sleepTime;
+    {
+      std::lock_guard<std::mutex> lock{futureMutex_};
+      // Estimate amount of time the first future will time out in, and sleep
+      // for that long.
+      auto runningTime =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch()) -
+          futureTimeouts_.begin()->first;
+      sleepTime =
+          std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
+    }
+    std::this_thread::sleep_for(sleepTime);
+    // TODO inefficient probably.
+    if (rpcTimeout_.count() == 0) {
+      continue;
+    }
     std::vector<std::shared_ptr<FutureMessage>> timedOutFutures;
     {
       // Check for timed out futures while holding the lock.
       std::lock_guard<std::mutex> lock{futureMutex_};
-      for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();) {
+      for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
+           /* intentional no increment */) {
         std::chrono::milliseconds startTime = it->first;
         std::vector<int64_t> futureIDs = it->second;
         auto diffTime =
@@ -478,26 +496,25 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
           break;
         } else {
           for (const auto& futureID : futureIDs) {
+            TORCH_CHECK(
+                futures_.find(futureID) != futures_.end(),
+                "Race Condition - Expected future does not exist in map");
             auto fut = futures_[futureID].first;
             timedOutFutures.push_back(fut);
-            TORCH_CHECK(
-                futures_.find(futureID) != futures_.end(), "Race Condition!");
             futures_.erase(futureID);
           }
+          // post-fix increment iterator to ensure that correct iteration order
+          // is maintained.
           futureTimeouts_.erase(it++);
         }
       }
     }
-    if (shutdown_.load()) {
-      return;
-    }
+
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
     if (!timedOutFutures.empty()) {
       auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), "future timed out.");
-      // Clean up timedOutFutures and remove the entries from the respective
-      // maps.
       for (const auto& timedOutFuture : timedOutFutures) {
         timedOutFuture->markCompleted(exceptionMsg);
       }

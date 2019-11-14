@@ -168,6 +168,16 @@ PyObject* rpc_init(PyObject* /* unused */) {
         return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
 
+  module.def(
+      "set_rpc_timeout",
+      [](const std::chrono::milliseconds& rpcTimeout) {
+        RpcAgent::getDefaultRpcAgent()->setRpcTimeout(rpcTimeout);
+      },
+      R"(
+          Set the timeout for all RPCs. If an RPC is not completed within this
+          time, an exception indicating it has timed out will be raised.
+      )");
+
   Py_RETURN_TRUE;
 }
 
