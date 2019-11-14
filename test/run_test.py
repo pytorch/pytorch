@@ -94,6 +94,7 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'cpp_extensions',
+    'distributed',
     'multiprocessing',
     'distributed/rpc/process_group/rpc_fork',
     'distributed/rpc/process_group/rpc_spawn',
@@ -107,7 +108,7 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
-    if not TEST_WITH_ROCM and dist.is_mpi_available():
+    if dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3'
         }
@@ -115,7 +116,7 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
-    if not TEST_WITH_ROCM and dist.is_gloo_available():
+    if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
