@@ -454,11 +454,7 @@ void Reducer::initialize_buckets(
         }
 
         // Allocate bucket contents tensor.
-        // This must be a Variable because as of Apr 2019 there is still
-        // a distinction between the Tensor and Variable types, and it
-        // is not recommended (or sometimes even possible) to mix and match.
-        replica.contents = torch::autograd::make_variable(
-            at::empty({static_cast<long>(offset)}, options));
+        replica.contents = at::empty({static_cast<long>(offset)}, options);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -603,9 +599,7 @@ void Reducer::finalize_bucket_sparse(Bucket& bucket) {
     auto& replica = bucket.replicas[i];
     AT_ASSERT(replica.variables.size() == 1);
     auto& variable = replica.variables.front();
-    // The c10d API doesn't work with torch::autograd::Variable. We have to
-    // manually box it when assigning to the grad. See #19145.
-    variable.grad() = torch::autograd::make_variable(result[i]);
+    variable.grad() = result[i];
   }
 }
 
