@@ -212,6 +212,7 @@ void DistEngine::executeSendFunction(
 
     // Mark the autograd context id as initialized and unlock.
     initializedContextIds_.insert(autogradContext.contextId());
+    ClearContextIdGuard guard(autogradContext.contextId());
     lock.unlock();
 
     // Enqueue the current send function.
@@ -262,10 +263,22 @@ void DistEngine::execute(const variable_list& roots) {
     initializedContextIds_.insert(autogradContext.contextId());
   }
 
+  ClearContextIdGuard guard(autogradContext.contextId());
+
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
   autogradContext.clearAndWaitForOutstandingRpcs();
+}
+
+void DistEngine::clearInitializedContextId(int64_t contextId) {
+  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
+  initializedContextIds_.erase(contextId);
+}
+
+size_t DistEngine::numInitializedContextIds() {
+  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
+  return initializedContextIds_.size();
 }
 
 } // namespace autograd

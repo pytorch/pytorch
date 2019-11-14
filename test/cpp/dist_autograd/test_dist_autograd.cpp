@@ -1,14 +1,18 @@
+#include <memory>
+
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/torch.h>
 
-using namespace torch::distributed::autograd;
-using namespace torch::distributed::rpc;
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 class DistAutogradTest : public ::testing::Test {
  protected:
@@ -29,7 +33,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   DistAutogradContext& autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
-  worker_id_t worker_id = 1;
+  rpc::worker_id_t worker_id = 1;
   addSendRpcBackward(
       autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
   auto send_function = autogradContext.sendFunctions()[1];
@@ -48,3 +52,48 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   send_function->setGrads({in1, torch::autograd::Variable()});
   EXPECT_THROW(send_function->apply({}), c10::Error);
 }
+
+TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
+  autogradContainer_->newContext();
+  auto& engine = DistEngine::getInstance();
+  ASSERT_EQ(0, engine.numInitializedContextIds());
+
+  // Attach appropriate grad fn.
+  auto options = at::TensorOptions().requires_grad(true);
+  auto t = torch::autograd::make_variable(torch::ones({1}, options), true);
+  t.set_gradient_edge(t.gradient_edge());
+  ASSERT_NE(nullptr, t.grad_fn());
+
+  // Execute engine.
+  engine.execute({t});
+
+  // Validate appropriate cleanup.
+  ASSERT_EQ(0, engine.numInitializedContextIds());
+}
+
+TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
+  autogradContainer_->newContext();
+  auto& context = autogradContainer_->currentContext();
+  auto& engine = DistEngine::getInstance();
+  ASSERT_EQ(0, engine.numInitializedContextIds());
+
+  // Attach send function.
+  auto options = at::TensorOptions().requires_grad(true);
+  auto t = torch::ones({1}, options);
+  auto tensors = std::vector<torch::Tensor>{t};
+  addSendRpcBackward(
+      context, AutogradMetadata(context.contextId(), 0), tensors, 0);
+
+  auto sendFunction = context.retrieveSendFunction(0);
+  sendFunction->setGrads({t});
+
+  // Execute engine.
+  engine.executeSendFunction(context, sendFunction);
+
+  // Validate appropriate cleanup.
+  ASSERT_EQ(0, engine.numInitializedContextIds());
+}
+
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

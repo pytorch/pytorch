@@ -1,5 +1,6 @@
 #pragma once
 
+#include <gtest/gtest_prod.h>
 #include <mutex>
 #include <unordered_set>
 
@@ -11,6 +12,9 @@
 namespace torch {
 namespace distributed {
 namespace autograd {
+
+// Forward declaration.
+class ClearContextIdGuard;
 
 // This is a singleton class responsible for running distributed backward
 // passes. This engine relies heavily on the vanilla autograd engine and tries
@@ -81,6 +85,11 @@ class TORCH_API DistEngine {
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);
 
+  // Removes the provided contextId from the 'initializedContextIds_' map.
+  void clearInitializedContextId(int64_t contextId);
+
+  size_t numInitializedContextIds();
+
   // Set of autograd context_ids, which we have already initialized for
   // distributed autograd on this node (e.g.: already computed dependencies)
   std::unordered_set<int64_t> initializedContextIds_;
@@ -89,6 +98,24 @@ class TORCH_API DistEngine {
 
   // Reference to local autograd engine.
   torch::autograd::Engine& engine_;
+
+  friend class ClearContextIdGuard;
+  FRIEND_TEST(DistAutogradTest, TestInitializedContextCleanup);
+  FRIEND_TEST(DistAutogradTest, TestInitializedContextCleanupSendFunction);
+};
+
+// Guard to clear the provided contextId from the 'initializedContextIds_' map
+// once the distributed backward pass is done on a node.
+class ClearContextIdGuard {
+ public:
+  ClearContextIdGuard(int64_t contextId) : contextId_(contextId) {}
+
+  ~ClearContextIdGuard() {
+    DistEngine::getInstance().clearInitializedContextId(contextId_);
+  }
+
+ private:
+  int64_t contextId_;
 };
 
 } // namespace autograd
