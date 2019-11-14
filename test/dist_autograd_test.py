@@ -75,6 +75,10 @@ def my_nested_rref_add(dst, rref_t1, t2):
     return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
 
 
+def ret_requires_grad():
+    return torch.ones(3, 3, requires_grad=True)
+
+
 def my_py_nested_call(t1, t2, dst, world_size, hops):
     next_dst = (dst + 1) % world_size
     if hops > 0:
@@ -580,16 +584,13 @@ class DistAutogradTest(object):
 
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
-            if ExecMode.RPC_SYNC == exec_mode:
-                # prev context id is not passed over as tensors do not require
-                # grads
-                with self.assertRaises(RuntimeError):
-                    ctx = dist_autograd._retrieve_context(ctx_ids[1])
-            elif ExecMode.REMOTE == exec_mode:
-                # NB: RRef.to_here() always passes the autograd context to the
-                # the callee, as the caller does not know whether the return
-                # value would contain a requires_grad tensor or not.
-                pass
+            # NB: RRef.to_here() always passes the autograd context to the
+            # the callee, as the caller does not know whether the return
+            # value would contain a requires_grad tensor or not.
+            #
+            # rpc/remote with udf (_set_rpc_done here) also always passes the
+            # autograd context to the callee due to the same reason.
+            self.assertNotEqual(-1, dist_autograd._retrieve_context(ctx_ids[1]))
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad(self):
@@ -598,6 +599,42 @@ class DistAutogradTest(object):
     @dist_init
     def test_no_graph_with_tensors_not_require_grad_remote(self):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
+
+    def _test_grad_only_on_return_value(self, exec_mode):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(dst_rank),
+                    ret_requires_grad
+                )
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(dst_rank),
+                    ret_requires_grad
+                ).to_here()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
+            ctx = dist_autograd._current_context()
+            send_functions = ctx._send_functions()
+            self.assertEqual(len(send_functions), 0)
+            recv_functions = ctx._recv_functions()
+            self.assertEqual(len(recv_functions), 1)
+
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done, args=(context_id, 1))
+
+            # Wait for the prev rank to be done with rpc.
+            self._check_rpc_done(1)
+
+    @dist_init
+    def test_grad_only_on_return_value(self):
+        self._test_grad_only_on_return_value(ExecMode.RPC_SYNC)
+
+    @dist_init
+    def test_grad_only_on_return_value_remote(self):
+        self._test_grad_only_on_return_value(ExecMode.REMOTE)
 
     def _test_rpc_complex_args(self, exec_mode):
         with dist_autograd.context() as context_id:

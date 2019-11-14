@@ -48,7 +48,6 @@ DistAutogradContext* addRecvRpcBackward(
       autogradContainer.getOrCreateContext(autogradMetadata.autogradContextId);
 
   if (!tensors.empty() && torch::autograd::compute_requires_grad(tensors)) {
-
     // Attach the tensors as inputs to the autograd function.
     auto grad_fn = std::make_shared<RecvRpcBackward>(
         autogradMetadata, autogradContext, fromWorkerId);
