@@ -92,8 +92,6 @@ struct TORCH_API Module : public Object {
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
-  // module_value_ null and will be lazily initialized if is needed
-  Module() {}
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}
   ~Module() {}
 
