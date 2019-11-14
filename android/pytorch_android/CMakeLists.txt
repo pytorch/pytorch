@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.4.1)
-project(pytorch CXX)
+project(pytorch_jni CXX)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
@@ -21,18 +21,20 @@ endif()
 message(STATUS "libtorch dir:${libtorch_DIR}")
 
 file(GLOB pytorch_android_SOURCES
-  ${pytorch_android_DIR}/*.cpp
+  ${pytorch_android_DIR}/pytorch_jni_jit.cpp
+  ${pytorch_android_DIR}/pytorch_jni_common.cpp
+  ${pytorch_android_DIR}/pytorch_jni_common.h
 )
 
-add_library(pytorch SHARED
+add_library(pytorch_jni SHARED
     ${pytorch_android_SOURCES}
 )
 
-target_compile_options(pytorch PRIVATE
+target_compile_options(pytorch_jni PRIVATE
   -fexceptions
 )
 
-target_include_directories(pytorch PUBLIC
+target_include_directories(pytorch_jni PUBLIC
     ${libtorch_include_DIR}
 )
 
@@ -60,7 +62,7 @@ if (ANDROID_ABI)
   import_static_lib(libclog)
 
     # Link most things statically on Android.
-  target_link_libraries(pytorch
+  target_link_libraries(pytorch_jni
       fbjni
       -Wl,--gc-sections
       -Wl,--whole-archive
@@ -77,7 +79,7 @@ if (ANDROID_ABI)
 else()
 
   # Prefer dynamic linking on the host
-  target_link_libraries(pytorch
+  target_link_libraries(pytorch_jni
       fbjni
       -Wl,--gc-sections
       -Wl,--whole-archive

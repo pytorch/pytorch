@@ -462,7 +462,7 @@ void testControlFlow() {
   };
 
   auto L = [](int64_t l) {
-    return IValue(autograd::make_variable(scalar_to_tensor(at::Scalar(l))));
+    return IValue(scalar_to_tensor(at::Scalar(l)));
   };
   auto V = [](IValue t) { return std::move(t).toTensor().item<int64_t>(); };
   auto run_binary = [&](const std::string& name, int64_t a, int64_t b) {
@@ -485,11 +485,11 @@ void testEvalModeForLoadedModule() {
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
   torch::jit::script::Module module = torch::jit::load(module_path);
-  AT_ASSERT(module.get_module("dropout").is_training());
+  AT_ASSERT(module.attr("dropout").toModule().is_training());
   module.eval();
-  AT_ASSERT(!module.get_module("dropout").is_training());
+  AT_ASSERT(!module.attr("dropout").toModule().is_training());
   module.train();
-  AT_ASSERT(module.get_module("dropout").is_training());
+  AT_ASSERT(module.attr("dropout").toModule().is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -964,8 +964,8 @@ void testModuleConversion() {
 
     m.to(at::kCUDA);
     m.to(at::kCPU);
-    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cpu());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
@@ -973,8 +973,8 @@ void testModuleConversion() {
     m.register_buffer("bar", torch::ones({}));
 
     m.to(at::kCUDA);
-    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cuda());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cuda());
   }
 }
 
@@ -1001,7 +1001,10 @@ graph(%a):
     return stack;
   };
   run(graph, stack);
-  AT_ASSERT(testPassValue);
+  // we will not run fusion in simple mode
+  if (!getExecutorMode()) {
+    AT_ASSERT(testPassValue);
+  }
 }
 
 static void checkShape(
@@ -1030,8 +1033,7 @@ void testInsertAndEliminateRedundantGuards() {
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-  auto stack = createStack({v(x), v(y)});
+  auto stack = createStack({x, y});
   // introduce some profiling information
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
@@ -1081,8 +1083,7 @@ void testInsertBailOuts() {
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-  auto stack = createStack({v(x), v(y)});
+  auto stack = createStack({x, y});
   // introduce some profiling information
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
@@ -1112,8 +1113,6 @@ void testProfiler() {
 
   int hidden_size = 2 * input_size;
 
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-
   auto input = at::randn({batch_size, input_size}, at::kCPU);
   auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
   auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
@@ -1121,7 +1120,7 @@ void testProfiler() {
   auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
 
   auto g = build_lstm();
-  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
 
   auto& opt_graph = *g.get();
   ArgumentSpecCreator arg_spec_creator(opt_graph);
