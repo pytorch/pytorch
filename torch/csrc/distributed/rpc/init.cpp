@@ -166,9 +166,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
         return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
 
-  module.def("get_rpc_timeout", []() {
-    return RpcAgent::getDefaultRpcAgent()->getRpcTimeout();
-  });
+  module.def(
+      "get_rpc_timeout",
+      []() { return RpcAgent::getDefaultRpcAgent()->getRpcTimeout(); },
+      R"(
+          Retrieve the timeout for all RPCs that was set during RPC initialization.
+          Returns:
+            `datetime.timedelta` instance indicating the RPC timeout.
+      )");
 
   Py_RETURN_TRUE;
 }
