@@ -11,16 +11,6 @@ using namespace torch::distributed::autograd;
 
 namespace {
 
-Message createException(const Message& request, const std::exception& e) {
-  const char* err = e.what();
-  std::vector<char> payload(err, err + strlen(err));
-  return Message(
-      std::move(payload),
-      std::vector<torch::Tensor>(),
-      MessageType::EXCEPTION,
-      request.id());
-}
-
 // When request message has autograd info, processMessage() will set up valid
 // current context id properly. This struct is used to clean up current context
 // id after processMessage() is done.
@@ -47,7 +37,7 @@ Message RequestCallback::operator()(Message& request) const {
   } catch (std::exception& e) {
     LOG(ERROR) << "Received error while processing request type "
                << request.type() << ": " << e.what();
-    return createException(request, e);
+    return createExceptionResponse(request, e);
   }
 }
 

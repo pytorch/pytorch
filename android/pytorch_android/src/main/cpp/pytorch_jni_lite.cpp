@@ -6,19 +6,22 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/script.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/import.h>
 
 #include "pytorch_jni_common.h"
+
+using namespace pytorch_jni;
 
 namespace pytorch_jni {
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
- private:
+private:
   friend HybridBase;
-  torch::jit::script::Module module_;
+  torch::jit::mobile::Module module_;
 
- public:
+public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/Module$NativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
@@ -27,47 +30,27 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     return makeCxxInstance(modelPath);
   }
 
-#ifdef TRACE_ENABLED
-  static void onFunctionEnter(
-      const torch::autograd::profiler::RecordFunction& fn) {
-    Trace::beginSection(fn.name().str());
-  }
-
-  static void onFunctionExit(const torch::autograd::profiler::RecordFunction&) {
-    Trace::endSection();
-  }
-#endif
-
   PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
     auto qengines = at::globalContext().supportedQEngines();
     if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
         qengines.end()) {
       at::globalContext().setQEngine(at::QEngine::QNNPACK);
     }
-#ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
-        &onFunctionEnter,
-        &onFunctionExit,
-        /* need_inputs */ false,
-        /* sampled */ false);
-#endif
-    module_ = torch::jit::load(std::move(modelPath->toStdString()));
-    module_.eval();
+    module_ = torch::jit::_load_for_mobile(std::move(modelPath->toStdString()));
   }
 
   static void registerNatives() {
     registerHybrid({
-        makeNativeMethod("initHybrid", PytorchJni::initHybrid),
-        makeNativeMethod("forward", PytorchJni::forward),
-        makeNativeMethod("runMethod", PytorchJni::runMethod),
+      makeNativeMethod("initHybrid", PytorchJni::initHybrid),
+      makeNativeMethod("forward", PytorchJni::forward),
+      makeNativeMethod("runMethod", PytorchJni::runMethod),
     });
   }
 
   facebook::jni::local_ref<JIValue> forward(
       facebook::jni::alias_ref<
           facebook::jni::JArrayClass<JIValue::javaobject>::javaobject>
-          jinputs) {
-    Trace _s{"jni::Module::forward"};
+      jinputs) {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
@@ -75,9 +58,12 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       inputs.push_back(std::move(atIValue));
     }
+
+
     auto output = [&]() {
       torch::autograd::AutoGradMode guard(false);
-      return module_.forward(std::move(inputs));
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      return module_.forward(inputs);
     }();
     return JIValue::newJIValueFromAtIValue(output);
   }
@@ -86,7 +72,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       facebook::jni::alias_ref<facebook::jni::JString::javaobject> jmethodName,
       facebook::jni::alias_ref<
           facebook::jni::JArrayClass<JIValue::javaobject>::javaobject>
-          jinputs) {
+      jinputs) {
     std::string methodName = jmethodName->toStdString();
 
     std::vector<at::IValue> inputs{};
@@ -98,8 +84,8 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {
-        torch::autograd::AutoGradMode guard(false);
-        return (*method)(std::move(inputs));
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        return module_.run_method(methodName, inputs);
       }();
       return JIValue::newJIValueFromAtIValue(output);
     }
