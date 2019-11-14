@@ -127,7 +127,7 @@ class TORCH_API RpcAgent {
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
-  const std::chrono::milliseconds rpcTimeout_;
+  std::chrono::milliseconds rpcTimeout_;
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;
