@@ -3,69 +3,13 @@
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <Python.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-// Write the message into the given ostream
-std::string serialize(const Message& message) {
-  // We cast const void* to void* here because we need to create a tensor using
-  // that memory space. If is fine as that tensor stays function-local, and will
-  // not be modified during its lifetime.
-  auto payload = const_cast<void*>( // NOLINT
-      static_cast<const void*>(message.payload().data()));
-  auto payload_size = message.payload().size();
-
-  // getting tensor table from the message
-  std::vector<torch::Tensor> tensors = message.tensors();
-  // append payload as a tensor
-  tensors.push_back(torch::from_blob(payload, payload_size, {torch::kChar}));
-  // append id and autograd metadata as a tensor
-  tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}));
-
-  // optional: estimate output size, to avoid some unnecessary resizing.
-  static constexpr size_t kBaseOverhead = 2048;
-  static constexpr size_t kPerTensor = 128;
-  size_t estimate = kBaseOverhead;
-  for (const auto& t : tensors) {
-    estimate += t.nbytes() + kPerTensor;
-  }
-
-  std::string out;
-  out.reserve(estimate);
-  torch::save(tensors, [&](const void* buf, size_t n) -> size_t {
-    out.append(static_cast<const char*>(buf), n);
-    return n;
-  });
-  return out;
-}
-
-Message deserialize(MessageType type, const void* buf, size_t size) {
-  std::vector<torch::Tensor> tensors;
-
-  torch::load(tensors, static_cast<const char*>(buf), size);
-
-  TORCH_CHECK(tensors.size() >= 2, "Failed to deserialize a message.");
-  auto idTensor = std::move(tensors.back());
-  tensors.pop_back();
-  auto payloadTensor = std::move(tensors.back());
-  tensors.pop_back();
-
-  TORCH_INTERNAL_ASSERT(1, idTensor.numel());
-  int64_t id = idTensor.storage().data<int64_t>()[0];
-
-  const char* data = static_cast<const char*>(payloadTensor.storage().data());
-  std::vector<char> payload(data, data + payloadTensor.numel());
-
-  return Message(std::move(payload), std::move(tensors), type, id);
-}
-
-} // namespace
 
 //////////////////////////  MessageCounter  /////////////////////////////////
 
@@ -300,14 +244,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload =
-              c10::guts::make_unique<std::string>(serialize(message));
+          auto payload = c10::guts::make_unique<std::string>(
+              wireSerialize(message.payload(), message.tensors()));
           const char* data = payload->data();
           size_t len = payload->length();
           std::string* delete_when_done = payload.release();
           enqueueRecv(RecvWork(
               getWorkerInfo(pg_->getRank()),
               message.type(),
+              message.id(),
               torch::from_blob(
                   (void*)data,
                   len,
@@ -335,13 +280,15 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
-        std::string serializedPayload = serialize(work.message_);
+        std::string serializedPayload =
+            wireSerialize(work.message_.payload(), work.message_.tensors());
 
         std::vector<torch::Tensor> preamble = {torch::tensor(
             {(int64_t)pg_->getRank(),
              (int64_t)serializedPayload.length(),
-             (int64_t)work.message_.type()},
-            {torch::kLong})};
+             (int64_t)work.message_.type(),
+             (int64_t)work.message_.id()},
+            {torch::kInt64})};
 
         // ProcessGroup is not thread-safe when sending with the same tag, hence
         // the lock
@@ -382,8 +329,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         torch::Tensor& payload = work.payload_;
-        Message message =
-            deserialize(work.type_, payload.storage().data(), payload.numel());
+        auto data = wireDeserialize(payload.storage().data(), payload.numel());
+        Message message(
+            std::move(data.first),
+            std::move(data.second),
+            work.type_,
+            work.id_);
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
@@ -425,13 +376,14 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 void ProcessGroupAgent::listenLoop() {
   while (true) {
     // rank, tensor size, message type
-    std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
+    std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
     pg_->recvAnysource(preamble, pg_->getRank())->wait();
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];
     auto size = preamble_items[1];
     MessageType type = MessageType(preamble_items[2]);
+    int64_t id = preamble_items[3];
 
     if (type == MessageType::SHUTDOWN) {
       // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
@@ -445,7 +397,8 @@ void ProcessGroupAgent::listenLoop() {
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
-    enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
+    enqueueRecv(
+        RecvWork(allWorkerInfo_[srcRank], type, id, std::move(tensors[0])));
   }
 }
 
