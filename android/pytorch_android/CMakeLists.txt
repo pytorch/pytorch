@@ -83,8 +83,8 @@ if (ANDROID_ABI)
       -Wl,--gc-sections
       -Wl,--whole-archive
       libtorch
-      -Wl,--no-whole-archive
       libtorch_cpu
+      -Wl,--no-whole-archive
       libc10
       libnnpack
       libpytorch_qnnpack
