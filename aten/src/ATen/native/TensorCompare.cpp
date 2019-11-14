@@ -87,6 +87,13 @@ Tensor isnan(const Tensor& self) {
   return self != self;
 }
 
+Tensor isfinite(const Tensor& self) {
+  if (!self.is_floating_point()) {
+    return at::ones_like(self, at::kBool);
+  }
+  return (self == self) * (self.abs() != at::full_like(self, std::numeric_limits<double>::infinity()));
+}
+
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
   AT_ASSERT(n >= 0);
