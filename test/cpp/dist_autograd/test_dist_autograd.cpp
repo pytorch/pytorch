@@ -56,7 +56,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
 TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   autogradContainer_->newContext();
   auto& engine = DistEngine::getInstance();
-  ASSERT_EQ(0, engine.numInitializedContextIds());
+  ASSERT_EQ(0, engine.numBackwardPasses());
 
   // Attach appropriate grad fn.
   auto options = at::TensorOptions().requires_grad(true);
@@ -68,14 +68,14 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   engine.execute({t});
 
   // Validate appropriate cleanup.
-  ASSERT_EQ(0, engine.numInitializedContextIds());
+  ASSERT_EQ(0, engine.numBackwardPasses());
 }
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   autogradContainer_->newContext();
   auto& context = autogradContainer_->currentContext();
   auto& engine = DistEngine::getInstance();
-  ASSERT_EQ(0, engine.numInitializedContextIds());
+  ASSERT_EQ(0, engine.numBackwardPasses());
 
   // Attach send function.
   auto options = at::TensorOptions().requires_grad(true);
@@ -91,7 +91,7 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   engine.executeSendFunction(context, sendFunction);
 
   // Validate appropriate cleanup.
-  ASSERT_EQ(0, engine.numInitializedContextIds());
+  ASSERT_EQ(0, engine.numBackwardPasses());
 }
 
 } // namespace autograd

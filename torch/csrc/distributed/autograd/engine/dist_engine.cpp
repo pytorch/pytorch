@@ -276,7 +276,7 @@ void DistEngine::clearInitializedContextId(int64_t contextId) {
   initializedContextIds_.erase(contextId);
 }
 
-size_t DistEngine::numInitializedContextIds() {
+size_t DistEngine::numBackwardPasses() const {
   std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
   return initializedContextIds_.size();
 }
