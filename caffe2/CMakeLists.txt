@@ -798,6 +798,7 @@ ENDIF()
 
   if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
   endif()
 
   if (BUILD_TEST AND NOT NO_API)
