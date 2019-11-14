@@ -21,7 +21,9 @@ endif()
 message(STATUS "libtorch dir:${libtorch_DIR}")
 
 file(GLOB pytorch_android_SOURCES
-  ${pytorch_android_DIR}/*.cpp
+  ${pytorch_android_DIR}/pytorch_jni_jit.cpp
+  ${pytorch_android_DIR}/pytorch_jni_common.cpp
+  ${pytorch_android_DIR}/pytorch_jni_common.h
 )
 
 add_library(pytorch_jni SHARED
