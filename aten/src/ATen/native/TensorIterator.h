@@ -288,7 +288,7 @@ struct CAFFE2_API TensorIterator {
   bool is_final_output() const { return final_output_; }
 
   bool needs_dynamic_casting() const {
-    return (common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_;
+    return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
   }
 
   void set_check_mem_overlap(bool check_mem_overlap) {
@@ -330,6 +330,10 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
+  void dynamic_cast_if(bool condition) {
+    force_dynamic_casting_ = force_dynamic_casting_ || condition;
+  }
+
   void build();
 
 protected:
@@ -369,6 +373,7 @@ protected:
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
   bool have_differing_types_ = false;
+  bool force_dynamic_casting_ = false;
   bool all_ops_same_shape_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
