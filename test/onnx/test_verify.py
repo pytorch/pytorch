@@ -78,7 +78,7 @@ class TestVerify(TestCase):
                 return y
 
         x = torch.tensor([1, 2])
-        self.assertVerifyExpectFail(MyModel(), x, backend)
+        self.assertVerifyExpectFail(MyModel(), x, backend, do_constant_folding=False)
 
     def test_dynamic_model_structure(self):
         class MyModel(Module):

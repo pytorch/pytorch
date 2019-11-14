@@ -75,9 +75,9 @@ def skipIfEmbed(func):
 #    return caffe2_out
 
 
-def do_export(model, inputs, do_constant_folding=False, *args, **kwargs):
+def do_export(model, inputs, *args, **kwargs):
     f = io.BytesIO()
-    out = torch.onnx._export(model, inputs, f, do_constant_folding=do_constant_folding, *args, **kwargs)
+    out = torch.onnx._export(model, inputs, f, *args, **kwargs)
     if isinstance(model, torch.jit.ScriptModule):
         # Special case for common case of passing a single Tensor
         if isinstance(inputs, torch.Tensor):
@@ -332,13 +332,15 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False, atol=1e-7)
+        self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False, atol=1e-7,
+                            do_constant_folding=False)
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
         # othewise expand will fail) 
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -381,7 +383,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
         # othewise expand will fail) 
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -416,13 +419,15 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             return input
 
         input = make_input(RNN_BATCH_SIZE)
-        self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False)
+        self.run_model_test(model, train=False, batch_size=RNN_BATCH_SIZE, input=input, use_gpu=False,
+                            do_constant_folding=False)
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
         # othewise expand will fail) 
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -437,7 +442,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # predict net. When we embed parameters, there should be more
         # ops in the init net.
         mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params,
-                                                  keep_initializers_as_inputs=True)[0])
+                                                  keep_initializers_as_inputs=True,
+                                                  do_constant_folding=False)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
             assert len(prepared.init_net.op) == 875
