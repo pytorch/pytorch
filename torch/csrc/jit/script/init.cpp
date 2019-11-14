@@ -1014,42 +1014,49 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
+  py::class_<RawConcreteModuleType, std::shared_ptr<RawConcreteModuleType>>(
+      m, "RawConcreteModuleType")
+      .def(py::init<py::object>())
+      .def("add_constant", &RawConcreteModuleType::addConstant)
+      .def("add_attribute", &RawConcreteModuleType::addAttribute)
+      .def(
+          "add_function_attribute",
+          &RawConcreteModuleType::addFunctionAttribute)
+      .def("add_module", &RawConcreteModuleType::addModule)
+      .def("add_module_interface", &RawConcreteModuleType::addModuleInterface)
+      .def("add_overload", &RawConcreteModuleType::addOverload)
+      .def("set_poisoned", &RawConcreteModuleType::setPoisoned)
+      .def("add_failed_attribute", &RawConcreteModuleType::addFailedAttribute)
+      .def(
+          "set_module_dict",
+          [](RawConcreteModuleType& self) {
+            self.setIterableModuleKind(IterableModuleKind::DICT);
+          })
+      .def("build", &RawConcreteModuleType::build)
+      .def(
+          "equals",
+          [](const RawConcreteModuleType& self,
+             const RawConcreteModuleType& other) { return self.equals(other); })
+      .def(
+          "equals",
+          [](const RawConcreteModuleType& self,
+             const ConcreteModuleType& other) { return self.equals(other); })
+      .def("set_module_list", [](RawConcreteModuleType& self) {
+        self.setIterableModuleKind(IterableModuleKind::LIST);
+      });
+
   py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(
       m, "ConcreteModuleType")
-      .def(py::init<>())
       .def_property_readonly("py_class", &ConcreteModuleType::getPyClass)
       .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
-      .def("add_constant", &ConcreteModuleType::addConstant)
-      .def("add_attribute", &ConcreteModuleType::addAttribute)
-      .def("add_function_attribute", &ConcreteModuleType::addFunctionAttribute)
-      .def("add_module", &ConcreteModuleType::addModule)
-      .def("add_module_interface", &ConcreteModuleType::addModuleInterface)
-      .def("add_pyclass", &ConcreteModuleType::addPyClass)
-      .def("add_overload", &ConcreteModuleType::addOverload)
-      .def("add_jit_type", &ConcreteModuleType::addJitType)
-      .def("set_poisoned", &ConcreteModuleType::setPoisoned)
-      .def(
-          "set_module_dict",
-          [](ConcreteModuleType& self) {
-            self.setIterableModuleKind(IterableModuleKind::DICT);
-          })
-      .def(
-          "set_module_list",
-          [](ConcreteModuleType& self) {
-            self.setIterableModuleKind(IterableModuleKind::LIST);
-          })
-      .def(
-          "create_new_type_from_this",
-          &ConcreteModuleType::createNewTypeFromThis)
-      .def("add_failed_attribute", &ConcreteModuleType::addFailedAttribute)
       .def("dump", &ConcreteModuleType::dump)
       .def(
           "equals",
           [](const ConcreteModuleType& self, const ConcreteModuleType& other) {
-            return self == other;
+            return self.equals(other);
           })
       .def(
           "_create_methods",
