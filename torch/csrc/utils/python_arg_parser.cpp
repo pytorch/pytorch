@@ -132,12 +132,12 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-template <>
-auto FunctionParameter::check<true>(PyObject* obj) -> bool
+template <bool exact>
+auto FunctionParameter::check(PyObject* obj) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check</*exact=*/true>(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+      return THPVariable_Check<exact>(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -149,7 +149,7 @@ auto FunctionParameter::check<true>(PyObject* obj) -> bool
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
-      if (THPVariable_Check</*exact=*/true>(obj)) {
+      if (THPVariable_Check<exact>(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
         return !var.requires_grad() && var.dim() == 0;
       }
@@ -159,73 +159,7 @@ auto FunctionParameter::check<true>(PyObject* obj) -> bool
       if (THPUtils_checkLong(obj)) {
         return true;
       }
-      if (THPVariable_Check</*exact=*/true>(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
-      }
-      return false;
-    }
-#ifdef BUILD_NAMEDTENSOR
-    case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
-    case ParameterType::DIMNAME_LIST: {
-      if (THPUtils_checkDimnameList(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
-      return size == 1 && THPUtils_checkDimname(obj);
-    }
-#endif
-    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
-    case ParameterType::INT_LIST: {
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
-      return size > 0 && THPUtils_checkLong(obj);
-    }
-    case ParameterType::GENERATOR: return THPGenerator_Check(obj);
-    case ParameterType::BOOL: return PyBool_Check(obj);
-    case ParameterType::STORAGE: return isStorage(obj);
-    case ParameterType::PYOBJECT: return true;
-    case ParameterType::SCALARTYPE: return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
-    case ParameterType::LAYOUT: return THPLayout_Check(obj);
-    case ParameterType::MEMORY_FORMAT: return THPMemoryFormat_Check(obj);
-    case ParameterType::QSCHEME: return THPQScheme_Check(obj);
-    case ParameterType::DEVICE:
-      return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
-    case ParameterType::STRING: return THPUtils_checkString(obj);
-    default: throw std::runtime_error("unknown parameter type");
-  }
-}
-
-template <>
-auto FunctionParameter::check<false>(PyObject* obj) -> bool
-{
-  switch (type_) {
-    case ParameterType::TENSOR: {
-      return THPVariable_Check</*exact=*/false>(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
-    }
-    case ParameterType::SCALAR:
-    case ParameterType::COMPLEX:
-      if (PyComplex_Check(obj)) {
-        return true;
-      }
-      // fallthrough
-    case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj)) {
-        return true;
-      }
-      if (THPVariable_Check</*exact=*/false>(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
-        return !var.requires_grad() && var.dim() == 0;
-      }
-      return false;
-    }
-    case ParameterType::INT64: {
-      if (THPUtils_checkLong(obj)) {
-        return true;
-      }
-      if (THPVariable_Check</*exact=*/false>(obj)) {
+      if (THPVariable_Check<exact>(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
