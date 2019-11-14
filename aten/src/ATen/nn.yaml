@@ -137,10 +137,3 @@
 - name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding, IntArrayRef[2] dilation)
   cname: SpatialDepthwiseConvolution
   buffers: []
-
-- name: _thnn_conv3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias, IntArrayRef[3] stride, IntArrayRef[3] padding)
-  cname: VolumetricConvolutionMM
-  buffers: [finput, fgrad_input]
-  CPU:
-    forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
-    backward_scalar_types: ['Float', 'Double', 'BFloat16']
