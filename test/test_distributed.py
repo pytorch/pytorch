@@ -1962,7 +1962,7 @@ class _DistTestBase(object):
         # disabling cudnn.
         # SyncBatchNorm goes through native_batch_norm kernel, this avoids the
         # numerical issue created by the divergent code path.
-        with torch.backends.cudnn.flags(True):
+        with torch.backends.cudnn.flags(False):
             # check two model parameters over 5 iterations
             self._test_DDP_5iter(
                 model_gpu,
