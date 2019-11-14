@@ -267,5 +267,39 @@ struct TORCH_API MarginRankingLossOptions {
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MarginRankingLoss, MarginRankingLossFuncOptions)
 
+// ============================================================================
+
+/// Options for a nll-loss functional and module.
+struct TORCH_API NLLLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// A manual rescaling weight given to each class. If given, has to be a Tensor
+  /// of size C
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies a target value that is ignored
+  /// and does not contribute to the input gradient. When :attr:`size_average` is
+  /// ``True``, the loss is averaged over non-ignored targets.
+  TORCH_ARG(double, ignore_index) = -100;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+// ============================================================================
+
+/// Options for a cross-entropy-Loss functional and module.
+struct TORCH_API CrossEntropyLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// A manual rescaling weight given to each class. If given, has to be a Tensor
+  /// of size C
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies a target value that is ignored
+  /// and does not contribute to the input gradient. When :attr:`size_average` is
+  /// ``True``, the loss is averaged over non-ignored targets.
+  TORCH_ARG(double, ignore_index) = -100;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
 } // namespace nn
 } // namespace torch

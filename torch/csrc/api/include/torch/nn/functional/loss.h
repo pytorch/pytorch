@@ -469,6 +469,80 @@ inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
   return detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
 }
 
+namespace detail {
+inline Tensor nll_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const Tensor& weight,
+    const double& ignore_index,
+    const NLLLossOptions::reduction_t reduction) {
+    if(input.dim() < 2){
+      TORCH_WARN("Expected 2 or more dimensions (got ", input.dim(), ")");
+    }
+    if(input.sizes()[0] != target.sizes()[0]){
+      TORCH_WARN("Expected input batch_size (", input.sizes()[0], ") to match target batch_size (", target.sizes()[0], ")");
+    }
+
+  torch::Tensor ret;
+  if(input.dim() == 2){
+    ret = torch::nll_loss(
+          input,
+          target,
+          weight,
+          ignore_index,
+          enumtype::reduction_get_enum(reduction));
+  }
+  else if(input.dim() == 4){
+    ret = torch::nll_loss2d(
+          input,
+          target,
+          weight,
+          ignore_index,
+          enumtype::reduction_get_enum(reduction));
+  }
+  else{
+    auto n = input.sizes()[0];
+    auto c = input.sizes()[1];
+    auto out_size = input.sizes().slice(0, 1).vec();
+    auto temp = input.sizes().slice(2, input.dim() - 2).vec();
+    out_size.insert(out_size.end(), temp.begin(), temp.end());
+    if(target.sizes().slice(1, target.dim() - 1) != input.sizes().slice(2, input.dim() - 2)){
+      TORCH_WARN("Expected target size{", out_size, "} got {", target.sizes().vec(), "}");
+    }
+    torch::Tensor input_reshaped = input.contiguous().view({n, c, 1, -1});
+    torch::Tensor target_reshaped = target.contiguous().view({n, 1, -1});
+    if (c10::get_if<enumtype::kNone>(&reduction)){
+      ret = torch::nll_loss2d(input_reshaped, target_reshaped, weight, enumtype::reduction_get_enum(reduction), ignore_index);
+    }
+    else{
+      auto out = torch::nll_loss2d(input_reshaped, target_reshaped, weight, enumtype::reduction_get_enum(reduction), ignore_index);
+      ret = out.view(out_size);
+    }
+  }
+  return ret;
+}
+}
+
+inline Tensor nll_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const NLLLossOptions& options = {}) {
+  return detail::nll_loss(input, target, options.weight(), options.ignore_index(), options.reduction());
+}
+
+inline Tensor cross_entropy_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const CrossEntropyLossOptions& options = {}) {
+    const Tensor& log_softmax_input = torch::log_softmax(input);
+  return torch::nll_loss(
+      log_softmax_input,
+      target,
+      options.weight(),
+      options.ignore_index(),
+      enumtype::reduction_get_enum(options.reduction()));
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

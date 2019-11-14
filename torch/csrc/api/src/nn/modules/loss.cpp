@@ -280,5 +280,50 @@ Tensor MarginRankingLossImpl::forward(const Tensor& input1,
   return F::detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
 }
 
+// ============================================================================
+
+NLLLossImpl::NLLLossImpl(
+    const NLLLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+    reset();
+}
+
+void NLLLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::NLLLoss()";
+}
+
+void NLLLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+}
+
+Tensor NLLLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::nll_loss(input, target, options);
+}
+
+// ============================================================================
+
+CrossEntropyLossImpl::CrossEntropyLossImpl(
+    const CrossEntropyLossOptions& options_)
+    : options(options_) {
+    reset();
+}
+
+void CrossEntropyLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CrossEntropyLoss()";
+}
+
+void CrossEntropyLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+}
+
+Tensor CrossEntropyLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+    const Tensor& log_softmax_input = F::log_softmax(input);
+  return F::nll_loss(log_softmax_input, target, options);
+}
+
 } // namespace nn
 } // namespace torch
