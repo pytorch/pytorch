@@ -8,6 +8,14 @@ import torch
 from torch._C import parse_schema
 
 
+# The date specifies how long the whitelist exclusion should apply to.
+#
+#   - If we NEVER give BC guarantee for an operator, you can put the
+#     date arbitrarily far in the future.
+#   - Otherwise, pick a date that is far enough in the future that you
+#     believe you can land your diff before then.
+#
+# Whitelist entries can be removed after the date listed on them passes.
 white_list = [
     ('c10_experimental', datetime.date(2020, 1, 1)),
     ('_batch_norm_impl_index', datetime.date(2019, 11, 15)),
@@ -15,6 +23,8 @@ white_list = [
     ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
     ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
     ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
+    ('thnn_conv3d', datetime.date(9999, 1, 1)),
+    ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
 ]
 
 
