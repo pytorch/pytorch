@@ -1121,6 +1121,20 @@ TEST_F(ModulesTest, FeatureDropout) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
+TEST_F(ModulesTest, FeatureDropoutLegacyWarning) {
+  std::stringstream buffer;
+  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
+
+  FeatureDropout bn(0.5);
+
+  ASSERT_EQ(
+    count_substr_occurrences(
+      buffer.str(),
+      "torch::nn::FeatureDropout module is deprecated"
+    ),
+  1);
+}
+
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->named_parameters();
