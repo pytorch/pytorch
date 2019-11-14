@@ -559,10 +559,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();
   }
-  // We return a raw PyObject* so we need to explicitly incref, otherwise
-  // deallocating the py::object at the end of this scope may cause the
-  // reference count to drop to zero
-  return ret.inc_ref().ptr();
+  return ret.release().ptr();
 }
 
 // generated methods start here
