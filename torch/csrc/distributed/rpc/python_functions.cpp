@@ -66,6 +66,35 @@ void finishAcceptUserRRef(const Message& message) {
   ctx.delPendingUser(rr->forkId());
 }
 
+void finishCreatingOwnerRRef(const Message& message) {
+  RRefContext::handleException(message);
+  auto rr = RemoteRet::fromMessage(message);
+  TORCH_INTERNAL_ASSERT(
+      rr->rrefId() == rr->forkId(),
+      "Expecting an OwnerRRef as RemoteRet but got a fork.");
+  auto& ctx = RRefContext::getInstance();
+  ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+}
+
+std::shared_ptr<FutureMessage> sendPythonRemoteCall(
+    RpcAgent& agent,
+    const WorkerInfo& dst,
+    SerializedPyObj serializedPyObj,
+    IValue rrefId,
+    IValue forkId) {
+  auto pythonRemoteCall = c10::guts::make_unique<PythonRemoteCall>(
+      std::move(serializedPyObj), rrefId, forkId);
+
+  // set forceGradRecording to true as even if the args does not contain any
+  // tensor, the return value might still contain tensors.
+  return torch::distributed::autograd::sendMessageWithAutograd(
+      agent,
+      dst,
+      std::move(*pythonRemoteCall).toMessage(),
+      true /*forceGradRecording*/
+  );
+}
+
 } // namespace
 
 using namespace torch::distributed::autograd;
@@ -171,29 +200,34 @@ PyRRef pyRemotePythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
   auto& ctx = RRefContext::getInstance();
-  // TODO: support creating RRefs on a local object.
-  TORCH_INTERNAL_ASSERT(
-      ctx.getWorkerId() != dst.id_,
-      "Does not support creating RRef on self yet.");
-  auto userRRef = ctx.createUserRRef<py::object>(dst.id_);
+  auto serializedPyObj =
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+  if (ctx.getWorkerId() != dst.id_) {
+    auto userRRef = ctx.createUserRRef<py::object>(dst.id_);
+    ctx.addPendingUser(userRRef->forkId(), userRRef);
+    auto fm = sendPythonRemoteCall(
+        agent,
+        dst,
+        std::move(serializedPyObj),
+        userRRef->rrefId().toIValue(),
+        userRRef->forkId().toIValue());
 
-  auto pythonRemoteCall = c10::guts::make_unique<PythonRemoteCall>(
-      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors)),
-      userRRef->rrefId().toIValue(),
-      userRRef->forkId().toIValue());
+    fm->addCallback(finishAcceptUserRRef);
+    return PyRRef(userRRef);
+  } else {
+    auto ownerRRef = ctx.createOwnerRRef<py::object>();
+    // prevent this owner RRef be deleted due to other forks
+    ctx.addSelfAsFork(ownerRRef);
+    auto fm = sendPythonRemoteCall(
+        agent,
+        dst,
+        std::move(serializedPyObj),
+        ownerRRef->rrefId().toIValue(),
+        ownerRRef->rrefId().toIValue());
 
-  // set forceGradRecording to true as even if the args does not contain any
-  // tensor, the return value might still contain tensors.
-  auto fm = sendMessageWithAutograd(
-      agent,
-      dst,
-      std::move(*pythonRemoteCall).toMessage(),
-      true /*forceGradRecording*/
-  );
-
-  ctx.addPendingUser(userRRef->forkId(), userRRef);
-  fm->addCallback(finishAcceptUserRRef);
-  return PyRRef(userRRef);
+    fm->addCallback(finishCreatingOwnerRRef);
+    return PyRRef(ownerRRef);
+  }
 }
 
 } // namespace rpc

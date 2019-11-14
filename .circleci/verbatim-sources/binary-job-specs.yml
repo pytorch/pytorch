@@ -23,20 +23,6 @@
               conda install -y cmake
             fi
     - run:
-        name: Set JAVA_HOME
-        command: |
-            POSSIBLE_JAVA_HOMES=()
-            POSSIBLE_JAVA_HOMES+=(/usr/local)
-            POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-            for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-              if [[ -e "$JH/include/jni.h" ]] ; then
-                echo "Found jni.h under $JH"
-                echo "export JAVA_HOME=$JH" >> /env
-                echo "export BUILD_JNI=ON" >> /env
-                break
-              fi
-            done
-    - run:
         name: Update compiler to devtoolset7
         command: |
             set -eux -o pipefail
