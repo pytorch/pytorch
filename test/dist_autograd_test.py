@@ -22,6 +22,8 @@ ctx_ids = [-1, -1, -1, -1]
 
 known_context_ids = []
 
+requires_grad_tensor = torch.ones(3, 3, requires_grad=True)
+
 # Send rpc done info and context_id to
 # dst_rank = (self.rank + rank_distance) % self.world_size
 # we don't need a lock here since the GIL is held while executing remote
@@ -76,7 +78,7 @@ def my_nested_rref_add(dst, rref_t1, t2):
 
 
 def ret_requires_grad():
-    return torch.ones(3, 3, requires_grad=True)
+    return requires_grad_tensor
 
 
 def my_py_nested_call(t1, t2, dst, world_size, hops):
@@ -616,17 +618,16 @@ class DistAutogradTest(object):
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
-            ctx = dist_autograd._current_context()
-            send_functions = ctx._send_functions()
-            self.assertEqual(len(send_functions), 0)
-            recv_functions = ctx._recv_functions()
-            self.assertEqual(len(recv_functions), 1)
+            dist_autograd.backward([ret.sum()])
 
             rpc.rpc_sync("worker{}".format(dst_rank),
                          _set_rpc_done, args=(context_id, 1))
 
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
+            grads = dist_autograd.get_gradients(ctx_ids[1])
+            self.assertIn(requires_grad_tensor, grads)
+            self.assertEqual(torch.ones_like(ret), grads[requires_grad_tensor])
 
     @dist_init
     def test_grad_only_on_return_value(self):
