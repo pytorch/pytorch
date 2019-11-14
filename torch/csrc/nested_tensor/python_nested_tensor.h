@@ -23,6 +23,8 @@ namespace nested_tensor {
 
 namespace py = pybind11;
 
+using namespace at;
+
 struct _ListNestedTensor;
 
 struct _VariableNode {
@@ -117,8 +119,7 @@ static std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
 
 template <typename T, class F> static T map(_NestedNode nested_node, F fn) {
   if (nested_node._children.size() == 0) {
-    T new_nested_node(
-        _VariableNode(fn(nested_node._variable_node._variable)));
+    T new_nested_node(_VariableNode(fn(nested_node._variable_node._variable)));
     return new_nested_node;
   } else {
     std::vector<T> new_children;
@@ -159,6 +160,27 @@ struct TORCH_API _ListNestedTensor {
   int64_t element_size() { return _first_variable.element_size(); }
   // py::tuple size(int64_t dim) { return py::make_tuple(py::none(),
   // py::none()); }
+  _ListNestedTensor to(at::TensorOptions options, bool non_blocking, bool copy,
+                       c10::optional<MemoryFormat> memory_format) {
+    return _ListNestedTensor(
+        map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
+          return tensor.to(options, non_blocking, copy, memory_format);
+        }));
+  }
+  _ListNestedTensor to(ScalarType dtype, bool non_blocking, bool copy,
+                       c10::optional<MemoryFormat> memory_format) {
+    return _ListNestedTensor(
+        map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
+          return tensor.to(dtype, non_blocking, copy, memory_format);
+        }));
+  }
+  _ListNestedTensor to(Device device, ScalarType dtype, bool non_blocking,
+                       bool copy, c10::optional<MemoryFormat> memory_format) {
+    return _ListNestedTensor(
+        map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
+          return tensor.to(device, dtype, non_blocking, copy, memory_format);
+        }));
+  }
   _ListNestedTensor pin_memory() {
     return _ListNestedTensor(
         map<_NestedNode>(_structure, [](at::Tensor tensor) -> at::Tensor {
@@ -167,17 +189,19 @@ struct TORCH_API _ListNestedTensor {
   }
   _ListNestedTensor grad() {
     return _ListNestedTensor(
-        map<_NestedNode>(_structure,
-            [](at::Tensor tensor) -> at::Tensor { return tensor.grad(); }));
+        map<_NestedNode>(_structure, [](at::Tensor tensor) -> at::Tensor {
+          return tensor.grad();
+        }));
   }
   _ListNestedTensor detach() {
     return _ListNestedTensor(
-        map<_NestedNode>(_structure,
-            [](at::Tensor tensor) -> at::Tensor { return tensor.detach(); }));
+        map<_NestedNode>(_structure, [](at::Tensor tensor) -> at::Tensor {
+          return tensor.detach();
+        }));
   }
   _ListNestedTensor requires_grad_(bool requires_grad) {
-    return _ListNestedTensor(
-        map<_NestedNode>(_structure, [requires_grad](at::Tensor tensor) -> at::Tensor {
+    return _ListNestedTensor(map<_NestedNode>(
+        _structure, [requires_grad](at::Tensor tensor) -> at::Tensor {
           return tensor.requires_grad_(requires_grad);
         }));
   }
@@ -203,6 +227,7 @@ struct TORCH_API _ListNestedTensor {
   at::ScalarType scalar_type() { return _first_variable.scalar_type(); }
   at::Backend backend() { return _first_variable.type().backend(); }
   at::Device device() { return _first_variable.device(); }
+  at::TensorOptions options() { return _first_variable.options(); }
   bool requires_grad() { return _first_variable.requires_grad(); }
   int64_t dim() { return _first_variable.dim() + nested_dim(); }
   int64_t numel() { return _numel(_structure); }
@@ -210,6 +235,7 @@ struct TORCH_API _ListNestedTensor {
   bool is_contiguous() { return false; }
   _NestedNode get_structure() { return _structure; }
   // TODO: Implement these and call into them isntead of implementing them
+  // _ListNestedTensor to - it's a pain due to the 100s of to overloads
   // std::vector<py::object> nested_size();
   // std::vector<py::object> nested_stride();
   // separately in Variable dispatch functions.
@@ -228,9 +254,9 @@ struct TORCH_API _ListNestedTensorVariable {
       _ListNestedTensor cdata;
 };
 
-inline bool _ListNestedTensorVariable_Check(PyObject *obj)
-{
-  return _ListNestedTensorVariableClass && PyObject_IsInstance(obj, _ListNestedTensorVariableClass);
+inline bool _ListNestedTensorVariable_Check(PyObject *obj) {
+  return _ListNestedTensorVariableClass &&
+         PyObject_IsInstance(obj, _ListNestedTensorVariableClass);
 }
 
 // template <class R, class F> std::vector<R> map_fn(const _ListNestedTensor,

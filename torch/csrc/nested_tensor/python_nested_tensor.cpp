@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/tensor/python_tensor.h>
 
@@ -29,6 +30,7 @@ namespace nested_tensor {
 
 using namespace at;
 using namespace torch::autograd;
+using namespace torch::autograd::utils;
 namespace py = pybind11;
 
 PyObject *_ListNestedTensorVariableClass = nullptr;
@@ -57,8 +59,7 @@ PyObject *_ListNestedTensorVariableClass = nullptr;
 
 template <class F> static PyObject *_map_member(_NestedNode nested_node, F fn) {
   if (nested_node._children.size() == 0) {
-    return torch::autograd::utils::wrap(
-        nested_node._variable_node._variable.sizes());
+    return fn(nested_node._variable_node._variable);
   } else {
     std::vector<PyObject *> new_children;
     for (size_t i = 0; i < nested_node._children.size(); i++) {
@@ -80,6 +81,35 @@ PyObject *_ListNestedTensorVariable_nested_stride(PyObject *self_) {
   return _map_member(self.get_structure(), [](at::Tensor tensor) -> PyObject * {
     return torch::autograd::utils::wrap(tensor.strides());
   });
+}
+
+PyObject *_ListNestedTensorVariable_to(PyObject *self_, PyObject *args,
+                                       PyObject *kwargs) {
+  auto parsed = parse_to_conversion(args, kwargs, /*allow_copy*/ true);
+  auto &device = std::get<0>(parsed);
+  auto &scalarType = std::get<1>(parsed);
+  auto non_blocking = std::get<2>(parsed);
+  auto copy = std::get<3>(parsed);
+  auto opt_memory_format = std::get<4>(parsed);
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  if (device && device->is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
+  if (!device && !scalarType && !copy) {
+    Py_INCREF(self_);
+    return self_;
+  } else if (!device) {
+    return _ListNestedTensorVariable_Wrap(self.to(
+        scalarType.value(), non_blocking, copy, opt_memory_format));
+  } else if (!scalarType) {
+    return _ListNestedTensorVariable_Wrap(self.to(
+        self.options().device(device), non_blocking, copy, opt_memory_format));
+  } else {
+    return _ListNestedTensorVariable_Wrap(
+        self.to(device.value(), scalarType.value(), non_blocking,
+                             copy, opt_memory_format));
+  }
+  Py_RETURN_NONE;
 }
 
 // std::vector<py::object> _ListNestedTensor::nested_stride() {
@@ -338,6 +368,8 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      "Returns numel."},
     {"dim", (PyCFunction)_ListNestedTensorVariable_dim, METH_NOARGS,
      "Returns dim."},
+    {"to", (PyCFunction)_ListNestedTensorVariable_to,
+     METH_VARARGS | METH_KEYWORDS, "Returns to."},
     {"unbind", (PyCFunction)_ListNestedTensorVariable_unbind, METH_NOARGS,
      "Returns unbound components."},
     {NULL} /* Sentinel */
