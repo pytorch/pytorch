@@ -23,16 +23,19 @@ THP_API PyObject *THPVariableClass;
 bool THPVariable_initModule(PyObject *module);
 THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 
-inline bool THPVariable_Check(PyObject *obj, bool exact=false)
-{
-  if (exact) {
-    return Py_TYPE(obj) == (PyTypeObject*)THPVariableClass;
-  }
-  else {
-    return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
-  }
+template <bool exact=false>
+inline bool THPVariable_Check(PyObject *obj);
+
+template <>
+inline bool THPVariable_Check<true>(PyObject* obj) {
+  return Py_TYPE(obj) == (PyTypeObject*)THPVariableClass;
 }
 
+template <>
+inline bool THPVariable_Check<false>(PyObject* obj) {
+  return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
+}
+  
 inline torch::autograd::Variable& THPVariable_Unpack(PyObject* obj) {
   auto var = (THPVariable*)obj;
   return var->cdata;

@@ -193,7 +193,8 @@ struct FunctionSignature {
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
-  bool check(PyObject* obj, bool is_exact_class);
+  template <bool is_exact_class=false>
+  bool check(PyObject* obj);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
@@ -239,7 +240,7 @@ inline std::string PythonArgs::get_func_name(){
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (args[i] && THPVariable_Check(args[i], /*exact=*/true)) {
+  if (args[i] && THPVariable_Check<true>(args[i])) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);
