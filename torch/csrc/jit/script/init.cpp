@@ -216,9 +216,9 @@ void checkMutableFunctionDefault(
     const SourceRange& range,
     const Argument& arg,
     const py::object& def_arg) {
-  if (checkMutableFunctionDefault(def_arg)) {
+  if (checkMutableFunctionDefault(def_arg) || arg.type()->cast<ClassType>()) {
     throw ErrorReport(range)
-        << "Mutable default parameters are not supported because python bounds them to the function"
+        << "Mutable default parameters are not supported because Python binds them to the function"
         << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
         << " the default parameter within the body of the function. Found "
         << def_arg.get_type() << " on parameter " << arg.name();
