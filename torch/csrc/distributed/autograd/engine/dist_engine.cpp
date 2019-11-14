@@ -58,7 +58,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
 }
 
 void DistEngine::computeDependencies(
-    ContextPtr autogradContext,
+    const ContextPtr& autogradContext,
     const edge_list& rootEdges,
     const variable_list& grads,
     const std::shared_ptr<Node>& graphRoot,
@@ -172,7 +172,7 @@ void DistEngine::computeDependencies(
 }
 
 void DistEngine::runEngineAndAccumulateGradients(
-    ContextPtr autogradContext,
+    const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& graphRoot,
     const edge_list& outputEdges) {
   // Kick off autograd computation with the root node and retrieve all the

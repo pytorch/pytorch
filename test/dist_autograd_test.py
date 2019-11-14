@@ -187,7 +187,7 @@ class DistAutogradTest(object):
         if hasattr(self, 'dst_rank'):
             self.dst_rank = (self.dst_rank + 1) % self.world_size
             if self.dst_rank == self.rank:
-                self._next_rank()
+                return self._next_rank()
         else:
             self.dst_rank = (self.rank + 1) % self.world_size
         return self.dst_rank
@@ -1253,7 +1253,8 @@ class DistAutogradTest(object):
             self.assertEqual(t1.grad, grads[t1])
             self.assertEqual(t2.grad, grads[t2])
 
-    _my_backward_func_executed = threading.Condition()
+
+    _test_clean_context_backward_context_id = None
 
     class MyBackwardFunc(Function):
         @staticmethod
@@ -1263,17 +1264,16 @@ class DistAutogradTest(object):
         @staticmethod
         @once_differentiable
         def backward(ctx, input):
-            with DistAutogradTest._my_backward_func_executed:
-                DistAutogradTest._my_backward_func_executed.notifyAll()
-            return input
+            assert(DistAutogradTest._test_clean_context_backward_context_id is not None)
 
-    def _clear_context_thread(context):
-        # Wait until MyBackwardFunc is executed and then clean up context. This
-        # ensures we simulate a case where we clean up the context while the
-        # backward pass is running.
-        with DistAutogradTest._my_backward_func_executed:
-            DistAutogradTest._my_backward_func_executed.wait()
-        dist_autograd._release_context(context._context_id())
+            # Release the context to simulate error (use barrier before releasing context to ensure all nodes execute the backward function).
+            dist.barrier()
+            dist_autograd._release_context(DistAutogradTest._test_clean_context_backward_context_id)
+
+            # Verify all contexts are cleaned up.
+            assert(_all_contexts_cleaned_up())
+
+            return input
 
     @dist_init
     def test_clean_context_during_backward(self):
@@ -1287,32 +1287,39 @@ class DistAutogradTest(object):
         It is fine for the 'backward' call to throw an exception in this test,
         but the process should not crash.
         '''
+        self._initialize_pg()
 
         context = dist_autograd._new_context()
+        context_id = context._context_id()
+        DistAutogradTest._test_clean_context_backward_context_id = context_id
+
+        # Send the context id to all nodes.
+        for i in range(0, self.world_size):
+            if i != self.rank:
+                rpc.rpc_sync("worker{}".format(i), _set_rpc_done, args=(context_id, 1))
+
+        dist.barrier()
+
+        # Verify all context ids have been received.
+        self.assertEqual(self.world_size - 1, len(known_context_ids))
+
         t1 = torch.rand((3, 3), requires_grad=True)
         for i in range(0, 100):
-            if i == 50:
-                # Call MyBackwardFunc somewhere in the middle of the autograd
-                # graph.
+            dst = self._next_rank()
+            t1 = rpc.rpc_sync("worker{}".format(dst), torch.add, args=(t1, t1))
+            if i == 99:
+                # Call MyBackwardFunc as the first op of the backward pass to
+                # ensure we release the context early in the backward pass.
                 t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
-            t1 = rpc.rpc_sync("worker{}".format(self._next_rank()), torch.add, args=(t1, t1))
         self.assertEqual(100, len(context._send_functions()))
-
-        # Start thread to cleanup context.
-        t = threading.Thread(target=DistAutogradTest._clear_context_thread, args=(context,))
-        t.start()
 
         with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id"):
             dist_autograd.backward([t1.sum()])
-
-        # Wait for thread to finish.
-        t.join()
 
         # HACK: Killing workers since otherwise the autograd engine gets stuck on
         # other nodes. The proper fix would be addressing:
         # https://github.com/pytorch/pytorch/issues/27643, which would inform
         # other nodes about the failure.
-        self._initialize_pg()
         dist.barrier()
         sys.exit(0)
 

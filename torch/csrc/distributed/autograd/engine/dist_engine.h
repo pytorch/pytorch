@@ -67,7 +67,7 @@ class TORCH_API DistEngine {
   // We also determine all leaf nodes(functions) in the graph and accumulate
   // them in outputEdges.
   void computeDependencies(
-      ContextPtr context,
+      const ContextPtr& context,
       const torch::autograd::edge_list& rootEdges,
       const torch::autograd::variable_list& grads,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
@@ -77,7 +77,7 @@ class TORCH_API DistEngine {
   // and accumulate the gradients part 'outputEdges' in the provided autograd
   // context.
   void runEngineAndAccumulateGradients(
-      ContextPtr autogradContext,
+      const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);
 
