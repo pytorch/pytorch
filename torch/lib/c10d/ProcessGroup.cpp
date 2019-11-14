@@ -33,13 +33,20 @@ std::vector<at::Tensor> ProcessGroup::Work::result() const {
 
 void ProcessGroup::Work::synchronize() {}
 
-void ProcessGroup::Work::wait() {
+bool ProcessGroup::Work::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   cv_.wait(lock, [&] { return completed_; });
   if (exception_) {
     std::rethrow_exception(exception_);
   }
   synchronize();
+  return !aborted_;
+}
+
+void ProcessGroup::Work::abort() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  aborted_ = true;
+  cv_.notify_all();
 }
 
 void ProcessGroup::Work::finish(std::exception_ptr exception) {

@@ -259,6 +259,146 @@ void testBarrier(const std::string& path) {
   }
 }
 
+void testSend(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  constexpr uint64_t tag = 0x1337;
+
+  // Sender. Test helper.
+  std::thread senderThread([&]() {
+    auto selfRank = 1;
+    auto destRank = 0;
+
+    auto& pg = tests[selfRank].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+    // #1 Wait SendWork. Got aborted.
+    auto work = pg.send(
+        tensors, /* tensors */
+        destRank, /* destRank */
+        tag /* tag */
+    );
+    bool sendCompleted;
+    std::thread waitSendWorkThread([&]() { sendCompleted = work->wait(); });
+    work->abort();
+    waitSendWorkThread.join();
+    AT_ASSERT(!sendCompleted);
+
+    // #2 Wait SendWork. Successful.
+    work = pg.send(
+        tensors, /* tensors */
+        destRank, /* destRank */
+        tag /* tag */
+    );
+    sendCompleted = work->wait();
+    AT_ASSERT(sendCompleted);
+  });
+
+  // Receiver. Test helper.
+  std::thread receiverThread([&]() {
+    auto selfRank = 0;
+    auto srcRank = 1;
+
+    auto& pg = tests[0].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+
+    // #1 Recv.
+    auto work = pg.recv(
+        tensors, /* tensors */
+        srcRank, /* destRank */
+        tag /* tag */
+    );
+    work->wait();
+
+    // #2 Recv.
+    work = pg.recv(
+        tensors, /* tensors */
+        srcRank, /* destRank */
+        tag /* tag */
+    );
+    work->wait();
+  });
+
+  senderThread.join();
+  receiverThread.join();
+}
+
+void testRecv(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  constexpr uint64_t tag = 0x1337;
+
+  // Receiver. Test subject.
+  std::thread receiverThread([&]() {
+    auto selfRank = 0;
+    auto srcRank = 1;
+
+    auto& pg = tests[0].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+
+    // #1 Wait RecvWork. Got aborted.
+    auto work = pg.recv(
+        tensors, /* tensors */
+        srcRank, /* destRank */
+        tag /* tag */
+    );
+    bool recvCompleted;
+    std::thread waitRecvWorkThread([&]() { recvCompleted = work->wait(); });
+    work->abort();
+    waitRecvWorkThread.join();
+    AT_ASSERT(!recvCompleted);
+
+    // #2 Wait RecvWork. Successful.
+    work = pg.recv(
+        tensors, /* tensors */
+        srcRank, /* destRank */
+        tag /* tag */
+    );
+    recvCompleted = work->wait();
+    AT_ASSERT(recvCompleted);
+  });
+
+  // Sender. Test helper.
+  std::thread senderThread([&]() {
+    auto selfRank = 1;
+    auto destRank = 0;
+
+    auto& pg = tests[selfRank].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+    // #1 Send.
+    auto work = pg.send(
+        tensors, /* tensors */
+        destRank, /* destRank */
+        tag /* tag */
+    );
+    work->wait();
+
+    // #2 Send.
+    work = pg.send(
+        tensors, /* tensors */
+        destRank, /* destRank */
+        tag /* tag */
+    );
+    work->wait();
+  });
+
+  receiverThread.join();
+  senderThread.join();
+}
+
 int main(int argc, char** argv) {
   {
     TemporaryFile file;
@@ -307,6 +447,16 @@ int main(int argc, char** argv) {
   {
     TemporaryFile file;
     testBarrier(file.path);
+  }
+
+  {
+    TemporaryFile file;
+    testSend(file.path);
+  }
+
+  {
+    TemporaryFile file;
+    testRecv(file.path);
   }
 
   std::cout << "Test successful" << std::endl;
