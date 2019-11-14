@@ -10,6 +10,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.distributed.rpc import RRef
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
@@ -86,6 +87,14 @@ class MyClass:
 
 def _call_method_on_rref(method, rref, *args, **kwargs):
     return method(rref.local_value(), *args, **kwargs)
+
+
+def get_rref_list(values):
+    return [RRef(MyClass(a)) for a in values]
+
+
+def add_rref_to_value(rref, value):
+    return rref.to_here() + value
 
 
 def run_nested_pickle(pickle_cls_instance, tensor):
@@ -227,6 +236,44 @@ class RpcTest(object):
         ret = rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
         self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_self_py_udf_remote(self):
+        self_worker_info = rpc.get_worker_info()
+        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
+        self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1 + 3)
+
+    def _test_self_remote_rref_as_rpc_arg(self, dst):
+        self_worker_info = rpc.get_worker_info()
+        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
+        fut = rpc.rpc_async(dst, add_rref_to_value, args=(rref, torch.ones(2, 2)))
+        ret = rpc.rpc_sync(dst, add_rref_to_value, args=(rref, torch.ones(2, 2) + 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2) + 1)
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2))
+
+    @dist_init
+    def test_self_remote_rref_as_rpc_arg(self):
+        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        self._test_self_remote_rref_as_rpc_arg(dst)
+
+    @dist_init
+    def test_self_remote_rref_as_self_rpc_arg(self):
+        self._test_self_remote_rref_as_rpc_arg(rpc.get_worker_info())
+
+    def _test_self_remote_rref_as_remote_arg(self, dst):
+        self_worker_info = rpc.get_worker_info()
+        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
+        ret_rref = rpc.remote(dst, add_rref_to_value, args=(rref, torch.ones(2, 2)))
+        self.assertEqual(ret_rref.to_here(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2))
+
+    @dist_init
+    def test_self_remote_rref_as_remote_arg(self):
+        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        self._test_self_remote_rref_as_remote_arg(dst)
+
+    @dist_init
+    def test_self_remote_rref_as_self_remote_arg(self):
+        self._test_self_remote_rref_as_remote_arg(rpc.get_worker_info())
 
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
@@ -505,7 +552,6 @@ class RpcTest(object):
         value = VALUE_FUTURE.result()
         self.assertEqual(value, expected_src_rank)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28932")
     @dist_init
     def test_py_built_in(self):
         n = self.rank + 1
@@ -648,6 +694,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29381")
     @dist_init
     def test_nested_rpc(self):
         n = self.rank + 1
@@ -679,7 +726,6 @@ class RpcTest(object):
             )
         )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29150")
     @dist_init
     def test_stress_light_rpc(self):
         self._stress_test_rpc(light_rpc)
@@ -771,7 +817,6 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), my_function(n, n + 1, n + 2))
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29156")
     @dist_init
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
@@ -794,7 +839,6 @@ class RpcTest(object):
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29212")
     @dist_init
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
@@ -828,6 +872,7 @@ class RpcTest(object):
 
         self.assertEqual(c, torch.ones(n, n) + 4)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_remote(self):
         n = self.rank + 1
@@ -841,6 +886,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_rref(self):
         n = self.rank + 1
@@ -928,6 +974,50 @@ class RpcTest(object):
 
         ret = ret_rref
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
+
+    @dist_init
+    def test_local_rref_no_fork(self):
+        local_rref = RRef(35)
+        self.assertEqual(local_rref.local_value(), 35)
+
+    @dist_init
+    def test_return_local_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        rref_list = rpc.rpc_sync(
+            "worker{}".format(dst_rank), get_rref_list, args=(
+                [1, 2, 3], ))
+
+        for rref in rref_list:
+            rpc.rpc_sync(rref.owner(), _call_method_on_rref, args=(
+                MyClass.increment_value, rref, 10))
+
+        rets = [
+            rpc.rpc_sync(rref.owner(), _call_method_on_rref, args=(
+                MyClass.get_value, rref))
+            for rref in rref_list]
+
+        self.assertEqual(rets, [11, 12, 13])
+
+    @dist_init
+    def test_pass_local_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+
+        rref = RRef(40)
+        self.assertEqual(
+            rpc.rpc_sync(
+                dst_worker, add_rref_to_value, args=(rref, 50)), 90)
+        self.assertEqual(
+            rpc.rpc_async(
+                dst_worker, add_rref_to_value, args=(rref, 50)).wait(), 90)
+        self.assertEqual(
+            rpc.remote(
+                dst_worker,
+                add_rref_to_value,
+                args=(rref, 50)).to_here(), 90)
 
     @dist_init
     def test_remote_same_worker(self):
