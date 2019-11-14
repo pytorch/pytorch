@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import time
 import sys
+import time
 import unittest
 
 import torch
@@ -1253,7 +1253,7 @@ class DistAutogradTest(object):
             self.assertEqual(t1.grad, grads[t1])
             self.assertEqual(t2.grad, grads[t2])
 
-    _my_backward_func_executed = False
+    _my_backward_func_executed = threading.Condition()
 
     class MyBackwardFunc(Function):
         @staticmethod
@@ -1263,15 +1263,16 @@ class DistAutogradTest(object):
         @staticmethod
         @once_differentiable
         def backward(ctx, input):
-            DistAutogradTest._my_backward_func_executed = True
+            with DistAutogradTest._my_backward_func_executed:
+                DistAutogradTest._my_backward_func_executed.notifyAll()
             return input
 
     def _clear_context_thread(context):
         # Wait until MyBackwardFunc is executed and then clean up context. This
         # ensures we simulate a case where we clean up the context while the
         # backward pass is running.
-        while not DistAutogradTest._my_backward_func_executed:
-            time.sleep(0.1)
+        with DistAutogradTest._my_backward_func_executed:
+            DistAutogradTest._my_backward_func_executed.wait()
         dist_autograd._release_context(context._context_id())
 
     @dist_init
