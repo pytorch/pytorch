@@ -13,7 +13,7 @@ load_tests = load_tests
 # Not thread-safe decorator that runs the decorated test once with
 # the default dtype being torch.float and again with the default dtype
 # being torch.double.
-def multiple_default_dtypes(fn):
+def float_double_default_dtype(fn):
     @wraps(fn)
     def wrapped_fn(*args, **kwargs):
         cur_dtype = torch.get_default_dtype()
