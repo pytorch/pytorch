@@ -17,7 +17,6 @@ import torch.utils.model_zoo as model_zoo
 from torch.nn.utils import rnn as rnn_utils
 from debug_embed_params import run_embed_params
 import io
-import os
 
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
