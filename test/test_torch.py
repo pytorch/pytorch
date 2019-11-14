@@ -2483,6 +2483,7 @@ class _TestTorchMixin(object):
     def test_nbytes(self):
         self.assertEqual(torch.randn(3, dtype=torch.float32).nbytes, 12)
         self.assertEqual(torch.randn(3, dtype=torch.float64).nbytes, 24)
+        self.assertEqual(torch.randn(6, dtype=torch.float32)[::2].nbytes, 12)
 
     def test_itemsize(self):
         self.assertEqual(torch.zeros(2, dtype=torch.float16).itemsize, 2)
