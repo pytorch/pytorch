@@ -4970,6 +4970,11 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: method, function
+  dispatch:
+    CPU: any
+    CUDA: any
+    SparseCPU: any_sparse
+    SparseCUDA: any_sparse
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

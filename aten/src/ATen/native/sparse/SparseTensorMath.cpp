@@ -1180,4 +1180,10 @@ Tensor isnan_sparse(const Tensor & self){
   return at::isnan(self._values());
 }
 
+Tensor any_sparse(const Tensor& self) {
+  AT_ASSERT(self.is_sparse());
+
+  return at::any(self._values());
+}
+
 }} // namespace at::native
