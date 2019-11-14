@@ -282,15 +282,12 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       // ...otherwise, methods, parameters, attributes, and buffers are all
       // first class so they get returned as SimpleValues
       return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+  } else if (selfType->hasConstant(field)) {
+    return std::make_shared<SimpleValue>(
+        m.graph()->insertConstant(selfType->getConstant(field).value(), loc));
   }
 
-  // 2. Check if it's a user-provided constant property.
-  if (auto constant = concreteType_->findConstant(field)) {
-    // If it is, just insert the constant and return a SimpleValue for it.
-    return toSugaredValue(*constant, m, loc, true);
-  }
-
-  // 3. Special case: for module dicts we manually desugar items(), keys(),
+  // 2. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
   // TODO: These could be represented as first class methods probably.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
@@ -310,7 +307,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     }
   }
 
-  // 4. Check if this is the name of an overloaded method.
+  // 3. Check if this is the name of an overloaded method.
 
   // This can also be a call to a non-script module, or a plain
   // python method. If so return this as a python value.
@@ -318,12 +315,12 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<MethodValue>(self_, *overloads);
   }
 
-  // 5. Check if it's a function attribute.
+  // 4. Check if it's a function attribute.
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
   }
 
-  // 6. Check if it's an attribute of the original Python class that this
+  // 5. Check if it's an attribute of the original Python class that this
   // ScriptModule was derived from. The only class attributes we handle are
   // methods.
   py::object unboundMethod = py::getattr(

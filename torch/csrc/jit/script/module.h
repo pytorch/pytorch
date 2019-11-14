@@ -220,15 +220,15 @@ struct TORCH_API Module {
     if (auto r = module_object()->type()->findAttributeSlot(name)) {
       return module_object()->getSlot(*r);
     }
+    if (auto v = module_object()->type()->getConstant(name)) {
+      return v;
+    }
     return or_else;
   }
 
   bool hasattr(const std::string& name) const {
-    return module_object()->type()->findAttributeSlot(name).has_value();
-  }
-
-  c10::optional<IValue> find_constant(const std::string& name) const {
-    return type()->findConstant(name);
+    return module_object()->type()->findAttributeSlot(name).has_value() \
+      || module_object()->type()->hasConstant(name);
   }
 
   // each module owns its method. The reference returned here

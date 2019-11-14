@@ -5,6 +5,47 @@ namespace torch {
 namespace jit {
 namespace script {
 
+bool isSimpleConstant(const IValue& v) {
+  return v.isBool() || v.isDouble() || v.isInt() || \
+    v.isString() || v.isNone() || v.isDevice();
+}
+
+IValue getValidConstantFromTuple(const std::string& attr_name,
+                                 const std::vector<IValue>& l) {
+  std::vector<IValue> valid_list;
+  std::transform(l.begin(), l.end(), std::back_inserter(valid_list),
+                 [attr_name](const IValue& v) -> IValue {
+                   return getValidConstant(attr_name, v);
+                 });
+  return c10::ivalue::Tuple::create(valid_list);
+}
+
+IValue getValidConstant(const std::string& attr_name,
+                        const IValue& v) {
+  if (isSimpleConstant(v)) {
+    return v;
+  }
+  std::vector<IValue> elements;
+  if (v.isTuple()) {
+    return getValidConstantFromTuple(attr_name, v.toTuple()->elements());
+  } else if (v.isGenericList()) {
+    return getValidConstant(attr_name, v.toGenericList());
+  } else if (v.isDoubleList()) {
+    return getValidConstant(attr_name, v.toDoubleList());
+  } else if (v.isIntList()) {
+    return getValidConstant(attr_name, v.toIntList());
+  }
+  TORCH_CHECK(false,
+              v,
+              "object for attribute ",
+              attr_name,
+              "is not a valid constant."
+              "Valid constants are:",
+              "1. a nn.ModuleList",
+              "2. a value of type (bool, float, int, str, NoneType, torch.device, torch.layout, torch.dtype)",
+              "3. a list or tuple of (2)");
+}
+
 ClassTypePtr ConcreteModuleType::getJitType() const {
   TORCH_INTERNAL_ASSERT(jitType_);
   return jitType_;
@@ -40,7 +81,12 @@ ClassTypePtr ConcreteModuleType::createNewTypeFromThis() {
   for (const auto& pr : constants_) {
     const auto& name = pr.first;
     const auto& val = pr.second.v_;
-    cls->addConstant(name, toTypeInferredIValue(val));
+    auto match = tryToInferType(val);
+    if (!match.success()) {
+      TORCH_CHECK(false, "Can't infer type of ", py::str(val), "\n:", match.reason());
+    }
+    auto ivalue = getValidConstant(name, toIValue(val, match.type()));
+    cls->addConstant(name, ivalue);
   }
 
   for (const auto& moduleInfo : modules_) {
@@ -182,15 +228,6 @@ void ConcreteModuleType::addFailedAttribute(
     std::string failureReason) {
   TORCH_INTERNAL_ASSERT(!jitType_);
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
-}
-
-c10::optional<py::object> ConcreteModuleType::findConstant(
-    const std::string& name) const {
-  auto it = constants_.find(name);
-  if (it != constants_.end()) {
-    return it->second.v_;
-  }
-  return c10::nullopt;
 }
 
 void ConcreteModuleType::dump() const {
