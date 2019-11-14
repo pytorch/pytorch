@@ -1,33 +1,21 @@
-set(RPC_TEST_ROOT ${TORCH_ROOT}/test/cpp/rpc)
-
-file(GLOB RPC_TEST_SRCS ${RPC_TEST_ROOT}/test_*.cpp)
-set(RPC_TEST_SRCS ${RPC_TEST_SRCS} PARENT_SCOPE)
-
-add_executable(test_cpp_rpc
+set(TORCH_RPC_TEST_DIR "${TORCH_ROOT}/test/cpp/rpc")
+set(TORCH_RPC_TEST_SOURCES
   ${TORCH_ROOT}/test/cpp/common/main.cpp
-  ${RPC_TEST_ROOT}/gtest.cpp
-  ${RPC_TEST_SRCS})
+  ${TORCH_RPC_TEST_DIR}/test_wire_serialization.cpp
+)
 
-target_link_libraries(test_cpp_rpc PRIVATE torch gtest)
+add_executable(test_cpp_rpc ${TORCH_RPC_TEST_SOURCES})
 target_include_directories(test_cpp_rpc PRIVATE ${ATen_CPU_INCLUDE})
+target_link_libraries(test_cpp_rpc PRIVATE torch gtest)
 
 if (USE_CUDA)
-  target_link_libraries(test_cpp_rpc PRIVATE
+  target_link_libraries(test_cpp_rcp PRIVATE
     ${CUDA_LIBRARIES}
     ${CUDA_NVRTC_LIB}
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
 
-  target_compile_definitions(test_cpp_rpc PRIVATE USE_CUDA)
-elseif (USE_ROCM)
-  target_link_libraries(test_cpp_rpc PRIVATE
-    ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_HCC_LIBRARIES}
-    ${TORCH_CUDA_LIBRARIES})
-
-  target_link_libraries(test_cpp_rpc PRIVATE caffe2_gpu)
-
-  target_compile_definitions(test_cpp_rpc PRIVATE USE_ROCM)
+  target_compile_definitions(test_cpp_rcpc PRIVATE "USE_CUDA")
 endif()
 
 if (INSTALL_TEST)
