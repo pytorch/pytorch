@@ -22,9 +22,13 @@ struct TORCH_API FutureMessage final {
 
   // If completed() the callback will be invoked in-place.
   void addCallback(const Callback& callback);
+
+  // Get the destination rank of this future.
   inline int dst() const {
     return dst_;
+
   }
+  // Set the destination rank of this future.
   inline void setDst(int dst) {
     dst_ = dst;
   }

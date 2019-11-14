@@ -122,7 +122,6 @@ class ProcessGroupAgent : public RpcAgent {
   // termination and only exit when all sent messages are processed.
   MessageCounter sendCounts_;
   MessageCounter recvCounts_;
-  MessageCounter timedOutCounts_;
 
   std::atomic<int64_t> nextId_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe

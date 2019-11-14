@@ -124,14 +124,13 @@ ProcessGroupAgent::ProcessGroupAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
           c10::guts::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
+      shutdown_{false},
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
-      timedOutCounts_(pg_->getSize()),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
-  shutdown_.store(false);
   collectNames();
   TORCH_CHECK(
       nameMap_.size() > 1,
@@ -178,7 +177,6 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
 }
 
 void ProcessGroupAgent::join() {
-  fprintf(stderr, "in join function...\n");
   // Every process i sends a SHUTDOWN message to process i + 1. This is
   // necessary for now because:
   // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
@@ -192,12 +190,8 @@ void ProcessGroupAgent::join() {
     std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
     futureTimeoutCV_.notify_one();
   }
-  fprintf(stderr, "calling sync \n");
   sync();
-  fprintf(stderr, "called sync\n");
-  fprintf(stderr, "going for the lock \n");
   std::unique_lock<std::mutex> lock(futureMutex_);
-  fprintf(stderr, "waiting on the CV\n");
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
@@ -310,9 +304,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
       futureTimeoutCV_.notify_one();
     }
-    // std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
-    // futureTimeoutCV_.notify_one();
-    // lock.unlock();
+
     message.setId(requestId);
   } else {
     future->markCompleted();
@@ -422,8 +414,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             std::lock_guard<std::mutex> lock{futureMutex_};
             if (futures_.find(id) == futures_.end()) {
               // Received a completion for a timed out future, drop the recv.
-              // HACK need to do this for hasPendingMessage()
-              // recvCounts_.increment(work.from_.id_);
+              // RecvCounts will not be incremented here, it will be incremented
+              // by the sender who has determined the future has timed out.
               return;
             }
             std::tie(fm, futureStartTime) = futures_[id];
@@ -486,12 +478,6 @@ void ProcessGroupAgent::listenLoop() {
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
   // TODO separate w helper methods
-  // wait until there is a future (or sync calls it)
-  // std::unique_lock<std::mutex> lock(futureMutex_);
-  // fprintf(stderr, "waiting on the CV\n");
-  // futureCV_.wait(
-  //     lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
-  // lock.unlock();
   {
     std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
     futureTimeoutCV_.wait(lock);
@@ -521,9 +507,9 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       std::lock_guard<std::mutex> lock{futureMutex_};
       for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
            /* intentional no increment */) {
-        std::chrono::milliseconds startTime = it->first;
-        std::vector<int64_t> futureIDs = it->second;
-        auto diffTime =
+        const std::chrono::milliseconds startTime = it->first;
+        const std::vector<int64_t> futureIDs = it->second;
+        const auto diffTime =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()) -
             startTime;
@@ -536,7 +522,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
             TORCH_CHECK(
                 futures_.find(futureID) != futures_.end(),
                 "Race Condition - Expected future does not exist in map");
-            auto fut = futures_[futureID].first;
+            const auto fut = futures_[futureID].first;
             timedOutFutures.push_back(fut);
             futures_.erase(futureID);
           }
@@ -550,11 +536,12 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
     if (!timedOutFutures.empty()) {
-      auto exceptionMsg = createExceptionResponse(
+      // TODO enhance error message
+      const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), "future timed out.");
       for (const auto& timedOutFuture : timedOutFutures) {
         timedOutFuture->markCompleted(exceptionMsg);
-        int dst = timedOutFuture->dst();
+        const int dst = timedOutFuture->dst();
 
         recvCounts_.increment(dst);
         futureCV_.notify_all();
