@@ -102,7 +102,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_cdist_outnames(x1, x2);
+  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
 #endif
   auto result = [&]() {
 #ifdef BUILD_NAMEDTENSOR
@@ -111,7 +111,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
     return cdist_impl(x1, x2, p, compute_mode);
   }();
 #ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -129,7 +129,7 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, c
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
   IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(x1.dim() - 2, 0));
   int batch_product = std::accumulate(batch_tensor1.begin(), batch_tensor1.end(), 1, std::multiplies<int64_t>());
-  Tensor grad_x1 = at::empty_like(x1, x1.options()).view({batch_product, n, m});
+  Tensor grad_x1 = at::empty_like(x1, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT).view({batch_product, n, m});
   cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
   return grad_x1;
 }
@@ -159,7 +159,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   TORCH_CHECK(pdist.is_contiguous(), "_pdist_backward requires pdist to be contiguous");
   auto device = self.type().device_type();
   TORCH_CHECK(device == kCPU || device == kCUDA, "_pdist_backward only supports CPU and CUDA devices, got: ", device);
-  Tensor result = at::empty_like(self);
+  Tensor result = at::empty_like(self, at::MemoryFormat::Contiguous);
   pdist_backward_stub(device, result, grad, self, p, pdist);
   return result;
 }

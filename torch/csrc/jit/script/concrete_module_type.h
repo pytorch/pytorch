@@ -62,7 +62,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       std::string name,
       const TypePtr& type,
       py::object pyFunction);
+
+  // add a submodule to the ConcreteModuleType can either be ConcreteModuleType
+  // that get constructed recursively, or InterfaceType (Module)
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
+  void addModuleInterface(std::string name, const TypePtr& type);
+
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
@@ -99,7 +104,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, py::object> getConstantsPy() const;
   std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
       const;
-  std::vector<std::string> getModuleNamesPy() const;
+  std::vector<std::pair<std::string, TypePtr>> getModulesPy() const;
 
   // This determines whether two modules can share a type. The container structs
   // used by ConcreteModuleType have been defined such that operator==
@@ -107,6 +112,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   friend bool operator==(
       const ConcreteModuleType& lhs,
       const ConcreteModuleType& rhs) {
+    if (lhs.jitType_ == rhs.jitType_) {
+      // If the computed types are the same, these modules can (obviously) share
+      // a type.
+      return true;
+    }
+
     if (lhs.isPoisoned_ || rhs.isPoisoned_) {
       return false;
     }
@@ -134,7 +145,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
         lhsSorted.begin(),
         lhsSorted.end(),
         [](const ModuleInfo& a, const ModuleInfo& b) {
-          return a.name < b.name;
+          return a.name_ < b.name_;
         });
 
     auto rhsSorted = rhs.modules_;
@@ -142,7 +153,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
         rhsSorted.begin(),
         rhsSorted.end(),
         [](const ModuleInfo& a, const ModuleInfo& b) {
-          return a.name < b.name;
+          return a.name_ < b.name_;
         });
 
     return lhsSorted == rhsSorted;
@@ -190,18 +201,37 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   };
 
   struct ModuleInfo {
-    std::string name;
-    std::shared_ptr<ConcreteModuleType> meta;
+    ModuleInfo(std::string name, std::shared_ptr<ConcreteModuleType> meta)
+        : name_(std::move(name)), meta_(std::move(meta)), type_(nullptr) {}
 
+    ModuleInfo(std::string name, const TypePtr& type)
+        : name_(std::move(name)), meta_(nullptr), type_(type) {}
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
-      return *(lhs.meta) == *(rhs.meta);
+      if (lhs.meta_ != nullptr && rhs.meta_ != nullptr) {
+        return *(lhs.meta_) == *(rhs.meta_);
+      } else if (lhs.type_ != nullptr && rhs.type_ != nullptr) {
+        return  *(lhs.type_) == *(rhs.type_);
+      } else {
+        return false;
+      }
     }
+
+    TypePtr getJitType() const {
+      return meta_ == nullptr? type_ : meta_->getJitType();
+    }
+    std::string name_;
+
+    // Module Info contains either an ConcreateModuleType or a type (which is
+    // a Module Interface), these two are union relationship.
+    std::shared_ptr<ConcreteModuleType> meta_;
+    TypePtr type_;
+
   };
 
   // If true, this type will never compare equally to anything else. This is
   // used if we want to ensure that this type is not shared (for example, if it
   // came from a traced module)
-  bool isPoisoned_;
+  bool isPoisoned_ = false;
 
   // The value of any constants defined by the module.
   std::unordered_map<std::string, Constant> constants_;
