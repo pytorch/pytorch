@@ -7,7 +7,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/EnableNamedTensor.h>
@@ -53,8 +52,7 @@ inline Tensor Tensor::toBackend(Backend b) const {
 inline TensorOptions Tensor::options() const {
   return TensorOptions().dtype(dtype())
                         .device(device())
-                        .layout(layout())
-                        .is_variable(is_variable());
+                        .layout(layout());
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
@@ -164,5 +162,25 @@ AT_FORALL_QINT_TYPES(DEFINE_CAST)
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
+
+// Gradient Node and Edges
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Tensor return type
+  std::function<void(Tensor)> fn(hook);
+  _register_hook([fn](const Tensor& grad) {
+    fn(grad);
+    return Tensor();
+  });
+}
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
+  _register_hook(hook);
+}
+
 
 } //namespace at

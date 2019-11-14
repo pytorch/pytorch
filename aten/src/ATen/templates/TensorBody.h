@@ -36,53 +36,6 @@ namespace torch { namespace autograd {
 
 struct Node;
 
-/// Represents a particular input of a function.
-struct Edge {
-  Edge() noexcept : function(nullptr), input_nr(0) {}
-
-  Edge(std::shared_ptr<Node> function_, uint32_t input_nr_) noexcept
-      : function(std::move(function_)), input_nr(input_nr_) {}
-
-  /// Convenience method to test if an edge is valid.
-  bool is_valid() const noexcept {
-    return function != nullptr;
-  }
-
-  // Required for use in associative containers.
-  bool operator==(const Edge& other) const noexcept {
-    return this->function == other.function && this->input_nr == other.input_nr;
-  }
-
-  bool operator!=(const Edge& other) const noexcept {
-    return !(*this == other);
-  }
-
-  /// The function this `Edge` points to.
-  std::shared_ptr<Node> function;
-
-  /// The identifier of a particular input to the function.
-  uint32_t input_nr;
-};
-}} // namespace torch::autograd
-
-// A hook that's called on gradients
-
-namespace torch { namespace autograd {
-
-struct AutogradMeta;
-
-struct CAFFE2_API FunctionPreHook {
-  virtual ~FunctionPreHook();
-  virtual std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& grads) = 0;
-};
-
-struct CAFFE2_API FunctionPostHook {
-  virtual ~FunctionPostHook();
-  virtual std::vector<at::Tensor> operator()(
-    const std::vector<at::Tensor>& outputs /* grad_inputs */,
-    const std::vector<at::Tensor>& inputs /* grad_outputs */) = 0;
-};
-
 }} // namespace torch::autograd
 
 namespace at {
@@ -96,6 +49,12 @@ struct Quantizer;
 // to frontend
 using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
+
+namespace impl {
+inline bool variable_excluded_from_dispatch() {
+  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+}
+}
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
@@ -249,7 +208,7 @@ class CAFFE2_API Tensor {
   }
 
   at::MemoryFormat suggest_memory_format() const {
-    if (impl_->is_strides_like_channels_last()) {
+    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
       return at::MemoryFormat::ChannelsLast;
     }
     return at::MemoryFormat::Contiguous;
@@ -282,8 +241,7 @@ class CAFFE2_API Tensor {
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
-        scalar_type(),
-        is_variable());
+        scalar_type());
   }
   TensorTypeSet type_set() const {
     return impl_->type_set();
@@ -303,10 +261,9 @@ class CAFFE2_API Tensor {
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
-  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
-  /// Defined in Type.h because of include order issues.
+  C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
-    return impl_->is_variable();
+    return !at::impl::variable_excluded_from_dispatch();
   }
 
   /// Returns a `Tensor`'s layout. Defined in Type.h
@@ -447,14 +404,35 @@ class CAFFE2_API Tensor {
     return impl_->requires_grad();
   }
 
-  // TODO: There is something bad about this: const-correctness on Tensor
-  // is not supposed to matter, but here we are looking at the constness
-  // of Tensor to decide whether or not to return a mutable reference...
   Tensor& grad() {
     return impl_->grad();
   }
   const Tensor& grad() const {
     return impl_->grad();
+  }
+
+  // STOP.  Thinking of adding a method here, which only makes use
+  // of other ATen methods?  Define it in native_functions.yaml.
+
+  //example
+  //Tensor * add(Tensor & b);
+  ${tensor_method_declarations}
+
+  // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
+  // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.
+  // Before that change, we make this method to maintain BC for C++ usage like
+  // `x.to(y.dtype)`.
+  // TODO: remove following two after at::kDouble and its friends are TypeMeta's.
+  inline Tensor to(caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+    return this->to(/*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
+  }
+  inline Tensor to(Device device, caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+    return this->to(device, /*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
+  }
+
+  template <typename F, typename... Args>
+  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+    return func(*this, std::forward<Args>(params)...);
   }
 
   /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended
@@ -465,12 +443,7 @@ class CAFFE2_API Tensor {
   /// returned `Tensor`'s tensor metadata (e.g. sizes / strides / storage / storage_offset)
   /// will not update the original `Variable`, due to the fact that this function
   /// shallow-copies the `Variable`'s underlying TensorImpl.
-  Tensor tensor_data() const noexcept {
-    auto self_impl_copy = impl_->shallow_copy_and_detach(
-      /*version_counter=*/impl_->version_counter(),
-      /*allow_tensor_metadata_change=*/impl_->allow_tensor_metadata_change());
-    return Tensor(self_impl_copy);
-  }
+  at::Tensor tensor_data() const noexcept;
 
   /// NOTE: `var.variable_data()` in C++ has the same semantics as `tensor.data`
   /// in Python, which create a new `Variable` that shares the same storage and
@@ -497,94 +470,13 @@ class CAFFE2_API Tensor {
   /// this and the base Variable.
   const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
 
-  /// Gets the raw gradient function pointer, whatever it currently is.
-  torch::autograd::Node* grad_fn_unsafe() const;
-
-  /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
-  /// if it still exists. If the gradient accumulator function has been
-  /// destroyed, returns a `nullptr`.
-  std::shared_ptr<torch::autograd::Node> try_get_grad_accumulator() const;
-
-  /// Gets the gradient accumulator of the `Variable` if it has one, or else
-  /// create one on the fly and return it.
-  std::shared_ptr<torch::autograd::Node> grad_accumulator() const;
-
-  /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
-  /// gradient function if this is an interior `Variable`, or the gradient
-  /// accumulator otherwise. If the `Variable` is interior, the returned `Edge`
-  /// will store the input index of the `Node` to which this variable is
-  /// connected in its `input_nr` field. For leaves, the `input_nr` is always
-  /// zero. Note that `set_gradient_edge` and `gradient_edge` are not
-  /// symmetric. You must use `set_gradient_edge` to set the `grad_fn` and
-  /// `set_grad_accumulator` to set the accumulator.
-  torch::autograd::Edge gradient_edge() const {
-    // If grad_fn is null (as is the case for a leaf node), we instead
-    // interpret the gradient function to be a gradient accumulator, which will
-    // accumulate its inputs into the grad property of the variable. These
-    // nodes get suppressed in some situations, see "suppress gradient
-    // accumulation" below. Note that only variables which have `requires_grad =
-    // True` can have gradient accumulators.
-    if (const auto& gradient = grad_fn()) {
-      return torch::autograd::Edge(gradient, output_nr());
-    } else {
-      return torch::autograd::Edge(grad_accumulator(), 0);
-    }
-  }
-
-  /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
-  /// `Variable`.
-  /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
-  /// and never the `grad_accumulator`. For the latter, use
-  /// `set_grad_accumulator`. This allows late construction of an interior
-  /// `Variable`.
-  void set_gradient_edge(torch::autograd::Edge edge) const noexcept;
-
-  // Versions
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  /// Increments the version count of this `Variable`.
-  void bump_version() const noexcept {
-    impl_->bump_version();
-  }
-  void set_version_counter(const c10::VariableVersion& version_counter) const noexcept {
-    impl_->set_version_counter(version_counter);
-  }
-
-  /// Retrieves this `Variable`s version counter.
-  const c10::VariableVersion& version_counter() const noexcept {
-    return impl_->version_counter();
-  }
-
-  /// Retrieves the current value of the `Variable`'s version counter.
-  /// Equivalent to calling `version_counter().current_version()`.
-  uint32_t current_version() const noexcept {
-    return impl_->version_counter().current_version();
-  }
-
-  // Autograd Graph Interaction
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  /// Update the `grad_fn` of an existing Variable. Called after in-place
-  /// modifications.
-  ///
-  /// For View Variables:
-  /// Called after in-place modifications. Modifies the grad_fn of the base
-  /// Variable.
-  void rebase_history(torch::autograd::Edge gradient_edge) const;
-
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  void add_hook(std::shared_ptr<torch::autograd::FunctionPreHook> hook) const;
-  const std::vector<std::shared_ptr<torch::autograd::FunctionPreHook>>& hooks() const noexcept;
-  void clear_hooks() const;
 
   template <typename T>
   using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
   template <typename T>
   using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
-  // Remove hook at given position
-  void remove_hook(unsigned pos) const;
 
   // Returns the index of the hook in the list which can be used to remove hook
   // Register a hook with no return value
@@ -593,6 +485,14 @@ class CAFFE2_API Tensor {
   // Register a hook with variable return value
   template <typename T>
   hook_return_var_t<T> register_hook(T&& hook) const;
+
+private:
+  unsigned _register_hook(std::function<Tensor(const Tensor&)> hook) const;
+
+public:
+
+  // Remove hook at given position
+  void remove_hook(unsigned pos) const;
 
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -607,41 +507,7 @@ class CAFFE2_API Tensor {
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void set_name(const std::string& name) const;
   const std::string& name() const noexcept;
-
-  PyObject* pyobj() const noexcept {
-    return impl_->pyobj();
-  }
-  void set_pyobj(PyObject* pyobj) const noexcept {
-    impl_->set_pyobj(pyobj);
-  }
-
-  torch::autograd::AutogradMeta* get_autograd_meta() const noexcept;
-
-  // STOP.  Thinking of adding a method here, which only makes use
-  // of other ATen methods?  Define it in native_functions.yaml.
-
-  //example
-  //Tensor * add(Tensor & b);
-  ${tensor_method_declarations}
-
-  // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
-  // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.
-  // Before that change, we make this method to maintain BC for C++ usage like
-  // `x.to(y.dtype)`.
-  // TODO: remove following two after at::kDouble and its friends are TypeMeta's.
-  inline Tensor to(caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
-    return this->to(/*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
-  }
-  inline Tensor to(Device device, caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
-    return this->to(device, /*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
-  }
-
-  template <typename F, typename... Args>
-  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
-    return func(*this, std::forward<Args>(params)...);
-  }
 
 protected:
   friend class ::caffe2::Tensor;
@@ -666,9 +532,3 @@ static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
 }
 
 } // namespace at
-
-namespace torch { namespace autograd {
-
-using Variable = at::Tensor;
-
-}} // namespace torch::autograd

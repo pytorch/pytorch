@@ -35,14 +35,6 @@ struct type_caster<at::Tensor> {
 
   static handle
   cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
-    // Commenting out this test is a bit naughty, but I plan to moot this test
-    // soon (by merging Tensor and Variable), and previously we failed to do
-    // this check on Variable, leading to a (very real) bug in TestScript.test_tensor_grad
-    //
-    //if (!src.is_variable()) {
-    //  throw std::runtime_error(
-    //      "Expected tensor's dynamic type to be Variable, not Tensor");
-    //}
     return handle(THPVariable_Wrap(torch::autograd::Variable(src)));
   }
 };

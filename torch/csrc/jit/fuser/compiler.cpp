@@ -23,11 +23,17 @@
 #include <unordered_set>
 #include <utility>
 
+namespace {
+std::mutex& fusionBackendLock() {
+  static std::mutex fusion_backends_lock_{};
+  return fusion_backends_lock_;
+}
+}
+
 namespace torch {
 namespace jit {
 namespace fuser {
 
-std::mutex fusion_backends_lock_;
 static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
 getFusionBackends() {
   static std::unordered_map<at::Device::Type, FusedKernelConstructor>
@@ -38,17 +44,17 @@ getFusionBackends() {
 void registerFusionBackend(
     at::Device::Type backend_type,
     FusedKernelConstructor ctor) {
-  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  std::lock_guard<std::mutex> guard(fusionBackendLock());
   getFusionBackends()[backend_type] = std::move(ctor);
 }
 
 bool hasFusionBackend(at::Device::Type backend_type) {
-  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  std::lock_guard<std::mutex> guard(fusionBackendLock());
   return getFusionBackends().count(backend_type);
 }
 
 const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
-  std::lock_guard<std::mutex> guard(fusion_backends_lock_);
+  std::lock_guard<std::mutex> guard(fusionBackendLock());
   return getFusionBackends().at(backend_type);
 }
 
@@ -274,7 +280,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   }
 
   const bool use_cuda = device.is_cuda();
-  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
+  const std::string name = "kernel_" + c10::to_string(next_kernel_id++);
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =
