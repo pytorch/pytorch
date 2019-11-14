@@ -34,11 +34,11 @@ void testClassTypeAddConstant() {
   cls->addConstant("const1", IValue(1));
   cls->addConstant("const2", IValue(2));
   ASSERT_TRUE(cls->numConstants(), 2);
-  ASSERT_TRUE(cls->findConstant("const1"));
-  ASSERT_TRUE(cls->findConstant("const2"));
-  ASSERT_FALSE(cls->findConstant("const3"));
-  ASSERT_TRUE(cls->findConstant("const1").value().toInt() == 1);
-  ASSERT_TRUE(cls->findConstant("const2").value().toInt() == 2);
+  ASSERT_TRUE(cls->hasConstant("const1"));
+  ASSERT_TRUE(cls->hasConstant("const2"));
+  ASSERT_FALSE(cls->hasConstant("const3"));
+  ASSERT_TRUE(cls->getConstant("const1").value().toInt() == 1);
+  ASSERT_TRUE(cls->getConstant("const2").value().toInt() == 2);
 }
 
 } // namespace jit

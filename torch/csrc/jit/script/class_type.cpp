@@ -59,7 +59,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
 
 size_t ClassType::addAttribute(
     const std::string& name,
-    TypePtr type,
+    const TypePtr& type,
     bool is_parameter) {
   const char* what = is_parameter ? "parameter" : "attribute";
   checkNotExist(name, what);
@@ -104,7 +104,7 @@ Function* ClassType::getMethod(const std::string& name) const {
 
 size_t ClassType::addConstant(
       const std::string& name,
-      IValue value) {
+      const IValue& value) {
   checkNotExist(name, "constant");
   size_t slot = constantNames_.size();
   constantNames_.push_back(name);
@@ -112,7 +112,7 @@ size_t ClassType::addConstant(
   return slot;
 }
 
-c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
+c10::optional<IValue> ClassType::getConstant(const std::string& name) const {
   AT_ASSERT(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
