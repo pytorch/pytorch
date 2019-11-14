@@ -425,6 +425,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
      pos_weight=None: -1),
     (torch.bincount, lambda input, weights=None, minlength=0: -1),
     (torch.bitwise_not, lambda input, out=None: -1),
+    (torch.bitwise_xor, lambda input, other, out=None: -1),
     (torch.bmm, lambda input, mat2, out=None: -1),
     (torch.broadcast_tensors, lambda *tensors: -1),
     (torch.cartesian_prod, lambda *tensors: -1),
