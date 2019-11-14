@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 #include <stack>
@@ -30,7 +30,6 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
 double getScaleFromInput(Node* input_node) {
   c10::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
-
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,
@@ -51,7 +50,8 @@ double getScaleFromInput(Node* input_node) {
     TORCH_CHECK(
         input_node->inputs().size() > 7,
         "quantized::conv2d expected scale to be 8th input");
-    scale = toIValue(input_node->inputs()[7]);
+    auto num_inputs = input_node->inputs().size();
+    scale = toIValue(input_node->inputs()[num_inputs - 2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::conv2d_relu") {
     // %r = quantized::conv2d_relu(%input, %unpacked_weight, %stride,
@@ -59,7 +59,8 @@ double getScaleFromInput(Node* input_node) {
     TORCH_CHECK(
         input_node->inputs().size() > 6,
         "quantized::conv2d_relu expected scale to be 7th input");
-    scale = toIValue(input_node->inputs()[6]);
+    auto num_inputs = input_node->inputs().size();
+    scale = toIValue(input_node->inputs()[num_inputs - 2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::add") {
     // %r = quantized::add(%input_a, %input_b, %w_scale, %w_zero_point)
@@ -78,6 +79,9 @@ double getScaleFromInput(Node* input_node) {
     auto tmp = input_node->inputs()[0]->node();
     return getScaleFromInput(tmp);
   }
+  std::cerr
+      << "Warning: unrecognized quantized operator while trying to compute q_scale. "
+      << "Returning default scale of 1.0 for operator " << input_name << std::endl;
   return 1.0;
 }
 
@@ -143,11 +147,11 @@ void unpackQuantizedWeightsHelper(
         at::Tensor>(*op, packed_weight);
     at::Tensor unpacked_weight = std::get<0>(result);
 
-    // Permute weights?
-    if (unpacked_weight.ndimension() == 2) {
-      unpacked_weight.permute({1, 0});
-    } else if (unpacked_weight.ndimension() == 4) {
+    // Permute weights
+    std::vector<int64_t> wt_sizes = unpacked_weight.sizes().vec();
+    if (unpacked_weight.ndimension() == 4) {
       unpacked_weight.permute({0, 2, 3, 1});
+      wt_sizes = {unpacked_weight.size(0), unpacked_weight.size(2), unpacked_weight.size(3), unpacked_weight.size(1)};
     }
 
     // Remove packed_params
@@ -167,7 +171,7 @@ void unpackQuantizedWeightsHelper(
     Node* c2_weight = CreateQuantizedWeights(
         os.str(),
         graph,
-        unpacked_weight.sizes().vec(),
+        wt_sizes,
         unpacked_weight.q_scale(),
         weight_zp);
     graph->setInsertPoint(qlinear_node);
@@ -190,7 +194,8 @@ void unpackQuantizedWeightsHelper(
     auto weight_scale = unpacked_weight.q_scale();
 
     auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
-    TORCH_INTERNAL_ASSERT(input_val->type()->isSubtypeOf(TensorType::get()));
+    TORCH_INTERNAL_ASSERT(input_val->type()->isSubtypeOf(TensorType::get()),
+    "Unsupported input type. Expected TensorType, got ", input_val->type()->str());
 
     auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
     auto input_scale = getScaleFromInput(input_node);
