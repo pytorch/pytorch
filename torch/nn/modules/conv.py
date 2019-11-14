@@ -5,7 +5,7 @@ from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
 from .module import Module
-from .utils import _single, _pair, _triple
+from .utils import _single, _pair, _triple, _repeat_tuple
 from ..._jit_internal import List
 
 
@@ -32,6 +32,10 @@ class _ConvNd(Module):
         self.transposed = transposed
         self.output_padding = output_padding
         self.groups = groups
+        if padding_mode not in {'zeros', 'reflect', 'replicate', 'circular'}:
+            raise ValueError(
+                "padding_mode must be one of {{'zeros', 'reflect', 'replicate', 'circular'}}, "
+                "but got padding_mode='{}'".format(padding_mode))
         self.padding_mode = padding_mode
         if transposed:
             self.weight = Parameter(torch.Tensor(
@@ -142,7 +146,7 @@ class Conv1d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'`` Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
@@ -193,9 +197,8 @@ class Conv1d(_ConvNd):
             False, _single(0), groups, bias, padding_mode)
 
     def forward(self, input):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv1d(F.pad(input, expanded_padding, mode='circular'),
+        if self.padding_mode != 'zeros':
+            return F.conv1d(F.pad(input, _repeat_tuple(self.padding, 2), mode=self.padding_mode),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
         return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -274,7 +277,7 @@ class Conv2d(_ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
-        padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'`` Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
@@ -332,10 +335,8 @@ class Conv2d(_ConvNd):
             False, _pair(0), groups, bias, padding_mode)
 
     def conv2d_forward(self, input, weight):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
+        if self.padding_mode != 'zeros':
+            return F.conv2d(F.pad(input, _repeat_tuple(self.padding, 2), mode=self.padding_mode),
                             weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
         return F.conv2d(input, weight, self.bias, self.stride,
@@ -409,7 +410,7 @@ class Conv3d(_ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
-        padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'`` Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
@@ -469,18 +470,26 @@ class Conv3d(_ConvNd):
             False, _triple(0), groups, bias, padding_mode)
 
     def forward(self, input):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[2] + 1) // 2, self.padding[2] // 2,
-                                (self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv3d(F.pad(input, expanded_padding, mode='circular'),
+        if self.padding_mode != 'zeros':
+            return F.conv3d(F.pad(input, _repeat_tuple(self.padding, 2), mode=self.padding_mode),
                             self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
         return F.conv3d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
-class _ConvTransposeMixin(object):
+class _ConvTransposeNd(_ConvNd):
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, transposed, output_padding,
+                 groups, bias, padding_mode):
+        if padding_mode != 'zeros':
+            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+
+        super(_ConvTransposeNd, self).__init__(
+            in_channels, out_channels, kernel_size, stride,
+            padding, dilation, transposed, output_padding,
+            groups, bias, padding_mode)
+
     def _output_padding(self, input, output_size, stride, padding, kernel_size):
         # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
         if output_size is None:
@@ -520,7 +529,7 @@ class _ConvTransposeMixin(object):
         return ret
 
 
-class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose1d(_ConvTransposeNd):
     r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
 
@@ -631,7 +640,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
             output_padding, self.groups, self.dilation)
 
 
-class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose2d(_ConvTransposeNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
 
@@ -778,7 +787,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
             output_padding, self.groups, self.dilation)
 
 
-class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose3d(_ConvTransposeNd):
     r"""Applies a 3D transposed convolution operator over an input image composed of several input
     planes.
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,

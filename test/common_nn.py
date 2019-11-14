@@ -2485,37 +2485,28 @@ new_module_tests = [
         pickle=False,
     ),
 
-    dict(
-        module_name='Conv1d',
-        constructor_args=(3, 4, 2, 2, (1,), 1, 1, True, 'circular'),
-        input_size=(2, 3, 5,),
-        cudnn=True,
-        desc='stride1_pad1circular',
-    ),
-    dict(
-        module_name='Conv1d',
-        constructor_args=(3, 4, 2, 2, (2,), 1, 1, True, 'circular'),
-        input_size=(2, 3, 5,),
-        cudnn=True,
-        desc='stride1_pad2circular',
-    ),
-    dict(
-        module_name='Conv2d',
-        constructor_args=(3, 4, (3, 3), (2, 2), (1, 2), 1, 1, True, 'circular'),
-        input_size=(2, 3, 3, 3),
-        cudnn=True,
-        desc='pad2circular',
-        check_with_long_tensor=True,
-    ),
-    dict(
-        module_name='Conv3d',
-        constructor_args=(3, 4, 2, 2, (1, 2, 3), 1, 1, True, 'circular'),
-        input_size=(2, 3, 3, 3, 3),
-        cudnn=True,
-        desc='stride_pad1circular',
-        check_with_long_tensor=True,
-    ),
 ]
+
+
+
+# add conv padding mode tests:
+for padding_mode in ['reflect', 'circular', 'replicate', 'zeros']:
+    # conv signature:
+    #     in_channels, out_channels, kernel_size, stride=1,
+    #     padding=0, dilation=1, groups=1,
+    #     bias=True, padding_mode='zeros'
+    for d in (1, 2, 3):
+        new_module_tests.append(
+            dict(
+                module_name='Conv{}d'.format(d),
+                constructor_args=(3, 4, 3, 2, 2, 1, 1, True, padding_mode),
+                input_size=(2, 3) + (3,) * d,
+                output_size=(2, 4) + (3,) * d,
+                cudnn=True,
+                desc='{}_stride2_pad2'.format(padding_mode),
+                check_with_long_tensor=True,
+            ),
+        )
 
 
 def kldivloss_reference(input, target, reduction='mean'):
