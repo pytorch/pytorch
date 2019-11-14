@@ -64,10 +64,14 @@ export PYTORCH_BUILD_NUMBER=1
 
 
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
+  JAVA_HOME=
+  BUILD_JNI=OFF
+
   POSSIBLE_JAVA_HOMES=()
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  # TODO: Fix Mac Java build
+  #POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
       echo "Found jni.h under $JH"
@@ -78,8 +82,6 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   done
   if [ -z "$JAVA_HOME" ]; then
     echo "Did not find jni.h"
-    JAVA_HOME=
-    BUILD_JNI=OFF
   fi
 fi
 
