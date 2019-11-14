@@ -130,8 +130,7 @@ ProcessGroupAgent::ProcessGroupAgent(
       timedOutCounts_(pg_->getSize()),
       nextId_(0),
       sendMutexes_(pg_->getSize()),
-      threadPool_(numSendRecvThreads),
-      numTimedOutFutures_(0) {
+      threadPool_(numSendRecvThreads) {
   shutdown_.store(false);
   collectNames();
   TORCH_CHECK(
@@ -255,8 +254,6 @@ bool ProcessGroupAgent::hasPendingMessage() {
       // It is possible that the sender reads its send count before sending, but
       // the receive reads its recv count after receiving. Hence, both > and <
       // are valid states.
-      // fprintf(stderr, "%d %d %d \n", sentCnt, recvCnt, numTimedOutFutures_);
-      fprintf(stderr, "sentCnt: %d, recvCnt %d\n", sentCnt, recvCnt);
       if (sentCnt != recvCnt) {
         return true;
       }
@@ -495,9 +492,11 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
   // futureCV_.wait(
   //     lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   // lock.unlock();
-  std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
-  futureTimeoutCV_.wait(lock);
-  lock.unlock();
+  {
+    std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
+    futureTimeoutCV_.wait(lock);
+  }
+
   while (!shutdown_.load()) {
     // std::chrono::milliseconds sleepTime;
     // {
@@ -511,12 +510,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     //   sleepTime =
     //       std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
     // }
-
-    bool shouldShutdown = shutdown_.load();
-    fprintf(
-        stderr,
-        "sleeping for 50 ms second, should shutdown %d\n",
-        shouldShutdown);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     // TODO inefficient probably.
     if (rpcTimeout_.count() == 0) {
@@ -554,7 +547,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       }
     }
 
-    // TODO - code does not currently work due to issues with hasPendingMessage.
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
     if (!timedOutFutures.empty()) {
@@ -564,9 +556,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
         timedOutFuture->markCompleted(exceptionMsg);
         int dst = timedOutFuture->dst();
 
-        recvCounts_.increment(dst); // need to encode dst into the future, and then
-                               // decrement recvCounts instead of doing this.
-        // should we notify on every future or just once?
+        recvCounts_.increment(dst);
         futureCV_.notify_all();
       }
     }

@@ -1028,10 +1028,6 @@ class RpcTest(object):
 
         self.assertEqual(result, sum(vals))
 
-    @dist_init
-    def test_get_default_rpc_timeout(self):
-        timeout = rpc.get_rpc_timeout()
-        self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
 
     @dist_init(setup_model_parallel=False)
     def test_set_rpc_timeout(self):
@@ -1055,8 +1051,8 @@ class RpcTest(object):
         fut = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=())
         print('started future')
         print('started')
-        # with self.assertRaisesRegex(RuntimeError, "future timed out"):
-        #     fut.wait()
+        with self.assertRaisesRegex(RuntimeError, "future timed out"):
+            fut.wait()
         print("done")
 
         # futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(200)]
