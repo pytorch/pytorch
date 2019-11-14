@@ -69,8 +69,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.cosh_`,None
    :meth:`Tensor.cpu`,:ref:`keeps_input_names-doc`
    :meth:`Tensor.cuda`,:ref:`keeps_input_names-doc`
-   ":meth:`Tensor.cumprod`, :func:`torch.cumprod`",:ref:`removes_dimensions-doc`
-   ":meth:`Tensor.cumsum`, :func:`torch.cumsum`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.cumprod`, :func:`torch.cumprod`",:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.cumsum`, :func:`torch.cumsum`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.data_ptr`,None
    ":meth:`Tensor.detach`, :func:`torch.detach`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.detach_`,None
@@ -465,4 +465,3 @@ from name inference. For example,
     >>> x += y
     >>> x.names
     ('N', 'C')
-

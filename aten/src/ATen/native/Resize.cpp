@@ -34,6 +34,27 @@ Tensor& resize_cpu_(
 // this function in native_functions.yaml
 Tensor& resize_as_sparse_(Tensor& self, const Tensor& src);
 
+
+// TODO(VitalyFedyunin): Move it to HTML docs.
+//
+// Strides of the output tensor of `resize_as_` operator is defined by input
+// tensor strides and the value of memory_format argument.
+//
+// If memory_format is not defined or equals to MemoryFormat::Contiguous
+// (torch.contiguous_format) output tensor will have contiguous strides.
+//
+// If memory_format is equal to MemoryFormat::ChannelsLast (torch.channels_last)
+// and input tensor is 4D, output tensor will have channels last memory layout.
+//
+// If memory_format is equal to MemoryFormat::Preserve (torch.preserve_format)
+// output tensor will be defined by strides of the input tensor, following
+// memory format preservation rule:
+//
+//  - If input tensor strides are in channels last format, output tensor will
+//    have channels last memory layout.
+//
+//  - Otherwise, output tensor will have contiguous memory layout.
+//
 Tensor& resize_as_(
     Tensor& self,
     const Tensor& the_template,
