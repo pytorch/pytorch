@@ -31,7 +31,7 @@ if is_available():
         rpc_timeout=DEFAULT_RPC_TIMEOUT,
     ):
         r"""
-        Initializes model parallel primitives such as the local rpc agent
+        Initializes rpc primitives such as the local rpc agent
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current

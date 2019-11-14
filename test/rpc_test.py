@@ -239,7 +239,7 @@ class RpcTest(object):
 
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_register_rpc_backend_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
@@ -265,7 +265,7 @@ class RpcTest(object):
         )
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             store, _, _ = next(torch.distributed.rendezvous(
@@ -280,7 +280,7 @@ class RpcTest(object):
             )
         rpc.join_rpc()
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
             self_name="worker{}".format(self.rank),
@@ -313,7 +313,7 @@ class RpcTest(object):
             )
         rpc.join_rpc()
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_invalid_names(self):
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             store, _, _ = next(torch.distributed.rendezvous(
@@ -475,7 +475,7 @@ class RpcTest(object):
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_join_rpc(self):
         # Initialize RPC.
         rpc.init_rpc(
@@ -997,7 +997,7 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @unittest.skip("Test is flaky on ASAN, see https://github.com/pytorch/pytorch/issues/29117")
-    @dist_init(setup_model_parallel=True)
+    @dist_init(setup_rpc=True)
     def test_call_method_on_rref(self):
         """
         Tests that it is possible to call an instance method on a remote objet
@@ -1029,7 +1029,7 @@ class RpcTest(object):
         timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_set_rpc_timeout(self):
         timeout = timedelta(seconds=1)
         rpc.init_rpc(
@@ -1054,7 +1054,7 @@ class RpcTest(object):
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):
-        @dist_init(setup_model_parallel=False)
+        @dist_init(setup_rpc=False)
         def test_func(self):
             return "expected result"
 

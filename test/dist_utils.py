@@ -50,7 +50,7 @@ def set_termination_signal():
     _TERMINATION_SIGNAL.set()
 
 
-def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=True):
+def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
@@ -67,7 +67,7 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
     if old_test_method is None:
         return partial(
             dist_init,
-            setup_model_parallel=setup_model_parallel,
+            setup_rpc=setup_rpc,
             clean_shutdown=clean_shutdown,
         )
 
@@ -78,7 +78,7 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
             "worker{}".format(rank): rank for rank in range(self.world_size)
         }
 
-        if setup_model_parallel:
+        if setup_rpc:
             global _ALL_NODE_NAMES
             _ALL_NODE_NAMES = self.worker_name_to_id.keys()
 
@@ -94,7 +94,7 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
 
         return_value = old_test_method(self, *arg, **kwargs)
 
-        if setup_model_parallel:
+        if setup_rpc:
             if clean_shutdown:
                 # Follower reports done.
                 if self.rank == MASTER_RANK:
