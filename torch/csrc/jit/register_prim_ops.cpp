@@ -2476,11 +2476,11 @@ RegisterOperators reg2({
           listSelect<value_type>,                                              \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
-          "prim::min." decl_type "( " decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
+          "prim::min.lr" decl_type "( " decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
           minList<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
-          "prim::max." decl_type "( " decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
+          "prim::max.lr" decl_type "( " decl_type "[] l, " decl_type "[] r) -> " decl_type "[]",\
           maxList<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
