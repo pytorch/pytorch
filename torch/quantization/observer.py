@@ -702,62 +702,40 @@ class HistogramObserver(_ObserverBase):
         return new_min, new_max
 
     @torch.jit.ignore
-    def _combine_histograms(
-        self, dst_histogram, dst_min, dst_max, src_histogram, src_min, src_max
-    ):
-        # type: (Tensor, float, float, Tensor, float, float) -> Tensor
-        bins_dst = dst_histogram.size()[0]
-        bins_src = src_histogram.size()[0]
+    def _adjust_min_max(self, combined_min, combined_max, L):
+        hist_bin_width = (self.max_val - self.min_val)/(self.bins*L)
+        M = torch.ceil((combined_max-combined_min)/(self.bins*hist_bin_width)).to(torch.int)
+        e = M*(self.bins*hist_bin_width) - (combined_max-combined_min)
+        combined_max = combined_max+e/2
+        combined_min = combined_min-e/2
+        start_idx = torch.round((self.min_val-combined_min)/hist_bin_width).to(torch.int)
+        return combined_min, combined_max, M,start_idx
 
-        dst_bin_width = (dst_max - dst_min) / bins_dst
-        src_bin_width = (src_max - src_min) / bins_src
-
-        for i in range(bins_src):
-            src_bin_count = src_histogram[i].item()
-            if src_bin_count == 0:
-                continue
-
-            src_bin_begin = src_min + src_bin_width * i
-            src_bin_end = src_bin_begin + src_bin_width
-
-            dst_bin = 0
-            if dst_bin_width:
-                dst_bin = int((src_bin_begin - dst_min) / dst_bin_width)
-
-            dst_bin_begin = dst_min + dst_bin_width * dst_bin
-            dst_bin_end = dst_bin_begin + dst_bin_width
-
-            dst_bin2 = 0
-            if dst_bin_width:
-                dst_bin2 = min(
-                    int((src_bin_end - dst_min) / dst_bin_width), bins_dst - 1
-                )
-
-            assert dst_bin2 <= dst_bin + 2, "1 src_bin is mapped to at most 2 dst_bins"
-            # dst_bin_cnt is the count from src_bin that should go to dst_bin
-            # the remainder should go to dst_bin2
-            dst_bin_cnt = 0
-            if src_bin_width == 0 or dst_bin_width == 0:
-                dst_bin_cnt = src_bin_count
-            else:
-                # We divide counts in src_bin in proportion to range overlap with dst_bin
-                dst_bin_cnt = min(
-                    round(
-                        (dst_bin_end - src_bin_begin) / src_bin_width * src_bin_count
-                    ),
-                    src_bin_count,
-                )
-
-            dst_histogram[dst_bin] += dst_bin_cnt
-
-            # remaining should go to dst_bin2
-            if dst_bin_cnt < src_bin_count:
-                dst_histogram[dst_bin2] += src_bin_count - dst_bin_cnt
-        return dst_histogram
-
+    @torch.jit.ignore
+    def _combine_histograms(self, orig_hist, new_hist, L, M, start_idx,Nbins):
+        # First up-sample the histogram with new data by a factor of L
+        # This creates an approximate probability density thats piecwise constant
+        upsampled_histogram = new_hist.repeat_interleave(L)
+        # Now insert the upsampled histogram into the output
+        # histogram, which is initialized with zeros.
+        # The offset at which the histogram is introduced is determined
+        # by the start index as the output histogram can cover a wider range
+        histogram_with_output_range = torch.zeros((Nbins * M.item()))
+        histogram_with_output_range[start_idx.item():Nbins * L + start_idx.item()] = upsampled_histogram
+        # Compute integral histogram, double precision is needed to ensure
+        # that there are no overflows
+        integral_histogram = torch.cumsum(histogram_with_output_range, 0, dtype = torch.double)[M-1::M]
+        # Finally perform interpolation
+        shifted_integral_histogram = torch.zeros((Nbins))
+        shifted_integral_histogram[0] = 0
+        shifted_integral_histogram[1:Nbins] = integral_histogram[0:-1]
+        interpolated_histogram = (integral_histogram - shifted_integral_histogram) / L
+        orig_hist = orig_hist + interpolated_histogram.to(torch.float)
+        return orig_hist
 
     def forward(self, x_orig):
         # type: (Tensor) -> Tensor
+#        print('New forward')
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
@@ -770,27 +748,25 @@ class HistogramObserver(_ObserverBase):
         else:
             new_min = torch.min(x)
             new_max = torch.max(x)
-            new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
-            # combine the existing histogram and new histogram into 1 histogram
-            combined_histogram = torch.zeros_like(self.histogram)
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
-            self._combine_histograms(
-                combined_histogram,
-                combined_min.item(),
-                combined_max.item(),
-                self.histogram,
-                min_val.item(),
-                max_val.item(),
-            )
-            self._combine_histograms(
-                combined_histogram,
-                combined_min.item(),
-                combined_max.item(),
-                new_histogram,
-                new_min.item(),
-                new_max.item(),
-            )
+            # combine the existing histogram and new histogram into 1 histogram
+            # We do this by first upsampling the histogram to a dense grid
+            # and then downsampling the histogram efficiently
+            upsample_rate = 128
+            combined_min, combined_max, downsample_rate, start_idx = self._adjust_min_max(combined_min, combined_max, upsample_rate)
+            combined_histogram = torch.histc(x, self.bins, min=combined_min, max=combined_max)
+            if combined_min == self.min_val and combined_max == self.max_val:
+                combined_histogram += self.histogram
+            else:
+                combined_histogram = self._combine_histograms(
+                    combined_histogram,
+                    self.histogram,
+                    upsample_rate,
+                    downsample_rate,
+                    start_idx,
+                    self.bins)
+
             self.histogram = combined_histogram
             self.min_val = combined_min
             self.max_val = combined_max
