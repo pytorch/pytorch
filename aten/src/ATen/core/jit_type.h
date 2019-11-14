@@ -1521,11 +1521,19 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeTypes_;
   }
 
+  bool hasConstant(const std::string& name) const {
+    return std::find_if(
+               constantNames_.cbegin(),
+               constantNames_.cend(),
+               [&](const std::string& constant) { return constant == name; }) !=
+        constantNames_.cend();
+  }
+
   size_t addConstant(
       const std::string& name,
       IValue value);
 
-  c10::optional<IValue> findConstant(const std::string& name) const;
+  c10::optional<IValue> getConstant(const std::string& name) const;
 
   size_t numConstants() const {
     AT_ASSERT(constantNames_.size() == constantValues_.size());

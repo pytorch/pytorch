@@ -112,7 +112,7 @@ size_t ClassType::addConstant(
   return slot;
 }
 
-c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
+c10::optional<IValue> ClassType::getConstant(const std::string& name) const {
   AT_ASSERT(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
