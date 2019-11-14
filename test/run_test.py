@@ -144,7 +144,7 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     # only that subdirectory is in sys.path by default,
     # `import common_utils` would fail in this case.
     os.environ['PYTHONPATH'] = os.pathsep.join(
-        [os.environ['PYTHONPATH'], test_directory]
+        [path for path in [os.environ.get('PYTHONPATH', ''), test_directory] if path]
     )
 
     unittest_args = options.additional_unittest_args
