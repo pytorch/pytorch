@@ -1817,15 +1817,19 @@ class SetAffinityDataset(torch.utils.data.IterableDataset):
         return iter(after)
 
 
+def worker_set_affinity(_):
+    os.sched_setaffinity(0, [2])
+
+
+@unittest.skipIf(
+    not hasattr(os, 'sched_setaffinity'),
+    "os.sched_setaffinity is not available")
 class TestSetAffinity(TestCase):
     def test_set_affinity_in_worker_init(self):
         dataset = SetAffinityDataset()
 
-        def worker_init_fn(_):
-            os.sched_setaffinity(0, [2])
-
         dataloader = torch.utils.data.DataLoader(
-            dataset, num_workers=2, worker_init_fn=worker_init_fn)
+            dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
             self.assertEqual(sample, [2])
 
