@@ -215,11 +215,33 @@ static PyObject *_ListNestedTensorVariable_requires_grad_(PyObject *self_,
     throw std::runtime_error("Argument must be bool.");
   }
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  if (PyObject_IsTrue(bool_arg)) {
-    return _ListNestedTensorVariable_Wrap(self.requires_grad_(true));
-  } else {
-    return _ListNestedTensorVariable_Wrap(self.requires_grad_(false));
+  return _ListNestedTensorVariable_Wrap(
+      self.requires_grad_(PyObject_IsTrue(bool_arg)));
+}
+
+static void _ListNestedTensorVariable_backward(PyObject *self_,
+                                               PyObject *args) {
+  PyObject *gradient_;
+  PyObject *retain_graph_;
+  PyObject *create_graph_;
+  if (!PyArg_ParseTuple(args, "OOO", &gradient_, &retain_graph_, &create_graph_)) {
+    throw std::runtime_error("tuple parsing failed");
   }
+  if (!_ListNestedTensorVariable_Check(gradient_)) {
+    throw std::runtime_error("variable parsing failed");
+  }
+  if (!PyBool_Check(retain_graph_)) {
+    throw std::runtime_error("retain bool parsing failed");
+  }
+  if (!PyBool_Check(create_graph_)) {
+    throw std::runtime_error("create graph bool parsing failed");
+  }
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  auto &gradient =
+      reinterpret_cast<_ListNestedTensorVariable *>(gradient_)->cdata;
+  bool retain_graph = PyObject_IsTrue(retain_graph_);
+  bool create_graph = PyObject_IsTrue(create_graph_);
+  self.backward(gradient, retain_graph, create_graph);
 }
 
 static PyObject *
@@ -255,10 +277,8 @@ static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
      nullptr},
     {"device", (getter)_ListNestedTensorVariable_device, nullptr, nullptr,
      nullptr},
-    {"grad", (getter)_ListNestedTensorVariable_grad, nullptr, nullptr,
-     nullptr},
-    {nullptr}
-};
+    {"grad", (getter)_ListNestedTensorVariable_grad, nullptr, nullptr, nullptr},
+    {nullptr}};
 
 static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {"element_size", (PyCFunction)_ListNestedTensorVariable_element_size,
@@ -269,6 +289,8 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      "Detaches and returns."},
     {"requires_grad_", (PyCFunction)_ListNestedTensorVariable_requires_grad_,
      METH_O, "requires_grad_ and returns."},
+    {"backward", (PyCFunction)_ListNestedTensorVariable_backward, METH_VARARGS,
+     "backward and returns."},
     {"requires_grad", (PyCFunction)_ListNestedTensorVariable_requires_grad,
      METH_NOARGS, "Returns requires_grad."},
     {"is_pinned", (PyCFunction)_ListNestedTensorVariable_is_pinned, METH_NOARGS,

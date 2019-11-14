@@ -16,6 +16,7 @@
 
 // TODO:
 // - HANDLE_TH_ERRORS
+// - Python exception handling.
 
 namespace torch {
 namespace nested_tensor {
@@ -180,14 +181,14 @@ struct TORCH_API _ListNestedTensor {
           return tensor.requires_grad_(requires_grad);
         }));
   }
-  // void backward(_ListNestedTensor gradient, bool retain_graph,
-  //               bool create_graph) {
-  //   apply2(_structure, gradient.get_structure(),
-  //          [retain_graph, create_graph](at::Tensor &tensor1,
-  //                                       const at::Tensor &tensor2) {
-  //            tensor1.backward(tensor2, retain_graph, create_graph);
-  //          });
-  // }
+  void backward(_ListNestedTensor gradient, bool retain_graph,
+                bool create_graph) {
+    apply2(_structure, gradient.get_structure(),
+           [retain_graph, create_graph](at::Tensor &tensor1,
+                                        const at::Tensor &tensor2) {
+             tensor1.backward(tensor2, retain_graph, create_graph);
+           });
+  }
   // // Only works if nested_dim() higher than 1.
   // std::vector<py::object> nested_size();
   // std::vector<py::object> nested_stride();
@@ -226,6 +227,11 @@ struct TORCH_API _ListNestedTensorVariable {
       /* Type-specific fields go here. */
       _ListNestedTensor cdata;
 };
+
+inline bool _ListNestedTensorVariable_Check(PyObject *obj)
+{
+  return _ListNestedTensorVariableClass && PyObject_IsInstance(obj, _ListNestedTensorVariableClass);
+}
 
 // template <class R, class F> std::vector<R> map_fn(const _ListNestedTensor,
 // F);
