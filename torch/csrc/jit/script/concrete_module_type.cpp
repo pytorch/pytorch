@@ -37,10 +37,11 @@ ClassTypePtr createTypeFromData(const ConcreteModuleTypeData& data) {
 }
 } // namespace
 
-std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromInterface(
-    InterfaceTypePtr interface) {
+std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
+    TypePtr type) {
+  TORCH_INTERNAL_ASSERT(type->cast<InterfaceType>() || type->cast<ClassType>());
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
-  ret->jitType_ = std::move(interface);
+  ret->jitType_ = std::move(type);
   return ret;
 }
 
