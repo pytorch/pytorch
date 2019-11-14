@@ -77,52 +77,8 @@ graph {
     op_type: "Sub"
   }
   node {
-    output: "9"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    output: "10"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 7
-        raw_data: "\377\377\377\377\377\377\377\177"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "3"
     output: "11"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "10"
-    output: "12"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "9"
-    output: "13"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -146,8 +102,8 @@ graph {
   node {
     input: "0"
     input: "11"
-    input: "12"
-    input: "13"
+    input: "17"
+    input: "18"
     input: "14"
     output: "15"
     op_type: "Slice"
@@ -164,6 +120,18 @@ graph {
     }
   }
   name: "torch-jit-export"
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "17"
+    raw_data: "\377\377\377\377\377\377\377\177"
+  }
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "18"
+    raw_data: "\000\000\000\000\000\000\000\000"
+  }
   input {
     name: "0"
     type {

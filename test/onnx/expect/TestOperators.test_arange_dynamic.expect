@@ -77,18 +77,6 @@ graph {
     op_type: "Add"
   }
   node {
-    output: "9"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 11
-        raw_data: "\000\000\000\000\000\000\340?"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "3"
     output: "10"
     op_type: "Cast"
@@ -109,23 +97,18 @@ graph {
     }
   }
   node {
-    input: "9"
-    output: "12"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 1
-      type: INT
-    }
-  }
-  node {
     input: "10"
     input: "11"
-    input: "12"
+    input: "14"
     output: "13"
     op_type: "Range"
   }
   name: "torch-jit-export"
+  initializer {
+    data_type: 1
+    name: "14"
+    raw_data: "\000\000\000?"
+  }
   input {
     name: "0"
     type {

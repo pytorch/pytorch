@@ -49,11 +49,6 @@ graph {
   }
   name: "torch-jit-export"
   initializer {
-    data_type: 7
-    name: "num_batches_tracked"
-    raw_data: "\000\000\000\000\000\000\000\000"
-  }
-  initializer {
     dims: 128
     data_type: 1
     name: "running_mean"
@@ -109,16 +104,6 @@ graph {
           dim {
             dim_value: 128
           }
-        }
-      }
-    }
-  }
-  input {
-    name: "num_batches_tracked"
-    type {
-      tensor_type {
-        elem_type: 7
-        shape {
         }
       }
     }
