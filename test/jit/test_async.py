@@ -23,6 +23,7 @@ class TestAsync(JitTestCase):
         y = torch.jit._wait(fut)
         # assert nothing; only to make sure the fake python path works
 
+    @skipIf(True, "Test is flaky: https://github.com/pytorch/pytorch/issues/29764")
     def test_async_parsing(self):
         @torch.jit.script
         def foo(x):
@@ -269,6 +270,7 @@ class TestAsync(JitTestCase):
         with self.assertRaisesRegex(Exception, 'expects a tensor with <= 2 dimensions'):
             wait_script_nest(x)
 
+    @skipIf(True, "Test is flaky: https://github.com/pytorch/pytorch/issues/29842")
     def test_async_grad_guard_with_grad(self):
         @torch.jit.script
         def foo(x):
