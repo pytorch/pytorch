@@ -692,6 +692,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
+  py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
+      .def_static("get", &NoneType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
