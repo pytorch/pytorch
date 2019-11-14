@@ -306,15 +306,19 @@ class LSTM(RNNBase):
             hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
-        assert batch_sizes is None
 
         weight_values = []
         for mod in self._all_weight_values:
             weight_values.append(mod.param)
 
-        result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
-                                    float(self.dropout), self.training, self.bidirectional,
-                                    self.batch_first, dtype=self.dtype, use_dynamic=True)
+        if batch_sizes is None:
+            result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
+                                        float(self.dropout), self.training, self.bidirectional,
+                                        self.batch_first, dtype=self.dtype, use_dynamic=True)
+        else:
+            result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
+                                        self.num_layers, float(self.dropout), self.training,
+                                        self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 
