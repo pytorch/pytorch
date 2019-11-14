@@ -275,13 +275,6 @@ class RpcTest(object):
     def test_self_remote_rref_as_self_remote_arg(self):
         self._test_self_remote_rref_as_remote_arg(rpc.get_worker_info())
 
-    @dist_init
-    def test_self_remote_rref_as_self_remote_arg(self):
-        self_worker_info = rpc.get_worker_info()
-        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
-        ret_rref = rpc.remote(self_worker_info, add_rref_to_value, args=(rref, torch.ones(2, 2)))
-        self.assertEqual(ret_rref.to_here(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2))
-
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
     @dist_init(setup_model_parallel=False)
