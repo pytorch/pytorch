@@ -86,9 +86,11 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 // one of them is modified in-place during `forward` but the other is needed in
 // backward, autograd engine will complain.
 //
-// We thus re-wrap these Variables after broadcasting (i.e., effetively doing
+// We thus re-wrap these Variables after broadcasting (i.e., effectively doing
 // what is equivalent to .data in Python), and give them individual version
 // counters.
+//
+// NB: Just calling detach() on the variables is not sufficient
 //
 // NB: For `device[0]` in broadcast_coalesced, the input Variables are always
 //     returned as-is, so **do not** re-wrap them.
@@ -130,7 +132,6 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         auto & vals = broadcast_values[i];
         for (auto & t : utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          AT_ASSERT(t.is_variable());
           Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
@@ -143,7 +144,6 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         auto & device_outputs = outputs[i];
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          AT_ASSERT(t.is_variable());
           Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }

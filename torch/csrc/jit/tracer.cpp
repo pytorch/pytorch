@@ -125,7 +125,7 @@ Value* TracingState::getValue(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
-    if (ten.is_variable() && ten.requires_grad()) {
+    if (ten.requires_grad()) {
       pauseTracing();
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
@@ -641,8 +641,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   {
     // Make sure this scalar to tensor isn't traced!
     at::AutoNonVariableTypeMode guard;
-    size_var =
-        autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+    size_var = scalar_to_tensor(at::Scalar(var.size(dim)));
   }
   auto* value = getValueTrace(var);
   auto dim_val = graph->insertConstant(dim);
