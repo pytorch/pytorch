@@ -9,9 +9,9 @@ torch.nn.ModuleList|Yes|No
 torch.nn.ModuleDict|No|No
 torch.nn.ParameterList|No|No
 torch.nn.ParameterDict|No|No
-torch.nn.Conv1d|No|No
-torch.nn.Conv2d|No|No
-torch.nn.Conv3d|No|No
+torch.nn.Conv1d|Yes|No
+torch.nn.Conv2d|Yes|No
+torch.nn.Conv3d|Yes|No
 torch.nn.ConvTranspose1d|No|No
 torch.nn.ConvTranspose2d|No|No
 torch.nn.ConvTranspose3d|No|No
@@ -80,6 +80,7 @@ torch.nn.InstanceNorm2d|No|No
 torch.nn.InstanceNorm3d|No|No
 torch.nn.LayerNorm|Yes|No
 torch.nn.LocalResponseNorm|Yes|No
+torch.nn.CrossMapLRN2d|Yes|No
 torch.nn.RNN|No|No
 torch.nn.LSTM|No|No
 torch.nn.GRU|No|No
@@ -138,6 +139,5 @@ torch.nn.utils.rnn.pack_padded_sequence|No|No
 torch.nn.utils.rnn.pad_packed_sequence|No|No
 torch.nn.utils.rnn.pad_sequence|No|No
 torch.nn.utils.rnn.pack_sequence|No|No
-torch.nn.CrossMapLRN2d|No|No
 torch.nn.FractionalMaxPool3d|No|No
 torch.nn.SampleModule|Yes|Yes

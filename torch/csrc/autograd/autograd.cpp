@@ -27,7 +27,7 @@ variable_list _make_grads(
         TORCH_CHECK(
             output.numel() == 1,
             "grad can be implicitly created only for scalar outputs");
-        new_grads.emplace_back(at::ones_like(output));
+        new_grads.emplace_back(at::ones_like(output, at::MemoryFormat::Contiguous));
       }
     }
   } else {
@@ -45,7 +45,7 @@ variable_list _make_grads(
           TORCH_CHECK(
               output.numel() == 1,
               "grad can be implicitly created only for scalar outputs");
-          new_grads.emplace_back(at::ones_like(output));
+          new_grads.emplace_back(at::ones_like(output, at::MemoryFormat::Contiguous));
         }
       } else {
         // grad output is defined, just append to the new_grads

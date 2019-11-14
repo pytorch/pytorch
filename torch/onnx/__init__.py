@@ -135,7 +135,9 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             then the behavior is chosen automatically as follows. If operator_export_type
             is OperatorExportTypes.ONNX, the behavior is equivalent to setting this
             argument to False. For other values of operator_export_type, the behavior is
-            equivalent to setting this argument to True.
+            equivalent to setting this argument to True. Note that for ONNX opset version < 9,
+            initializers MUST be part of graph inputs. Therefore, if opset_version argument is
+            set to a 8 or lower, this argument will be ignored.
     """
 
     from torch.onnx import utils
