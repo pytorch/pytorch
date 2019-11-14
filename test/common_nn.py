@@ -2513,9 +2513,7 @@ new_module_tests = [
         skip_double=TEST_WITH_ROCM,
         pickle=False,
     ),
-
 ]
-
 
 
 # add conv padding mode tests:
@@ -2533,7 +2531,6 @@ for padding_mode in ['reflect', 'circular', 'replicate', 'zeros']:
                 output_size=(2, 4) + (3,) * d,
                 cudnn=True,
                 desc='{}_stride2_pad2'.format(padding_mode),
-                check_with_long_tensor=True,
             ),
         )
 
