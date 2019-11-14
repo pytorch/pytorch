@@ -37,6 +37,10 @@ class _ConvNd(Module):
                 "padding_mode must be one of {{'zeros', 'reflect', 'replicate', 'circular'}}, "
                 "but got padding_mode='{}'".format(padding_mode))
         self.padding_mode = padding_mode
+        if padding_mode == 'zeros':
+            self._padding_repeated_twice = None
+        else:
+            self._padding_repeated_twice = _repeat_tuple(self.padding, 2)
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
@@ -198,7 +202,7 @@ class Conv1d(_ConvNd):
 
     def forward(self, input):
         if self.padding_mode != 'zeros':
-            return F.conv1d(F.pad(input, _repeat_tuple(self.padding, 2), mode=self.padding_mode),
+            return F.conv1d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
         return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -336,7 +340,7 @@ class Conv2d(_ConvNd):
 
     def conv2d_forward(self, input, weight):
         if self.padding_mode != 'zeros':
-            return F.conv2d(F.pad(input, _repeat_tuple(self.padding, 2), mode=self.padding_mode),
+            return F.conv2d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
                             weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
         return F.conv2d(input, weight, self.bias, self.stride,
@@ -471,7 +475,7 @@ class Conv3d(_ConvNd):
 
     def forward(self, input):
         if self.padding_mode != 'zeros':
-            return F.conv3d(F.pad(input, _repeat_tuple(self.padding, 2), mode=self.padding_mode),
+            return F.conv3d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
         return F.conv3d(input, self.weight, self.bias, self.stride,
