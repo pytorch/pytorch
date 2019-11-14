@@ -187,7 +187,6 @@ void ProcessGroupAgent::join() {
   // This is needed in case no futures were created, otherwise the future
   // timeout watchdog would sleep forever.
 
-  fprintf(stderr, "join is notifying watchdog.\n");
   {
     std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
     futureTimeoutCV_.notify_one();
@@ -198,7 +197,6 @@ void ProcessGroupAgent::join() {
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
 
-  fprintf(stderr, "Done waiting on CV\n");
   pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(
@@ -302,7 +300,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       futureTimeouts_[futureStartTime].push_back(requestId);
     }
     // Signal watchdog for future timeouts to begin
-    fprintf(stderr, "SEND is notifying watchdog.\n");
     {
       std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
       futureTimeoutCV_.notify_one();
@@ -572,7 +569,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       }
     }
   }
-  fprintf(stderr, "joining the thread....\n");
 }
 
 } // namespace rpc
