@@ -137,6 +137,15 @@ def print_to_stderr(message):
 
 
 def run_test(executable, test_module, test_directory, options, *extra_unittest_args):
+    # Adding the root working directory, test_directory, to Python
+    # module search path, sys.path,
+    # because if the test_module is loacated in a subdirectory,
+    # only that subdirectory is in sys.path by default,
+    # `import common_utils` would fail in this case.
+    os.environ['PYTHONPATH'] = os.pathsep.join(
+        [os.environ['PYTHONPATH'], test_directory]
+    )
+
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')

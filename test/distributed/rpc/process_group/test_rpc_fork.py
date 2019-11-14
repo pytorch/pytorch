@@ -6,6 +6,8 @@ from common_distributed import MultiProcessTestCase
 from common_utils import run_tests
 from distributed.rpc.process_group.rpc_test import ProcessGroupRpcTest
 
+import sys
+print("========== sys.path:", sys.path)
 
 # rpc_fork tests use double as the default dtype
 torch.set_default_dtype(torch.double)
