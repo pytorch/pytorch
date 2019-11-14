@@ -1,7 +1,7 @@
 from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional, Any
+from typing import NamedTuple, List, Optional, Any, Dict
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
@@ -86,12 +86,17 @@ class TestScriptPy3(JitTestCase):
         self.assertEqual(out.time_since_first, 3.0)
 
     def test_ignore_with_types(self):
+        @torch.jit.ignore
+        def fn(x: Dict[str, Optional[torch.Tensor]]):
+            return x + 10
+
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
 
             def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
                 self.dropout_modality(in_batch)
+                fn(in_batch)
                 return torch.tensor(1)
 
             @torch.jit.ignore
@@ -100,6 +105,17 @@ class TestScriptPy3(JitTestCase):
 
         sm = torch.jit.script(M())
         FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
+
+    def test_bad_types(self):
+        @torch.jit.ignore
+        def fn(my_arg):
+            return my_arg + 10
+
+        with self.assertRaisesRegex(RuntimeError, "argument 'my_arg'"):
+            @torch.jit.script
+            def other_fn(x):
+                return fn('2')
+
 
     def test_named_tuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):

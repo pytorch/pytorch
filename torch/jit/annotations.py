@@ -72,12 +72,18 @@ def get_signature(fn, rcb, loc, is_method):
         return None
 
     param_types, return_type = signature
-    arg_names = inspect.getfullargspec(fn).args
-    named_param_types = list(zip(arg_names, param_types))
     if is_method:
         # Chop off `self` arg
-        named_param_types = named_param_types[1:]
-    return named_param_types, return_type
+        param_types = param_types[1:]
+    return param_types, return_type
+
+
+def get_param_names(fn, is_method):
+    arg_names = inspect.getfullargspec(fn).args
+    if is_method:
+        # Chop off `self` arg
+        arg_names = arg_names[1:]
+    return arg_names
 
 
 # This is essentially a weaker form of get_signature(), where we don't care if

@@ -42,17 +42,22 @@ FunctionSchema PythonValue::getSchema(
   }
   // We may mutate this if we can determine the number of args from Python
   // introspection.
-  using NamedArg = std::pair<std::string, TypePtr>;
   size_t actual_n_args = moduleSelf_ ? n_args + 1 : n_args;
+  auto py_arg_names =
+      annotations.attr("get_param_names")(fn_to_get_signature, bool(moduleSelf_));
+  std::vector<std::string> arg_names = py::cast<std::vector<std::string>>(py_arg_names);
   if (!signature.is_none()) {
-    std::vector<NamedArg> arg_types;
+    std::vector<TypePtr> arg_types;
     TypePtr ret_type;
     std::tie(arg_types, ret_type) =
-        py::cast<std::pair<std::vector<NamedArg>, TypePtr>>(signature);
+        py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
     args.reserve(arg_types.size());
+    TORCH_INTERNAL_ASSERT(arg_names.size() == arg_types.size());
+    size_t i = 0;
     for (auto& arg_type : arg_types) {
       args.push_back(
-          Argument(arg_type.first, std::move(arg_type.second), {}, {}, false));
+          Argument(arg_names.at(i), std::move(arg_type), {}, {}, false));
+      i++;
     }
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   } else {
@@ -72,12 +77,13 @@ FunctionSchema PythonValue::getSchema(
         --actual_n_args;
       }
     }
+    TORCH_INTERNAL_ASSERT(arg_names.size() == actual_n_args);
     // Construct the default signature: all arguments and returns will be
     // DynamicType
     args.reserve(actual_n_args);
     for (size_t i = 0; i < actual_n_args; ++i) {
       args.push_back(
-          Argument(std::to_string(i), TensorType::get(), {}, {}, false));
+          Argument(arg_names.at(i), TensorType::get(), {}, {}, false));
     }
     TypePtr ret_type = TensorType::get();
     if (n_binders == 0) {
