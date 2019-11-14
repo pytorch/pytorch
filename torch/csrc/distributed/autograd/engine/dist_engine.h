@@ -39,7 +39,7 @@ class TORCH_API DistEngine {
   // receives gradients from the corresponding 'recv' method on another node.
   // The gradients are accumulated in the provided autograd context.
   void executeSendFunction(
-      DistAutogradContext& autogradContext,
+      ContextPtr autogradContext,
       const std::shared_ptr<torch::autograd::Node>& sendFunction);
 
  private:
@@ -67,7 +67,7 @@ class TORCH_API DistEngine {
   // We also determine all leaf nodes(functions) in the graph and accumulate
   // them in outputEdges.
   void computeDependencies(
-      DistAutogradContext& context,
+      ContextPtr context,
       const torch::autograd::edge_list& rootEdges,
       const torch::autograd::variable_list& grads,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
@@ -77,7 +77,7 @@ class TORCH_API DistEngine {
   // and accumulate the gradients part 'outputEdges' in the provided autograd
   // context.
   void runEngineAndAccumulateGradients(
-      DistAutogradContext& autogradContext,
+      ContextPtr autogradContext,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);
 

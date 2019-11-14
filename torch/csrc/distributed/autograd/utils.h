@@ -25,9 +25,8 @@ TORCH_API void addSendRpcBackward(
 // creates a new autograd context if needed and registers the 'recv' function
 // with this context.
 //
-// Returns a pointer to the autograd context created (nullptr in case of no
-// autograd information was needed.)
-TORCH_API DistAutogradContext* addRecvRpcBackward(
+// Returns a pointer to the autograd context created.
+TORCH_API ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId);

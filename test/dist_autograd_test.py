@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import time
+import sys
 import unittest
 
 import torch
@@ -991,7 +992,6 @@ class DistAutogradTest(object):
         # Verify thread is still alive (indicating backward hasn't completed yet).
         self.assertTrue(t.is_alive())
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28928")
     @dist_init
     def test_backward_autograd_engine_error(self):
         with dist_autograd.context() as context_id:
@@ -1252,6 +1252,69 @@ class DistAutogradTest(object):
             grads = dist_autograd.get_gradients(context_id)
             self.assertEqual(t1.grad, grads[t1])
             self.assertEqual(t2.grad, grads[t2])
+
+    _my_backward_func_executed = False
+
+    class MyBackwardFunc(Function):
+        @staticmethod
+        def forward(ctx, input):
+            return input
+
+        @staticmethod
+        @once_differentiable
+        def backward(ctx, input):
+            DistAutogradTest._my_backward_func_executed = True
+            return input
+
+    def _clear_context_thread(context):
+        # Wait until MyBackwardFunc is executed and then clean up context. This
+        # ensures we simulate a case where we clean up the context while the
+        # backward pass is running.
+        while not DistAutogradTest._my_backward_func_executed:
+            time.sleep(0.1)
+        dist_autograd._release_context(context._context_id())
+
+    @dist_init
+    def test_clean_context_during_backward(self):
+        '''
+        This test simulates the situation where the 'backward' call might throw
+        an exception locally which would lead to the autograd context being
+        cleaned up if we're using the context manager. As a result, the autograd
+        context might be cleaned up while some threads are still using the
+        autograd context.
+
+        It is fine for the 'backward' call to throw an exception in this test,
+        but the process should not crash.
+        '''
+
+        context = dist_autograd._new_context()
+        t1 = torch.rand((3, 3), requires_grad=True)
+        for i in range(0, 100):
+            if i == 50:
+                # Call MyBackwardFunc somewhere in the middle of the autograd
+                # graph.
+                t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
+            t1 = rpc.rpc_sync("worker{}".format(self._next_rank()), torch.add, args=(t1, t1))
+        self.assertEqual(100, len(context._send_functions()))
+
+        # Start thread to cleanup context.
+        t = threading.Thread(target=DistAutogradTest._clear_context_thread, args=(context,))
+        t.start()
+
+        with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id"):
+            dist_autograd.backward([t1.sum()])
+
+        # Wait for thread to finish.
+        t.join()
+
+        # HACK: Killing workers since otherwise the autograd engine gets stuck on
+        # other nodes. The proper fix would be addressing:
+        # https://github.com/pytorch/pytorch/issues/27643, which would inform
+        # other nodes about the failure.
+        self._initialize_pg()
+        dist.barrier()
+        sys.exit(0)
+
 
 if __name__ == '__main__':
     unittest.main()

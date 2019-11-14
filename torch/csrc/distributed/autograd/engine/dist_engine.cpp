@@ -58,7 +58,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
 }
 
 void DistEngine::computeDependencies(
-    DistAutogradContext& autogradContext,
+    ContextPtr autogradContext,
     const edge_list& rootEdges,
     const variable_list& grads,
     const std::shared_ptr<Node>& graphRoot,
@@ -78,7 +78,7 @@ void DistEngine::computeDependencies(
   std::queue<Node*> queue;
   queue.push(static_cast<Node*>(graphRoot.get()));
 
-  auto sendFunctions = autogradContext.sendFunctions();
+  auto sendFunctions = autogradContext->sendFunctions();
 
   // Add all the send functions to the queue as roots.
   for (const auto& mapEntry : sendFunctions) {
@@ -168,11 +168,11 @@ void DistEngine::computeDependencies(
   }
 
   // Let autograd context take ownership of the GraphTask.
-  autogradContext.setGraphTask(std::move(graphTask));
+  autogradContext->setGraphTask(std::move(graphTask));
 }
 
 void DistEngine::runEngineAndAccumulateGradients(
-    DistAutogradContext& autogradContext,
+    ContextPtr autogradContext,
     const std::shared_ptr<Node>& graphRoot,
     const edge_list& outputEdges) {
   // Kick off autograd computation with the root node and retrieve all the
@@ -180,7 +180,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   // TODO: make this non-blocking
   // (https://github.com/pytorch/pytorch/issues/26359)
   variable_list grads = engine_.execute_with_graph_task(
-      autogradContext.retrieveGraphTask(), graphRoot);
+      autogradContext->retrieveGraphTask(), graphRoot);
 
   // Accumulate all the gradients in the context.
   TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
@@ -194,16 +194,16 @@ void DistEngine::runEngineAndAccumulateGradients(
       auto& variable =
           std::static_pointer_cast<AccumulateGrad>(outputEdges[i].function)
               ->variable;
-      autogradContext.accumulateGrad(variable, grads[i]);
+      autogradContext->accumulateGrad(variable, grads[i]);
     }
   }
 }
 
 void DistEngine::executeSendFunction(
-    DistAutogradContext& autogradContext,
+    ContextPtr autogradContext,
     const std::shared_ptr<Node>& sendFunction) {
   std::unique_lock<std::mutex> lock(initializedContextIdsLock_);
-  if (initializedContextIds_.find(autogradContext.contextId()) ==
+  if (initializedContextIds_.find(autogradContext->contextId()) ==
       initializedContextIds_.end()) {
     edge_list outputEdges;
     // Pass in a dummy graphRoot since all send functions are the roots.
@@ -211,11 +211,11 @@ void DistEngine::executeSendFunction(
     computeDependencies(autogradContext, {}, {}, dummyRoot, outputEdges);
 
     // Mark the autograd context id as initialized and unlock.
-    initializedContextIds_.insert(autogradContext.contextId());
+    initializedContextIds_.insert(autogradContext->contextId());
     lock.unlock();
 
     // Enqueue the current send function.
-    auto graphTask = autogradContext.retrieveGraphTask();
+    auto graphTask = autogradContext->retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
         graphTask, sendFunction, torch::autograd::InputBuffer(0)));
 
@@ -223,10 +223,10 @@ void DistEngine::executeSendFunction(
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
 
     // Wait for all of the outstanding rpcs to complete.
-    autogradContext.clearAndWaitForOutstandingRpcs();
+    autogradContext->clearAndWaitForOutstandingRpcs();
   } else {
     lock.unlock();
-    auto graphTask = autogradContext.retrieveGraphTask();
+    auto graphTask = autogradContext->retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
         graphTask, sendFunction, torch::autograd::InputBuffer(0)));
   }
@@ -235,8 +235,7 @@ void DistEngine::executeSendFunction(
 void DistEngine::execute(const variable_list& roots) {
   // Get the current context, if exists. This will throw if we don't have a
   // valid context.
-  DistAutogradContext& autogradContext =
-      DistAutogradContainer::getInstance().currentContext();
+  auto autogradContext = DistAutogradContainer::getInstance().currentContext();
 
   // Perform initial pre-processing.
   edge_list rootEdges;
@@ -252,20 +251,20 @@ void DistEngine::execute(const variable_list& roots) {
     std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
     // Context should not have been intialized already.
     TORCH_INTERNAL_ASSERT(
-        initializedContextIds_.find(autogradContext.contextId()) ==
+        initializedContextIds_.find(autogradContext->contextId()) ==
         initializedContextIds_.end());
 
     computeDependencies(
         autogradContext, rootEdges, grads, graphRoot, outputEdges);
 
     // Mark the autograd context id as initialized.
-    initializedContextIds_.insert(autogradContext.contextId());
+    initializedContextIds_.insert(autogradContext->contextId());
   }
 
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
-  autogradContext.clearAndWaitForOutstandingRpcs();
+  autogradContext->clearAndWaitForOutstandingRpcs();
 }
 
 } // namespace autograd

@@ -46,9 +46,9 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
               })
           .def(
               "_send_functions",
-              [](const DistAutogradContext& ctx) {
+              [](const ContextPtr ctx) {
                 std::map<int64_t, py::object> funcs;
-                for (const auto& map_entry : ctx.sendFunctions()) {
+                for (const auto& map_entry : ctx->sendFunctions()) {
                   funcs.emplace(
                       map_entry.first,
                       py::reinterpret_steal<py::object>(
@@ -57,9 +57,9 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
                 }
                 return funcs;
               })
-          .def("_known_worker_ids", [](const DistAutogradContext& ctx) {
+          .def("_known_worker_ids", [](const ContextPtr ctx) {
             std::vector<rpc::worker_id_t> worker_ids;
-            for (const auto worker_id : ctx.getKnownWorkerIds()) {
+            for (const auto worker_id : ctx->getKnownWorkerIds()) {
               worker_ids.push_back(worker_id);
             }
             return worker_ids;
@@ -67,7 +67,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "_new_context",
-      []() -> const DistAutogradContext& {
+      []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().newContext();
       },
       py::return_value_policy::reference);
@@ -85,14 +85,14 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "_retrieve_context",
-      [](int64_t context_id) -> const DistAutogradContext& {
+      [](int64_t context_id) -> const ContextPtr {
         return DistAutogradContainer::getInstance().retrieveContext(context_id);
       },
       py::return_value_policy::reference);
 
   module.def(
       "_current_context",
-      []() -> const DistAutogradContext& {
+      []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().currentContext();
       },
       py::return_value_policy::reference);
@@ -144,9 +144,9 @@ Example::
   module.def(
       "get_gradients",
       [](int64_t contextId) {
-        const auto& autogradContext =
+        auto autogradContext =
             DistAutogradContainer::getInstance().retrieveContext(contextId);
-        return torch::jit::toPyObject(IValue(autogradContext.getGradients()));
+        return torch::jit::toPyObject(IValue(autogradContext->getGradients()));
       },
       R"(
 Retrieves a map from Tensor to the appropriate gradient for that Tensor
