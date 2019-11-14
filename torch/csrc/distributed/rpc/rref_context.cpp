@@ -142,7 +142,7 @@ template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
 
 template <typename T>
 std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
-  // Don't add this OnwerRRef to the owners_ map yet by default, otherwise
+  // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
   // to another worker.
