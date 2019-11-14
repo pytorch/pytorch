@@ -2485,17 +2485,6 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.randn(3, dtype=torch.float64).nbytes, 24)
         self.assertEqual(torch.randn(6, dtype=torch.float32)[::2].nbytes, 12)
 
-    def test_itemsize(self):
-        self.assertEqual(torch.zeros(2, dtype=torch.float16).itemsize, 2)
-        self.assertEqual(torch.zeros(2, dtype=torch.float32).itemsize, 4)
-        self.assertEqual(torch.zeros(2, dtype=torch.float64).itemsize, 8)
-        self.assertEqual(torch.zeros(2, dtype=torch.int8).itemsize, 1)
-        self.assertEqual(torch.zeros(2, dtype=torch.int16).itemsize, 2)
-        self.assertEqual(torch.zeros(2, dtype=torch.int32).itemsize, 4)
-        self.assertEqual(torch.zeros(2, dtype=torch.int64).itemsize, 8)
-        self.assertEqual(torch.zeros(2, dtype=torch.uint8).itemsize, 1)
-        self.assertEqual(torch.zeros(2, dtype=torch.bool).itemsize, 1)
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_empty_storage_view(self):
         # we should be able to "modify" slices of a 0-element
@@ -3379,6 +3368,7 @@ class _TestTorchMixin(object):
         short = torch.ShortStorage().element_size()
         int = torch.IntStorage().element_size()
         long = torch.LongStorage().element_size()
+        half = torch.HalfStorage().element_size()
         float = torch.FloatStorage().element_size()
         double = torch.DoubleStorage().element_size()
         bool = torch.BoolStorage().element_size()
@@ -3389,6 +3379,7 @@ class _TestTorchMixin(object):
         self.assertEqual(short, torch.ShortTensor().element_size())
         self.assertEqual(int, torch.IntTensor().element_size())
         self.assertEqual(long, torch.LongTensor().element_size())
+        self.assertEqual(half, torch.HalfTensor().element_size())
         self.assertEqual(float, torch.FloatTensor().element_size())
         self.assertEqual(double, torch.DoubleTensor().element_size())
         self.assertEqual(bool, torch.BoolTensor().element_size())
@@ -3398,6 +3389,7 @@ class _TestTorchMixin(object):
         self.assertGreater(short, 0)
         self.assertGreater(int, 0)
         self.assertGreater(long, 0)
+        self.assertGreater(half, 0)
         self.assertGreater(float, 0)
         self.assertGreater(double, 0)
         self.assertGreater(bool, 0)
@@ -3412,7 +3404,19 @@ class _TestTorchMixin(object):
         self.assertGreaterEqual(int, short)
         self.assertGreaterEqual(long, 4)
         self.assertGreaterEqual(long, int)
+        self.assertGreaterEqual(half, 2)
         self.assertGreaterEqual(double, float)
+
+        # itemsize property tests
+        self.assertEqual(torch.zeros(2, dtype=torch.uint8).itemsize, byte)
+        self.assertEqual(torch.zeros(2, dtype=torch.int8).itemsize, char)
+        self.assertEqual(torch.zeros(2, dtype=torch.int16).itemsize, short)
+        self.assertEqual(torch.zeros(2, dtype=torch.int32).itemsize, int)
+        self.assertEqual(torch.zeros(2, dtype=torch.int64).itemsize, long)
+        self.assertEqual(torch.zeros(2, dtype=torch.float16).itemsize, half)
+        self.assertEqual(torch.zeros(2, dtype=torch.float32).itemsize, float)
+        self.assertEqual(torch.zeros(2, dtype=torch.float64).itemsize, double)
+        self.assertEqual(torch.zeros(2, dtype=torch.bool).itemsize, bool)
 
     def test_split(self):
         tensor = torch.rand(7, 4)
