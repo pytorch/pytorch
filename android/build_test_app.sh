@@ -47,7 +47,7 @@ echo "ABIS_LIST:$ABIS_LIST"
 LIB_DIR=$PYTORCH_ANDROID_DIR/pytorch_android/src/main/jniLibs
 INCLUDE_DIR=$PYTORCH_ANDROID_DIR/pytorch_android/src/main/cpp/libtorch_include
 mkdir -p $LIB_DIR
-rm $LIB_DIR/*
+rm -f $LIB_DIR/*
 mkdir -p $INCLUDE_DIR
 
 for abi in $(echo $ABIS_LIST | tr ',' '\n')
