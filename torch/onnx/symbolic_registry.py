@@ -22,6 +22,7 @@ def register_version(domain, version):
         _registry[(domain, version)] = {}
     register_ops_in_version(domain, version)
 
+
 def register_ops_helper(domain, version, iter_version):
     version_ops = get_ops_in_version(iter_version)
     for op in version_ops:
