@@ -171,6 +171,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       []() { return RpcAgent::getDefaultRpcAgent()->getRpcTimeout(); },
       R"(
           Retrieve the timeout for all RPCs that was set during RPC initialization.
+
           Returns:
             `datetime.timedelta` instance indicating the RPC timeout.
       )");
