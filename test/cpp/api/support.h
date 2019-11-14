@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <ATen/Dispatch.h>
+#include <ATen/native/TensorIndexing.h>
 #include <torch/nn/cloneable.h>
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -47,6 +49,16 @@ private:
 
 inline bool pointer_equal(at::Tensor first, at::Tensor second) {
   return first.data_ptr<float>() == second.data_ptr<float>();
+}
+
+template <typename T>
+bool exactly_equal(at::Tensor left, T right) {
+  return left.item<T>() == right;
+}
+
+template <typename T>
+bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
+  return std::abs(left.item<T>() - right) < tolerance;
 }
 
 inline int count_substr_occurrences(const std::string& str, const std::string& substr) {
