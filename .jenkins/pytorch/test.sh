@@ -120,7 +120,7 @@ test_python_ge_config_legacy() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn jit_simple jit_legacy jit_fuser_legacy --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
+  time python test/run_test.py --exclude nn jit_legacy jit_fuser_legacy --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
   assert_git_not_dirty
 }
 
