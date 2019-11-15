@@ -63,10 +63,9 @@ fi
 export PYTORCH_BUILD_NUMBER=1
 
 
+JAVA_HOME=
+BUILD_JNI=OFF
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
-  JAVA_HOME=
-  BUILD_JNI=OFF
-
   POSSIBLE_JAVA_HOMES=()
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
