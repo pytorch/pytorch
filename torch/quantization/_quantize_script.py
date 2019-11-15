@@ -24,11 +24,11 @@ class ConvPackedParams(torch.nn.Module):
     @torch.jit.export
     def set_weight_bias(self, weight, bias):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.conv_prepack(weight, bias, self.stride, self.padding, self.dilation, self.groups)
+        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride, self.padding, self.dilation, self.groups)
 
     @torch.jit.export
     def _weight_bias(self):
-        return torch.ops.quantized.conv_unpack(self._packed_params)
+        return torch.ops.quantized.conv2d_unpack(self._packed_params)
 
     def forward(self, x):
         return x
@@ -132,7 +132,11 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     if not inplace:
         model = model.copy()
     scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
-    torch._C._jit_pass_fold_convbn(model._c)
+    # We are not going to run fold_convbn pass right now
+    # since it is not able to work correctly, we will
+    # revisit after constants is properly handled in
+    # JIT
+    # torch._C._jit_pass_fold_convbn(model._c)
     prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
     # When we mutating graph we didn't create a new ClassType

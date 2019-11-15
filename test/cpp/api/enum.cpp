@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/variant.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -10,7 +9,7 @@
   v = torch::k##name; \
   std::string pretty_print_name("k"); \
   pretty_print_name.append(#name); \
-  ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), pretty_print_name); \
+  ASSERT_EQ(torch::enumtype::get_enum_name(v), pretty_print_name); \
 }
 
 TEST(EnumTest, AllEnums) {
@@ -32,9 +31,19 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kReflect,
     torch::enumtype::kReplicate,
     torch::enumtype::kCircular,
+    torch::enumtype::kNearest,
+    torch::enumtype::kBilinear,
+    torch::enumtype::kBicubic,
+    torch::enumtype::kTrilinear,
+    torch::enumtype::kArea,
     torch::enumtype::kSum,
     torch::enumtype::kMean,
-    torch::enumtype::kMax
+    torch::enumtype::kMax,
+    torch::enumtype::kNone,
+    torch::enumtype::kBatchMean,
+    torch::enumtype::kZeros,
+    torch::enumtype::kBorder,
+    torch::enumtype::kReflection
   > v;
 
   TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
@@ -54,7 +63,17 @@ TEST(EnumTest, AllEnums) {
   TORCH_ENUM_PRETTY_PRINT_TEST(Reflect)
   TORCH_ENUM_PRETTY_PRINT_TEST(Replicate)
   TORCH_ENUM_PRETTY_PRINT_TEST(Circular)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Nearest)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Bilinear)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Bicubic)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Trilinear)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Area)
   TORCH_ENUM_PRETTY_PRINT_TEST(Sum)
   TORCH_ENUM_PRETTY_PRINT_TEST(Mean)
   TORCH_ENUM_PRETTY_PRINT_TEST(Max)
+  TORCH_ENUM_PRETTY_PRINT_TEST(None)
+  TORCH_ENUM_PRETTY_PRINT_TEST(BatchMean)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Zeros)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Border)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Reflection)
 }
