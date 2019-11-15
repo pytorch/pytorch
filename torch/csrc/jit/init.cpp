@@ -35,6 +35,7 @@
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
+#include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -221,6 +222,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_fold_quant_inputs",
           [](std::shared_ptr<Graph>& g) {
             return FoldQuantNodesIntoInputsOutputs(g);
+          })
+      .def(
+          "_jit_pass_reconstruct_scopes",
+          [](script::Module& module, std::shared_ptr<Graph>& g) {
+            ReconstructScopes(module, *g, "top");
           })
       .def(
           "_jit_pass_remove_inplace_ops",

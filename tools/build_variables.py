@@ -132,6 +132,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/python_print.cpp",
     "torch/csrc/jit/passes/quantization.cpp",
+    "torch/csrc/jit/passes/reconstruct_scopes.cpp",
     "torch/csrc/jit/passes/fuse_linear.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
