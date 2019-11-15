@@ -1265,7 +1265,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     singleCheckErrors(infos[0], "symeig_cuda");
   }
   if (eigenvectors) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), self_working_copy, );
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), self_working_copy);
   } else {
     return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device(), /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), at::empty({0}, self.options()));
   }
