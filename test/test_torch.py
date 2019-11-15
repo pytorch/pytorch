@@ -6099,6 +6099,23 @@ class TestTorchDeviceType(TestCase):
         # clone
         self.assertEqual((), zero_d.clone().shape)
 
+        zero_d_bool = torch.tensor(True, device=device)
+        one_d_bool = torch.tensor([True], device=device)
+
+        # masked_select
+        self.assertEqual((1,), torch.masked_select(zero_d_bool, zero_d_bool).shape)
+        self.assertEqual((1,), torch.masked_select(zero_d_bool, one_d_bool).shape)
+        self.assertEqual((1,), torch.masked_select(one_d_bool, zero_d_bool).shape)
+
+        zero_d_uint8 = torch.tensor(1, dtype=torch.uint8, device=device)
+        one_d_uint8 = torch.tensor([1], dtype=torch.uint8, device=device)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.assertEqual((1,), torch.masked_select(zero_d_uint8, zero_d_uint8).shape)
+            self.assertEqual((1,), torch.masked_select(zero_d_uint8, one_d_uint8).shape)
+            self.assertEqual((1,), torch.masked_select(one_d_uint8, zero_d_uint8).shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
