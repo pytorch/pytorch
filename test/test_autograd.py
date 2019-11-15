@@ -39,7 +39,7 @@ from common_methods_invocations import (method_tests,
                                         mask_not_all_zeros,
                                         S)
 from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCUDA, dtypes, dtypesIfCUDA,
+                                onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                 deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2594,6 +2594,18 @@ class TestAutograd(TestCase):
         print(prof.table())
         print(prof.key_averages(group_by_input_shape=True).table())
 
+    def test_profiler_no_cuda(self):
+        print("")
+        layer = torch.nn.Linear(20, 30)
+        x = torch.randn(128, 20)
+        with profile(use_cuda=False) as prof:
+            layer(x)
+
+        prof_str = str(prof)
+        print(prof_str)
+        self.assertTrue('cpu' in prof_str.lower())
+        self.assertTrue('cuda' not in prof_str.lower())
+
     def test_profiler_aggregation_lstm(self):
         print("")
         rnn = torch.nn.LSTM(10, 20, 2)
@@ -3348,7 +3360,7 @@ def gradgradcheck_method_precision_override(test_name):
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, nondet_tol=1e-10))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -3957,6 +3969,19 @@ class TestAutogradDeviceType(TestCase):
         input = torch.randn(1, device=devices[0], requires_grad=True)
         output = input.to(device=devices[1]) + input.to(device=devices[1])
         output.backward()
+
+    @onlyCPU
+    def test_copy_(self, device):
+        # At the time of writing this test, copy_ is not generated from native_functions.yaml
+        # there was a bug that bfloat16 was not recognized as floating.
+        x = torch.randn(10, device=device, requires_grad=True)
+        floating_dt = [dt for dt in torch.testing.get_all_dtypes() if dt.is_floating_point]
+        for dt in floating_dt:
+            y = torch.empty(10, device=device, dtype=dt)
+            y.copy_(x)
+            self.assertTrue(y.requires_grad)
+            z = x.to(torch.bfloat16)
+            self.assertTrue(z.requires_grad)
 
     @onlyCUDA
     def test_cross_device_reentrant_autograd(self, device):

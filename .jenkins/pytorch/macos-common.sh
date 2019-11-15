@@ -13,12 +13,12 @@ mkdir -p ${WORKSPACE_DIR}
 # If a local installation of conda doesn't exist, we download and install conda
 if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
   mkdir -p ${WORKSPACE_DIR}
-  curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ${WORKSPACE_DIR}/miniconda3.sh
-  bash ${WORKSPACE_DIR}/miniconda3.sh -b -p ${WORKSPACE_DIR}/miniconda3
+  retry curl https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ${WORKSPACE_DIR}/miniconda3.sh
+  retry bash ${WORKSPACE_DIR}/miniconda3.sh -b -p ${WORKSPACE_DIR}/miniconda3
 fi
 export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
 source ${WORKSPACE_DIR}/miniconda3/bin/activate
-conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
+retry conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 
 # The torch.hub tests make requests to GitHub.
 #
@@ -29,13 +29,13 @@ conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 # > certificate verify failed: unable to get local issuer certificate
 # > (_ssl.c:1056)
 #
-conda install -y -c conda-forge certifi
+retry conda install -y -c conda-forge certifi
 
 # Needed by torchvision, which is imported from TestHub in test_utils.py.
-conda install -y pillow
+retry conda install -y pillow
 
 # Building with USE_DISTRIBUTED=1 requires libuv (for Gloo).
-conda install -y libuv pkg-config
+retry conda install -y libuv pkg-config
 
 # Image commit tag is used to persist the build from the build job
 # and to retrieve the build from the test job.

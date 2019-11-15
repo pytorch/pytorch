@@ -320,7 +320,7 @@ Tensor upsample_bicubic2d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners) {
-  Tensor output = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
   upsample_bicubic2d_out_cuda_template(
       output, input, output_size, align_corners);
   return output;
@@ -342,7 +342,7 @@ Tensor upsample_bicubic2d_backward_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners) {
-  Tensor grad_input = at::empty_like(grad_output);
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
   upsample_bicubic2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners);
   return grad_input;

@@ -50,6 +50,16 @@ void window_function_checks(
       window_length);
 }
 
+// bool inputs are considered integral
+static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
+  for (Scalar& s : l) {
+    if (!s.isIntegral(true)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -67,7 +77,10 @@ Tensor arange(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  Tensor result = at::empty({0}, options);  // to be filled by arange_out
+  bool set_to_integral_dtype = !options.has_dtype() && allIntegral({start, end, step});
+  Tensor result = set_to_integral_dtype
+      ? at::empty({0}, options.dtype(at::ScalarType::Long))
+      : at::empty({0}, options);
   return at::arange_out(result, start, end, step);
 }
 
@@ -86,7 +99,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.device().type() == DeviceType::CPU);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
@@ -227,8 +240,8 @@ Tensor empty_like(
       // Copy the tensors with channels to avoid accidental overrides
       return at::_empty_per_channel_affine_quantized(
           self.sizes(),
-          self.q_per_channel_scales().clone(),
-          self.q_per_channel_zero_points().clone(),
+          self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
+          self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_axis(),
           options,
           memory_format);
@@ -253,7 +266,7 @@ Tensor empty_like(
 
 #ifdef BUILD_NAMEDTENSOR
   if (self.opt_names()) {
-    namedinference::propagate_names(result, self.opt_names());
+    namedinference::propagate_names(result, self.names());
   }
 #endif
 
@@ -398,6 +411,7 @@ Tensor ones_like(
   return native::ones_like(
       self, self.options(), optional_memory_format);
 }
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
@@ -893,7 +907,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;

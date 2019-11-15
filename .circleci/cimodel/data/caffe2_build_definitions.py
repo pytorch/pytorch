@@ -12,23 +12,29 @@ from dataclasses import dataclass
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 325
+DOCKER_IMAGE_VERSION = 336
 
 
 @dataclass
 class Conf:
     language: str
     distro: Ver
-    compiler: Ver
+    # There could be multiple compiler versions configured (e.g. nvcc
+    # for gpu files and host compiler (gcc/clang) for cpu files)
+    compilers: [Ver]
     build_only: bool
     is_important: bool
+
+    @property
+    def compiler_names(self):
+        return [c.name for c in self.compilers]
 
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
 
         omit = self.language == "onnx_py2" \
             or self.language == "onnx_py3.6" \
-            or self.compiler.name in ["android", "mkl", "clang"] \
+            or set(self.compiler_names).intersection({"android", "mkl", "clang"}) \
             or str(self.distro) in ["ubuntu14.04", "macos10.13"]
 
         return [] if omit else ["cudnn7"]
@@ -40,7 +46,7 @@ class Conf:
         ] + self.get_build_name_middle_parts()
 
     def get_build_name_middle_parts(self):
-        return [str(self.compiler)] + self.get_cudnn_insertion() + [str(self.distro)]
+        return [str(c) for c in self.compilers] + self.get_cudnn_insertion() + [str(self.distro)]
 
     def construct_phase_name(self, phase):
         root_parts = self.get_build_name_root_parts()
@@ -80,11 +86,11 @@ class Conf:
 
         build_env_name = "-".join(parts)
         parameters["build_environment"] = miniutils.quote(build_env_name)
-        if self.compiler.name == "ios":
+        if "ios" in self.compiler_names:
             parameters["build_ios"] = miniutils.quote("1")
         if phase == "test":
             # TODO cuda should not be considered a compiler
-            if self.compiler.name == "cuda":
+            if "cuda" in self.compiler_names:
                 parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
 
         if self.distro.name != "macos":
@@ -92,7 +98,7 @@ class Conf:
             if self.build_only:
                 parameters["build_only"] = miniutils.quote("1")
         if phase == "test":
-            resource_class = "large" if self.compiler.name != "cuda" else "gpu.medium"
+            resource_class = "large" if "cuda" not in self.compiler_names else "gpu.medium"
             parameters["resource_class"] = resource_class
 
         return parameters
@@ -125,11 +131,10 @@ def instantiate_configs():
     root = get_root()
     found_configs = conf_tree.dfs(root)
     for fc in found_configs:
-
         c = Conf(
             language=fc.find_prop("language_version"),
             distro=fc.find_prop("distro_version"),
-            compiler=fc.find_prop("compiler_version"),
+            compilers=fc.find_prop("compiler_version"),
             build_only=fc.find_prop("build_only"),
             is_important=fc.find_prop("important"),
         )
@@ -143,12 +148,8 @@ def get_workflow_jobs():
 
     configs = instantiate_configs()
 
-    # TODO Why don't we build this config?
-    # See https://github.com/pytorch/pytorch/pull/17323#discussion_r259450540
-    filtered_configs = filter(lambda x: not (str(x.distro) == "ubuntu14.04" and str(x.compiler) == "gcc4.9"), configs)
-
     x = []
-    for conf_options in filtered_configs:
+    for conf_options in configs:
 
         phases = ["build"]
         if not conf_options.build_only:
