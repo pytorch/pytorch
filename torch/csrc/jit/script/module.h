@@ -88,7 +88,7 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
-  Module() : Object(nullptr) {}
+  Module() {}
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,

@@ -15,7 +15,6 @@ using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 struct TORCH_API Object {
   Object() {}
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
-  explicit Object(c10::QualifiedName class_name);
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
       c10::QualifiedName,
