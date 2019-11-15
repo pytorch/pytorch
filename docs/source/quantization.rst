@@ -147,7 +147,8 @@ Fused modules are provided for common patterns in CNNs. Combining several operat
 * ``torch.nn.intrinsic`` — float versions of the modules, can be swapped with quantized version 1 to 1
     * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
     * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
-    * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + Relu
+    * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
+    * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
     * :class:`~torch.nn.intrinsic.LinearReLU` — Linear + ReLU
 * ``torch.nn.intrinsic.qat`` — versions of layers for quantization-aware training
     * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
@@ -157,6 +158,7 @@ Fused modules are provided for common patterns in CNNs. Combining several operat
 * ``torch.nn.intrinsic.quantized`` — quantized version of fused layers for inference (no BatchNorm variants as it's usually folded into convolution for inference)
     * :class:`~torch.nn.intrinsic.quantized.LinearReLU` — Linear + ReLU
     * :class:`~torch.nn.intrinsic.quantized.ConvReLU2d` — 2D Convolution + ReLU
+    * :class:`~torch.nn.intrinsic.quantized.ConvReLU3d` — 3D Convolution + ReLU
 
 ``torch.nn.qat``
 ~~~~~~~~~~~~~~~~
@@ -220,6 +222,7 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.FloatFunctional` — Wrapper class to make stateless float operations stateful so that they can be replaced with quantized versions
 * :class:`~torch.nn.quantized.QFunctional` — Wrapper class for quantized versions of stateless operations like ```torch.add``
 * :class:`~torch.nn.quantized.Conv2d` — 2D convolution
+* :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.MaxPool2d` — 2D max pooling
 * :class:`~torch.nn.quantized.ReLU` — Rectified linear unit
@@ -241,6 +244,7 @@ Functional versions of quantized NN layers (many of them accept explicit quantiz
 * :func:`~torch.nn.quantized.functional.adaptive_avg_pool2d` — 2D adaptive average pooling
 * :func:`~torch.nn.quantized.functional.avg_pool2d` — 2D average pooling
 * :func:`~torch.nn.quantized.functional.conv2d` — 2D convolution
+* :func:`~torch.nn.quantized.functional.conv3d` — 3D convolution
 * :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
@@ -339,8 +343,8 @@ based on observed tensor data are provided, developers can provide their own
 quantization functions. Quantization can be applied selectively to different
 parts of the model or configured differently for different parts of the model.
 
-We also provide support for per channel quantization for **conv2d()**
-and **linear()**
+We also provide support for per channel quantization for **conv2d()**,
+**conv3d()** and **linear()**
 
 Quantization workflows work by adding (e.g. adding observers as
 ``.observer`` submodule) or replacing (e.g. converting ``nn.Conv2d`` to
@@ -450,6 +454,11 @@ ConvReLU2d
 .. autoclass:: ConvReLU2d
     :members:
 
+ConvReLU3d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvReLU3d
+    :members:
+
 LinearReLU
 ~~~~~~~~~~~~~~~
 .. autoclass:: LinearReLU
@@ -494,6 +503,11 @@ ConvReLU2d
 .. autoclass:: ConvReLU2d
     :members:
 
+ConvReLU3d
+~~~~~~~~~~~~~~~
+.. autoclass:: ConvReLU3d
+    :members:
+
 LinearReLU
 ~~~~~~~~~~~~~~~
 .. autoclass:: LinearReLU
@@ -530,6 +544,7 @@ Functional interface
 .. autofunction:: relu
 .. autofunction:: linear
 .. autofunction:: conv2d
+.. autofunction:: conv3d
 .. autofunction:: max_pool2d
 
 .. automodule:: torch.nn.quantized
@@ -547,6 +562,11 @@ ReLU6
 Conv2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: Conv2d
+    :members:
+
+Conv3d
+~~~~~~~~~~~~~~~
+.. autoclass:: Conv3d
     :members:
 
 FloatFunctional
