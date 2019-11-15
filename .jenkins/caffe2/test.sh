@@ -145,4 +145,3 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
-

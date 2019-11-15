@@ -102,7 +102,9 @@ void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
 #endif
 }
 
-void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
+void Module::_save_for_mobile(
+    std::ostream& out,
+    const ExtraFilesMap& extra_files) const {
 #ifndef C10_MOBILE
   ExportModule(*this, out, extra_files, true);
 #else
@@ -110,8 +112,9 @@ void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_file
 #endif
 }
 
-void Module::_save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
-    const {
+void Module::_save_for_mobile(
+    const std::string& filename,
+    const ExtraFilesMap& extra_files) const {
 #ifndef C10_MOBILE
   ExportModule(*this, filename, extra_files, true);
 #else
@@ -237,7 +240,10 @@ Module Module::clone_impl(
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
       r.register_attribute(
-          type()->getAttributeName(i), s.type(), s, type()->is_parameter(i));
+          type()->getAttributeName(i),
+          type()->getAttribute(i),
+          s,
+          type()->is_parameter(i));
     }
   }
 
@@ -403,9 +409,7 @@ void Module::dump(
     bool print_attr_values = true,
     bool print_param_values = true) const {
   std::cout << dump_to_str(
-                   print_method_bodies,
-                   print_attr_values,
-                   print_param_values)
+                   print_method_bodies, print_attr_values, print_param_values)
             << std::endl;
 }
 
