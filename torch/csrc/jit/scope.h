@@ -52,23 +52,32 @@ struct Function;
 struct InlinedCallStack;
 
 /**
- * InlinedCallStack is a node of a trie that represents the callstack.
- * Each node in the trie is a pair [Function, SourceRange].
- * Each IR Node has a callstack field, which is basically a pointer to a trie
- * node. Initially the field is null, but if the node is created during an
- * inlining from a different function it gets filled with the function and
- * source range info. As inlining continues, the trie can grow.
+ * InlinedCallStack is an element in a list representing callstack of functions
+ * that have been inlined.
  *
- * Examples to understand how callstack looks like:
- * - Callstack for a node in a function 'foo' that was never inlined is empty
- *   (c10::nullopt).
- * - Callstack for a node in a function 'foo' that was created when 'bar' was
- *   inlined to 'foo' contains only one entry: <'bar'>. Callstack for a node in
- *   'bar' is empty.
- * - When 'baz' is inlined into 'bar' and 'bar' is inlined to 'foo', then the
- *   node in 'foo' originated from 'baz' will have a callstack with two entries:
- *   <'bar', 'baz'>. The last element in this vector will correspond to the leaf
- *   function.
+ * Each such element holds info about the current callsite (Function and
+ * SourceRange) and a pointer to the next element in the list. The last element
+ * in the list represents the innermost function that was inlined.
+ *
+ * For instance, if a node has a callstack
+ *    [foo, source_range1] -> [bar, source_range2]
+ * it means that this node was originally from function 'bar' that was called
+ * at 'source_range2' in function 'foo' that was called in the current function
+ * at 'source_range1'.
+ *
+ * If a node did not come from any inlined function, its callstack will be
+ * empty.
+ *
+ * The callstack lists only grow, we never remove elements from them, which
+ * allows us to reuse same elements in different lists. For instance, if we
+ * inline function 'bar' to 'foo' and then inline 'foo' to two functions 'ham'
+ * and 'baz', the callstacks would look like:
+ *
+ *  [baz, source_range3]  --
+ *                           \
+ *                             --> [foo, source_range1] -> [bar, source_range2]
+ *                           /
+ *  [ham, source_range4]  --
  */
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
@@ -76,7 +85,6 @@ using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
   c10::optional<InlinedCallStackPtr> callee_;
-
   Function* fn_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
@@ -91,11 +99,10 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
       Function* fn,
       SourceRange source_range);
 
-  // Return callstack for the callee.
-  // Essentially, move one level up in the trie.
+  // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
 
-  // Flatten callstack to a vector of [Function, SourceRange] pairs.
+  // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
 };
 
