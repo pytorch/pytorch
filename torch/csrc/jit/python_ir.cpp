@@ -692,6 +692,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
+  py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
+      .def_static("get", &NoneType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
@@ -729,7 +731,14 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_interface(
             c10::QualifiedName(qualified_name));
-      }));
+      }))
+      .def("getMethodNames", [](InterfaceType& self) {
+        std::vector<std::string> names;
+        for (const FunctionSchema& fn : self.methods()) {
+          names.emplace_back(fn.name());
+        }
+        return names;
+      });
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)

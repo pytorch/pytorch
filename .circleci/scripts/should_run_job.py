@@ -32,6 +32,8 @@ default_set = set([
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
     'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
+    # Caffe2 CentOS
+    'caffe2-py3.6-devtoolset7-cuda9.0-cudnn7-centos7',
 
     # Binaries
     'manywheel 2.7mu cpu devtoolset7',
@@ -62,6 +64,10 @@ default_set = set([
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
+
+    # GraphExecutor config jobs
+    'pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test',
+    'pytorch-linux-xenial-py3.6-gcc5.4-ge_config_legacy-test',
 
     # Other checks
     'pytorch-short-perf-test-gpu',
