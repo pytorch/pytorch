@@ -206,8 +206,8 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     TupleTypePtr tuple_type = iv.type()->cast<TupleType>();
     Node* tuple_node = nullptr;
     if (tuple_type->name() && tuple_type->schema()) {
-      // if tuple have schema, then it's a named tuple, pass the type to tuple
-      // creation
+      // if tuple have name and schema, then it's a named tuple
+      // pass the type to tuple node creation
       tuple_node = graph->createTuple(
           fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }),
           tuple_type);
