@@ -83,7 +83,7 @@ double getScaleFromInput(Node* input_node) {
   } else if (input_name == "aten::split_with_sizes") {
     return getScaleFromInput(input_node->inputs()[0]->node());
   }
-  TORCH_INTERNAL_ASSERT(false, "Unrecognized quantized operator while trying to compute q_scale. Returning default scale of 1.0 for operator ", input_name);
+  TORCH_INTERNAL_ASSERT(false, "Unrecognized quantized operator while trying to compute q_scale for operator ", input_name);
 }
 
 Node* CreateQuantizedWeights(
