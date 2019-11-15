@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/script/object.h>
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/resolver.h>
 #include <torch/csrc/jit/script/sugared_value.h>
