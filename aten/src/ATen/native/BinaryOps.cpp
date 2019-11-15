@@ -167,7 +167,7 @@ Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor add(Scalar other, const Tensor& self, Scalar alpha) {
-  return native::add(self, other, alpha);
+  return native::add(wrapped_scalar_tensor(other), self, alpha);
 }
 
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
