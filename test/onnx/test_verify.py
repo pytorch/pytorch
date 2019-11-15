@@ -75,10 +75,10 @@ class TestVerify(TestCase):
             def forward(self, x):
                 y = x * x
                 self.param.data.add_(1.0)
-                return y
+                return y, self.param
 
         x = torch.tensor([1, 2])
-        self.assertVerifyExpectFail(MyModel(), x, backend, do_constant_folding=False)
+        self.assertVerifyExpectFail(MyModel(), x, backend)
 
     def test_dynamic_model_structure(self):
         class MyModel(Module):
