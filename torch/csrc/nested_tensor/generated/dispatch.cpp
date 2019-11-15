@@ -15,10 +15,31 @@ PyObject *_ListNestedTensorVariable___str__(PyObject *self_) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *_ListNestedTensorVariable_detachdim(PyObject *self_) {
+PyObject *_ListNestedTensorVariable_detach(PyObject *self_) {
   HANDLE_TH_ERRORS
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return wrap(self.detachdim());
+  return wrap(self.detach());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *_ListNestedTensorVariable_device(PyObject *self_) {
+  HANDLE_TH_ERRORS
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return wrap(self.device());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *_ListNestedTensorVariable_dim(PyObject *self_) {
+  HANDLE_TH_ERRORS
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return wrap(self.dim());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *_ListNestedTensorVariable_dtype(PyObject *self_) {
+  HANDLE_TH_ERRORS
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return wrap(self.dtype());
   END_HANDLE_TH_ERRORS
 }
 
@@ -47,6 +68,13 @@ PyObject *_ListNestedTensorVariable_is_pinned(PyObject *self_) {
   HANDLE_TH_ERRORS
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
   return wrap(self.is_pinned());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *_ListNestedTensorVariable_layout(PyObject *self_) {
+  HANDLE_TH_ERRORS
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return wrap(self.layout());
   END_HANDLE_TH_ERRORS
 }
 

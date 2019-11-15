@@ -116,48 +116,6 @@ PyObject *_ListNestedTensorVariable_unbind(PyObject *self_) {
   return return_list;
 }
 
-// PyObject *_ListNestedTensorVariable_to_tensor(PyObject *self_) {
-//   HANDLE_TH_ERRORS
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.to_tensor());
-//   END_HANDLE_TH_ERRORS
-// }
-// 
-// PyObject *_ListNestedTensorVariable___str__(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.__str__());
-// }
-// 
-// PyObject *_ListNestedTensorVariable_requires_grad(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.requires_grad());
-// }
-// 
-// PyObject *_ListNestedTensorVariable_is_pinned(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.is_pinned());
-// }
-// 
-// PyObject *_ListNestedTensorVariable_is_contiguous(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.is_contiguous());
-// }
-// 
-// PyObject *_ListNestedTensorVariable_dim(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.dim());
-// }
-// 
-// PyObject *_ListNestedTensorVariable_numel(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.numel());
-// }
-// 
-// PyObject *_ListNestedTensorVariable___repr__(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.__repr__());
-// }
-
 static void _ListNestedTensorVariable_dealloc(_ListNestedTensorVariable *self) {
   // TODO: Need to revisit this for GC
   // PyObject_GC_UnTrack(self);
@@ -176,27 +134,6 @@ static PyObject *_ListNestedTensorVariable_pynew(PyTypeObject *type,
   return _ListNestedTensorVariable_NewWithVar(
       type, std::move(_ListNestedTensor(_get_structure(listObj))));
 }
-
-
-// static PyObject *_ListNestedTensorVariable_element_size(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return torch::autograd::utils::wrap(self.element_size());
-// }
-// 
-// static PyObject *_ListNestedTensorVariable_pin_memory(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return wrap(self.pin_memory());
-// }
-// 
-// static PyObject *_ListNestedTensorVariable_grad(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return _ListNestedTensorVariable_Wrap(self.grad());
-// }
-// 
-// static PyObject *_ListNestedTensorVariable_detach(PyObject *self_) {
-//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-//   return _ListNestedTensorVariable_Wrap(self.detach());
-// }
 
 static PyObject *_ListNestedTensorVariable_requires_grad_(PyObject *self_,
                                                           PyObject *bool_arg) {
@@ -232,32 +169,6 @@ static void _ListNestedTensorVariable_backward(PyObject *self_,
   bool retain_graph = PyObject_IsTrue(retain_graph_);
   bool create_graph = PyObject_IsTrue(create_graph_);
   self.backward(gradient, retain_graph, create_graph);
-}
-
-static PyObject *
-_ListNestedTensorVariable_dtype(_ListNestedTensorVariable *self, void *unused) {
-  HANDLE_TH_ERRORS
-  auto &self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject *
-_ListNestedTensorVariable_layout(_ListNestedTensorVariable *self,
-                                 void *unused) {
-  HANDLE_TH_ERRORS
-  auto &self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getLayout(self_.backend()));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject *
-_ListNestedTensorVariable_device(_ListNestedTensorVariable *self,
-                                 void *unused) {
-  HANDLE_TH_ERRORS
-  auto &self_ = self->cdata;
-  return THPDevice_New(self_.device());
-  END_HANDLE_TH_ERRORS
 }
 
 static Py_ssize_t _ListNestedTensorVariable_len(PyObject *self_) {

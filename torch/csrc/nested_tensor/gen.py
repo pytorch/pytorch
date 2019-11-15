@@ -22,12 +22,15 @@ PyObject *_ListNestedTensorVariable_{method_name}(PyObject *self_) {{
 method_names = [
     "__repr__",
     "__str__",
-    "detach"
+    "detach",
+    "device",
     "dim",
+    "dtype",
     "element_size",
     "grad",
     "is_contiguous",
     "is_pinned",
+    "layout",
     "numel",
     "pin_memory",
     "requires_grad",
