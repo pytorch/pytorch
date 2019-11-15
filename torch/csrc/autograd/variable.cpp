@@ -61,6 +61,7 @@ static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_fa
 namespace impl {
 
   AutogradMeta* materialize_autograd_meta(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call materialize_autograd_meta() on undefined tensor");
     auto p = self.unsafeGetTensorImpl();
     if (!p->autograd_meta()) {
       p->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
@@ -173,14 +174,17 @@ namespace impl {
   void set_version_counter(
       const Variable& self,
       const c10::VariableVersion& version_counter) noexcept {
+    TORCH_CHECK(self.defined(), "cannot call set_version_counter() on undefined tensor");
     self.unsafeGetTensorImpl()->set_version_counter(version_counter);
   }
 
   void bump_version(const Variable& self) noexcept {
+    TORCH_CHECK(self.defined(), "cannot call bump_version() on undefined tensor");
     self.unsafeGetTensorImpl()->bump_version();
   }
 
   const c10::VariableVersion& version_counter(const Variable& self) noexcept {
+    TORCH_CHECK(self.defined(), "cannot call version_counter() on undefined tensor");
     return self.unsafeGetTensorImpl()->version_counter();
   }
 
@@ -219,15 +223,18 @@ namespace impl {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   void set_pyobj(const Variable& self, PyObject* pyobj) noexcept {
+    TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
     self.unsafeGetTensorImpl()->set_pyobj(pyobj);
   }
 
   PyObject* pyobj(const Variable& self) noexcept {
+    TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
     return self.unsafeGetTensorImpl()->pyobj();
   }
 
   AutogradMeta* get_autograd_meta(const Variable& self) noexcept {
     // NB: could return null
+    TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
     return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
   }
 

@@ -46,6 +46,7 @@ std::string Tensor::toString() const {
 }
 
 Tensor Tensor::variable_data() const noexcept {
+  TORCH_CHECK(defined(), "cannot call variable_data() on undefined tensor");
   auto self_impl_copy = unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/0,
     /*allow_tensor_metadata_change=*/false);
@@ -54,6 +55,7 @@ Tensor Tensor::variable_data() const noexcept {
 }
 
 Tensor Tensor::tensor_data() const noexcept {
+  TORCH_CHECK(defined(), "cannot call tensor_data() on undefined tensor");
   auto self_impl_copy = unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/unsafeGetTensorImpl()->version_counter(),
     /*allow_tensor_metadata_change=*/unsafeGetTensorImpl()->allow_tensor_metadata_change());
@@ -86,6 +88,7 @@ namespace {
 }
 
 const std::string& Tensor::name() const noexcept {
+  TORCH_CHECK(defined(), "cannot call variable_data() on undefined tensor");
   if (torch::autograd::impl::get_autograd_meta(*this)) {
     return torch::autograd::impl::get_autograd_meta(*this)->name_;
   } else {
