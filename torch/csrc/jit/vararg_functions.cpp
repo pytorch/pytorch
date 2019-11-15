@@ -29,11 +29,14 @@ void tupleUnpackFunc(int num_outputs, Stack& stack) {
 }
 
 void formatFunc(int num_inputs, Stack& stack) {
-  static const std::regex unsupported_options("\\{(.*?)\\}");
+  // static const std::regex unsupported_options("\\{(.*?)\\}");
   auto format = peek(stack, 0, num_inputs).toStringRef();
-  if (std::regex_search(format, unsupported_options)) {
-    AT_WARN("Format options are not supported.");
-  }
+  // // Temporally comment out the warning message because of
+  // // "StdRegexIsAwful" internal Lint error, to prevent sev
+  // // of std::regex from PT mobile.
+  // if (std::regex_search(format, unsupported_options)) {
+  //   AT_WARN("Format options are not supported.");
+  // }
 
   auto args = last(stack, num_inputs - 1);
   std::stringstream ss;
