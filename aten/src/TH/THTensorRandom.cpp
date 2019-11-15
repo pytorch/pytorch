@@ -6,3 +6,6 @@
 
 #include <TH/generic/THTensorRandom.cpp>
 #include <TH/THGenerateBoolType.h>
+
+#include <TH/generic/THTensorRandom.cpp>
+#include <TH/THGenerateBFloat16Type.h>

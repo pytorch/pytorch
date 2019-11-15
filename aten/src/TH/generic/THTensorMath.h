@@ -66,7 +66,13 @@ TH_API void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor 
 #if !defined(TH_REAL_IS_BOOL)
 TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value);
+
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_BFLOAT16)
+TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 #endif
+#endif
+
+TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index);
 
 #if !defined(TH_REAL_IS_BFLOAT16)
 
@@ -122,7 +128,6 @@ TH_API void THTensor_(cos)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(cosh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(atan)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfc)(THTensor *r_, THTensor *t);
 

@@ -129,6 +129,7 @@
 [[
   name: _th_index_select
   cuda_bool: True
+  cpu_bfloat16: True
   cname: indexSelect
   variants:
     - function
@@ -455,6 +456,7 @@
 [[
   name: _th_tanh
   cname: tanh
+  cpu_bfloat16: True
   types:
     - floating_point
   backends:
@@ -1147,6 +1149,7 @@
 ]]
 [[
   name: _th_uniform_
+  cpu_bfloat16: True
   types:
     - floating_point
   backends:

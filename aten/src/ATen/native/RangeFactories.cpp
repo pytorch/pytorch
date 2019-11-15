@@ -113,7 +113,11 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
              "unsupported range: ", xstart, " -> ", xend);
     TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
              "upper bound and larger bound inconsistent with step sign");
-    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
+    int64_t size;
+    if (result.scalar_type() == ScalarType::Float)
+      size = static_cast<int64_t>(((end.to<double>() - start.to<double>()) / step.to<double>()) + 1);
+    else
+      size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
     if (result.numel() != size) {
       result.resize_({size});
     }
