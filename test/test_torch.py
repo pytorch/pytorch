@@ -2427,6 +2427,14 @@ class _TestTorchMixin(object):
         x = torch.Tensor([1, nan, 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
+    def test_dtype_is_signed(self):
+        for dtype in torch.testing.get_all_dtypes():
+            self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
+
+        self.assertFalse(torch.quint8.is_signed)
+        self.assertTrue(torch.qint8.is_signed)
+        self.assertTrue(torch.qint32.is_signed)
+
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
@@ -3959,7 +3967,6 @@ class _TestTorchMixin(object):
 
         test(io.BytesIO())
 
-
     def test_serialization(self):
         # Test serialization with a real file
         b = self._test_serialization_data()
@@ -5249,9 +5256,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
     def test_comparison_ops_must_take_bool_output(self):
-        with self.assertRaisesRegex(RuntimeError, 'The output tensor of a comparison or logical op must be a bool'):
-            for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne, torch.logical_xor]:
-                op(torch.tensor([True]), torch.tensor([False]), out=torch.empty(1, dtype=torch.uint8))
+        for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne, torch.logical_xor]:
+            self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
 
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
@@ -6287,6 +6293,36 @@ class TestTorchDeviceType(TestCase):
             # in-place
             with self.assertRaises(RuntimeError):
                 a.bitwise_not_()
+
+    def test_bitwise_xor(self, device):
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
+            expected_res = torch.tensor([3, -1, 0], dtype=dtype, device=device)
+            b_scalar = 2
+            expected_res_scalar = torch.tensor([3, -4, 1], dtype=dtype, device=device)
+
+            # standard version
+            self.assertEqual(torch.bitwise_xor(a, b), expected_res)
+            self.assertEqual(torch.bitwise_xor(a, b_scalar), expected_res_scalar)
+
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_xor(a, b, out=c)
+            self.assertEqual(c, expected_res)
+            torch.bitwise_xor(a, b_scalar, out=c)
+            self.assertEqual(c, expected_res_scalar)
+
+            # in-place
+            a1 = a.clone()
+            a1.bitwise_xor_(b)
+            self.assertEqual(a1, expected_res)
+            a.bitwise_xor_(b_scalar)
+            self.assertEqual(a, expected_res_scalar)
+
+        self.assertEqual(torch.tensor([True, False, False], device=device),
+                         torch.bitwise_xor(torch.tensor([True, True, False], device=device),
+                                           torch.tensor([False, True, False], device=device)))
 
     def test_logical_not(self, device):
         for dtype in torch.testing.get_all_dtypes():
