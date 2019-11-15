@@ -113,6 +113,8 @@ private:
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
 
+  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatch_key) const;
+
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
@@ -150,18 +152,60 @@ private:
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
+    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
+    const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+    return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+  });
 }
 
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
+    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
+    const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+    return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+  });
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.callBoxed(stack);
+  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) {
+    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+    const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+    kernel.callBoxed(stack);
+  });
+}
+
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) const {
+  if (dispatchKey.has_value()) {
+    const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
+
+    if (nullptr != backendKernel) {
+      return *backendKernel;
+    }
+  }
+
+  const KernelFunction* catchallKernel = dispatchTable.lookupCatchallKernel();
+  if (nullptr != catchallKernel) {
+    return *catchallKernel;
+  }
+
+  if (!dispatchKey.has_value() || *dispatchKey == TensorTypeId::UndefinedTensorId) {
+    TORCH_CHECK(false,
+          "There were no tensor arguments to this function (e.g., you passed an "
+          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
+          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          "Available functions are ", dispatchTable.listAllDispatchKeys())
+  }
+
+  const std::string dispatchKeyStr = toString(*dispatchKey);
+  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
+          " from the '", dispatchKeyStr, "' backend. '",
+          dispatchTable.operatorName(), "' is only available for these backends: ",
+          dispatchTable.listAllDispatchKeys(), ".");
 }
 
 } // namespace c10
+
