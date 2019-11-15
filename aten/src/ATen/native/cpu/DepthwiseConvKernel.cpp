@@ -27,18 +27,18 @@ struct Arguments final {
 inline std::vector<int64_t> calculate_conv_output_size(
     const IntArrayRef input_size,
     const IntArrayRef weight_size,
-    const IntArrayRef padding,
-    const IntArrayRef stride) {
+    const IntArrayRef stride,
+    const IntArrayRef padding) {
   const auto calc_output_dimension = [](
-    const int64_t input, const int64_t kernel, const int64_t padding, const int64_t stride) {
+    const int64_t input, const int64_t kernel, const int64_t stride, const int64_t padding) {
     return 1 + (input - kernel + 2 * padding) / stride;
   };
 
   return std::vector<int64_t> {
     input_size[0],
     weight_size[0],
-    calc_output_dimension(input_size[2], weight_size[2], padding[0], stride[0]),
-    calc_output_dimension(input_size[3], weight_size[3], padding[1], stride[1]),
+    calc_output_dimension(input_size[2], weight_size[2], stride[0], padding[0]),
+    calc_output_dimension(input_size[3], weight_size[3], stride[1], padding[1]),
   };
 }
 
