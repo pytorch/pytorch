@@ -22,6 +22,8 @@ class TORCH_API ConvImpl : public torch::nn::Cloneable<Derived> {
 
   void reset() override;
 
+  void reset_parameters();
+
   /// Pretty prints the `Conv{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
