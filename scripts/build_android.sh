@@ -57,6 +57,7 @@ CMAKE_ARGS=()
 
 if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
   CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
@@ -105,6 +106,10 @@ CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
 CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=$ANDROID_NATIVE_API_LEVEL")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
+
+if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
+  CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
+fi
 
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)

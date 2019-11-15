@@ -53,11 +53,11 @@ static void THPWrapper_dealloc(THPWrapper* self)
 
 PyTypeObject THPWrapperType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._PtrWrapper",                /* tp_name */
-  sizeof(THPWrapper),                    /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPWrapper_dealloc,        /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  "torch._C._PtrWrapper",                      /* tp_name */
+  sizeof(THPWrapper),                          /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  (destructor)THPWrapper_dealloc,              /* tp_dealloc */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -71,12 +71,12 @@ PyTypeObject THPWrapperType = {
   nullptr,                                     /* tp_getattro */
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  nullptr,                                  /* tp_doc */
+  Py_TPFLAGS_DEFAULT,                          /* tp_flags */
+  nullptr,                                     /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
   nullptr,                                     /* tp_methods */
@@ -86,10 +86,10 @@ PyTypeObject THPWrapperType = {
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPWrapper_pynew,                      /* tp_new */
+  THPWrapper_pynew,                            /* tp_new */
 };
 
 bool THPWrapper_init(PyObject *module)
