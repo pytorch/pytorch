@@ -125,7 +125,7 @@ Value* TracingState::getValue(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
-    if (ten.is_variable() && ten.requires_grad()) {
+    if (ten.requires_grad()) {
       pauseTracing();
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
@@ -206,18 +206,22 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     TupleTypePtr tuple_type = iv.type()->cast<TupleType>();
     Node* tuple_node = nullptr;
     if (tuple_type->name() && tuple_type->schema()) {
+      // if tuple have schema, then it's a named tuple, pass the type to tuple
+      // creation
       tuple_node = graph->createTuple(
-        fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }), tuple_type);
+          fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }),
+          tuple_type);
     } else {
+      // else this is a normal tuple
       tuple_node = graph->createTuple(
-        fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
+          fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     }
 
     graph->insertNode(tuple_node);
     return tuple_node->output();
   } else {
     AT_ERROR(
-        "Only tensors tuples, named tuples of tensors can be output from traced functions");
+        "Only tensors, tuples or named tuples of tensors can be output from traced functions");
   }
 }
 

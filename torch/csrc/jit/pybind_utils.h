@@ -170,7 +170,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
         return type_match.reason();
       }
     }
-    if (PyObject_HasAttrString(input.ptr(), "_fields")) {
+    if (py::hasattr(input, "_fields")) {
       // If this is a NamedTuple type, fetch the names correspondingly.
       auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
           py::module::import("torch.jit").attr("_qualified_name")(input.get_type())));
