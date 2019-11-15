@@ -330,9 +330,10 @@ class BenchmarkRunner(object):
 
         # Filter framework, operator, test_name, tag, forward_only
         if (self._check_keep(op_test_config.test_name, self.args.test_name) and
-            self._check_keep(op_test_config.tag, self.args.tag_filter) and
             self._check_keep_list(test_case.op_bench.module_name(), operators) and
             self._check_keep_list(test_case.framework, frameworks) and
+                (self.args.tag_filter == 'all' or
+                    self._check_keep(op_test_config.tag, self.args.tag_filter)) and
                 (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only) and
                 (self.args.device == 'None' or self.args.device in op_test_config.test_name)):
             return True
