@@ -97,7 +97,7 @@ def upsample_nearest_2d(g, input, size, scale_factor, mode, align_corners):
 def relu(g, input):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import relu
-        relu(g, input)
+        return relu(g, input)
     output = g.op("_caffe2::Int8Relu", input)
     sym_help._quantized_ops.add(output)
     return output
