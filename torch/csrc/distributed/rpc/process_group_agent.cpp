@@ -187,15 +187,11 @@ void ProcessGroupAgent::join() {
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
   shutdown_.store(true);
-  // This is needed in case no futures were created, otherwise the future
-  // timeout watchdog would sleep forever.
-
-  {
-    std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
-    futureTimeoutCV_.notify_one();
-  }
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
+  // This is needed in case no futures were created, otherwise the future
+  // timeout watchdog would sleep forever.
+  futureTimeoutCV_.notify_one();
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
@@ -299,10 +295,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       futures_[requestId] = FutureInfo(future, futureStartTime, to.id_);
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[futureStartTime].push_back(requestId);
-    }
-    // Signal watchdog for future timeouts to begin
-    {
-      std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
+      // Signal watchdog for future timeouts to begin
       futureTimeoutCV_.notify_one();
     }
 
@@ -427,12 +420,11 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
             auto& futuresAtTime = futureTimeouts_[futureStartTime];
+            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
             TORCH_CHECK(
-                std::find(futuresAtTime.begin(), futuresAtTime.end(), id) !=
-                    futuresAtTime.end(),
+                it != futuresAtTime.end(),
                 "Error: could not find future in futureTimeouts map, race condition.");
-            futuresAtTime.erase(
-                std::find(futuresAtTime.begin(), futuresAtTime.end(), id));
+            futuresAtTime.erase(it);
             if (futuresAtTime.empty()) {
               // remove the key from futureTimeouts_
               futureTimeouts_.erase(futureStartTime);
@@ -484,7 +476,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
   while (!shutdown_.load()) {
     std::chrono::milliseconds sleepTime;
     {
-      std::lock_guard<std::mutex> lock{futureMutex_};
+      std::unique_lock<std::mutex> lock{futureMutex_};
       // Estimate amount of time the first future will time out in, and sleep
       // for that long.
       // if there are no futures or the RPC timeout is set to 0 (meaning no
@@ -501,14 +493,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
         sleepTime =
             std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
       }
-    }
-
-    // Sleep for the ETA for the next future to time out, or until we are woken
-    // up, either by shutting down or by creation of a new future.
-    {
-      std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
-      futureTimeoutCV_.wait_for(
-          lock, sleepTime); // TODO, should we add a predicate shutdown_.load()
+      futureTimeoutCV_.wait_for(lock, sleepTime);
     }
 
     if (shutdown_.load()) {
@@ -548,7 +533,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
           std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::steady_clock::now().time_since_epoch()) -
           startTime;
-      if (diffTime <= rpcTimeout_) {
+      if (rpcTimeout_.count() == 0 || diffTime <= rpcTimeout_) {
         // Since the futureTimeouts_ map is ordered by timeout, we don't need
         // to check the remaining futures.
         break;

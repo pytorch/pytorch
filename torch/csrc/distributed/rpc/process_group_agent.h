@@ -165,8 +165,7 @@ class ProcessGroupAgent : public RpcAgent {
   std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
-  // Lock and CV to wake up watchdog thread that watches for timed out futures.
-  mutable std::mutex futureTimeoutMutex_;
+  // CV to wake up watchdog thread that watches for timed out futures.
   std::condition_variable futureTimeoutCV_;
 };
 
