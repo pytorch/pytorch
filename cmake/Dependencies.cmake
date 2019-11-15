@@ -955,6 +955,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
     list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
+    list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
 
