@@ -36,4 +36,4 @@ def check_consistency():
 
 
 if __name__ == "__main__":
-    check_consistency()
+    """check_consistency()"""

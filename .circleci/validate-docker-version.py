@@ -41,6 +41,4 @@ def validate_docker_version():
 
 
 if __name__ == "__main__":
-    """
     validate_docker_version()
-    """
