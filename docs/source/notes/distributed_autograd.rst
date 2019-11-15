@@ -3,20 +3,14 @@ Distributed Autograd Design
 
 This note will present the detailed design for distributed autograd and walk
 through the internals of the same. Make sure you're familiar with
-`Autograd Mechanics`_,
-``torch.distributed.rpc`` and ``RRef`` before proceeding
-(RFC: https://github.com/pytorch/pytorch/issues/23110).
-
-..
-  TODO: Update the link above to point to actual RPC and RRef docs.
-
-.. background:
+:ref:`autograd-mechanics` and the :ref:`distributed-rpc-framework` before 
+proceeding.
 
 Background
 ^^^^^^^^^^
 
 Let's say you have two nodes and a very simple model partitioned across two
-nodes. This can be implemented using ``torch.distributed.rpc`` as follows:
+nodes. This can be implemented using :mod:`torch.distributed.rpc` as follows:
 
 .. code::
 
@@ -51,7 +45,7 @@ Autograd recording during the forward pass
 
 PyTorch builds the autograd graph during the forward pass and this graph is
 used to execute the backward pass. For more details see
-`How autograd encodes history`_.
+:ref:`how-autograd-encodes-history`.
 
 For distributed autograd, we need to keep track of all RPCs during the forward
 pass to ensure the backward pass is executed appropriately. For this purpose,
@@ -69,8 +63,8 @@ an RPC.
 - Each ``send-recv`` pair is assigned a globally unique ``autograd_message_id``
   to uniquely identify the pair. This is useful to lookup the corresponding
   function on a remote node during the backward pass.
-- For ``RRef``, whenever we call ``RRef.to_here()`` we attach an appropriate
-  ``send-recv`` pair for the tensors involved.
+- For :ref:`rref`, whenever we call :meth:`torch.distributed.rpc.RRef.to_here` 
+  we attach an appropriate ``send-recv`` pair for the tensors involved.
 
 As an example, this is what the autograd graph for our example above would look
 like (t5.sum() excluded for simplicity):
@@ -83,18 +77,20 @@ Distributed Autograd Context
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Each forward and backward pass that uses distributed autograd is assigned a
-unique ``Distributed Autograd Context`` and this context has a globally unique
-``autograd_context_id``. This context is created on each node as needed.
+unique :class:`torch.distributed.autograd.context` and this context has a 
+globally unique ``autograd_context_id``. This context is created on each node 
+as needed.
+
 This context serves the following purpose:
 
 1. Multiple nodes running distributed backward passes might accumulate
    gradients on the same tensor and as a result the ``.grad`` field of the
    tensor would have gradients from a variety of distributed backward passes
    before we have the opportunity to run the optimizer. This is similar to
-   calling `torch.autograd.backward`_ multiple times locally. In order to
+   calling :meth:`torch.autograd.backward` multiple times locally. In order to
    provide a way of separating out the gradients for each backward pass, the
-   gradients are accumulated in the ``Distributed Autograd Context`` for each
-   backward pass.
+   gradients are accumulated in the :class:`torch.distributed.autograd.context` 
+   for each backward pass.
 2. During the forward pass we store the ``send`` and ``recv`` functions for
    each autograd pass in this context. This ensures we hold references to the
    appropriate nodes in the autograd graph to keep it alive. In addition to
@@ -222,7 +218,7 @@ The algorithm is as follows:
    `Distributed Autograd Context`_. The gradients are stored in a
    ``Dict[Tensor, Tensor]``, which is basically a map from Tensor to its
    associated gradient and this map can be retrieved using the
-   ``get_gradients`` API.
+   :meth:`~torch.distributed.autograd.get_gradients` API.
 
 |
 
@@ -294,7 +290,4 @@ Distributed Optimizer
 ^^^^^^^^^^^^^^^^^^^^^
 Coming soon...
 
-.. _Autograd Mechanics: https://pytorch.org/docs/stable/notes/autograd.html
-.. _How autograd encodes history: https://pytorch.org/docs/stable/notes/autograd.html#how-autograd-encodes-the-history
-.. _torch.autograd.backward: https://pytorch.org/docs/stable/autograd.html#torch.autograd.backward
 .. _RFC: https://github.com/pytorch/pytorch/issues/23110
