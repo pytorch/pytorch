@@ -83,9 +83,6 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
              " for argument #", pos, " '", name, "' in call to ", api);
   }
-  if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
-    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "' in call to ", api);
-  }
   return expr.unsafeGetTensorImpl();
 }
 
@@ -102,10 +99,6 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
     if (expr.scalar_type() != scalar_type) {
       AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
                " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
-    }
-    if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
-      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
-               i , " in sequence argument at position #", pos, " '", name, "'");
     }
     unwrapped.emplace_back(expr.unsafeGetTensorImpl());
   }

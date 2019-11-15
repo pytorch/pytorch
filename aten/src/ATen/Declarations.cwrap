@@ -142,21 +142,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_resize_as_
-  cname: resizeAs
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  return: self
-  scalar_check: the_template_->dim() == 0
-  arguments:
-    - THTensor* self
-    - THTensor* the_template
-]]
-[[
   name: _th_index_select
   cpu_bool: True
   cuda_bool: True
@@ -391,50 +376,6 @@
         - THTensor* self
         - real other
     - cname: cbitor
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
-  name: _th_xor
-  cname: __xor__
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: bitxor
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: cbitxor
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_ixor_
-  cname: __ixor__
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: bitxor
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-    - cname: cbitxor
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -680,20 +621,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_acos
-  cname: acos
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_cosh
   cname: cosh
   types:
@@ -771,34 +698,6 @@
   backends:
     - CUDA
   variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_frac_
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: frac
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: _th_frac
-  cname: frac
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
   return: argument 0
   arguments:
     - arg: THTensor* result

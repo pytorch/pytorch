@@ -46,14 +46,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
 
-  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
-                      .def(
-                          "wait",
-                          &PyFuture::wait,
-                          py::call_guard<py::gil_scoped_release>());
-
   auto pyRRef =
-      shared_ptr_class_<PyRRef>(module, "RRef")
+      shared_ptr_class_<PyRRef>(module, "RRef", R"(
+          A class encapsulating a reference to a value of some type on a remote worker.
+          This handle will keep the referenced remote value alive on the worker.
+      )")
+          .def(py::init<const py::object&>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -118,10 +116,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "sync",
           &ProcessGroupAgent::sync,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_get_rpc_timeout",
-          &ProcessGroupAgent::getRpcTimeout,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {
@@ -138,7 +132,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def(
-      "invoke_rpc_builtin",
+      "_invoke_rpc_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
@@ -148,7 +142,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_rpc_python_udf",
+      "_invoke_rpc_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
@@ -157,7 +151,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_remote_builtin",
+      "_invoke_remote_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
@@ -167,13 +161,23 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_remote_python_udf",
+      "_invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors) {
         return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
+
+  module.def(
+      "get_rpc_timeout",
+      []() { return RpcAgent::getDefaultRpcAgent()->getRpcTimeout(); },
+      R"(
+          Retrieve the timeout for all RPCs that was set during RPC initialization.
+
+          Returns:
+            `datetime.timedelta` instance indicating the RPC timeout.
+      )");
 
   Py_RETURN_TRUE;
 }

@@ -53,7 +53,8 @@ if is_available():
             self_rank (int): a globally unique id/rank of this node.
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
-            rpc_timeout (datetime.timedelta): Timeout for RPCs. Defaults to 10 seconds.
+            rpc_timeout (datetime.timedelta): Timeout for RPCs. Defaults to 60 seconds.
+                0 means infinity.
         """
         # Rendezvous.
         world_size = len(worker_name_to_id)
@@ -61,6 +62,14 @@ if is_available():
             init_method, rank=self_rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
+
+        # Initialize autograd before RPC since _init_rpc guarantees all
+        # processes sync via the store. If we initialize autograd after RPC,
+        # there could be a race where some nodes might have initialized autograd
+        # and others might not have. As a result, a node calling
+        # torch.distributed.autograd.backward() would run into errors since
+        # other nodes might not have been initialized.
+        torch.distributed.autograd._init(worker_name_to_id[self_name])
 
         # Initialize RPC.
         _init_rpc(
@@ -72,6 +81,3 @@ if is_available():
             num_send_recv_threads,
             rpc_timeout,
         )
-
-        # Initialize Autograd.
-        torch.distributed.autograd._init(api._agent.get_worker_info().id)

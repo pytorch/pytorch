@@ -171,22 +171,82 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _with_file_like(f, mode, body):
-    """
-    Executes a body function with a file object for f, opening
-    it in 'mode' if it is a string filename.
-    """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = open(f, mode)
-    try:
-        return body(f)
-    finally:
-        if new_fd:
-            f.close()
+def _is_path(name_or_buffer):
+    return isinstance(name_or_buffer, str) or \
+        (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
+        (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+
+
+class _opener(object):
+    def __init__(self, file_like):
+        self.file_like = file_like
+
+    def __enter__(self):
+        return self.file_like
+
+    def __exit__(self, *args):
+        pass
+
+
+class _open_file(_opener):
+    def __init__(self, name, mode):
+        super(_open_file, self).__init__(open(name, mode))
+
+    def __exit__(self, *args):
+        self.file_like.close()
+
+
+class _open_buffer_reader(_opener):
+    pass
+
+
+class _open_buffer_writer(_opener):
+    def __exit__(self, *args):
+        self.file_like.flush()
+
+
+def _open_file_like(name_or_buffer, mode):
+    if _is_path(name_or_buffer):
+        return _open_file(name_or_buffer, mode)
+    else:
+        if 'w' in mode:
+            return _open_buffer_writer(name_or_buffer)
+        elif 'r' in mode:
+            return _open_buffer_reader(name_or_buffer)
+        else:
+            raise RuntimeError("Expected 'r' or 'w' in mode but got {}".format(mode))
+
+
+
+class _open_zipfile_reader(_opener):
+    def __init__(self, name_or_buffer):
+        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
+
+
+class _open_zipfile_writer_file(_opener):
+    def __init__(self, name):
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+
+
+class _open_zipfile_writer_buffer(_opener):
+    def __init__(self, buffer):
+        self.buffer = buffer
+        super(_open_zipfile_writer_buffer, self).__init__(torch._C.PyTorchFileWriter(buffer))
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+        self.buffer.flush()
+
+
+def _open_zipfile_writer(name_or_buffer):
+    if _is_path(name_or_buffer):
+        container = _open_zipfile_writer_file
+    else:
+        container = _open_zipfile_writer_buffer
+    return container(name_or_buffer)
 
 
 def _is_compressed_file(f):
@@ -258,7 +318,8 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
-    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
+    with _open_file_like(f, 'wb') as opened_file:
+        _save(obj, opened_file, pickle_module, pickle_protocol)
 
 
 def _save(obj, f, pickle_module, pickle_protocol):
@@ -414,21 +475,11 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)):
-        new_fd = True
-        f = open(f, 'rb')
-    elif (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = f.open('rb')
-    try:
-        if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
-            pickle_load_args['encoding'] = 'utf-8'
-        return _load(f, map_location, pickle_module, **pickle_load_args)
-    finally:
-        if new_fd:
-            f.close()
+    if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
+        pickle_load_args['encoding'] = 'utf-8'
+
+    with _open_file_like(f, 'rb') as opened_file:
+        return _load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 
 # Register pickling support for layout instances such as

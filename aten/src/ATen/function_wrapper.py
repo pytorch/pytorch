@@ -137,11 +137,6 @@ BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
-# Generate a file that lists all functions and their schema string. Used for XLA
-REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
-""")
-
 # add non-virtual declaration to TensorBody.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
@@ -154,7 +149,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
+        op${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -165,7 +160,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
+        op${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -186,7 +181,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -198,7 +193,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -243,7 +238,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -256,7 +251,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -494,7 +489,6 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'function_definitions': List[str],
     'type_ids': List[str],
     'native_function_declarations': List[str],
-    'registration_declarations': List[str],
 })
 
 # A Declarations.cwrap formal argument
@@ -1316,13 +1310,6 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        # RegistrationDeclarations.h is used downstream in XLA, where XLA uses
-        # it as the "source of truth" for pytorch ops and generates code based
-        # on it. We don't pass named tensor only functions there because XLA
-        # doesn't support them.
-        if not is_named_tensor_only:
-            top_env['registration_declarations'].append(
-                REGISTRATION_DECLARATION.substitute(option))
         top_env['list_of_aten_ops'].append(
             check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
         )
@@ -1711,7 +1698,8 @@ def create_derived(backend_type_env, declarations):
                         for arg in arguments:
                             scalar_check_arg = (scalar_check if not isinstance(scalar_check, dict)
                                                 else scalar_check.get(arg['name']))  # type: ignore
-                            if scalar_check_arg is not None:
+                            # maybe_zero_dim(false) is a no-op
+                            if scalar_check_arg is not None and scalar_check_arg != 'false':
                                 stmt = "{}_->maybe_zero_dim({});".format(arg['name'], scalar_check_arg)
                                 if nullable_argument(arg):
                                     stmt = "if ({}_) {}".format(arg['name'], stmt)
