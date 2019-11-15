@@ -85,7 +85,7 @@ We can now run the following commands to build the application from within the
   mkdir build
   cd build
   cmake -DCMAKE_PREFIX_PATH=/absolute/path/to/libtorch ..
-  make
+  cmake --build .
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
 distribution. If all goes well, it will look something like this:
@@ -121,7 +121,7 @@ distribution. If all goes well, it will look something like this:
   -- Configuring done
   -- Generating done
   -- Build files have been written to: /example-app/build
-  root@4b5a67132e81:/example-app/build# make
+  root@4b5a67132e81:/example-app/build# cmake --build .
   Scanning dependencies of target example-app
   [ 50%] Building CXX object CMakeFiles/example-app.dir/example-app.cpp.o
   [100%] Linking CXX executable example-app
