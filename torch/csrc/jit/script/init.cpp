@@ -196,6 +196,35 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
 }
 } // namespace
 
+bool checkMutableFunctionDefault(const py::object& def_arg) {
+  if (py::isinstance<py::list>(def_arg) || py::isinstance<py::dict>(def_arg)) {
+    return true;
+  }
+  if (py::isinstance<py::tuple>(def_arg)) {
+    auto pytuple = def_arg.cast<py::tuple>();
+    for (py::handle t : pytuple) {
+      py::object obj = py::reinterpret_borrow<py::object>(t);
+      if (checkMutableFunctionDefault(obj)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void checkMutableFunctionDefault(
+    const SourceRange& range,
+    const Argument& arg,
+    const py::object& def_arg) {
+  if (checkMutableFunctionDefault(def_arg) || arg.type()->cast<ClassType>()) {
+    throw ErrorReport(range)
+        << "Mutable default parameters are not supported because Python binds them to the function"
+        << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
+        << " the default parameter within the body of the function. Found "
+        << def_arg.get_type() << " on parameter " << arg.name();
+  }
+}
+
 FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
     const FunctionSchema& schema,
@@ -205,6 +234,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
   for (auto& arg : schema.arguments()) {
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
+      checkMutableFunctionDefault(range, arg, it->second);
       try {
         IValue value;
         auto n = arg.N();
