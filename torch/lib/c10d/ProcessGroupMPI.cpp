@@ -143,7 +143,7 @@ int ProcessGroupMPI::AsyncWork::sourceRank() const {
 
 bool ProcessGroupMPI::AsyncWork::wait() {
   if (request_ == MPI_REQUEST_NULL) {
-    return;
+    return true;
   }
 
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
