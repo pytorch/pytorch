@@ -75,11 +75,16 @@ class ProcessGroupAgent : public RpcAgent {
     std::shared_ptr<FutureMessage> future_;
     std::chrono::milliseconds startTime_;
     int dstRank_;
+    std::chrono::milliseconds timeout_;
     FutureInfo(
         const std::shared_ptr<FutureMessage>& future,
         const std::chrono::milliseconds& startTime,
-        int dstRank)
-        : future_(future), startTime_(startTime), dstRank_(dstRank){};
+        int dstRank,
+        const std::chrono::milliseconds timeout)
+        : future_(future),
+          startTime_(startTime),
+          dstRank_(dstRank),
+          timeout_(timeout){};
     FutureInfo(){};
   };
 
@@ -94,6 +99,11 @@ class ProcessGroupAgent : public RpcAgent {
   void pollTimedOutRPCs();
   // process timed out futures
   const std::vector<FutureInfo> processTimedOutFutures();
+  // compute the remaining time for an RPC, given its absolute start time and
+  // its timeout.
+  const std::chrono::milliseconds getRPCRemainingTime(
+      const std::chrono::milliseconds& rpcStartTime,
+      const std::chrono::milliseconds& rpcTimeout);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

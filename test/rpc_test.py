@@ -1045,11 +1045,12 @@ class RpcTest(object):
         rpc.join_rpc()
 
     @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_timeouts(self):
         rpc.set_rpc_timeout(timedelta(milliseconds=1))
         dst_rank = (self.rank + 1) % self.world_size
         fut = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=())
-        with self.assertRaisesRegex(RuntimeError, "Future ran for more than"):
+        with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
             fut.wait()
 
         # future should run to completion if the timeout is longer.

@@ -84,8 +84,8 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
-constexpr std::chrono::milliseconds INFINITY_SLEEP_INTERVAL =
-    std::chrono::hours(8760);
+const std::chrono::milliseconds INFINITY_SLEEP_INTERVAL =
+    std::chrono::hours(std::numeric_limits<int64_t>::max());
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -292,10 +292,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
             std::chrono::steady_clock::now().time_since_epoch());
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
-      futures_[requestId] = FutureInfo(future, futureStartTime, to.id_);
+      auto futureInfo =
+          FutureInfo(future, futureStartTime, to.id_, rpcTimeout_);
+      futures_[requestId] = futureInfo;
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[futureStartTime].push_back(requestId);
-      // Signal watchdog for future timeouts to begin
+      // Signal the watchdog for future timeouts to begin if this is the first
+      // future created, or if a future with a lower TTL has  been created.
       if (futures_.size() == 1) {
         futureTimeoutCV_.notify_one();
       }
@@ -423,7 +426,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             // and remove it from the timeouts map
             auto& futuresAtTime = futureTimeouts_[futureStartTime];
             auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
-            TORCH_CHECK(
+            TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
                 "Error: could not find future in futureTimeouts map, race condition.");
             futuresAtTime.erase(it);
@@ -477,25 +480,23 @@ void ProcessGroupAgent::listenLoop() {
 void ProcessGroupAgent::pollTimedOutRPCs() {
   while (!shutdown_.load()) {
     std::chrono::milliseconds sleepTime;
-    {
-      std::unique_lock<std::mutex> lock{futureMutex_};
-      // Estimate amount of time the first future will time out in, and sleep
-      // for that long.
-      // if there are no futures or the RPC timeout is set to 0 (meaning no
-      // timeout), then sleep for a set "infinity" time.
-      if (futureTimeouts_.empty() || rpcTimeout_.count() == 0) {
-        sleepTime = INFINITY_SLEEP_INTERVAL;
-      } else {
-        auto runningTime =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()) -
-            futureTimeouts_.begin()->first;
-        sleepTime =
-            std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
-      }
-      futureTimeoutCV_.wait_for(lock, sleepTime);
+    std::unique_lock<std::mutex> lock{futureMutex_};
+    // Estimate amount of time the first future will time out in, and sleep
+    // for that long.
+    // if there are no futures or the RPC timeout is set to 0 (meaning no
+    // timeout), then sleep for a set "infinity" time.
+    if (futureTimeouts_.empty() || rpcTimeout_.count() == 0) {
+      sleepTime = INFINITY_SLEEP_INTERVAL;
+    } else {
+      const auto remainingTime =
+          getRPCRemainingTime(futureTimeouts_.begin()->first, rpcTimeout_);
+      sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
     }
+    futureTimeoutCV_.wait_for(lock, sleepTime);
 
+    if (rpcTimeout_.count() == 0) {
+      continue;
+    }
     if (shutdown_.load()) {
       return;
     }
@@ -504,9 +505,10 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
+    lock.unlock();
     if (!timedOutFutures.empty()) {
-      std::stringstream ss;
-      ss << "Future ran for more than " << rpcTimeout_.count()
+      std::ostringstream ss;
+      ss << "RPC ran for more than " << rpcTimeout_.count()
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
@@ -524,38 +526,43 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
     processTimedOutFutures() {
   std::vector<FutureInfo> timedOutFutures;
-  {
-    // Check for timed out futures while holding the lock.
-    std::lock_guard<std::mutex> lock{futureMutex_};
-    for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
-         /* intentional no increment */) {
-      const std::chrono::milliseconds startTime = it->first;
-      const std::vector<int64_t> futureIDs = it->second;
-      const auto diffTime =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now().time_since_epoch()) -
-          startTime;
-      if (rpcTimeout_.count() == 0 || diffTime <= rpcTimeout_) {
-        // Since the futureTimeouts_ map is ordered by timeout, we don't need
-        // to check the remaining futures.
-        break;
-      } else {
-        for (const auto& futureID : futureIDs) {
-          auto it = futures_.find(futureID);
-          TORCH_CHECK(
-              it != futures_.end(),
-              "Race Condition - Expected future does not exist in map");
-          const auto futInfo = it->second;
-          timedOutFutures.push_back(futInfo);
-          futures_.erase(futureID);
-        }
-        // post-fix increment iterator to ensure that correct iteration order
-        // is maintained.
-        futureTimeouts_.erase(it++);
+  for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
+       /* intentional no increment */) {
+    const std::chrono::milliseconds& startTime = it->first;
+    const std::vector<int64_t>& futureIDs = it->second;
+    const auto remainingTime =
+        getRPCRemainingTime(futureTimeouts_.begin()->first, rpcTimeout_);
+    if (rpcTimeout_.count() == 0 || remainingTime.count() > 0) {
+      // Since the futureTimeouts_ map is ordered by timeout, we don't need
+      // to check the remaining futures.
+      break;
+    } else {
+      for (const auto& futureID : futureIDs) {
+        auto it = futures_.find(futureID);
+        TORCH_INTERNAL_ASSERT(
+            it != futures_.end(),
+            "Race Condition - Expected future does not exist in map");
+        const auto futInfo = it->second;
+        timedOutFutures.push_back(futInfo);
+        futures_.erase(futureID);
       }
+      // post-fix increment iterator to ensure that correct iteration order
+      // is maintained.
+      it = futureTimeouts_.erase(it);
     }
   }
   return timedOutFutures;
+}
+
+const std::chrono::milliseconds ProcessGroupAgent::getRPCRemainingTime(
+    const std::chrono::milliseconds& rpcStartTime,
+    const std::chrono::milliseconds& rpcTimeout) {
+  const auto elapsedTime =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()) -
+      rpcStartTime;
+  const auto remainingTime = rpcTimeout - elapsedTime;
+  return remainingTime;
 }
 
 } // namespace rpc
