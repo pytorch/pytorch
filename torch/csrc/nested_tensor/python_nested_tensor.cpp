@@ -145,6 +145,18 @@ PyObject *_ListNestedTensorVariable_unbind(PyObject *self_) {
   return return_list;
 }
 
+Variable _NestedNode_to_tensor(const _NestedNode &nested_node) {
+  if (nested_node._children.size() == 0) {
+    return nested_node._variable_node._variable;
+  } else {
+    std::vector<at::Tensor> variables;
+    for (_NestedNode node : nested_node._children) {
+      variables.push_back(_NestedNode_to_tensor(node));
+    }
+    return stack(variables);
+  }
+}
+
 std::string _NestedNode___str__(const _NestedNode &nested_node) {
   std::stringstream result;
   if (nested_node._children.size() == 0) {
@@ -164,6 +176,13 @@ std::string _NestedNode___str__(const _NestedNode &nested_node) {
     result << "])";
     return result.str();
   }
+}
+
+PyObject *_ListNestedTensorVariable_to_tensor(PyObject *self_) {
+  HANDLE_TH_ERRORS
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return wrap(_NestedNode_to_tensor(self.get_structure()));
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *_ListNestedTensorVariable___str__(PyObject *self_) {
@@ -366,6 +385,8 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      METH_NOARGS, "Returns is_contiguous."},
     {"numel", (PyCFunction)_ListNestedTensorVariable_numel, METH_NOARGS,
      "Returns numel."},
+    {"to_tensor", (PyCFunction)_ListNestedTensorVariable_to_tensor, METH_NOARGS,
+     "Returns to_tensor."},
     {"dim", (PyCFunction)_ListNestedTensorVariable_dim, METH_NOARGS,
      "Returns dim."},
     {"to", (PyCFunction)_ListNestedTensorVariable_to,
