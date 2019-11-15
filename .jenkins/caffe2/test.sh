@@ -104,8 +104,13 @@ fi
 echo "Running Python tests.."
 if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   # locale setting is required by click package with py3
-  export LC_ALL=C.UTF-8
-  export LANG=C.UTF-8
+  for loc in "en_US.utf8" "C.UTF-8"; do
+    if locale -a | grep "$loc" >/dev/null 2>&1; then
+      export LC_ALL="$loc"
+      export LANG="$loc"
+      break;
+    fi
+  done
 fi
 
 pip install --user pytest-sugar
@@ -119,6 +124,7 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
   ${rocm_ignore_test[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
@@ -139,4 +145,3 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
-

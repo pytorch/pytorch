@@ -11,21 +11,13 @@ namespace jit {
 
 namespace {
 
-at::Tensor wrap_tensor(at::Tensor&& tensor) {
-  if (tensor.is_variable()) {
-    return std::move(tensor);
-  } else {
-    return torch::autograd::make_variable(std::move(tensor));
-  }
-}
-
 IValue wrap(IValue&& ivalue) {
   if (ivalue.isTensor()) {
-    return wrap_tensor(std::move(ivalue).toTensor());
+    return std::move(ivalue).toTensor();
   } else if (ivalue.isTensorList()) {
     c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
     for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = wrap_tensor(list.extract(i));
+      list[i] = list.extract(i);
     }
     return std::move(list);
   } else if (ivalue.isGenericList()) {

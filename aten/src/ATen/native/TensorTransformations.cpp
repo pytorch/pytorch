@@ -49,7 +49,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   auto in_tensor = self;
   const int64_t total_dims = in_tensor.dim();
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  Tensor out_tensor = at::empty_like(in_tensor);
+  Tensor out_tensor = at::empty_like(in_tensor, at::MemoryFormat::Contiguous);
 
   // create contiguous strides for input tensor
   auto stride_contiguous_v = std::vector<int64_t>(total_dims);
@@ -80,7 +80,7 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   }
   // avoid a div zero error below.
   if (self.numel() == 0) {
-    return self.clone();
+    return self.clone(at::MemoryFormat::Preserve);
   }
   int64_t dim = dims[0];
   int64_t size = self.size(dim);
@@ -136,7 +136,7 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
     case 3:
       return self.flip({dims[0]}).transpose_(dims[0], dims[1]);
     default:
-      return self.clone();
+      return self.clone(at::MemoryFormat::Contiguous);
   }
 }
 
