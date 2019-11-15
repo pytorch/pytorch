@@ -296,8 +296,8 @@ void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, i
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
   float fAlpha = alpha;
   float fBeta = beta;
   THCublasCheck(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
