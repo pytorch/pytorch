@@ -27,6 +27,7 @@ torch::nn::AvgPool1d|:white_check_mark:|No
 torch::nn::AvgPool2d|:white_check_mark:|No
 torch::nn::AvgPool3d|:white_check_mark:|No
 torch::nn::FractionalMaxPool2d|No|No
+torch::nn::FractionalMaxPool3d|No|No
 torch::nn::LPPool1d|:white_check_mark:|No
 torch::nn::LPPool2d|:white_check_mark:|No
 torch::nn::AdaptiveMaxPool1d|:white_check_mark:|No
@@ -139,7 +140,6 @@ torch::nn::utils.rnn.pack_padded_sequence|No|No
 torch::nn::utils.rnn.pad_packed_sequence|No|No
 torch::nn::utils.rnn.pad_sequence|No|No
 torch::nn::utils.rnn.pack_sequence|No|No
-torch::nn::FractionalMaxPool3d|No|No
 torch::nn::SampleModule|:white_check_mark:|:white_check_mark:
 
 ## torch::nn::functional
