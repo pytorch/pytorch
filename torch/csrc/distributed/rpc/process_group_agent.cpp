@@ -85,7 +85,7 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
 constexpr std::chrono::milliseconds INFINITY_SLEEP_INTERVAL =
-    std::chrono::hours(100);
+    std::chrono::hours(8760);
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -505,7 +505,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
     if (!timedOutFutures.empty()) {
-      // TODO enhance error message
       std::stringstream ss;
       ss << "Future ran for more than " << rpcTimeout_.count()
          << " milliseconds and timed out.";
