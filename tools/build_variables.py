@@ -178,6 +178,7 @@ libtorch_sources = [
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/object.cpp",
     "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/utils/byte_order.cpp",
