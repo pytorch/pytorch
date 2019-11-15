@@ -36,10 +36,6 @@ THP_API PyObject *_ListNestedTensorVariableClass;
 
 // If is_leaf tensors are available, otherwise children.
 struct _NestedNode {
-  // _NestedNode() = delete;
-  // _NestedNode(const _NestedNode&) = delete;
-  // _NestedNode(_NestedNode&&) = delete;
-
   _NestedNode() {}
   _NestedNode(const std::vector<_NestedNode> children) : _children(children) {}
   _NestedNode(_VariableNode variable_node) : _variable_node(variable_node) {}
@@ -141,21 +137,12 @@ static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
 TORCH_API extern PyTypeObject _ListNestedTensorVariableType;
 
 // TODO: Eventually allow construction from a list of _BufferNestedTensors.
-
 struct TORCH_API _ListNestedTensor {
   _ListNestedTensor() = delete;
-  // _ListNestedTensor(_ListNestedTensor& other) : _structure(other._structure),
-  // _first_variable(_get_first_variable(_structure)) {}
-  // _ListNestedTensor(_ListNestedTensor&&) = delete;
-
-  // _ListNestedTensor(std::vector<py::object> tensors)
-  //     : _ListNestedTensor(_get_structure(tensors)) {}
   _ListNestedTensor(_NestedNode structure)
       : _structure(structure),
         _first_variable(_get_first_variable(_structure)) {}
   int64_t element_size() { return _first_variable.element_size(); }
-  // py::tuple size(int64_t dim) { return py::make_tuple(py::none(),
-  // py::none()); }
   _ListNestedTensor to(at::TensorOptions options, bool non_blocking, bool copy,
                        c10::optional<MemoryFormat> memory_format) {
     return _ListNestedTensor(
@@ -238,6 +225,7 @@ struct TORCH_API _ListNestedTensor {
   // std::vector<py::object> unbind();
   // std::string __str__();
   // std::string __repr__();
+  // py::tuple size(int64_t dim);
 
 private:
   const _NestedNode _structure;
@@ -254,9 +242,6 @@ inline bool _ListNestedTensorVariable_Check(PyObject *obj) {
   return _ListNestedTensorVariableClass &&
          PyObject_IsInstance(obj, _ListNestedTensorVariableClass);
 }
-
-// template <class R, class F> std::vector<R> map_fn(const _ListNestedTensor,
-// F);
 
 void initialize_python_bindings();
 
