@@ -157,6 +157,8 @@ std::vector<Dimname> compute_baddbmm_outnames(
     TensorImpl* other,
     TensorImpl* bias);
 
+bool are_names_equal(TensorImpl* self, TensorImpl* other);
+
 } // namespace namedinference
 
 } // namespace at
