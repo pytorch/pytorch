@@ -67,9 +67,6 @@ from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
-from hypothesis import given
-from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -1120,10 +1117,7 @@ graph(%x : Tensor,
                       if x.startswith('_observer_')])
         assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
 
-    @given(
-        is_per_channel=st.booleans()
-    )
-    def test_insert_quant_dequant(self, is_per_channel):
+    def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1132,36 +1126,37 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.conv(x)
 
-        m = torch.jit.script(M())
-        observer = default_per_channel_weight_observer.with_args(ch_axis=1) if is_per_channel \
-            else default_observer
-        qconfig = QConfig(activation=observer, weight=observer)
-        qconfig_dict = {
-            '': script_qconfig(qconfig)
-        }
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+        for is_per_channel in [True, False]:
+            m = torch.jit.script(M())
+            observer = default_per_channel_weight_observer.with_args(ch_axis=1) if is_per_channel \
+                else default_observer
+            qconfig = QConfig(activation=observer, weight=observer)
+            qconfig_dict = {
+                '': script_qconfig(qconfig)
+            }
+            torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+            data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
-        get_forward(m._c)(data)
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
-        assert len(m._modules._c.items()) == 1, \
-            'Expected to have single submodule of conv'
+            get_forward(m._c)(data)
+            torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
+            assert len(m._modules._c.items()) == 1, \
+                'Expected to have single submodule of conv'
 
-        get_forward(m._c)(data)
-        quant_func = "aten::quantize_per_channel" if is_per_channel \
-            else "aten::quantize_per_tensor"
-        FileCheck().check_not(quant_func) \
-                   .check("prim::CallMethod[name=\"forward\"]") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(str(get_forward_graph(m._c)))
-        FileCheck().check(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check("aten::conv2d") \
-                   .check(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check("return") \
-                   .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
+            get_forward(m._c)(data)
+            quant_func = "aten::quantize_per_channel" if is_per_channel \
+                else "aten::quantize_per_tensor"
+            FileCheck().check_not(quant_func) \
+                       .check("prim::CallMethod[name=\"forward\"]") \
+                       .check_not(quant_func) \
+                       .check("return") \
+                       .run(str(get_forward_graph(m._c)))
+            FileCheck().check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("aten::conv2d") \
+                       .check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("return") \
+                       .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_prepack_unpack(self):
@@ -1466,11 +1461,7 @@ graph(%input, %weight):
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
-    @no_deadline
-    @given(
-        is_per_channel=st.booleans()
-    )
-    def test_fold_prepack(self, is_per_channel):
+    def test_fold_prepack(self):
         def copy_weights(name, m, ref_m):
             if name == 'linear':
                 m.fc1.weight = torch.nn.Parameter(ref_m.fc1.module.weight.detach())
@@ -1478,72 +1469,73 @@ graph(%input, %weight):
             else:
                 m.conv.weight = torch.nn.Parameter(ref_m.conv.weight.detach())
 
-        for name, M, ref_M, data in [
-                ('linear',
-                 SingleLayerLinearModel,
-                 AnnotatedSingleLayerLinearModel,
-                 torch.randn((5, 5), dtype=torch.float)),
-                ('conv',
-                 ConvModel,
-                 AnnotatedConvModel,
-                 torch.randn((1, 3, 7, 7), dtype=torch.float))]:
-            qconfig = QConfig(
-                activation=default_observer,
-                weight=default_per_channel_weight_observer if is_per_channel else default_weight_observer)
-            # eager mode
-            ref_m = ref_M()
-            m = M()
-            copy_weights(name, m, ref_m)
-            ref_m.qconfig = qconfig
-            ref_m = quantize(ref_m, test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
-            ref_res = ref_m(data)
-            # script mode
-            m = torch.jit.script(m)
-            qconfig_dict = {
-                '': script_qconfig(qconfig)
-            }
-            m._c = torch._C._jit_pass_insert_observers(m._c, 'forward', qconfig_dict, False)
-            get_forward(m._c)(data)
-            m._c = torch._C._jit_pass_insert_quant_dequant(m._c, 'forward', False)
-            torch._C._jit_pass_insert_prepack_unpack(m._c)
-            linear_packed_params = torch.jit.script(LinearPackedParams())._c
-            conv_packed_params = torch.jit.script(ConvPackedParams())._c
-            torch._C._jit_pass_fold_prepack(m._c,
-                                            linear_packed_params,
-                                            conv_packed_params)
-            res = get_forward(m._c)(data)
-            # check result
-            self.assertEqual(res, ref_res)
+        for is_per_channel in [True, False]:
+            for name, M, ref_M, data in [
+                    ('linear',
+                     SingleLayerLinearModel,
+                     AnnotatedSingleLayerLinearModel,
+                     torch.randn((5, 5), dtype=torch.float)),
+                    ('conv',
+                     ConvModel,
+                     AnnotatedConvModel,
+                     torch.randn((1, 3, 7, 7), dtype=torch.float))]:
+                qconfig = QConfig(
+                    activation=default_observer,
+                    weight=default_per_channel_weight_observer if is_per_channel else default_weight_observer)
+                # eager mode
+                ref_m = ref_M()
+                m = M()
+                copy_weights(name, m, ref_m)
+                ref_m.qconfig = qconfig
+                ref_m = quantize(ref_m, test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
+                ref_res = ref_m(data)
+                # script mode
+                m = torch.jit.script(m)
+                qconfig_dict = {
+                    '': script_qconfig(qconfig)
+                }
+                m._c = torch._C._jit_pass_insert_observers(m._c, 'forward', qconfig_dict, False)
+                get_forward(m._c)(data)
+                m._c = torch._C._jit_pass_insert_quant_dequant(m._c, 'forward', False)
+                torch._C._jit_pass_insert_prepack_unpack(m._c)
+                linear_packed_params = torch.jit.script(LinearPackedParams())._c
+                conv_packed_params = torch.jit.script(ConvPackedParams())._c
+                torch._C._jit_pass_fold_prepack(m._c,
+                                                linear_packed_params,
+                                                conv_packed_params)
+                res = get_forward(m._c)(data)
+                # check result
+                self.assertEqual(res, ref_res)
 
-            # check attributes
-            # construct a RecursiveScriptModule
-            m = wrap_cpp_module(m._c)
-            mod_to_inspect = m.fc1 if name == 'linear' else m.conv
-            packed_module_list = [x for x, _ in mod_to_inspect._modules._c.items()
-                                  if x.startswith('_' + name + '_packed_params_module')]
-            assert len(packed_module_list) == 1, \
-                'Expected to have one packed_params_module'
-            packed_module_name = packed_module_list[0]
-            # check values
-            w, _ = mod_to_inspect._c.getattr(packed_module_name)._get_method('_weight_bias')()
-            original_w = mod_to_inspect.weight
-            if is_per_channel:
-                ref_w = torch.quantize_per_channel(original_w,
-                                                   w.q_per_channel_scales(),
-                                                   w.q_per_channel_zero_points(),
-                                                   w.q_per_channel_axis(),
-                                                   w.dtype).dequantize()
-            else:
-                ref_w = torch.quantize_per_tensor(original_w, w.q_scale(), w.q_zero_point(), w.dtype).dequantize()
-            self.assertEqual(ref_w, w.dequantize())
+                # check attributes
+                # construct a RecursiveScriptModule
+                m = wrap_cpp_module(m._c)
+                mod_to_inspect = m.fc1 if name == 'linear' else m.conv
+                packed_module_list = [x for x, _ in mod_to_inspect._modules._c.items()
+                                      if x.startswith('_' + name + '_packed_params_module')]
+                assert len(packed_module_list) == 1, \
+                    'Expected to have one packed_params_module'
+                packed_module_name = packed_module_list[0]
+                # check values
+                w, _ = mod_to_inspect._c.getattr(packed_module_name)._get_method('_weight_bias')()
+                original_w = mod_to_inspect.weight
+                if is_per_channel:
+                    ref_w = torch.quantize_per_channel(original_w,
+                                                       w.q_per_channel_scales(),
+                                                       w.q_per_channel_zero_points(),
+                                                       w.q_per_channel_axis(),
+                                                       w.dtype).dequantize()
+                else:
+                    ref_w = torch.quantize_per_tensor(original_w, w.q_scale(), w.q_zero_point(), w.dtype).dequantize()
+                self.assertEqual(ref_w, w.dequantize())
 
-            # test serialization
-            buffer = io.BytesIO()
-            torch.jit.save(m, buffer)
-            buffer.seek(0)
-            loaded_mod = torch.jit.load(buffer)
-            loaded_res = loaded_mod(data)
-            self.assertEqual(ref_res, loaded_res)
+                # test serialization
+                buffer = io.BytesIO()
+                torch.jit.save(m, buffer)
+                buffer.seek(0)
+                loaded_mod = torch.jit.load(buffer)
+                loaded_res = loaded_mod(data)
+                self.assertEqual(ref_res, loaded_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
