@@ -567,6 +567,7 @@ class HistogramObserver(_ObserverBase):
         self.min_val = None
         self.max_val = None
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
+        self.upsample_rate = 128
 
     @torch.jit.ignore
     def _non_linear_param_search(self):
@@ -703,6 +704,7 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit.ignore
     def _adjust_min_max(self, combined_min, combined_max, upsample_rate):
+        # type: (Tensor, Tensor, int) -> Tuple[Tensor, Tensor, int, int]
         # We ensure that:
         # (combined_max - combined_min)/(downsample_rate*Nbins) = (max - min)/(upsample_rate*Nbins)
         # This allows us to have a common grid of resolution s, where we can align
@@ -710,15 +712,16 @@ class HistogramObserver(_ObserverBase):
         # start_idx maps min_val to the histogram bin index.
 
         hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
-        downsample_rate = torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).to(torch.int)
+        downsample_rate = torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).to(torch.int).item()
         e = downsample_rate * (self.bins * hist_bin_width) - (combined_max - combined_min)
         combined_max = combined_max + e / 2
         combined_min = combined_min - e / 2
-        start_idx = torch.round((self.min_val - combined_min) / hist_bin_width).to(torch.int)
+        start_idx = torch.round((self.min_val - combined_min) / hist_bin_width).to(torch.int).item()
         return combined_min, combined_max, downsample_rate, start_idx
 
     @torch.jit.ignore
     def _combine_histograms(self, orig_hist, new_hist, upsample_rate, downsample_rate, start_idx, Nbins):
+        # type: (Tensor, Tensor, int, int, int, int) -> Tensor
         # First up-sample the histogram with new data by a factor of L
         # This creates an approximate probability density thats piecwise constant
         upsampled_histogram = new_hist.repeat_interleave(upsample_rate)
@@ -726,8 +729,8 @@ class HistogramObserver(_ObserverBase):
         # histogram, which is initialized with zeros.
         # The offset at which the histogram is introduced is determined
         # by the start index as the output histogram can cover a wider range
-        histogram_with_output_range = torch.zeros((Nbins * downsample_rate.item()))
-        histogram_with_output_range[start_idx.item():Nbins * upsample_rate + start_idx.item()] = upsampled_histogram
+        histogram_with_output_range = torch.zeros((Nbins * downsample_rate))
+        histogram_with_output_range[start_idx:Nbins * upsample_rate + start_idx] = upsampled_histogram
         # Compute integral histogram, double precision is needed to ensure
         # that there are no overflows
         integral_histogram = torch.cumsum(histogram_with_output_range, 0,
@@ -759,16 +762,16 @@ class HistogramObserver(_ObserverBase):
             # combine the existing histogram and new histogram into 1 histogram
             # We do this by first upsampling the histogram to a dense grid
             # and then downsampling the histogram efficiently
-            upsample_rate = 128
-            combined_min, combined_max, downsample_rate, start_idx = self._adjust_min_max(combined_min, combined_max, upsample_rate)
+            combined_min, combined_max, downsample_rate, start_idx = \
+                self._adjust_min_max(combined_min, combined_max, self.upsample_rate)
             combined_histogram = torch.histc(x, self.bins, min=combined_min, max=combined_max)
-            if combined_min == self.min_val and combined_max == self.max_val:
+            if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
             else:
                 combined_histogram = self._combine_histograms(
                     combined_histogram,
                     self.histogram,
-                    upsample_rate,
+                    self.upsample_rate,
                     downsample_rate,
                     start_idx,
                     self.bins)
