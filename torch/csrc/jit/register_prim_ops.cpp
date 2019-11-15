@@ -25,6 +25,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <bitset>
@@ -324,7 +325,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Scalar s;
            pop(stack, s);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
+           push(stack, at::scalar_to_tensor(s));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -335,7 +336,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            bool b;
            pop(stack, b);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(b)));
+           push(stack, at::scalar_to_tensor(b));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -931,15 +932,26 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AutogradAnyNonZero,
+         "prim::AutogradAnyNonZero(...) -> int",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
-           return [=](Stack& stack) {
+           return [num_inputs](Stack& stack) {
              bool result = false;
-             for (const IValue& t : last(stack, num_inputs)) {
-               if (t.toTensor().defined()) {
-                 result = true;
-                 break;
+             for (const IValue& v : last(stack, num_inputs)) {
+               if (v.isTensor()) {
+                 if (v.toTensor().defined()) {
+                   result = true;
+                   break;
+                 }
+               } else if (v.isTensorList()) {
+                 for (const at::Tensor& t : v.toTensorListRef()) {
+                   result = true;
+                 }
+                 if (result) {
+                   break;
+                 }
+               } else {
+                 TORCH_INTERNAL_ASSERT(false);
                }
              }
              drop(stack, num_inputs);
@@ -947,18 +959,25 @@ RegisterOperators reg(
              return 0;
            };
          },
-         aliasAnalysisSpecialCase()),
+         aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
          [](Stack& stack) {
            at::Tensor a, b;
            pop(stack, a, b);
-           if (!a.defined())
-             stack.emplace_back(b);
-           else if (!b.defined())
+           if (!a.defined() && !b.defined()) {
+             // undef + undef == undef
              stack.emplace_back(a);
-           else
+           }
+           else if (!a.defined()) {
+             stack.emplace_back(b);
+           }
+           else if (!b.defined()) {
+             stack.emplace_back(a);
+           }
+           else {
              stack.emplace_back(a + b);
+           }
            return 0;
          },
          aliasAnalysisSpecialCase()),
@@ -2380,7 +2399,8 @@ RegisterOperators reg2({
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          char c = string.at(index);
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
           return 0;
         },
@@ -2737,7 +2757,8 @@ RegisterOperators reg2({
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          char c = string.at(index);
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
           return 0;
         },

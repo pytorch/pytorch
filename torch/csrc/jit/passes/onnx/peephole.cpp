@@ -388,7 +388,7 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_versio
   gather_indices->insertBefore(n);
   gather_indices->t_(
       attr::value,
-      autograd::make_variable(at::scalar_to_tensor(at::Scalar(1))));
+      at::scalar_to_tensor(at::Scalar(1)));
 
   Node* batch_size = graph->create(onnx::Gather, 1);
   batch_size->insertBefore(n);
@@ -404,20 +404,20 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_versio
   hidden_size->insertBefore(n);
   hidden_size->t_(
       attr::value,
-      autograd::make_variable(at::full(
+      at::full(
           {1},
           n->i(attr::hidden_size),
-          at::kLong))); // at::Scalar(n->i(attr::hidden_size)).toTensor());
+          at::kLong)); // at::Scalar(n->i(attr::hidden_size)).toTensor());
 
   Node* num_directions = graph->create(onnx::Constant, 1);
   num_directions->insertBefore(n);
   num_directions->t_(
       attr::value,
-      autograd::make_variable(scalar_to_tensor(at::Scalar(
+      scalar_to_tensor(at::Scalar(
           n->hasAttribute(attr::direction) &&
                   n->s(attr::direction) == "bidirectional"
               ? 2
-              : 1))));
+              : 1)));
 
   Node* unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_num_directions->insertBefore(n);
@@ -519,6 +519,8 @@ static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
 }
 
 static void eraseListConstruct(Block* block) {
+  // TODO: Fix this pass/maybe get rid of this part.
+  // Tensor lists might be used for meshgrid and such ops as well.
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* n = *it;
@@ -590,13 +592,13 @@ static void fuseSplitListUnpack(Block* b) {
       auto origSplitNode = it->input()->node();
 
       Node* splitNode =
-          b->owningGraph()->create(onnx::Split, it->outputs().size());
+        b->owningGraph()->create(onnx::Split, it->outputs().size());
       for (size_t i = 0; i < splitNode->outputs().size(); ++i) {
         splitNode->outputs()[i]->copyMetadata(it->outputs()[i]);
       }
       splitNode->copyAttributes(*origSplitNode);
       splitNode->insertBefore(origSplitNode);
-      splitNode->addInput(origSplitNode->input());
+      splitNode->addInput(origSplitNode->inputs().at(0));
       it->replaceAllUsesWith(splitNode);
       it->removeAllInputs();
       origSplitNode->destroy();
@@ -645,6 +647,24 @@ static void fuseUnbindListUnpack(Block *b) {
       it->removeAllInputs();
       orig_unbind_node->destroy();
       it.destroyCurrent();
+    }
+  }
+}
+
+// For ops such as meshgrid where output is a list of Tensors
+// (returns prim::ListConstruct), we need to unpack the list
+// before the pass which deletes ListConstruct.
+static void fuseListConstructListUnpack(Block *b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseListConstructListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == prim::ListConstruct) {
+      for (size_t i = 0; i < it->outputs().size(); i++) {
+        auto output = it->outputs().at(i);
+        output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
+      }
     }
   }
 }
@@ -698,9 +718,10 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
-  eraseListConstruct(graph->block());
+  fuseListConstructListUnpack(graph->block());
   fuseSplitListUnpack(graph->block());
   fuseUnbindListUnpack(graph->block());
+  eraseListConstruct(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
 }
 
