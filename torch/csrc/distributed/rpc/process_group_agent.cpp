@@ -298,7 +298,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[futureStartTime].push_back(requestId);
       // Signal the watchdog for future timeouts to begin if this is the first
-      // future created, or if a future with a lower TTL has  been created.
+      // future created
+      // TODO (https://github.com/pytorch/pytorch/issues/29892) - modify this
+      // to notify the CV when a new RPC with a shorter TTL is created.
       if (futures_.size() == 1) {
         futureTimeoutCV_.notify_one();
       }

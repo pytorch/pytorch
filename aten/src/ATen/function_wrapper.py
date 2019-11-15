@@ -1698,7 +1698,8 @@ def create_derived(backend_type_env, declarations):
                         for arg in arguments:
                             scalar_check_arg = (scalar_check if not isinstance(scalar_check, dict)
                                                 else scalar_check.get(arg['name']))  # type: ignore
-                            if scalar_check_arg is not None:
+                            # maybe_zero_dim(false) is a no-op
+                            if scalar_check_arg is not None and scalar_check_arg != 'false':
                                 stmt = "{}_->maybe_zero_dim({});".format(arg['name'], scalar_check_arg)
                                 if nullable_argument(arg):
                                     stmt = "if ({}_) {}".format(arg['name'], stmt)

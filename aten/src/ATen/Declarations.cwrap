@@ -142,21 +142,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_resize_as_
-  cname: resizeAs
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  return: self
-  scalar_check: the_template_->dim() == 0
-  arguments:
-    - THTensor* self
-    - THTensor* the_template
-]]
-[[
   name: _th_index_select
   cpu_bool: True
   cuda_bool: True
