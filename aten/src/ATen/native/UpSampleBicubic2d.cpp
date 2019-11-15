@@ -24,7 +24,7 @@ static void upsample_bicubic2d_out_frame(
         const scalar_t* in = &idata[output_y * input_width + output_x];
         scalar_t* out = &odata[output_y * output_width + output_x];
 
-        for (int64_t c = 0; c < channels; ++c) {
+        for (int64_t c = 0; c < channels * nbatch; ++c) {
           out[0] = in[0];
           in += input_width * input_height;
           out += output_width * output_height;
