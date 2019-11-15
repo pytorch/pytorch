@@ -93,7 +93,6 @@ class ProcessGroup {
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     bool completed_ = false;
-    bool aborted_ = false;
     std::exception_ptr exception_;
   };
 

@@ -35,18 +35,17 @@ void ProcessGroup::Work::synchronize() {}
 
 bool ProcessGroup::Work::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
-  cv_.wait(lock, [&] { return aborted_ | completed_; });
+  cv_.wait(lock, [&] { return completed_; });
   if (exception_) {
     std::rethrow_exception(exception_);
   }
   synchronize();
-  return !aborted_;
+  // Always return true, because abort API is not implemented.
+  return true;
 }
 
 void ProcessGroup::Work::abort() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  aborted_ = true;
-  cv_.notify_all();
+  TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.")
 }
 
 void ProcessGroup::Work::finish(std::exception_ptr exception) {
