@@ -940,8 +940,13 @@ class RpcTest(object):
     def test_remote_with_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
+        # check ref to other workers
         rref = rpc.remote("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
+            rref.to_here()
+        # check ref to itself
+        rref = rpc.remote("worker{}".format(self.rank), no_result, args=(10,))
+        with self.assertRaisesRegex(Exception, "TypeError"):
             rref.to_here()
 
     @dist_init
