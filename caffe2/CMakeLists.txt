@@ -885,9 +885,15 @@ endif()
 
 
 target_compile_options(torch_cpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
-# NB: This must be target_compile_definitions, not target_compile_options,
-# as the latter is not respected by nvcc
-target_compile_definitions(torch_cpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+if(USE_CUDA)
+  target_compile_options(torch_cuda PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  target_compile_definitions(torch_cuda PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+elseif(USE_ROCM)
+  target_compile_options(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+  target_compile_definitions(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+endif()
 
 
 # ATen parallelism settings
