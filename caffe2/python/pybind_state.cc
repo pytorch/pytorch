@@ -93,12 +93,12 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 class ScriptModuleFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return py::cast(blob.Get<torch::jit::script::Module>());
+    return py::cast(*blob.Get<std::unique_ptr<torch::jit::script::Module>>());
   }
 };
 
 REGISTER_BLOB_FETCHER(
-    (TypeMeta::Id<torch::jit::script::Module>()),
+    (TypeMeta::Id<std::unique_ptr<torch::jit::script::Module>>()),
     caffe2::python::ScriptModuleFetcher);
 #endif
 
@@ -247,7 +247,7 @@ bool feedBlob(
   }
 #ifdef FBCODE_CAFFE2
   if (auto module = torch::jit::script::as_module(arg)) {
-    *blob->GetMutable<torch::jit::script::Module>() = *module;
+    blob->GetMutable<std::unique_ptr<torch::jit::script::Module>>()->reset(new torch::jit::script::Module(*module));
     return true;
   }
 #endif
