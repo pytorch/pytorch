@@ -1471,6 +1471,13 @@ graph(%input, %weight):
         is_per_channel=st.booleans()
     )
     def test_fold_prepack(self, is_per_channel):
+        def copy_weights(name, m, ref_m):
+            if name == 'linear':
+                m.fc1.weight = torch.nn.Parameter(ref_m.fc1.module.weight.detach())
+                m.fc1.bias = torch.nn.Parameter(ref_m.fc1.module.bias.detach())
+            else:
+                m.conv.weight = torch.nn.Parameter(ref_m.conv.weight.detach())
+
         for name, M, ref_M, data in [
                 ('linear',
                  SingleLayerLinearModel,
@@ -1486,11 +1493,7 @@ graph(%input, %weight):
             # eager mode
             ref_m = ref_M()
             m = M()
-            if name == 'linear':
-                m.fc1.weight = torch.nn.Parameter(ref_m.fc1.module.weight.detach())
-                m.fc1.bias = torch.nn.Parameter(ref_m.fc1.module.bias.detach())
-            else:
-                m.conv.weight = torch.nn.Parameter(ref_m.conv.weight.detach())
+            copy_weights(name, m, ref_m)
             ref_m.qconfig = qconfig
             ref_m = quantize(ref_m, test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
             ref_res = ref_m(data)
@@ -1515,10 +1518,7 @@ graph(%input, %weight):
             # check attributes
             # construct a RecursiveScriptModule
             m = wrap_cpp_module(m._c)
-            if name == 'linear':
-                mod_to_inspect = m.fc1
-            else:
-                mod_to_inspect = m.conv
+            mod_to_inspect = m.fc1 if name == 'linear' else m.conv
             packed_module_list = [x for x, _ in mod_to_inspect._modules._c.items()
                                   if x.startswith('_' + name + '_packed_params_module')]
             assert len(packed_module_list) == 1, \
@@ -10436,6 +10436,33 @@ a")
         torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs)
+
+    def test_trace_autograd_function(self):
+        class TestFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return torch.neg(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return torch.neg(grad_output)
+
+
+
+        class TracedModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(TestFunc.apply(x))
+
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.tm = TracedModule()
+
+            def forward(self, x):
+                return self.tm(x)
+
+        traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
 
     def test_interpolate_trace(self):
         class test(nn.Module):
