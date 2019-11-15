@@ -62,7 +62,7 @@ std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph)
-    : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
+    : GraphExecutorImplBase(graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
