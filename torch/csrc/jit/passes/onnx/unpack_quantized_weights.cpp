@@ -78,12 +78,12 @@ double getScaleFromInput(Node* input_node) {
   } else if (input_name == "aten::relu") {
     auto tmp = input_node->inputs()[0]->node();
     return getScaleFromInput(tmp);
+  } else if (input_name == "prim::ListUnpack") {
+    return getScaleFromInput(input_node->inputs()[0]->node());
+  } else if (input_name == "aten::split_with_sizes") {
+    return getScaleFromInput(input_node->inputs()[0]->node());
   }
-  std::cerr
-      << "Warning: unrecognized quantized operator while trying to compute q_scale. "
-      << "Returning default scale of 1.0 for operator " << input_name
-      << std::endl;
-  return 1.0;
+  TORCH_INTERNAL_ASSERT(false, "Unrecognized quantized operator while trying to compute q_scale. Returning default scale of 1.0 for operator ", input_name);
 }
 
 Node* CreateQuantizedWeights(
