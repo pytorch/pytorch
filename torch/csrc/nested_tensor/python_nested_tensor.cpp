@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/nested_tensor/generated/dispatch.h>
 
 #include <structmember.h>
 
@@ -43,21 +44,21 @@ template <class F> static PyObject *_map_member(_NestedNode nested_node, F fn) {
     for (size_t i = 0; i < nested_node._children.size(); i++) {
       new_children.push_back(_map_member(nested_node._children[i], fn));
     }
-    return torch::autograd::utils::wrap(new_children);
+    return wrap(new_children);
   }
 }
 
 PyObject *_ListNestedTensorVariable_nested_size(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
   return _map_member(self.get_structure(), [](at::Tensor tensor) -> PyObject * {
-    return torch::autograd::utils::wrap(tensor.sizes());
+    return wrap(tensor.sizes());
   });
 }
 
 PyObject *_ListNestedTensorVariable_nested_stride(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
   return _map_member(self.get_structure(), [](at::Tensor tensor) -> PyObject * {
-    return torch::autograd::utils::wrap(tensor.strides());
+    return wrap(tensor.strides());
   });
 }
 
@@ -115,86 +116,47 @@ PyObject *_ListNestedTensorVariable_unbind(PyObject *self_) {
   return return_list;
 }
 
-Variable _NestedNode_to_tensor(const _NestedNode &nested_node) {
-  if (nested_node._children.size() == 0) {
-    return nested_node._variable_node._variable;
-  } else {
-    std::vector<at::Tensor> variables;
-    for (_NestedNode node : nested_node._children) {
-      variables.push_back(_NestedNode_to_tensor(node));
-    }
-    return stack(variables);
-  }
-}
-
-std::string _NestedNode___str__(const _NestedNode &nested_node) {
-  std::stringstream result;
-  if (nested_node._children.size() == 0) {
-    PyObject *objectsRepresentation =
-        PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
-    result << PyBytes_AsString(PyUnicode_AsUTF8String(objectsRepresentation));
-    return result.str();
-  } else {
-    result << "nested_tensor([";
-    result << std::endl;
-    for (_NestedNode node : nested_node._children) {
-      result << "  ";
-      result << _NestedNode___str__(node);
-      result << ",";
-      result << std::endl;
-    }
-    result << "])";
-    return result.str();
-  }
-}
-
-PyObject *_ListNestedTensorVariable_to_tensor(PyObject *self_) {
-  HANDLE_TH_ERRORS
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return wrap(_NestedNode_to_tensor(self.get_structure()));
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject *_ListNestedTensorVariable___str__(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  std::string str = _NestedNode___str__(self.get_structure());
-  return PyUnicode_FromStringAndSize(str.c_str(), str.size());
-}
-
-PyObject *_ListNestedTensorVariable_requires_grad(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return torch::autograd::utils::wrap(self.requires_grad());
-}
-
-PyObject *_ListNestedTensorVariable_is_pinned(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return torch::autograd::utils::wrap(self.is_pinned());
-}
-
-PyObject *_ListNestedTensorVariable_is_contiguous(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return torch::autograd::utils::wrap(self.is_contiguous());
-}
-
-PyObject *_ListNestedTensorVariable_dim(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return torch::autograd::utils::wrap(self.dim());
-}
-
-PyObject *_ListNestedTensorVariable_numel(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return torch::autograd::utils::wrap(self.numel());
-}
-
-PyObject *_ListNestedTensorVariable___repr__(PyObject *self_) {
-  // NOTE: Don't delete this. repr is an important concept, this
-  // implementation is just faulty due to torch.Tensor.__repr__
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  // TODO: Assuming that there is no difference in __str__ and __repr__ for
-  // torch.Tensor.
-  std::string str = _NestedNode___str__(self.get_structure());
-  return PyUnicode_FromStringAndSize(str.c_str(), str.size());
-}
+// PyObject *_ListNestedTensorVariable_to_tensor(PyObject *self_) {
+//   HANDLE_TH_ERRORS
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.to_tensor());
+//   END_HANDLE_TH_ERRORS
+// }
+// 
+// PyObject *_ListNestedTensorVariable___str__(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.__str__());
+// }
+// 
+// PyObject *_ListNestedTensorVariable_requires_grad(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.requires_grad());
+// }
+// 
+// PyObject *_ListNestedTensorVariable_is_pinned(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.is_pinned());
+// }
+// 
+// PyObject *_ListNestedTensorVariable_is_contiguous(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.is_contiguous());
+// }
+// 
+// PyObject *_ListNestedTensorVariable_dim(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.dim());
+// }
+// 
+// PyObject *_ListNestedTensorVariable_numel(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.numel());
+// }
+// 
+// PyObject *_ListNestedTensorVariable___repr__(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.__repr__());
+// }
 
 static void _ListNestedTensorVariable_dealloc(_ListNestedTensorVariable *self) {
   // TODO: Need to revisit this for GC
@@ -202,22 +164,6 @@ static void _ListNestedTensorVariable_dealloc(_ListNestedTensorVariable *self) {
   // THPVariable_clear(self);
   self->cdata.~_ListNestedTensor();
   Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-// Creates a new Python object for a Variable. The Variable must not already
-// have a PyObject* associated with it.
-static PyObject *
-_ListNestedTensorVariable_NewWithVar(PyTypeObject *type,
-                                     _ListNestedTensor nested_tensor) {
-  PyObject *obj = type->tp_alloc(type, 0);
-  if (obj) {
-    auto v = (_ListNestedTensorVariable *)obj;
-    new (&v->cdata) _ListNestedTensor(std::move(nested_tensor));
-    // v->cdata.set_pyobj(obj);
-    return obj;
-  } else {
-    throw python_error();
-  }
 }
 
 static PyObject *_ListNestedTensorVariable_pynew(PyTypeObject *type,
@@ -231,30 +177,26 @@ static PyObject *_ListNestedTensorVariable_pynew(PyTypeObject *type,
       type, std::move(_ListNestedTensor(_get_structure(listObj))));
 }
 
-PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
-  return _ListNestedTensorVariable_NewWithVar(
-      (PyTypeObject *)_ListNestedTensorVariableClass, std::move(var));
-}
 
-static PyObject *_ListNestedTensorVariable_element_size(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return torch::autograd::utils::wrap(self.element_size());
-}
-
-static PyObject *_ListNestedTensorVariable_pin_memory(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return _ListNestedTensorVariable_Wrap(self.pin_memory());
-}
-
-static PyObject *_ListNestedTensorVariable_grad(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return _ListNestedTensorVariable_Wrap(self.grad());
-}
-
-static PyObject *_ListNestedTensorVariable_detach(PyObject *self_) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return _ListNestedTensorVariable_Wrap(self.detach());
-}
+// static PyObject *_ListNestedTensorVariable_element_size(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return torch::autograd::utils::wrap(self.element_size());
+// }
+// 
+// static PyObject *_ListNestedTensorVariable_pin_memory(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return wrap(self.pin_memory());
+// }
+// 
+// static PyObject *_ListNestedTensorVariable_grad(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return _ListNestedTensorVariable_Wrap(self.grad());
+// }
+// 
+// static PyObject *_ListNestedTensorVariable_detach(PyObject *self_) {
+//   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+//   return _ListNestedTensorVariable_Wrap(self.detach());
+// }
 
 static PyObject *_ListNestedTensorVariable_requires_grad_(PyObject *self_,
                                                           PyObject *bool_arg) {

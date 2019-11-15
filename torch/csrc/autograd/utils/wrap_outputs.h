@@ -34,6 +34,11 @@ inline PyObject* wrap(double value) {
   return PyFloat_FromDouble(value);
 }
 
+inline PyObject* wrap(std::string value) {
+  //Copies the object and interprets it as UTF-8
+  return PyUnicode_FromStringAndSize(value.c_str(), value.size());
+}
+
 inline PyObject* wrap(std::complex<double> value) {
   // I could probably also use FromComplex with a reinterpret cast,
   // but... eh.

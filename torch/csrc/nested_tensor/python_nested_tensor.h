@@ -30,8 +30,6 @@ struct _VariableNode {
   torch::autograd::Variable _variable;
 };
 
-PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor);
-
 THP_API PyObject *_ListNestedTensorVariableClass;
 
 // If is_leaf tensors are available, otherwise children.
@@ -134,6 +132,40 @@ static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
   }
 }
 
+static std::string _NestedNode___str__(const _NestedNode &nested_node) {
+  std::stringstream result;
+  if (nested_node._children.size() == 0) {
+    PyObject *objectsRepresentation =
+        PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
+    result << PyBytes_AsString(PyUnicode_AsUTF8String(objectsRepresentation));
+    return result.str();
+  } else {
+    result << "nested_tensor([";
+    result << std::endl;
+    for (_NestedNode node : nested_node._children) {
+      result << "  ";
+      result << _NestedNode___str__(node);
+      result << ",";
+      result << std::endl;
+    }
+    result << "])";
+    return result.str();
+  }
+}
+
+static torch::autograd::Variable
+_NestedNode_to_tensor(const _NestedNode &nested_node) {
+  if (nested_node._children.size() == 0) {
+    return nested_node._variable_node._variable;
+  } else {
+    std::vector<at::Tensor> variables;
+    for (_NestedNode node : nested_node._children) {
+      variables.push_back(_NestedNode_to_tensor(node));
+    }
+    return stack(variables);
+  }
+}
+
 TORCH_API extern PyTypeObject _ListNestedTensorVariableType;
 
 // TODO: Eventually allow construction from a list of _BufferNestedTensors.
@@ -196,8 +228,16 @@ struct TORCH_API _ListNestedTensor {
              tensor1.backward(tensor2, retain_graph, create_graph);
            });
   }
-  // // Only works if nested_dim() higher than 1.
   int64_t __len__() { return _structure._children.size(); }
+  std::string __str__() { return _NestedNode___str__(_structure); }
+  // NOTE: Don't delete this. repr is an important concept, this
+  // implementation is just faulty due to torch.Tensor.__repr__
+  // TODO: Assuming that there is no difference in __str__ and __repr__ for
+  // torch.Tensor.
+  std::string __repr__() { return _NestedNode___str__(_structure); }
+  torch::autograd::Variable to_tensor() {
+    return _NestedNode_to_tensor(_structure);
+  }
   int64_t nested_dim() {
     const _NestedNode *start_structure = &_structure;
     int64_t depth = 0;
@@ -245,5 +285,37 @@ inline bool _ListNestedTensorVariable_Check(PyObject *obj) {
 
 void initialize_python_bindings();
 
-} // namespace nestedtensor
+// Creates a new Python object for a Variable. The Variable must not already
+// have a PyObject* associated with it.
+static PyObject *
+_ListNestedTensorVariable_NewWithVar(PyTypeObject *type,
+                                     _ListNestedTensor nested_tensor) {
+  PyObject *obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto v = (_ListNestedTensorVariable *)obj;
+    new (&v->cdata) _ListNestedTensor(std::move(nested_tensor));
+    // v->cdata.set_pyobj(obj);
+    return obj;
+  } else {
+    throw python_error();
+  }
+}
+
+static PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
+  return _ListNestedTensorVariable_NewWithVar(
+      (PyTypeObject *)_ListNestedTensorVariableClass, std::move(var));
+}
+
+} // namespace nested_tensor
 } // namespace torch
+namespace torch {
+namespace autograd {
+namespace utils {
+inline PyObject *wrap(torch::nested_tensor::_ListNestedTensor nested_tensor) {
+  // TODO: Necessary to create new object?
+  // What about copy behavior?
+  return _ListNestedTensorVariable_Wrap(torch::nested_tensor::_ListNestedTensor(nested_tensor));
+}
+}
+}
+}
