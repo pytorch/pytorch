@@ -285,70 +285,60 @@ TEST_F(ModulesTest, AvgPool3d) {
 }
 
 TEST_F(ModulesTest, FractionalMaxPool2d) {
-  FractionalMaxPool2d model(FractionalMaxPool2dOptions(3));
+  FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(1));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 1, 1})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 1}));
 }
 
 TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
-  FractionalMaxPool2d model(FractionalMaxPool2dOptions(3));
+  FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(1));
   auto x = torch::ones({2, 5, 5}, torch::requires_grad());
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 1, 1})));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 1}));
   ASSERT_TRUE(torch::allclose(
     indices,
-    torch::tensor({{{ 0,  2},
-                    {10, 12}},
-                   {{ 0,  2},
-                    {10, 12}}}, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
+    torch::tensor({{{12}}, {{12}}})));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 1, 1}));
 }
 
 TEST_F(ModulesTest, FractionalMaxPool3d) {
-  FractionalMaxPool3d model(FractionalMaxPool3dOptions(3));
+  FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(1));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
   ASSERT_EQ(y.ndimension(), 4);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 1, 1, 1})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 1, 1}));
 }
 
 TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
-  FractionalMaxPool3d model(FractionalMaxPool3dOptions(3));
+  FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(1));
   auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
 
   ASSERT_EQ(y.dim(), 4);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 1, 1, 1})));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 1, 1}));
 
   ASSERT_TRUE(torch::allclose(
     indices,
-    torch::tensor({{{{ 0,  2},
-                     {10, 12}},
-                    {{50, 52},
-                     {60, 62}}},
-                   {{{ 0,  2},
-                     {10, 12}},
-                    {{50, 52},
-                     {60, 62}}}}, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+    torch::tensor({{{{62}}}, {{{62}}}})));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 1, 1, 1}));
 }
 
 TEST_F(ModulesTest, LPPool1d) {
@@ -2804,16 +2794,10 @@ TEST_F(ModulesTest, PrettyPrintAvgPool) {
       "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
 }
 
-TEST_F(ModulesTest, PrettyPrinFractionaltMaxPool) {
-  ASSERT_EQ(
-      c10::str(FractionalMaxPool2d(5)),
-      "torch::nn::FractionalMaxPool2d()");
+TEST_F(ModulesTest, PrettyPrinFractionalMaxPool) {
   ASSERT_EQ(
       c10::str(FractionalMaxPool2d(FractionalMaxPool2dOptions(5).output_size(1))),
       "torch::nn::FractionalMaxPool2d()");
-  ASSERT_EQ(
-      c10::str(FractionalMaxPool3d(5)),
-      "torch::nn::FractionalMaxPool3d()");
   ASSERT_EQ(
       c10::str(FractionalMaxPool3d(FractionalMaxPool3dOptions(5).output_size(1))),
       "torch::nn::FractionalMaxPool3d()");

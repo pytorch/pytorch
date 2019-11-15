@@ -149,28 +149,30 @@ TEST_F(FunctionalTest, AvgPool3d) {
 
 TEST_F(FunctionalTest, FractionalMaxPool2d) {
   auto x = torch::ones({2, 5, 5});
-  auto y = F::fractional_max_pool2d(x, F::FractionalMaxPool2dFuncOptions(3));
+  auto y = F::fractional_max_pool2d(x, F::FractionalMaxPool2dFuncOptions(3).output_size(1));
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 1, 1})));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 1}));
 
-  auto y_with_indices = F::fractional_max_pool2d_with_indices(x, F::FractionalMaxPool2dFuncOptions(3));
-  ASSERT_TRUE(torch::allclose(std::get<0>(y_with_indices), torch::ones({2, 2, 2})));
-  ASSERT_TRUE(torch::allclose(std::get<1>(y_with_indices), torch::ones({2, 2, 2}))); // yf225 TODO: need to get actual value
+  auto y_with_indices = F::fractional_max_pool2d_with_indices(x, F::FractionalMaxPool2dFuncOptions(3).output_size(1));
+  ASSERT_TRUE(torch::equal(y, std::get<0>(y_with_indices)));
+  ASSERT_TRUE(torch::allclose(std::get<1>(y_with_indices), torch::tensor({{{12}}, {{12}}})));
+  ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 1, 1}));
 }
 
 TEST_F(FunctionalTest, FractionalMaxPool3d) {
   auto x = torch::ones({2, 5, 5, 5});
-  auto y = F::fractional_max_pool3d(x, F::FractionalMaxPool3dFuncOptions(3));
+  auto y = F::fractional_max_pool3d(x, F::FractionalMaxPool3dFuncOptions(3).output_size(1));
 
   ASSERT_EQ(y.ndimension(), 4);
-  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 1, 1, 1})));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 1, 1}));
 
-  auto y_with_indices = F::fractional_max_pool3d_with_indices(x, F::FractionalMaxPool3dFuncOptions(3));
-  ASSERT_TRUE(torch::allclose(std::get<0>(y_with_indices), torch::ones({2, 2, 2, 2})));
-  ASSERT_TRUE(torch::allclose(std::get<1>(y_with_indices), torch::ones({2, 2, 2, 2}))); // yf225 TODO: need to get actual value
+  auto y_with_indices = F::fractional_max_pool3d_with_indices(x, F::FractionalMaxPool3dFuncOptions(3).output_size(1));
+  ASSERT_TRUE(torch::equal(y, std::get<0>(y_with_indices)));
+  ASSERT_TRUE(torch::allclose(std::get<1>(y_with_indices), torch::tensor({{{{62}}}, {{{62}}}})));
+  ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 1, 1, 1}));
 }
 
 TEST_F(FunctionalTest, LPPool1d) {
