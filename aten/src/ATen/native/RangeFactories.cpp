@@ -147,8 +147,10 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
     if (numel != size) {
       if(numel > 0){
-        TORCH_WARN("Size of out Tensor does not match the result Tensor. The interval may be subjected "
-                   "to rounding error. The output Tensor will be resized!");
+        TORCH_WARN("The number of elements in the out tensor of shape ", result.sizes(),
+                    " is ", numel, " which does not match the computed number of elements ", size,
+                    ". Note that this may occur as a result of rounding error. "
+                    "The out tensor will be resized to a tensor of shape (", size, ",).");
       }
       result.resize_({size});
     }

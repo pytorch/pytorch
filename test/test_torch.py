@@ -1656,6 +1656,13 @@ class _TestTorchMixin(object):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+        # Test Rounding Errors
+        line = torch.zeros(size=(1, 49))
+        self.assertWarnsRegex(lambda: torch.arange(-1, 1, 2 / 49, dtype=torch.float32, out=line),
+                              'resized',
+                              'The out tensor will be resized')
+        self.assertEqual(line.shape, [50])
+
         x = torch.empty(1).expand(10)
         self.assertRaises(RuntimeError, lambda: torch.arange(10, out=x))
         msg = "unsupported range"
@@ -11410,7 +11417,7 @@ class TestTorchDeviceType(TestCase):
                                                   [2., 1.]]],
                                                 dtype=dtype,
                                                 device=device)
-            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]], 
+            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]],
                                                       [[False, True], [True, True]]],
                                                      dtype=torch.bool,
                                                      device=device)
@@ -11472,7 +11479,7 @@ class TestTorchDeviceType(TestCase):
                 x,
                 return_inverse=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
             else:
@@ -11484,7 +11491,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=False,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
             else:
@@ -11496,7 +11503,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=True,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
@@ -11590,7 +11597,7 @@ class TestTorchDeviceType(TestCase):
             expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], dtype=dtype, device=device)
             expected_y_counts_bool = torch.tensor([3, 3, 2, 2], dtype=dtype, device=device)
             y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_y_inverse_bool, y_inverse)
                 self.assertEqual(expected_y_counts_bool, y_counts)
             else:
