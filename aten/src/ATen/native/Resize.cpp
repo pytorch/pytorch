@@ -28,6 +28,10 @@ Tensor& resize_as_sparse_(Tensor& self, const Tensor& src);
 // Strides of the output tensor of `resize_as_` operator is defined by input
 // tensor strides and the value of memory_format argument.
 //
+// If memory_format is omitted and input tensor have the same shape as output
+// tensor, strides of the output will remain unchanged. Strides going to be
+// set to contiguous if shapes are different.
+//
 // If memory_format is equals to MemoryFormat::Contiguous (torch.contiguous_format)
 // output tensor will have contiguous strides.
 //
