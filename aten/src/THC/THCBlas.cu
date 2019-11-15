@@ -228,10 +228,12 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
   at::cuda::blas::gemm<at::Half>(at::cuda::getCurrentCUDAStream().stream(), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
+#ifdef __HIP_PLATFORM_HCC__
 void THCudaBlas_Bgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::BFloat16 alpha, at::BFloat16 *a, int64_t lda, at::BFloat16 *b, int64_t ldb, at::BFloat16 beta, at::BFloat16 *c, int64_t ldc)
 {
   at::cuda::blas::gemm<at::BFloat16>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
+#endif
 
 void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
@@ -275,16 +277,15 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
                                    (void*)&fBeta, c, CUDA_R_16F, (int)ldc, strideC,
                                    (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-#endif
+#endif // __HIP_PLATFORM_HCC__
 }
+#endif // CUDA_VERSION or __HIP_PLATFORM_HCC__
 
+#ifdef __HIP_PLATFORM_HCC__
 void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              at::BFloat16 alpha, const at::BFloat16 *a, int64_t lda, int64_t strideA, const at::BFloat16 *b, int64_t ldb, int64_t strideB,
                              at::BFloat16 beta, at::BFloat16 *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
-#ifndef __HIP_PLATFORM_HCC__
-  TORCH_CHECK(false, "gemmStridedBatched not supported with at::BFloat16");
-#endif
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
   {
@@ -308,8 +309,7 @@ void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, i
                                    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
 }
-
-#endif
+#endif // __HIP_PLATFORM_HCC__
 
 void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,

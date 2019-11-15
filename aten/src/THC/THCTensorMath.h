@@ -13,6 +13,9 @@
 #include <THC/generic/THCTensorMathBlas.h>
 #include <THC/THCGenerateAllTypes.h>
 
+#include <THC/generic/THCTensorMathBlas.h>
+#include <THC/THCGenerateBFloat16Type.h>
+
 #include <THC/generic/THCTensorMathMagma.h>
 #include <THC/THCGenerateAllTypes.h>
 
