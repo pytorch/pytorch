@@ -158,7 +158,7 @@ bool ProcessGroupMPI::AsyncWork::wait() {
 }
 
 void ProcessGroupMPI::AsyncWork::abort() {
-  AT_ASSERT(false, "ProcessGroupMPI::AsyncWork::abort not implemented.")
+  TORCH_CHECK(false, "ProcessGroupMPI::AsyncWork::abort not implemented.")
 }
 
 void ProcessGroupMPI::AsyncWork::populateException() {

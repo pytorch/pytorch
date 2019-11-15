@@ -220,7 +220,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait() {
 }
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
-  AT_ASSERT(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
+  TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
