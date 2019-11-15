@@ -1498,7 +1498,7 @@ RegisterOperators logging_operators(
           push(stack, float_op); \
         } else { \
           int64_t a = x.toInt(); \
-          int64_t b = y.toInt(); \
+          int64_t b = x.toInt(); \
           push(stack, int_op); \
         } \
       } \
