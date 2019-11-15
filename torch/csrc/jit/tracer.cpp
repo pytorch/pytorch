@@ -125,7 +125,7 @@ Value* TracingState::getValue(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
-    if (ten.is_variable() && ten.requires_grad()) {
+    if (ten.requires_grad()) {
       pauseTracing();
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
@@ -543,10 +543,23 @@ void addInputs(
   n->addInput(list_node->output());
 }
 
+void addInputs(
+    Node* n,
+    const char* name,
+    c10::optional<caffe2::TypeMeta> opt_dtype) {
+  if (opt_dtype.has_value()) {
+    return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
 void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize
   // TensorOptions
-  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
+  addInputs(n, name, options.dtype_opt());
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
   addInputs(n, name, options.pinned_memory());
@@ -628,8 +641,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   {
     // Make sure this scalar to tensor isn't traced!
     at::AutoNonVariableTypeMode guard;
-    size_var =
-        autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+    size_var = scalar_to_tensor(at::Scalar(var.size(dim)));
   }
   auto* value = getValueTrace(var);
   auto dim_val = graph->insertConstant(dim);
