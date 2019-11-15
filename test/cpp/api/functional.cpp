@@ -1879,12 +1879,12 @@ TEST_F(FunctionalTest, Dropout) {
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
     auto output = F::dropout(input, F::DropoutFuncOptions().p(rate));
-    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
   }
   auto output = F::dropout(input);
-  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
 }
 
 TEST_F(FunctionalTest, Dropout2d) {
@@ -1894,12 +1894,12 @@ TEST_F(FunctionalTest, Dropout2d) {
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
     auto output = F::dropout2d(input, F::Dropout2dFuncOptions().p(rate));
-    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
   }
   auto output = F::dropout2d(input);
-  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
 }
 
 TEST_F(FunctionalTest, Dropout3d) {
@@ -1909,10 +1909,10 @@ TEST_F(FunctionalTest, Dropout3d) {
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
     auto output = F::dropout3d(input, F::Dropout3dFuncOptions().p(rate));
-    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
   }
   auto output = F::dropout3d(input);
-  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
-  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
 }
