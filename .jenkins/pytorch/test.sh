@@ -11,11 +11,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-# Make directory for test reports
-sudo mkdir /var/lib/jenkins/workspace/test/test-reports
-sudo chown jenkins test/test-reports
-
 if [ -n "${IN_CIRCLECI}" ]; then
+  # Make directory for test reports
+  sudo mkdir /var/lib/jenkins/workspace/test/test-reports
+  sudo chown jenkins test/test-reports
+
+  # TODO move this to docker
+  pip_install unittest-xml-reporting
+
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
@@ -221,9 +224,6 @@ test_backward_compatibility() {
   set +x
   assert_git_not_dirty
 }
-
-# TODO move this to docker
-pip_install unittest-xml-reporting
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
