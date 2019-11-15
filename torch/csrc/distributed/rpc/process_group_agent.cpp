@@ -296,7 +296,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[futureStartTime].push_back(requestId);
       // Signal watchdog for future timeouts to begin
-      futureTimeoutCV_.notify_one();
+      if (futures_.size() == 1) {
+        futureTimeoutCV_.notify_one();
+      }
     }
 
     message.setId(requestId);
@@ -506,12 +508,15 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // could invoke callbacks.
     if (!timedOutFutures.empty()) {
       // TODO enhance error message
+      std::stringstream ss;
+      ss << "Future ran for more than " << rpcTimeout_.count()
+         << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
-          Message({}, {}, MessageType::EXCEPTION), "future timed out.");
+          Message({}, {}, MessageType::EXCEPTION), ss.str());
       for (const auto& timedOutFuture : timedOutFutures) {
         timedOutFuture.future_->markCompleted(exceptionMsg);
-        const int dst = timedOutFuture.dstRank_;
 
+        const int dst = timedOutFuture.dstRank_;
         recvCounts_.increment(dst);
         futureCV_.notify_all();
       }

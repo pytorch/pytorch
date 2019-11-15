@@ -1051,7 +1051,7 @@ class RpcTest(object):
         fut = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=())
         print('started future')
         print('started')
-        with self.assertRaisesRegex(RuntimeError, "future timed out"):
+        with self.assertRaisesRegex(RuntimeError, "Future ran for more than"):
             fut.wait()
 
         # future should run to completion if the timeout is longer.
