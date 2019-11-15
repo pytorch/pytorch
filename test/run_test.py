@@ -105,17 +105,17 @@ if dist.is_available():
     if dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3',
-            'TEST_REPORT_FILE_OVERRIDE': 'test-reports/TestDistBackend-mpi'
+            'TEST_REPORT_FILE_OVERRIDE': 'test-reports/TestDistBackend-mpi.xml'
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
-            'TEST_REPORT_FILE_OVERRIDE': 'test-reports/TestDistBackend-nccl'
+            'TEST_REPORT_FILE_OVERRIDE': 'test-reports/TestDistBackend-nccl.xml'
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
-            'TEST_REPORT_FILE_OVERRIDE': 'test-reports/TestDistBackend-gloo'
+            'TEST_REPORT_FILE_OVERRIDE': 'test-reports/TestDistBackend-gloo.xml'
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
