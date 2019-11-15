@@ -526,7 +526,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
   py::object torch_api_function = PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != NULL, "torch API function must exist");
   py::object ret;
-  for (auto &arg : r.overloaded_args) {
+  for (auto &arg : r.signature.overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
     ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
@@ -546,9 +546,9 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
     std::stringstream ss;
     ss << "no implementation found for 'torch." << r.get_func_name()
        << "' on types that implement __torch_function__: [";
-    for (auto &arg : r.overloaded_args) {
+    for (auto &arg : r.signature.overloaded_args) {
       ss << arg.ptr()->ob_type->tp_name;
-      if (!arg.is(r.overloaded_args.back())) {
+      if (!arg.is(r.signature.overloaded_args.back())) {
         ss << ", ";
       }
       else {

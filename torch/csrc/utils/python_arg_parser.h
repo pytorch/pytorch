@@ -113,18 +113,16 @@ private:
 };
 
 struct PythonArgs {
-  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args, std::vector<py::handle> overloaded_args)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
     : idx(idx)
     , traceable(traceable)
     , signature(signature)
-    , args(args)
-    , overloaded_args(overloaded_args) {}
+    , args(args) {}
 
   int idx;
   bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
-  std::vector<py::handle> overloaded_args;
 
   inline bool has_torch_function();
   inline std::string get_func_name();
@@ -177,12 +175,13 @@ private:
 struct FunctionSignature {
   explicit FunctionSignature(const std::string& fmt);
 
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], std::vector<py::handle> &overloaded_args, bool raise_exception);
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
 
   std::string toString() const;
 
   std::string name;
   std::vector<FunctionParameter> params;
+  std::vector<py::handle> overloaded_args;
   ssize_t min_args;
   ssize_t max_args;
   ssize_t max_pos_args;
@@ -193,8 +192,7 @@ struct FunctionSignature {
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
-  template <bool is_exact_class=false>
-  bool check(PyObject* obj);
+  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
@@ -232,7 +230,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
 }
 
 inline bool PythonArgs::has_torch_function(){
-  return overloaded_args.size() > 0;
+  return !this->signature.overloaded_args.empty();
 }
 
 inline std::string PythonArgs::get_func_name(){
@@ -240,7 +238,7 @@ inline std::string PythonArgs::get_func_name(){
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (args[i] && THPVariable_Check<true>(args[i])) {
+  if (args[i] && THPVariable_CheckExact(args[i])) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);
@@ -645,7 +643,7 @@ static bool _is_basic_python_type(PyTypeObject *tp)
 static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
 {
   PyTypeObject *tp = Py_TYPE(obj);
-  if (THPVariable_Check<true>(obj)) {
+  if (THPVariable_CheckExact(obj)) {
       return py::object();
   }
   if (_is_basic_python_type(tp)) {
