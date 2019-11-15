@@ -30,14 +30,7 @@ template<typename Fn> class function_ref;
 
 template<typename Ret, typename ...Params>
 class function_ref<Ret(Params...)> {
-Ret (*callback)(intptr_t callable, Params ...params) = nullptr;
-intptr_t callable;
-
-template<typename Callable>
-static Ret callback_fn(intptr_t callable, Params ...params) {
-    return (*reinterpret_cast<Callable*>(callable))(
-        std::forward<Params>(params)...);
-}
+intptr_t callable = 0;
 
 public:
 function_ref() = default;
@@ -52,14 +45,13 @@ function_ref(Callable &&callable,
                  std::is_convertible<
                    typename std::result_of<Callable&&(Params&&...)>::type,
                    Ret>::value>::type * = nullptr)
-    : callback(callback_fn<typename std::remove_reference<Callable>::type>),
-        callable(reinterpret_cast<intptr_t>(&callable)) {}
+    : callable(reinterpret_cast<intptr_t>(&callable)) {}
 
 Ret operator()(Params ...params) const {
-    return callback(callable, std::forward<Params>(params)...);
+    return (*reinterpret_cast<Ret(*)(Params...)>(callable))(std::forward<Params>(params)...);
 }
 
-operator bool() const { return callback; }
+operator bool() const { return callable; }
 };
  
 }
