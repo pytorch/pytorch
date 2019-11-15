@@ -2094,13 +2094,19 @@ class TestSparse(TestCase):
             self.assertEqual(sp_tensor, sp_tensor_loaded)
 
     def test_any(self):
-        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([False]))
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, False]))
         t_any = torch.tensor(False)
+        self.assertEqual(torch.any(t), t_any)
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([True, False]))
+        t_any = torch.tensor(True)
         self.assertEqual(torch.any(t), t_any)
 
     def test_isnan(self):
-        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
-        t_nan = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([False]))
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
+        t_nan = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, False]))
+        self.assertEqual(torch.isnan(t).int(), t_nan.int())
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, float("nan")]))
+        t_nan = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, True]))
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
 
 class TestUncoalescedSparse(TestSparse):
