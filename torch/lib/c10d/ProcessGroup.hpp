@@ -73,6 +73,8 @@ class ProcessGroup {
 
     // Waits until request completes. Blocking operation.
     // Throws if the work completed with an exception.
+    // Returns false if the work is aboorted.
+    // Otherwise, it always returns true, indicating the work is completed.
     //
     // Functionally equivalent to:
     //
@@ -81,7 +83,9 @@ class ProcessGroup {
     //   if (!success) { std::rethrow_exception(exception()); }
     //   return success;
     //
-    virtual void wait();
+    virtual bool wait();
+
+    virtual void abort();
 
    protected:
     void finish(std::exception_ptr exception = nullptr);
@@ -89,6 +93,7 @@ class ProcessGroup {
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     bool completed_ = false;
+    bool aborted_ = false;
     std::exception_ptr exception_;
   };
 

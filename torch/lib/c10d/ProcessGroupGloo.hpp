@@ -96,7 +96,9 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
@@ -111,7 +113,9 @@ class ProcessGroupGloo : public ProcessGroup {
 
     int sourceRank() const override;
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
