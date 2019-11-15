@@ -902,6 +902,24 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, GroupNorm) {
+  GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = model(x);
+  auto y_exp = torch::group_norm(x, 2, model->weight, model->bias, 2e-5);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (auto i = 0; i < 2; i++) {
+    ASSERT_EQ(y.size(i), 2);
+  }
+
+  ASSERT_EQ(model->weight.grad().numel(), 2);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, Bilinear) {
   Bilinear model(5, 3, 2);
   auto x1 = torch::randn({10, 5}, torch::requires_grad());
@@ -2828,6 +2846,15 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
       ASSERT_EQ(
         c10::str(LayerNorm(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintGroupNorm) {
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2))),
+      "torch::nn::GroupNorm(2, 2, eps=1e-05, affine=true)");
+      ASSERT_EQ(
+        c10::str(GroupNorm(GroupNormOptions(2, 2).eps(2e-5).affine(false))),
+          "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {

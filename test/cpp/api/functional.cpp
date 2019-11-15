@@ -990,6 +990,13 @@ TEST_F(FunctionalTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, GroupNorm) {
+  const auto input = torch::randn({2, 2});
+  auto y = F::group_norm(input, F::GroupNormFuncOptions(2).eps(2e-5));
+  auto y_exp = torch::group_norm(input, 2, torch::Tensor(), torch::Tensor(), 2e-5);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, LocalResponseNorm) {
   const auto x = torch::arange(100, 118).resize_({3, 3, 2});
   const auto y = F::local_response_norm(x, F::LocalResponseNormFuncOptions(2));
