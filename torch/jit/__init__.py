@@ -1824,7 +1824,7 @@ class TracedModule(ScriptModule):
         # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module_for_tracing(tmp_module, ())
 
-        self.__dict__['_name'] = 'TracedModule[' + type(orig).__name__ + ']'
+        self.__dict__['_name'] = type(orig).__name__
         self.__dict__['_actual_script_module'] = script_module
         for name in ("_parameters", "_buffers", "_modules"):
             delattr(self, name)
@@ -1844,6 +1844,9 @@ class TracedModule(ScriptModule):
 
     def _get_name(self):
         return self._name
+
+    def extra_repr(self):
+        return 'original_name={}'.format(self._name)
 
 
 if _enabled:
