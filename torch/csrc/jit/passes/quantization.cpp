@@ -1075,10 +1075,10 @@ void FoldPrepackedWeightIntoModule(
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
         module, method.name(), linear_params_module, conv_params_module);
-    for (script::Module m : module.children()) {
-      FoldPrepackedWeightIntoModule(
-          m, linear_params_module, conv_params_module);
-    }
+  }
+  for (script::Module m : module.children()) {
+    FoldPrepackedWeightIntoModule(
+        m, linear_params_module, conv_params_module);
   }
 }
 } // namespace jit
