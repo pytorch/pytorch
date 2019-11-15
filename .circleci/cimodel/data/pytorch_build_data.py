@@ -39,7 +39,6 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
                 XImportant("3.6"),
                 ("3.6", [
                     ("libtorch", [XImportant(True)])

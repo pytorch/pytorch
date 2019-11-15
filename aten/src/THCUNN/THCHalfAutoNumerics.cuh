@@ -31,10 +31,6 @@ inline __host__ __device__ double fmaxType(double x, double y) {
 
 // arithmetic functions
 
-inline __host__ __device__ THHalf abs(THHalf a) {
-  return THCNumerics<THHalf>::abs(a);
-}
-
 inline __host__ __device__ THHalf exp(THHalf a) {
   return THCNumerics<THHalf>::exp(a);
 }
