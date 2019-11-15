@@ -15,6 +15,7 @@
 // TODO:
 // - HANDLE_TH_ERRORS
 // - Python exception handling.
+// map and apply functions that accepted JIT-ed functions to avoid unbind
 
 namespace torch {
 namespace nested_tensor {
@@ -117,6 +118,19 @@ template <typename T, class F> static T map(_NestedNode nested_node, F fn) {
       new_children.push_back(T(map<T>(nested_node._children[i], fn)));
     }
     return T(new_children);
+  }
+}
+
+template <typename T, class F, class G> static T map_more(_NestedNode nested_node, F fn, G gfn) {
+  if (nested_node._children.size() == 0) {
+    T result = fn(nested_node._variable_node._variable);
+    return result;
+  } else {
+    std::vector<T> new_children;
+    for (size_t i = 0; i < nested_node._children.size(); i++) {
+      new_children.push_back(T(map_more<T>(nested_node._children[i], fn, gfn)));
+    }
+    return gfn(new_children);
   }
 }
 
@@ -314,7 +328,8 @@ namespace utils {
 inline PyObject *wrap(torch::nested_tensor::_ListNestedTensor nested_tensor) {
   // TODO: Necessary to create new object?
   // What about copy behavior?
-  return _ListNestedTensorVariable_Wrap(torch::nested_tensor::_ListNestedTensor(nested_tensor));
+  return _ListNestedTensorVariable_Wrap(
+      torch::nested_tensor::_ListNestedTensor(nested_tensor));
 }
 }
 }

@@ -1,7 +1,7 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/nested_tensor/generated/dispatch.h>
 
 #include <structmember.h>
 
@@ -36,30 +36,20 @@ namespace py = pybind11;
 
 PyObject *_ListNestedTensorVariableClass = nullptr;
 
-template <class F> static PyObject *_map_member(_NestedNode nested_node, F fn) {
-  if (nested_node._children.size() == 0) {
-    return fn(nested_node._variable_node._variable);
-  } else {
-    std::vector<PyObject *> new_children;
-    for (size_t i = 0; i < nested_node._children.size(); i++) {
-      new_children.push_back(_map_member(nested_node._children[i], fn));
-    }
-    return wrap(new_children);
-  }
-}
-
 PyObject *_ListNestedTensorVariable_nested_size(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return _map_member(self.get_structure(), [](at::Tensor tensor) -> PyObject * {
-    return wrap(tensor.sizes());
-  });
+  return map_more<PyObject *>(
+      self.get_structure(),
+      [](at::Tensor tensor) -> PyObject * { return wrap(tensor.sizes()); },
+      [](std::vector<PyObject *> list) -> PyObject * { return wrap(list); });
 }
 
 PyObject *_ListNestedTensorVariable_nested_stride(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  return _map_member(self.get_structure(), [](at::Tensor tensor) -> PyObject * {
-    return wrap(tensor.strides());
-  });
+  return map_more<PyObject *>(
+      self.get_structure(),
+      [](at::Tensor tensor) -> PyObject * { return wrap(tensor.strides()); },
+      [](std::vector<PyObject *> list) -> PyObject * { return wrap(list); });
 }
 
 PyObject *_ListNestedTensorVariable_to(PyObject *self_, PyObject *args,
@@ -78,15 +68,14 @@ PyObject *_ListNestedTensorVariable_to(PyObject *self_, PyObject *args,
     Py_INCREF(self_);
     return self_;
   } else if (!device) {
-    return _ListNestedTensorVariable_Wrap(
+    return wrap(
         self.to(scalarType.value(), non_blocking, copy, opt_memory_format));
   } else if (!scalarType) {
-    return _ListNestedTensorVariable_Wrap(self.to(
-        self.options().device(device), non_blocking, copy, opt_memory_format));
+    return wrap(self.to(self.options().device(device), non_blocking, copy,
+                        opt_memory_format));
   } else {
-    return _ListNestedTensorVariable_Wrap(
-        self.to(device.value(), scalarType.value(), non_blocking, copy,
-                opt_memory_format));
+    return wrap(self.to(device.value(), scalarType.value(), non_blocking, copy,
+                        opt_memory_format));
   }
   Py_RETURN_NONE;
 }
