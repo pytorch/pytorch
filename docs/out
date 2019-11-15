@@ -1,0 +1,241 @@
+Running Sphinx v2.2.1
+loading pickled environment... done
+building [mo]: targets for 0 po files that are out of date
+building [html]: targets for 0 source files that are out of date
+updating environment: 0 added, 4 changed, 0 removed
+reading sources... [ 25%] index
+reading sources... [ 50%] org/pytorch/torchvision/package-index
+reading sources... [ 75%] quantization
+reading sources... [100%] tensorboard
+
+/home/rvarm1/pytorch/docs/source/conf.py:30: UserWarning: unable to load "torchvision" package
+  warnings.warn('unable to load "torchvision" package')
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:205: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  TypedField('parameter', label=l_('Parameters'),
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:208: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  Field('returnvalue', label=l_('Returns'), has_arg=False,
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:210: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  GroupedField('throws', names=('throws',), label=l_('Throws'), rolename='type')
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:257: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  TypedField('parameter', label=l_('Parameters'),
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:260: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  GroupedField('throws', names=('throws',), label=l_('Throws'))
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:297: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  GroupedField('parameter', names=('param',), label=l_('Parameters'))
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:491: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  'package':     ObjType(l_('package'), 'package', 'ref'),
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:492: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  'type':        ObjType(l_('type'), 'type', 'ref'),
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:493: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  'field':       ObjType(l_('field'), 'field', 'ref'),
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:494: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  'constructor': ObjType(l_('constructor'), 'construct', 'ref'),
+/data/users/rvarm1/c2env/lib64/python3.6/site-packages/javasphinx/domain.py:495: RemovedInSphinx30Warning: sphinx.locale.l_() is deprecated.  Please use `_()` instead.
+  'method':      ObjType(l_('method'), 'meth', 'ref')
+/home/rvarm1/pytorch/docs/source/index.rst:63: WARNING: toctree contains reference to nonexisting document 'torchvision/index'
+/home/rvarm1/pytorch/docs/source/org/pytorch/torchvision/package-index.rst:6: WARNING: toctree contains reference to nonexisting document 'org/pytorch/torchvision/TensorImageUtils'
+WARNING: autodoc: failed to import class 'Observer' from module 'torch.quantization'; the following exception was raised:
+Traceback (most recent call last):
+  File "/data/users/rvarm1/c2env/lib64/python3.6/site-packages/sphinx/util/inspect.py", line 230, in safe_getattr
+    return getattr(obj, name, *defargs)
+AttributeError: module 'torch.quantization' has no attribute 'Observer'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/data/users/rvarm1/c2env/lib64/python3.6/site-packages/sphinx/ext/autodoc/importer.py", line 71, in import_object
+    obj = attrgetter(obj, attrname)
+  File "/data/users/rvarm1/c2env/lib64/python3.6/site-packages/sphinx/ext/autodoc/__init__.py", line 226, in get_attr
+    return autodoc_attrgetter(self.env.app, obj, name, *defargs)
+  File "/data/users/rvarm1/c2env/lib64/python3.6/site-packages/sphinx/ext/autodoc/__init__.py", line 1501, in autodoc_attrgetter
+    return safe_getattr(obj, name, *defargs)
+  File "/data/users/rvarm1/c2env/lib64/python3.6/site-packages/sphinx/util/inspect.py", line 246, in safe_getattr
+    raise AttributeError(name)
+AttributeError: Observer
+
+/home/rvarm1/pytorch/docs/source/quantization.rst:466: WARNING: duplicate label quantization:convbn2d, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:471: WARNING: duplicate label quantization:convbnrelu2d, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:476: WARNING: duplicate label quantization:convrelu2d, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:481: WARNING: duplicate label quantization:linearrelu, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:493: WARNING: duplicate label quantization:convrelu2d, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:498: WARNING: duplicate label quantization:linearrelu, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:548: WARNING: duplicate label quantization:conv2d, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:573: WARNING: duplicate label quantization:linear, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+/home/rvarm1/pytorch/docs/source/quantization.rst:583: WARNING: duplicate label quantization:linear, other instance in /home/rvarm1/pytorch/docs/source/quantization.rst
+WARNING: autodoc: failed to import class 'tensorboard.writer.SummaryWriter' from module 'torch.utils'; the following exception was raised:
+TensorBoard logging requires TensorBoard with Python summary writer installed. This should be available in 1.14 or above.
+looking for now-outdated files... none found
+pickling environment... done
+checking consistency... /home/rvarm1/pytorch/docs/source/org/pytorch/TensorImageUtils.rst: WARNING: document isn't included in any toctree
+/home/rvarm1/pytorch/docs/source/org/pytorch/torchvision/package-index.rst: WARNING: document isn't included in any toctree
+done
+preparing documents... done
+writing output... [ 25%] index
+writing output... [ 50%] org/pytorch/torchvision/package-index
+writing output... [ 75%] quantization
+writing output... [100%] tensorboard
+
+generating indices...  genindex py-modindexdone
+highlighting module code... [  0%] torch
+highlighting module code... [  1%] torch._C
+highlighting module code... [  2%] torch._C._nn
+highlighting module code... [  2%] torch.__config__
+highlighting module code... [  3%] torch._jit_internal
+highlighting module code... [  4%] torch._tensor_str
+highlighting module code... [  4%] torch._utils
+highlighting module code... [  5%] torch.autograd
+highlighting module code... [  6%] torch.autograd.anomaly_mode
+highlighting module code... [  6%] torch.autograd.function
+highlighting module code... [  7%] torch.autograd.grad_mode
+highlighting module code... [  8%] torch.autograd.gradcheck
+highlighting module code... [  8%] torch.autograd.profiler
+highlighting module code... [  9%] torch.cuda
+highlighting module code... [ 10%] torch.cuda.comm
+highlighting module code... [ 10%] torch.cuda.memory
+highlighting module code... [ 11%] torch.cuda.nvtx
+highlighting module code... [ 12%] torch.cuda.random
+highlighting module code... [ 12%] torch.cuda.streams
+highlighting module code... [ 13%] torch.distributed
+highlighting module code... [ 14%] torch.distributed.autograd
+highlighting module code... [ 14%] torch.distributed.distributed_c10d
+highlighting module code... [ 15%] torch.distributed.rpc
+highlighting module code... [ 16%] torch.distributed.rpc.api
+highlighting module code... [ 16%] torch.distributions.bernoulli
+highlighting module code... [ 17%] torch.distributions.beta
+highlighting module code... [ 18%] torch.distributions.binomial
+highlighting module code... [ 18%] torch.distributions.categorical
+highlighting module code... [ 19%] torch.distributions.cauchy
+highlighting module code... [ 20%] torch.distributions.chi2
+highlighting module code... [ 20%] torch.distributions.constraint_registry
+highlighting module code... [ 21%] torch.distributions.constraints
+highlighting module code... [ 22%] torch.distributions.dirichlet
+highlighting module code... [ 22%] torch.distributions.distribution
+highlighting module code... [ 23%] torch.distributions.exp_family
+highlighting module code... [ 24%] torch.distributions.exponential
+highlighting module code... [ 25%] torch.distributions.fishersnedecor
+highlighting module code... [ 25%] torch.distributions.gamma
+highlighting module code... [ 26%] torch.distributions.geometric
+highlighting module code... [ 27%] torch.distributions.gumbel
+highlighting module code... [ 27%] torch.distributions.half_cauchy
+highlighting module code... [ 28%] torch.distributions.half_normal
+highlighting module code... [ 29%] torch.distributions.independent
+highlighting module code... [ 29%] torch.distributions.kl
+highlighting module code... [ 30%] torch.distributions.laplace
+highlighting module code... [ 31%] torch.distributions.log_normal
+highlighting module code... [ 31%] torch.distributions.lowrank_multivariate_normal
+highlighting module code... [ 32%] torch.distributions.multinomial
+highlighting module code... [ 33%] torch.distributions.multivariate_normal
+highlighting module code... [ 33%] torch.distributions.negative_binomial
+highlighting module code... [ 34%] torch.distributions.normal
+highlighting module code... [ 35%] torch.distributions.one_hot_categorical
+highlighting module code... [ 35%] torch.distributions.pareto
+highlighting module code... [ 36%] torch.distributions.poisson
+highlighting module code... [ 37%] torch.distributions.relaxed_bernoulli
+highlighting module code... [ 37%] torch.distributions.relaxed_categorical
+highlighting module code... [ 38%] torch.distributions.studentT
+highlighting module code... [ 39%] torch.distributions.transformed_distribution
+highlighting module code... [ 39%] torch.distributions.transforms
+highlighting module code... [ 40%] torch.distributions.uniform
+highlighting module code... [ 41%] torch.distributions.weibull
+highlighting module code... [ 41%] torch.functional
+highlighting module code... [ 42%] torch.hub
+highlighting module code... [ 43%] torch.jit
+highlighting module code... [ 43%] torch.multiprocessing
+highlighting module code... [ 44%] torch.multiprocessing.spawn
+highlighting module code... [ 45%] torch.nn.functional
+highlighting module code... [ 45%] torch.nn.init
+highlighting module code... [ 46%] torch.nn.intrinsic.modules.fused
+highlighting module code... [ 47%] torch.nn.intrinsic.qat.modules.conv_fused
+highlighting module code... [ 47%] torch.nn.intrinsic.qat.modules.linear_relu
+highlighting module code... [ 48%] torch.nn.intrinsic.quantized.modules.conv_relu
+highlighting module code... [ 49%] torch.nn.intrinsic.quantized.modules.linear_relu
+highlighting module code... [ 50%] torch.nn.modules.activation
+highlighting module code... [ 50%] torch.nn.modules.adaptive
+highlighting module code... [ 51%] torch.nn.modules.batchnorm
+highlighting module code... [ 52%] torch.nn.modules.container
+highlighting module code... [ 52%] torch.nn.modules.conv
+highlighting module code... [ 53%] torch.nn.modules.distance
+highlighting module code... [ 54%] torch.nn.modules.dropout
+highlighting module code... [ 54%] torch.nn.modules.flatten
+highlighting module code... [ 55%] torch.nn.modules.fold
+highlighting module code... [ 56%] torch.nn.modules.instancenorm
+highlighting module code... [ 56%] torch.nn.modules.linear
+highlighting module code... [ 57%] torch.nn.modules.loss
+highlighting module code... [ 58%] torch.nn.modules.module
+highlighting module code... [ 58%] torch.nn.modules.normalization
+highlighting module code... [ 59%] torch.nn.modules.padding
+highlighting module code... [ 60%] torch.nn.modules.pixelshuffle
+highlighting module code... [ 60%] torch.nn.modules.pooling
+highlighting module code... [ 61%] torch.nn.modules.rnn
+highlighting module code... [ 62%] torch.nn.modules.sparse
+highlighting module code... [ 62%] torch.nn.modules.transformer
+highlighting module code... [ 63%] torch.nn.modules.upsampling
+highlighting module code... [ 64%] torch.nn.parallel.data_parallel
+highlighting module code... [ 64%] torch.nn.parallel.distributed
+highlighting module code... [ 65%] torch.nn.parameter
+highlighting module code... [ 66%] torch.nn.qat.modules.conv
+highlighting module code... [ 66%] torch.nn.qat.modules.linear
+highlighting module code... [ 67%] torch.nn.quantized.dynamic.modules.linear
+highlighting module code... [ 68%] torch.nn.quantized.dynamic.modules.rnn
+highlighting module code... [ 68%] torch.nn.quantized.functional
+highlighting module code... [ 69%] torch.nn.quantized.modules
+highlighting module code... [ 70%] torch.nn.quantized.modules.activation
+highlighting module code... [ 70%] torch.nn.quantized.modules.conv
+highlighting module code... [ 71%] torch.nn.quantized.modules.functional_modules
+highlighting module code... [ 72%] torch.nn.quantized.modules.linear
+highlighting module code... [ 72%] torch.nn.utils.clip_grad
+highlighting module code... [ 73%] torch.nn.utils.convert_parameters
+highlighting module code... [ 74%] torch.nn.utils.prune
+highlighting module code... [ 75%] torch.nn.utils.rnn
+highlighting module code... [ 75%] torch.nn.utils.spectral_norm
+highlighting module code... [ 76%] torch.nn.utils.weight_norm
+highlighting module code... [ 77%] torch.onnx
+highlighting module code... [ 77%] torch.onnx.operators
+highlighting module code... [ 78%] torch.optim.adadelta
+highlighting module code... [ 79%] torch.optim.adagrad
+highlighting module code... [ 79%] torch.optim.adam
+highlighting module code... [ 80%] torch.optim.adamax
+highlighting module code... [ 81%] torch.optim.adamw
+highlighting module code... [ 81%] torch.optim.asgd
+highlighting module code... [ 82%] torch.optim.lbfgs
+highlighting module code... [ 83%] torch.optim.lr_scheduler
+highlighting module code... [ 83%] torch.optim.optimizer
+highlighting module code... [ 84%] torch.optim.rmsprop
+highlighting module code... [ 85%] torch.optim.rprop
+highlighting module code... [ 85%] torch.optim.sgd
+highlighting module code... [ 86%] torch.optim.sparse_adam
+highlighting module code... [ 87%] torch.quantization
+highlighting module code... [ 87%] torch.quantization.fake_quantize
+highlighting module code... [ 88%] torch.quantization.fuse_modules
+highlighting module code... [ 89%] torch.quantization.observer
+highlighting module code... [ 89%] torch.quantization.qconfig
+highlighting module code... [ 90%] torch.quantization.quantize
+highlighting module code... [ 91%] torch.quantization.stubs
+highlighting module code... [ 91%] torch.quasirandom
+highlighting module code... [ 92%] torch.random
+highlighting module code... [ 93%] torch.serialization
+highlighting module code... [ 93%] torch.sparse
+highlighting module code... [ 94%] torch.storage
+highlighting module code... [ 95%] torch.tensor
+highlighting module code... [ 95%] torch.utils.checkpoint
+highlighting module code... [ 96%] torch.utils.cpp_extension
+highlighting module code... [ 97%] torch.utils.data._utils.worker
+highlighting module code... [ 97%] torch.utils.data.dataloader
+highlighting module code... [ 98%] torch.utils.data.dataset
+highlighting module code... [ 99%] torch.utils.data.distributed
+highlighting module code... [100%] torch.utils.data.sampler
+
+writing additional pages...  searchdone
+copying images... [ 33%] math-quantizer-equation.png
+copying images... [ 66%] scripts/activation_images/ReLU6.png
+copying images... [100%] _static/img/tensorboard/hier_tags.png
+
+copying static files... ... done
+copying extra files... done
+dumping search index in English (code: en)... done
+dumping object inventory... done
+build succeeded, 15 warnings.
+
+The HTML pages are in build/html.
+/data/users/rvarm1/c2env/src/pytorch-sphinx-theme/pytorch_sphinx_theme/search.html:20: RemovedInSphinx30Warning: To modify script_files in the theme is deprecated. Please insert a <script> tag directly in your theme instead.
+  <p class="last">

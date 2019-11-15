@@ -61,8 +61,7 @@ used for applications such as model parallel training. In short, applications
 may send and receive gradient recording tensors over RPC. In the forward pass,
 we record when gradient recording tensors are sent over RPC and during the
 backward pass we use this information to perform a distributed backward pass
-using RPC. For more details see the design doc
-`here <https://pytorch.org/docs/master/notes/distributed_autograd.html>`_.
+using RPC. For more details see the design doc for distributed autograd: :doc:`/notes/distributed_autograd`.
 
 .. automodule:: torch.distributed.autograd
     :members:
