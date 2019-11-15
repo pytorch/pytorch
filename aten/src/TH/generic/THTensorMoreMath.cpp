@@ -6,9 +6,7 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
 #include <ATen/core/EnableNamedTensor.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
@@ -17,7 +15,7 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
 
 #if !defined(TH_REAL_IS_BFLOAT16)
 
-int THTensor_(equal)(THTensor *ta, THTensor* tb)
+static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
 {
   std::atomic<int> equal{1};
   if(!THTensor_(isSameSizeAs)(ta, tb))
@@ -52,6 +50,16 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
                      })
   }
   return equal.load();
+}
+
+int THTensor_(equal)(THTensor *ta, THTensor* tb) {
+#ifdef BUILD_NAMEDTENSOR
+  if (!at::namedinference::are_names_equal(ta, tb)) {
+    return 0;
+  }
+  at::NoNamesGuard guard;
+#endif
+  return THTensor_(equalImpl)(ta, tb);
 }
 
 // Helper function to be used in a reduction operation.
@@ -1000,12 +1008,10 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #endif
 
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
-LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
