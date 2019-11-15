@@ -1,5 +1,5 @@
-from . import invoke_rpc_builtin, invoke_rpc_python_udf
-from . import invoke_remote_builtin, invoke_remote_python_udf
+from . import _invoke_rpc_builtin, _invoke_rpc_python_udf
+from . import _invoke_remote_builtin, _invoke_remote_python_udf
 from . import _start_rpc_agent
 from . import _destroy_rref_context, _cleanup_python_rpc_handler
 from . import WorkerInfo
@@ -182,12 +182,12 @@ def remote(to, func, args=None, kwargs=None):
 
     info = _to_worker_info(to)
     if qualified_name is not None:
-        return invoke_remote_builtin(
+        return _invoke_remote_builtin(
             _agent, info, qualified_name, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
             PythonUDF(func, args, kwargs))
-        return invoke_remote_python_udf(
+        return _invoke_remote_python_udf(
             _agent, info, pickled_python_udf, tensors)
 
 
@@ -202,13 +202,13 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
 
     info = _to_worker_info(to)
     if qualified_name is not None:
-        fut = invoke_rpc_builtin(
+        fut = _invoke_rpc_builtin(
             _agent, info, qualified_name, *args, **kwargs
         )
     else:
         (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
             PythonUDF(func, args, kwargs))
-        fut = invoke_rpc_python_udf(
+        fut = _invoke_rpc_python_udf(
             _agent, info, pickled_python_udf, tensors)
     return fut
 
@@ -229,9 +229,10 @@ def rpc_sync(to, func, args=None, kwargs=None):
                        invocation.
 
     Returns:
-        Returns the result of running ``func``on ``args`` and ``kwargs``.
+        Returns the result of running ``func`` on ``args`` and ``kwargs``.
 
     Example::
+
         On worker 0:
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
