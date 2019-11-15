@@ -1174,7 +1174,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
 }
 
 Tensor isnan_sparse(const Tensor & self){
-  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
   SparseTensor out =  at::sparse_coo_tensor({0}, self.options().dtype(at::kBool));
   out.resize_as_(self);
   auto indices = out._indices();
@@ -1188,7 +1188,7 @@ Tensor isnan_sparse(const Tensor & self){
 }
 
 Tensor any_sparse(const Tensor& self) {
-  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
 
   return at::any(self._values());
 }
