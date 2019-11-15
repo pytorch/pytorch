@@ -19,7 +19,7 @@ at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
 }
 
-void adaptive_avg_pool2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void adaptive_avg_pool2d_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -31,7 +31,7 @@ void adaptive_avg_pool2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, 
   pack(*stack, std::move(result_));
 }
 
-void _convolution_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void _convolution_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -53,7 +53,7 @@ void _convolution_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* 
   pack(*stack, std::move(result_));
 }
 
-void conv2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void conv2d_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -70,7 +70,7 @@ void conv2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack)
     pack(*stack, std::move(result_));
 }
 
-void max_pool2d_with_indices_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void max_pool2d_with_indices_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -86,7 +86,7 @@ void max_pool2d_with_indices_kernel(OperatorKernel*, const c10::OperatorHandle& 
     pack(*stack, std::move(result_));
 }
 
-void max_pool2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void max_pool2d_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -102,7 +102,7 @@ void max_pool2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* st
   pack(*stack, std::move(result_));
 }
 
-void t_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void t_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -113,7 +113,7 @@ void t_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
   pack(*stack, std::move(result_));
 }
 
-void relu_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void relu_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   #endif
@@ -124,7 +124,7 @@ auto result_ = at::relu(
   pack(*stack, std::move(result_));
 }
 
-void addmm_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void addmm_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -140,7 +140,7 @@ void addmm_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) 
   pack(*stack, std::move(result_));
 }
 
-void view_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void view_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -151,7 +151,7 @@ void view_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
   pack(*stack, std::move(result_));
 }
 
-void flatten_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+void flatten_kernel(c10::OperatorHandle*, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
