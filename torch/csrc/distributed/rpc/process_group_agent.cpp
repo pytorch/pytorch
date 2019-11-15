@@ -84,6 +84,9 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
+constexpr std::chrono::milliseconds INFINITY_SLEEP_INTERVAL =
+    std::chrono::hours(100);
+
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
   const auto worldSize = pg_->getSize();
@@ -286,7 +289,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
-  future->setDst(to.id_);
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime =
@@ -294,7 +296,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
             std::chrono::steady_clock::now().time_since_epoch());
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
-      futures_[requestId] = std::make_pair(future, futureStartTime);
+      futures_[requestId] = FutureInfo(future, futureStartTime, to.id_);
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[futureStartTime].push_back(requestId);
     }
@@ -417,7 +419,10 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               // by the sender who has determined the future has timed out.
               return;
             }
-            std::tie(fm, futureStartTime) = futures_[id];
+
+            const auto& futureInfo = futures_[id];
+            fm = futureInfo.future_;
+            futureStartTime = futureInfo.startTime_;
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
@@ -476,82 +481,41 @@ void ProcessGroupAgent::listenLoop() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  // Sleep until a future is available, or there are no futures and we are
-  // shutting down.
-  {
-    std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
-    futureTimeoutCV_.wait(lock);
-  }
-
   while (!shutdown_.load()) {
     std::chrono::milliseconds sleepTime;
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       // Estimate amount of time the first future will time out in, and sleep
       // for that long.
-      if (futureTimeouts_.empty()) {
-        continue;
-      }
-      auto runningTime =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now().time_since_epoch()) -
-          futureTimeouts_.begin()->first;
-      // TODO: will sleep for 0 ms when rpcTimeout_ is 0 (meaning infinite),
-      // which will result in busy polling for the lock If rpcTimeout_ is 0,
-      // should we have a default sleep interval here?
-      sleepTime =
-          std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
-    }
-
-    // Sleep for the ETA for the next future to time out, or until we are told
-    // to shut down. This is to avoid the case where we sleep for a long time
-    // due to a future with a high timeout.
-    {
-      std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
-      if (futureTimeoutCV_.wait_for(
-              lock, sleepTime, [this] { return shutdown_.load(); })) {
-        // We were told to shutdown, so exit.
-        return;
-      }
-    }
-
-    // TODO inefficient, either when futureTimeouts_ map is empty or when we
-    // have timeout of 0, this thread will continaully contend for the lock
-    // without sleeping.
-    if (rpcTimeout_.count() == 0) {
-      continue;
-    }
-    std::vector<std::shared_ptr<FutureMessage>> timedOutFutures;
-    {
-      // Check for timed out futures while holding the lock.
-      std::lock_guard<std::mutex> lock{futureMutex_};
-      for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
-           /* intentional no increment */) {
-        const std::chrono::milliseconds startTime = it->first;
-        const std::vector<int64_t> futureIDs = it->second;
-        const auto diffTime =
+      // if there are no futures or the RPC timeout is set to 0 (meaning no
+      // timeout), then sleep for a set "infinity" time.
+      if (futureTimeouts_.empty() || rpcTimeout_.count() == 0) {
+        sleepTime = INFINITY_SLEEP_INTERVAL;
+      } else {
+        auto runningTime =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()) -
-            startTime;
-        if (diffTime <= rpcTimeout_) {
-          // Since the futureTimeouts_ map is ordered by timeout, we don't need
-          // to check the remaining futures.
-          break;
-        } else {
-          for (const auto& futureID : futureIDs) {
-            TORCH_CHECK(
-                futures_.find(futureID) != futures_.end(),
-                "Race Condition - Expected future does not exist in map");
-            const auto fut = futures_[futureID].first;
-            timedOutFutures.push_back(fut);
-            futures_.erase(futureID);
-          }
-          // post-fix increment iterator to ensure that correct iteration order
-          // is maintained.
-          futureTimeouts_.erase(it++);
-        }
+            futureTimeouts_.begin()->first;
+        // If we calculate that the future has already timed out, then sleep for
+        // 0 ms to immediately process the future.
+        sleepTime =
+            std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
       }
     }
+
+    // Sleep for the ETA for the next future to time out, or until we are woken
+    // up, either by shutting down or by creation of a new future.
+    {
+      std::unique_lock<std::mutex> lock(futureTimeoutMutex_);
+      futureTimeoutCV_.wait_for(
+          lock, sleepTime); // TODO, should we add a predicate shutdown_.load()
+    }
+
+    if (shutdown_.load()) {
+      return;
+    }
+
+    const auto timedOutFutures = processTimedOutFutures();
 
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
@@ -560,14 +524,50 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), "future timed out.");
       for (const auto& timedOutFuture : timedOutFutures) {
-        timedOutFuture->markCompleted(exceptionMsg);
-        const int dst = timedOutFuture->dst();
+        timedOutFuture.future_->markCompleted(exceptionMsg);
+        const int dst = timedOutFuture.dstRank_;
 
         recvCounts_.increment(dst);
         futureCV_.notify_all();
       }
     }
   }
+}
+
+const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
+    processTimedOutFutures() {
+  std::vector<FutureInfo> timedOutFutures;
+  {
+    // Check for timed out futures while holding the lock.
+    std::lock_guard<std::mutex> lock{futureMutex_};
+    for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
+         /* intentional no increment */) {
+      const std::chrono::milliseconds startTime = it->first;
+      const std::vector<int64_t> futureIDs = it->second;
+      const auto diffTime =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch()) -
+          startTime;
+      if (diffTime <= rpcTimeout_) {
+        // Since the futureTimeouts_ map is ordered by timeout, we don't need
+        // to check the remaining futures.
+        break;
+      } else {
+        for (const auto& futureID : futureIDs) {
+          TORCH_CHECK(
+              futures_.find(futureID) != futures_.end(),
+              "Race Condition - Expected future does not exist in map");
+          const auto futInfo = futures_[futureID];
+          timedOutFutures.push_back(futInfo);
+          futures_.erase(futureID);
+        }
+        // post-fix increment iterator to ensure that correct iteration order
+        // is maintained.
+        futureTimeouts_.erase(it++);
+      }
+    }
+  }
+  return timedOutFutures;
 }
 
 } // namespace rpc

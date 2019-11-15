@@ -71,6 +71,18 @@ class ProcessGroupAgent : public RpcAgent {
     std::mutex mutex_;
   };
 
+  struct FutureInfo {
+    std::shared_ptr<FutureMessage> future_;
+    std::chrono::milliseconds startTime_;
+    int dstRank_;
+    FutureInfo(
+        const std::shared_ptr<FutureMessage>& future,
+        const std::chrono::milliseconds& startTime,
+        int dstRank)
+        : future_(future), startTime_(startTime), dstRank_(dstRank){};
+    FutureInfo(){};
+  };
+
   void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
@@ -80,6 +92,8 @@ class ProcessGroupAgent : public RpcAgent {
   void listenLoop();
   // poll for timed out RPCs
   void pollTimedOutRPCs();
+  // process timed out futures
+  const std::vector<FutureInfo> processTimedOutFutures();
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -142,10 +156,7 @@ class ProcessGroupAgent : public RpcAgent {
   ThreadPool threadPool_;
   // Mapping of request id to (future, future timeout) pair. We store the future
   // timeout for efficient lookups into the futureTimeouts_ map.
-  std::unordered_map<
-      int64_t,
-      std::pair<std::shared_ptr<FutureMessage>, std::chrono::milliseconds>>
-      futures_;
+  std::unordered_map<int64_t, FutureInfo> futures_;
   // A map to keep track of when futures time out. The map is keyed by the time
   // (millisecond level precision) the future started, and the values correspond
   // to a vector of futures that started at that time. When futures time out,

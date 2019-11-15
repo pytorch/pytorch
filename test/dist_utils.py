@@ -91,7 +91,6 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
-                rpc_timeout=timedelta(seconds=0)
             )
 
         return_value = old_test_method(self, *arg, **kwargs)
