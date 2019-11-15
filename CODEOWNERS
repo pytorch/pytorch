@@ -19,3 +19,9 @@
 /torch/autograd/ @apaszke
 /torch/jit/ @apaszke
 /torch/utils/data/ @apaszke
+
+# Distributed RPC Framework.
+/torch/csrc/distributed/rpc @mrshenli @pritamdamania87
+/torch/csrc/distributed/autograd @mrshenli @pritamdamania87
+/torch/distributed/rpc @mrshenli @pritamdamania87
+/torch/distributed/autograd @mrshenli @pritamdamania87

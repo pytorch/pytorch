@@ -1068,7 +1068,7 @@ TEST_F(FunctionalTest, EmbeddingBag) {
   auto offsets = torch::tensor({0,4}, torch::kLong);
   auto weight = torch::empty({10, 3});
   torch::nn::init::normal_(weight);
-  auto y = F::embedding_bag(input, weight, EmbeddingBagOptions().mode(torch::kSum), offsets);
+  auto y = F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets));
   auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor()));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 
@@ -1886,8 +1886,22 @@ void test_isfinite() {
   }
   if (std::numeric_limits<T>::has_infinity) {
     const auto inf = std::numeric_limits<T>::infinity();
-    const auto x = torch::full({3, 3}, inf, torch::TensorOptions().dtype(S));
-    ASSERT_FALSE(torch::isfinite(x).all().template item<bool>());
+    const auto x = torch::tensor({
+      -inf,
+      std::numeric_limits<T>::lowest(),
+      static_cast<T>(0),
+      static_cast<T>(1),
+      static_cast<T>(42),
+      std::numeric_limits<T>::min(),
+      std::numeric_limits<T>::max(),
+      inf
+    }, torch::TensorOptions().dtype(S));
+    ASSERT_TRUE(torch::allclose(
+      torch::isfinite(x).toType(torch::kInt),
+      torch::tensor(
+        {false, true, true, true, true, true, true, false}
+      ).toType(torch::kInt)
+    ));
   }
 }
 

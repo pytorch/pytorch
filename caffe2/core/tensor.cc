@@ -204,7 +204,7 @@ void Tensor::enforce_invariants() {
   // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   CAFFE_ENFORCE(
-    !impl_->is_variable() || !(impl_->requires_grad() && at::GradMode::is_enabled()),
+    !(impl_->requires_grad() && at::GradMode::is_enabled()),
     "Caffe2 tensor wrapper doesn't support autograd variables that require grad");
 #endif
   CAFFE_ENFORCE_EQ(
