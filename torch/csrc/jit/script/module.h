@@ -213,7 +213,18 @@ struct TORCH_API Module {
   }
 
   IValue attr(const std::string& name) const {
-    return module_object()->getAttr(name);
+    if (auto r = module_object()->type()->findAttributeSlot(name)) {
+      return module_object()->getSlot(*r);
+    }
+    if (auto v = module_object()->type()->getConstant(name)) {
+      return v;
+    }
+    TORCH_CHECK(
+        false,
+        module_object()->type()->python_str(),
+        " does not have a field with name '",
+        name,
+        "'");
   }
 
   IValue attr(const std::string& name, IValue or_else) const {

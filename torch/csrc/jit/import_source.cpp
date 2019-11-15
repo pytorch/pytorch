@@ -274,6 +274,7 @@ struct SourceImporterImpl : public Resolver,
     std::vector<Def> methods;
     std::vector<ResolverPtr> resolvers;
     std::vector<Assign> attributes;
+    std::vector<Assign> constants;
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
@@ -303,6 +304,9 @@ struct SourceImporterImpl : public Resolver,
               } else if (name == "__annotations__") {
                 // This is to initialize the annotations dict, just ignore.
                 continue;
+              } else if (name == "__constants__") {
+                // This is to initialize the constants dict, just ignore.
+                continue;
               } else {
                 // This is a regular attribute assignment, of the form:
                 //   foo : Tensor
@@ -319,10 +323,18 @@ struct SourceImporterImpl : public Resolver,
               // is not a valid python, identifier. Looks like:
               //    __annotations__["0"] = Tensor
               const auto lhs = Subscript(assign.lhs());
-              TORCH_INTERNAL_ASSERT(
-                  Var(lhs.value()).name().name() == "__annotations__");
               TORCH_INTERNAL_ASSERT(lhs.subscript_exprs().size() == 1);
-              attributes.push_back(assign);
+              const auto& dict_name = Var(lhs.value()).name().name();
+              if(dict_name == "__annotations__") {
+                attributes.push_back(assign);
+              } else if (dict_name == "__constants__") {
+                constants.push_back(assign);
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false,
+                    "Unexpected subscript assignment, only supports assignment of __annotations__ and __constants__ but found:",
+                    dict_name);
+              }
             } break;
             default: {
               TORCH_INTERNAL_ASSERT(
@@ -365,6 +377,15 @@ struct SourceImporterImpl : public Resolver,
           class_type->addAttribute(name, type, is_parameter);
         }
       }
+    }
+
+    // Populate class constants
+    for (const auto& assign : constants) {
+      TORCH_INTERNAL_ASSERT(assign.lhs().kind() == TK_SUBSCRIPT);
+      const auto name =
+        StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0]).text();
+      auto v = IValue(0);
+      class_type->addConstant(name, v);
     }
 
     cu_->register_type(class_type);
