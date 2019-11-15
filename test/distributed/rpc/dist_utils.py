@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import threading
 from functools import partial, wraps
-from os import getenv
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -13,16 +12,6 @@ if not dist.is_available():
     sys.exit(0)
 
 
-class TestConfig:
-    __slots__ = ["rpc_backend_name"]
-
-    def __init__(self, *args, **kwargs):
-        assert len(args) == 0, "TestConfig only takes kwargs."
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-TEST_CONFIG = TestConfig(rpc_backend_name=getenv("RPC_BACKEND_NAME", "PROCESS_GROUP"))
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
@@ -85,7 +74,7 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
             # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
             rpc.init_model_parallel(
                 self_name="worker%d" % self.rank,
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                backend=self.rpc_backend,
                 init_method=self.init_method,
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,

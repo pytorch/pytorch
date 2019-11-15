@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/Parallel.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
 #include "ATen/cpp_custom_type_hack.h"
@@ -82,25 +83,6 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
 
   q_params.precision = precision;
 
-  // This operation does the following:
-  // 1) Quantizes the input matrix given the statistics we've calculated above
-  // 2) Creates a "row buffer" vector with offset values that must be added
-  //    to the integer matrix multiplication operation to ensure correctness
-  // 3) Packs the resulting quantized matrix into vector-register and cache
-  //    friendly tiles.
-  //
-  //  Note this is not executed eagerly, but rather within the fbgemmPacked call
-  //  below.
-  fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
-      /*trans=*/fbgemm::matrix_op_t::NoTranspose,
-      /*nRow=*/M,
-      /*nCol=*/K,
-      /*smat=*/input_ptr,
-      /*ld=*/K,
-      /*pmat=*/nullptr, // packA manages ownership of `pmat`
-      /*scale=*/q_params.scale,
-      /*zero_pt=*/q_params.zero_point);
-
   // ReQuantizeForFloat requires pointers to the scale and zero point values,
   // since in the case of rowwise quantization these will be arrays rather than
   // scalars. But in this case, we're doing whole-tensor quantization so we just
@@ -110,51 +92,79 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   int32_t weight_zero_point_int32 =
       static_cast<int32_t>(weight_zero_point.to<int64_t>());
 
-  // This is the end of the pipeline, pass the resulting matrix through
-  fbgemm::DoNothing<float, float> doNothingObj{};
-
   auto bias_contig = bias.contiguous();
 
-  // After the uint8 * int8 matrix multiplication is performed, this operation
-  // does:
-  //  1) Add in row and column offsets to the rows and columns, respectively
-  //  2) Dequantize the results into floating point
-  //  3) Add in the bias term
-  fbgemm::ReQuantizeForFloat</*FUSE_RELU*/false> outputProcObj(
-      /*nextop=*/doNothingObj,
-      /*Aq_scale=*/q_params.scale,
-      /*Bq_scale=*/&weight_scale_float,
-      /*Aq_zero_point=*/q_params.zero_point,
-      /*Bq_zero_point=*/&weight_zero_point_int32,
-      /*row_offsets=*/packA.getRowOffsetBuffer(),
-      /*col_offsets=*/col_offsets.data_ptr<int32_t>(),
-      /*bias=*/bias_contig.data_ptr<float>(),
-      /*nCol=*/N);
-
+  // The resulting matrix here is 2-D, let's view it with the original
+  // left hand dimensions of the input.
+  // Here are two examples:
+  // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+  // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+  std::vector<int64_t> out_sizes = input.sizes().vec();
+  out_sizes.back() = N;
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output = at::zeros(
-      {M, N}, bias.options().dtype(at::kFloat));
+      out_sizes, bias.options().dtype(at::kFloat));
   auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
   // Pull out the PackBMatrix instance from the owning tensor
   auto& packB = cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
-  // Do the GEMM
-  fbgemm::fbgemmPacked(
-      /*packA=*/packA,
-      /*packB=*/packB,
-      /*C=*/output.data_ptr<float>(),
-      /*C_buffer=*/buffer.data_ptr<int32_t>(),
-      /*ldc=*/N,
-      /*outProcess=*/outputProcObj,
-      /*thread_id=*/0,
-      /*num_threads=*/1);
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    // This operation does the following:
+    // 1) Quantizes the input matrix given the statistics we've calculated above
+    // 2) Creates a "row buffer" vector with offset values that must be added
+    //    to the integer matrix multiplication operation to ensure correctness
+    // 3) Packs the resulting quantized matrix into vector-register and cache
+    //    friendly tiles.
+    //
+    //  Note this is not executed eagerly, but rather within the fbgemmPacked
+    //  call below.
+    fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
+        /*trans=*/fbgemm::matrix_op_t::NoTranspose,
+        /*nRow=*/M,
+        /*nCol=*/K,
+        /*smat=*/input_ptr,
+        /*ld=*/K,
+        /*pmat=*/nullptr, // packA manages ownership of `pmat`
+        /*scale=*/q_params.scale,
+        /*zero_pt=*/q_params.zero_point);
 
-  // The resulting matrix here is 2-D, let's view it with the original
-  // left hand dimensions of the input.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
-  out_sizes.back() = N;
-  return output.view(out_sizes);
+    // This is the end of the pipeline, pass the resulting matrix through
+    fbgemm::DoNothing<float, float> doNothingObj{};
+
+    for (int task_id = begin; task_id < end; ++task_id) {
+      // After the uint8 * int8 matrix multiplication is performed, this
+      // operation does:
+      //  1) Add in row and column offsets to the rows and columns, respectively
+      //  2) Dequantize the results into floating point
+      //  3) Add in the bias term
+      fbgemm::ReQuantizeForFloat</*FUSE_RELU*/ false> outputProcObj(
+          /*nextop=*/doNothingObj,
+          /*Aq_scale=*/q_params.scale,
+          /*Bq_scale=*/&weight_scale_float,
+          /*Aq_zero_point=*/q_params.zero_point,
+          /*Bq_zero_point=*/&weight_zero_point_int32,
+          /*row_offsets=*/packA.getRowOffsetBuffer(),
+          /*col_offsets=*/col_offsets.data_ptr<int32_t>(),
+          /*bias=*/bias_contig.data_ptr<float>(),
+          /*nCol=*/N);
+
+      // Do the GEMM
+      fbgemm::fbgemmPacked(
+          /*packA=*/packA,
+          /*packB=*/packB,
+          /*C=*/output.data_ptr<float>(),
+          /*C_buffer=*/buffer.data_ptr<int32_t>(),
+          /*ldc=*/N,
+          /*outProcess=*/outputProcObj,
+          /*thread_id=*/task_id,
+          /*num_threads=*/num_tasks);
+    }
+  });
+
+  return output;
+
 }
 
 Tensor fbgemm_linear_int8_weight(

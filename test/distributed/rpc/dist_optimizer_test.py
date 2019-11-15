@@ -1,15 +1,14 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import threading
 import unittest
 
+from dist_utils import dist_init
+from torch import optim
+from torch.distributed.optim import DistributedOptimizer
 import torch
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from distributed.rpc.dist_utils import dist_init
-from distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
-from torch import optim
-from torch.distributed.optim import DistributedOptimizer
+import threading
 
 
 class MyModule:
@@ -34,7 +33,7 @@ class FailingOptimizer(optim.Optimizer):
         super(FailingOptimizer, self).__init__(params, {})
 
     def step(self, closure=None):
-        raise ValueError("Error running optimizer.")
+        raise ValueError('Error running optimizer.')
 
 
 def _call_method(method, obj_rref, *args, **kwargs):
@@ -57,7 +56,7 @@ def remote_method(method, obj_rref, *args, **kwargs):
         obj_rref.owner(),
         _call_method,
         args=[method, obj_rref] + list(args),
-        kwargs=kwargs,
+        kwargs=kwargs
     )
 
 
@@ -77,7 +76,7 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
         obj_rref.owner(),
         _call_method,
         args=[method, obj_rref] + list(args),
-        kwargs=kwargs,
+        kwargs=kwargs
     )
 
 
@@ -88,8 +87,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception(self):
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = 'worker%d' % ((self.rank + 1) % self.world_size)
+        owner2 = 'worker%d' % ((self.rank + 2) % self.world_size)
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -97,7 +96,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         remote_param2 = remote_method(MyModule.get_w, remote_module2)
 
         dist_optim = DistributedOptimizer(
-            FailingOptimizer, [remote_param1, remote_param2]
+            FailingOptimizer,
+            [remote_param1, remote_param2],
         )
 
         with dist_autograd.context():
@@ -105,7 +105,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
             output1 = rpc_async_method(MyModule.forward, remote_module1, t2)
-            output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
+            output2 = rpc_async_method(
+                MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1).sum()
 
             dist_autograd.backward([loss])
@@ -134,8 +135,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         local_optim.step()
 
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = 'worker%d' % ((self.rank + 1) % self.world_size)
+        owner2 = 'worker%d' % ((self.rank + 2) % self.world_size)
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -149,7 +150,9 @@ class DistOptimizerTest(RpcAgentTestFixture):
         self.assertEqual(old_w2, remote_param2.to_here())
 
         dist_optim = DistributedOptimizer(
-            optim.SGD, [remote_param1, remote_param2], lr=0.05
+            optim.SGD,
+            [remote_param1, remote_param2],
+            lr=0.05,
         )
 
         with dist_autograd.context():
@@ -157,7 +160,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
             output1 = rpc_async_method(MyModule.forward, remote_module1, t2)
-            output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
+            output2 = rpc_async_method(
+                MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1)
 
             dist_autograd.backward([loss.sum()])

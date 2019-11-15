@@ -3,5 +3,5 @@
 
 class ProcessGroupRpcAgentMixin(object):
     @property
-    def rpc_backend_name(self):
-        return "PROCESS_GROUP"
+    def rpc_backend(self):
+        return rpc.backend_registry.BackendType["PROCESS_GROUP"]

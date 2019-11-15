@@ -1,7 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import unittest
-
 import distributed.rpc.dist_utils as dist_utils
 import torch
 import torch.distributed.rpc as rpc
@@ -9,15 +7,6 @@ from distributed.rpc.process_group.process_group_rpc_agent_mixin import (
     ProcessGroupRpcAgentMixin,
 )
 from distributed.rpc.rpc_test import RpcTest
-
-
-def requires_process_group_agent(message=""):
-    def decorator(old_func):
-        return unittest.skipUnless(
-            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
-        )(old_func)
-
-    return decorator
 
 
 class ProcessGroupRpcTest(ProcessGroupRpcAgentMixin, RpcTest):
@@ -43,10 +32,3 @@ class ProcessGroupRpcTest(ProcessGroupRpcAgentMixin, RpcTest):
                 worker_name_to_id=self.worker_name_to_id,
             )
         rpc.join_rpc()
-
-    def test_requires_process_group_agent_decorator(self):
-        @requires_process_group_agent("test_func did not run")
-        def test_func():
-            return "expected result"
-
-        self.assertEqual(test_func(), "expected result")

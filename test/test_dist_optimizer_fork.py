@@ -9,10 +9,10 @@ from distributed.rpc.process_group.dist_optimizer_test import (
 
 
 class DistOptimizerTestWithFork(MultiProcessTestCase, ProcessGroupDistOptimizerTest):
+
     def setUp(self):
         super(DistOptimizerTestWithFork, self).setUp()
         self._fork_processes()
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()
