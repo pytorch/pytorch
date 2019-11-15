@@ -116,16 +116,6 @@ def get_worker_info(worker_name=None):
     else:
         return _agent.get_worker_info()
 
-@_require_initialized
-def get_rpc_timeout():
-    """
-    Retrieve the timeout for all RPCs that was set during RPC initialization.
-
-    Returns:
-        `datetime.timedelta` instance indicating the RPC timeout.
-    """
-    return _agent._get_rpc_timeout()
-
 
 def _to_worker_info(name_or_info):
     if isinstance(name_or_info, WorkerInfo):
