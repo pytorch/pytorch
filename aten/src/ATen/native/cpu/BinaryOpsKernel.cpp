@@ -93,11 +93,45 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
-void logical_xor_kernel(TensorIterator& iter) {
-  cpu_kernel(iter,
-    [](bool a, bool b) -> bool {
-      return a != b;
+void bitwise_xor_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
+    // integral types.
+    cpu_kernel(
+          iter,
+          [](bool a, bool b) {
+            return a != b;
+          });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            return a ^ b;
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a ^ b;
+          });
     });
+  }
+}
+
+void logical_xor_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_xor_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> bool {
+          return bool(a) != bool(b);
+        });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "logical_xor_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(bool(a) != bool(b));
+        });
+    });
+  }
 }
 
 void lt_kernel(TensorIterator& iter) {
@@ -174,14 +208,14 @@ void ge_kernel(TensorIterator& iter) {
 
 void eq_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "eq_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBool, kBFloat16, iter.input_dtype(), "eq_cpu", [&]() {
       cpu_kernel(iter,
        [=](scalar_t a, scalar_t b) -> bool {
          return a == b;
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "eq_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "eq_cpu", [&]() {
       cpu_kernel(iter,
        [=](scalar_t a, scalar_t b) -> scalar_t {
          return a == b;
@@ -192,21 +226,44 @@ void eq_kernel(TensorIterator& iter) {
 
 void ne_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "ne_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBool, kBFloat16, iter.input_dtype(), "ne_cpu", [&]() {
       cpu_kernel(iter,
        [=](scalar_t a, scalar_t b) -> bool {
          return a != b;
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "ne_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "ne_cpu", [&]() {
       cpu_kernel(iter,
        [=](scalar_t a, scalar_t b) -> scalar_t {
          return a != b;
        });
     });
   }
-  }
+}
+
+void smooth_l1_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
+    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
+      auto z = std::abs(a - b);
+      return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
+    });
+  });
+}
+
+void mse_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
+    cpu_kernel_vec(iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t {
+        auto diff = a - b;
+        return diff * diff;
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      auto diff =  a - b;
+      return diff * diff;
+      });
+  });
+}
 
 } // anonymous namespace
 
@@ -216,6 +273,7 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
+REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 REGISTER_DISPATCH(lt_stub, &lt_kernel);
 REGISTER_DISPATCH(le_stub, &le_kernel);
@@ -223,5 +281,7 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel);
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
+REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+REGISTER_DISPATCH(mse_stub, &mse_kernel);
 
 }} // namespace at::native

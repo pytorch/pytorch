@@ -9,7 +9,6 @@ import subprocess
 import glob
 
 import common_utils as common
-from common_utils import default_floating_dtype
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -66,26 +65,24 @@ class TestCppExtension(common.TestCase):
         z = cpp_extension.sigmoid_add(x, y)
         self.assertEqual(z, x.sigmoid() + y.sigmoid())
 
-    @default_floating_dtype(torch.double)
     def test_extension_module(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
-        weights = torch.rand(8, 4)
+        weights = torch.rand(8, 4, dtype=torch.double)
         expected = mm.get().mm(weights)
         result = mm.forward(weights)
         self.assertEqual(expected, result)
 
-    @default_floating_dtype(torch.double)
     def test_backward(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
-        weights = torch.rand(8, 4, requires_grad=True)
+        weights = torch.rand(8, 4, dtype=torch.double, requires_grad=True)
         result = mm.forward(weights)
         result.sum().backward()
         tensor = mm.get()
 
-        expected_weights_grad = tensor.t().mm(torch.ones([4, 4]))
+        expected_weights_grad = tensor.t().mm(torch.ones([4, 4], dtype=torch.double))
         self.assertEqual(weights.grad, expected_weights_grad)
 
-        expected_tensor_grad = torch.ones([4, 4]).mm(weights.t())
+        expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
     def test_jit_compile_extension(self):
@@ -477,18 +474,17 @@ class TestCppExtension(common.TestCase):
 
     @dont_wipe_extensions_build_folder
     @common.skipIfRocm
-    @default_floating_dtype(torch.double)
-    def test_cpp_frontend_module_has_same_output_as_python(self):
+    def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
             sources="cpp_extensions/cpp_frontend_extension.cpp",
             verbose=True,
         )
 
-        input = torch.randn(2, 5)
+        input = torch.randn(2, 5, dtype=dtype)
         cpp_linear = extension.Net(5, 2)
-        cpp_linear.to(torch.float64)
-        python_linear = torch.nn.Linear(5, 2)
+        cpp_linear.to(dtype)
+        python_linear = torch.nn.Linear(5, 2).to(dtype)
 
         # First make sure they have the same parameters
         cpp_parameters = dict(cpp_linear.named_parameters())
@@ -674,7 +670,7 @@ class TestCppExtension(common.TestCase):
         source = """
         #include <torch/script.h>
         torch::Tensor func(torch::Tensor x) { return x; }
-        static torch::jit::RegisterOperators r("test::func", &func);
+        static torch::RegisterOperators r("test::func", &func);
         """
         torch.utils.cpp_extension.load_inline(
             name="is_python_module",
@@ -731,6 +727,111 @@ class TestCppExtension(common.TestCase):
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 
+    def test_warning(self):
+        # Note: the module created from this source will include the py::key_error
+        # symbol. But because of visibility and the fact that it lives in a
+        # different compilation unit than pybind, this trips up ubsan even though
+        # it is fine. "ubsan.supp" thus needs to contain "vptr:warn_mod.so".
+        source = '''
+        // error_type:
+        // 0: no error
+        // 1: torch::TypeError
+        // 2: python_error()
+        // 3: py::error_already_set
+        at::Tensor foo(at::Tensor x, int error_type) {
+            std::ostringstream err_stream;
+            err_stream << "Error with "  << x.type();
+
+            TORCH_WARN(err_stream.str());
+            if(error_type == 1) {
+                throw torch::TypeError(err_stream.str().c_str());
+            }
+            if(error_type == 2) {
+                PyObject* obj = PyTuple_New(-1);
+                TORCH_CHECK(!obj);
+                // Pretend it was caught in a different thread and restored here
+                auto e = python_error();
+                e.persist();
+                e.restore();
+                throw e;
+            }
+            if(error_type == 3) {
+                throw py::key_error(err_stream.str());
+            }
+            return x.cos();
+        }
+        '''
+
+        # Ensure double type for hard-coded c name below
+        t = torch.rand(2).double()
+        cpp_tensor_name = r"CPUDoubleType"
+
+        # Without error handling, the warnings cannot be catched
+        # and the Tensor type names are not cleaned
+        warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
+                                                         cpp_sources=[source],
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=False)
+
+        with warnings.catch_warnings(record=True) as w:
+            warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 0)
+
+            # pybind translate all our errors to RuntimeError
+            with self.assertRaisesRegex(RuntimeError, cpp_tensor_name):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(RuntimeError, "bad argument to internal function|python_error"):
+                warn_mod.foo(t, 2)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
+                warn_mod.foo(t, 3)
+            self.assertEqual(len(w), 0)
+
+
+        warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
+                                                         cpp_sources=[source],
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=True)
+
+
+        with warnings.catch_warnings(record=True) as w:
+            # Catched with no error should be detected
+            warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 1)
+
+            # Catched with cpp error should not be detected
+            with self.assertRaisesRegex(TypeError, t.type()):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 1)
+
+            # Catched with python error should not be detected
+            with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
+                warn_mod.foo(t, 2)
+            self.assertEqual(len(w), 1)
+
+            # Catched with pybind error should not be detected
+            # Note that there is no type name translation for pybind errors
+            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
+                warn_mod.foo(t, 3)
+            self.assertEqual(len(w), 1)
+
+        # Make sure raising warnings are handled properly
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("error")
+
+            # No error, the warning should raise
+            with self.assertRaisesRegex(UserWarning, t.type()):
+                warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 0)
+
+            # Another error happened, the warning is ignored
+            with self.assertRaisesRegex(TypeError, t.type()):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 0)
+
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod
@@ -739,7 +840,7 @@ class TestMSNPUTensor(common.TestCase):
 
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
-        with self.assertRaisesRegex(RuntimeError, "No function is registered"):
+        with self.assertRaisesRegex(RuntimeError, "Could not run"):
             b = torch.arange(0, 10, device='msnpu')
 
     def test_zeros(self):

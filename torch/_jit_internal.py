@@ -7,7 +7,7 @@ circular dependency problems
 import inspect
 import weakref
 import warnings
-import torch._C
+import torch
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
@@ -140,7 +140,8 @@ def can_compile_class(cls):
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
         return False
-    fns = [getattr(cls, name) for name in cls.__dict__ if inspect.isroutine(getattr(cls, name))]
+    names = cls.__dict__
+    fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
 
@@ -216,15 +217,18 @@ class FunctionModifiers(object):
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
     DEFAULT = "default (compile if called from a exported function / forward)"
+    COPY_TO_SCRIPT_WRAPPER = \
+        "if this method is not scripted, copy the python method onto the scripted model"
 
 
 def export(fn):
     """
-    This decorator indicates that a method is used as an entry point into a
-    ``ScriptModule`` and should be compiled. ``forward`` implicitly is assumbed to be an
-    entry point, so it does not need this decorator. Functions and methods
-    called from ``forward`` are compiled as they are seen, so they do not need
-    this decorator either.
+    This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
+    :class:`ScriptModule` and should be compiled.
+
+    ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
+    Functions and methods called from ``forward`` are compiled as they are seen
+    by the compiler, so they do not need this decorator either.
 
     Example (using ``@torch.jit.export`` on a method):
 
@@ -380,12 +384,12 @@ def ignore(drop=False, **kwargs):
     drop_on_export = kwargs.pop("drop_on_export", None)
     if drop_on_export:
         warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
         drop = drop_on_export
     elif drop:
         warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
     def decorator(fn):
         if drop:
@@ -395,6 +399,10 @@ def ignore(drop=False, **kwargs):
         return fn
     return decorator
 
+
+def _copy_to_script_wrapper(fn):
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+    return fn
 
 def module_has_exports(mod):
     for name in dir(mod):
@@ -415,7 +423,6 @@ def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
-
 def get_torchscript_modifier(fn):
     if not callable(fn):
         return None
@@ -423,18 +430,11 @@ def get_torchscript_modifier(fn):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
-
-def _parameter_list(parameter_names_fn):
-    """
-    Decorator to denote that a function returns a list of all the parameters
-    in a module
-    """
-    def decorator(fn):
-        fn._parameter_names_fn = parameter_names_fn
-        return fn
-
-    return decorator
-
+def copy_torchscript_modifier(orig, new):
+    attr = get_torchscript_modifier(orig)
+    if attr is None:
+        return
+    new._torchscript_modifier = attr
 
 # overloading registration
 # overloads get registered in this file, and compiled in torch/jit/__init__.py
@@ -529,7 +529,7 @@ def _get_overloaded_methods(method, mod_class):
 
 try:
     import typing
-    from typing import Tuple, List, Dict, Optional
+    from typing import Tuple, List, Dict, Optional, Any
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -615,10 +615,14 @@ except ImportError:
         def __getitem__(self, types):
             return OptionalInstance(types)
 
+    class AnyCls(object):
+        pass
+
     Tuple = TupleCls()  # noqa: T484
     List = ListCls()  # noqa: T484
     Dict = DictCls()  # noqa: T484
     Optional = DictCls()  # noqa: T484
+    Any = AnyCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
@@ -672,7 +676,7 @@ for i in range(2, 7):
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch.jit.ScriptFunction):
+    if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
     name = obj.__name__

@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/passes/inliner.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -531,11 +532,12 @@ void GraphEncoder::EncodeTensor(
 
 class ScriptModuleSerializer {
  public:
-  ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename.c_str()) {}
+  explicit ScriptModuleSerializer(const std::string& filename)
+      : writer_(filename) {}
 
-  ScriptModuleSerializer(std::ostream* ofs)
-      : ofs_(), writer_(ofs) {}
+  explicit ScriptModuleSerializer(
+      const std::function<size_t(const void *, size_t)>& writer_func)
+      : writer_(writer_func) {}
 
   void serialize(
       const script::Module& module,
@@ -572,14 +574,13 @@ class ScriptModuleSerializer {
     data_pickle.pushIValue(value);
     data_pickle.stop();
     size_t i = 0;
+    std::string prefix = archive_name + "/";
     for (const auto& td : data_pickle.tensorData()) {
-      std::stringstream fname;
-      fname << archive_name << "/" << i++;
-      writer_.writeRecord(fname.str(), td.data(), td.sizeInBytes());
+      std::string fname = prefix + std::to_string(i++);
+      writer_.writeRecord(fname, td.data(), td.sizeInBytes());
     }
-    std::stringstream fname;
-    fname << archive_name << ".pkl";
-    writer_.writeRecord(fname.str(), data.data(), data.size());
+    std::string fname = archive_name + ".pkl";
+    writer_.writeRecord(fname, data.data(), data.size());
 
     // serialize all the captured run-time class types
     for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
@@ -606,67 +607,39 @@ class ScriptModuleSerializer {
   }
 
   void writeCode(const at::NamedTypePtr& root_type) {
-    convertNamedType(root_type);
-    static const std::string opset_string =
-        c10::str("op_version_set = ", CURRENT_OP_VERSION_SET, "\n");
+    class_deps_.push_back(root_type);
+    for (size_t i = 0; i < class_deps_.size(); ++i) {
+      // note: convertNameType may extend class_deps_, so re-checking
+      // .size() is necessary
+      convertNamedType(class_deps_[i]);
+    }
 
     // Mapping of filename => src. We need this because multiple clases may go
     // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
+    for (auto& item : file_streams_) {
+      const std::string filename = qualifierToArchivePath(item.key(), "code/");
 
-    // Aggregate classes into files by their qualified names
-    std::unordered_map<std::string, std::ostringstream> fileToSrc;
-    std::unordered_map<std::string, SourceRangeRecords> fileToDebug;
-    for (auto& item : converted_types_) {
-      const auto& converted_type = item.key();
-      auto& type_info = item.value();
+      std::string src = item.value().str();
 
-      // For the type, foo.bar.Baz
-      const std::string filename =
-          qualifierToArchivePath(converted_type->name()->prefix(), "code/");
-      // End state: filename is "foo/bar.py", in which we will define a class
-      // named Baz
-      auto& stream = fileToSrc[filename];
+      // Only compress these records if they're not tiny.
+      // The cpu cost of generating zip datastructs and compressing isn't
+      // well-spent for very small records.
+      static constexpr size_t kMinToCompress = 200;
 
-      // Adjust the SourceRange offsets since we are concatenating multiple
-      // classes to a single file.
-      // Need to add opset_string size as an offset because we will be
-      // prepending it to the file. (We should remove this opset_version string
-      // at some point and stash it in the model.json)
-      const auto offset =
-          static_cast<size_t>(stream.tellp()) + opset_string.size();
-      for (auto& sourceRange : type_info.debug_info) {
-        sourceRange.bytes += offset;
-      }
-
-      auto& debugInfo = fileToDebug[filename];
-      debugInfo.insert(
-          debugInfo.end(),
-          type_info.debug_info.begin(),
-          type_info.debug_info.end());
-      fileToSrc[filename] << type_info.source;
-    }
-
-    for (const auto& item : fileToSrc) {
-      const auto& filename = item.first;
-      const auto src = item.second.str();
-      const auto& debugInfo = fileToDebug.at(filename);
-
-      // Prepend the opset_version string
-      const auto lib_str = c10::str(opset_string, src);
       writer_.writeRecord(
-          filename, lib_str.c_str(), lib_str.size(), /*compress=*/true);
+          filename, src.c_str(), src.size(),
+          src.size() > kMinToCompress /*compress*/);
 
       // Write out the debug information
-      std::stringstream debugFilename;
-      debugFilename << filename << ".debug_pkl";
+      std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      const auto& range_data = source_range_pickler.pickle(debugInfo);
-
+      auto range_data =
+          source_range_pickler.pickle(item.value().ranges());
       writer_.writeRecord(
-          debugFilename.str(),
+          debugFilename,
           range_data.data(),
           range_data.size(),
-          /*compress=*/true);
+          range_data.size() > kMinToCompress /*compress*/);
     }
   }
 
@@ -675,7 +648,9 @@ class ScriptModuleSerializer {
     std::vector<c10::IValue> elements;
     for (const auto& method : methods) {
       const auto& func = method.function();
-      torch::jit::Code code(func.graph());
+      auto graph = func.graph()->copy();
+      Inline(*graph);
+      torch::jit::Code code(graph);
       // Make a copy of opnames. Some of them may be changed for mobile later.
       std::vector<c10::OperatorName> opnames;
       for (size_t i = 0; i < code.instructions().size(); ++i) {
@@ -741,46 +716,30 @@ class ScriptModuleSerializer {
   }
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {
-    if (converted_types_.contains(class_type)) {
+    if (converted_types_.count(class_type)) {
       return;
     }
-
-    std::vector<c10::NamedTypePtr> class_deps;
-    std::ostringstream source_stream;
-    SourceRangeRecords source_ranges;
-    PythonPrint(
-        source_stream,
-        source_ranges,
-        class_type,
-        constant_table_,
-        class_deps,
-        /*enforce_importable=*/true);
-
-    for (const auto& c : class_deps) {
-      if (c == class_type) {
-        // Don't re-process this class and enter an infinite loop. We need this
-        // because we insert to converted_classes_ post-traversal, so the
-        // current class isn't in there yet.
-        continue;
-      }
-      convertNamedType(c);
+    converted_types_.insert(class_type);
+    std::string qualifier = class_type->name()->prefix();
+    PythonPrint* pp = file_streams_.find(qualifier);
+    if (!pp) {
+      pp = &file_streams_.insert(
+          qualifier,
+          PythonPrint(
+              constant_table_, class_deps_, /*enforce_importable=*/true));
+      pp->LEGACY_printOpVersion();
     }
-    // Insert *after* we've traversed the dependencies. This ensures that any
-    // given class will appear after its dependencies in the order.
-    TypeInfo info{source_stream.str(), std::move(source_ranges)};
-    converted_types_.insert(class_type, std::move(info));
+    pp->printNamedType(class_type);
   }
 
-  std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::Tensor> constant_table_;
+  std::unordered_set<c10::NamedTypePtr> converted_types_;
+  std::vector<c10::NamedTypePtr> class_deps_;
 
-  // all deps used by this module hierarchy
-  struct TypeInfo {
-    std::string source;
-    SourceRangeRecords debug_info;
-  };
-  OrderedDict<c10::NamedTypePtr, TypeInfo> converted_types_;
+  // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
+  // created
+  OrderedDict<std::string, PythonPrint> file_streams_;
   bool bytecode_format_;
 };
 
@@ -954,7 +913,7 @@ void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
 }
 
 std::string prettyPrint(const onnx::ModelProto& model) {
-  std::stringstream ss;
+  std::ostringstream ss;
   dump(model, ss, 0);
   return ss.str();
 }
@@ -1022,7 +981,11 @@ void ExportModule(
     std::ostream& out,
     const script::ExtraFilesMap& extra_files,
     bool bytecode_format) {
-  ScriptModuleSerializer serializer(&out);
+  ScriptModuleSerializer serializer(
+    [&](const void* buf, size_t nbytes) -> size_t {
+      out.write(static_cast<const char *>(buf), nbytes);
+      return !out ? 0 : nbytes;
+    });
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
@@ -1032,6 +995,15 @@ void ExportModule(
     const script::ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(filename);
+  serializer.serialize(module, extra_files, bytecode_format);
+}
+
+void ExportModule(
+    const script::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func,
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
+  ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
 }
 

@@ -1,5 +1,17 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import sys
+import torch
+
+
+def is_available():
+    return sys.version_info >= (3, 0) and hasattr(torch._C, "_dist_autograd_init")
+
+
+if is_available() and not torch._C._dist_autograd_init():
+    raise RuntimeError("Failed to initialize torch.distributed.autograd")
+
+
 class context(object):
     '''
     Autograd context object to wrap forward and backward passes when using
@@ -8,8 +20,10 @@ class context(object):
     worker stores metadata associated with this context_id, which is required
     to correctly execute a distributed autograd pass.
 
-    This is only needed in the "FAST" mode for distributed autograd, where we
-    assume all RPC communication is would also be part of the backward pass.
+    This is only needed in the "FAST" mode (as described in
+    https://github.com/pytorch/pytorch/issues/23110) for distributed autograd,
+    where we assume all RPC communication is would also be part of the backward
+    pass.
 
     Example::
         >> import torch.distributed.autograd as dist_autograd

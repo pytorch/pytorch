@@ -7,10 +7,10 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
@@ -52,8 +52,7 @@ inline Tensor Tensor::toBackend(Backend b) const {
 inline TensorOptions Tensor::options() const {
   return TensorOptions().dtype(dtype())
                         .device(device())
-                        .layout(layout())
-                        .is_variable(is_variable());
+                        .layout(layout());
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch

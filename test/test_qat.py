@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import torch
 from torch.nn import Conv2d, BatchNorm2d, ReLU
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
-from torch.quantization.QConfig import default_qat_qconfig
+from torch.quantization.qconfig import default_qat_qconfig
 import torch.backends.mkldnn
 from common_utils import TestCase, run_tests
 from hypothesis import given

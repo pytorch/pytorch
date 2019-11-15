@@ -1117,7 +1117,7 @@ def gelu(input):
     r"""gelu(input) -> Tensor
 
     Applies element-wise the function
-    :math:`\text{GeLU}(x) = x * \Phi(x)`
+    :math:`\text{GELU}(x) = x * \Phi(x)`
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
@@ -1846,8 +1846,17 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         if target.size()[1:] != input.size()[2:]:
             raise ValueError('Expected target size {}, got {}'.format(
                 out_size, target.size()))
-        input = input.contiguous().view(n, c, 1, -1)
-        target = target.contiguous().view(n, 1, -1)
+        input = input.contiguous()
+        target = target.contiguous()
+        # support empty batches, see #15870
+        if input.numel() > 0:
+            input = input.view(n, c, 1, -1)
+        else:
+            input = input.view(n, c, 0, 0)
+        if target.numel() > 0:
+            target = target.view(n, 1, -1)
+        else:
+            target = target.view(n, 0, 0)
         reduction_enum = _Reduction.get_enum(reduction)
         if reduction != 'none':
             ret = torch._C._nn.nll_loss2d(
@@ -1938,6 +1947,9 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
+
+    .. _Kullback-Leibler divergence:
+        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -2591,7 +2603,7 @@ GRID_SAMPLE_PADDING_MODES = {
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None):
-    # type: (Tensor, Tensor, str, str, bool) -> Tensor
+    # type: (Tensor, Tensor, str, str, Optional[bool]) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -2700,7 +2712,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
 
 def affine_grid(theta, size, align_corners=None):
-    # type: (Tensor, List[int], bool) -> Tensor
+    # type: (Tensor, List[int], Optional[bool]) -> Tensor
     r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
     affine matrices :attr:`theta`.
 

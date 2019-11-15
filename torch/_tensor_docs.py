@@ -314,7 +314,7 @@ Examples::
         return input * scale.align_as(input)
 
     >>> num_channels = 3
-    >>> scale = torch.randn(num_channels, names='C')
+    >>> scale = torch.randn(num_channels, names=('C',))
     >>> imgs = torch.rand(32, 128, 128, num_channels, names=('N', 'H', 'W', 'C'))
     >>> more_imgs = torch.rand(32, num_channels, 128, 128, names=('N', 'C', 'H', 'W'))
     >>> videos = torch.randn(3, num_channels, 128, 128, 128, names=('N', 'C', 'H', 'W', 'D'))
@@ -399,6 +399,7 @@ Example::
     tensor([[False, True]], dtype=torch.bool)
     >>> a.any()
     tensor(True, dtype=torch.bool)
+
 .. function:: any(dim, keepdim=False, out=None) -> Tensor
 
 Returns True if any elements in each row of the tensor in the given
@@ -554,6 +555,20 @@ add_docstr_all('bitwise_not_',
 bitwise_not_() -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_not`
+""")
+
+add_docstr_all('bitwise_xor',
+               r"""
+bitwise_xor() -> Tensor
+
+See :func:`torch.bitwise_xor`
+""")
+
+add_docstr_all('bitwise_xor_',
+               r"""
+bitwise_xor_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
 add_docstr_all('logical_not',
@@ -1497,6 +1512,19 @@ lerp_(end, weight) -> Tensor
 In-place version of :meth:`~Tensor.lerp`
 """)
 
+add_docstr_all('lgamma',
+               r"""
+lgamma() -> Tensor
+
+See :func:`torch.lgamma`
+""")
+
+add_docstr_all('lgamma_', r"""
+lgamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.lgamma`
+""")
+
 add_docstr_all('log',
                r"""
 log() -> Tensor
@@ -1899,6 +1927,20 @@ Example:
     torch.Size([2, 3, 5])
     >>> x.permute(2, 0, 1).size()
     torch.Size([5, 2, 3])
+""")
+
+add_docstr_all('polygamma',
+               r"""
+polygamma(n) -> Tensor
+
+See :func:`torch.polygamma`
+""")
+
+add_docstr_all('polygamma_',
+               r"""
+polygamma_(n) -> Tensor
+
+In-place version of :meth:`~Tensor.polygamma`
 """)
 
 add_docstr_all('pow',

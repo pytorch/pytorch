@@ -1,36 +1,11 @@
-from cimodel.lib.conf_tree import ConfigNode, X, XImportant
+from cimodel.lib.conf_tree import ConfigNode, XImportant
 from cimodel.lib.conf_tree import Ver
 
 
 CONFIG_TREE_DATA = [
-    (Ver("ubuntu", "14.04"), [
-        (Ver("gcc", "4.8"), [X("py2")]),
-        (Ver("gcc", "4.9"), [X("py2")]),
-    ]),
     (Ver("ubuntu", "16.04"), [
-        (Ver("cuda", "9.0"), [
-            # TODO make explicit that this is a "secret TensorRT build"
-            #  (see https://github.com/pytorch/pytorch/pull/17323#discussion_r259446749)
-            # TODO Uh oh, were we supposed to make this one important?!
-            X("py2"),
-            XImportant("cmake"),
-        ]),
-        (Ver("cuda", "10.1"), [XImportant("py3.5")]),  # TensorRT 6 build
-        (Ver("mkl"), [XImportant("py2")]),
-        (Ver("gcc", "5"), [XImportant("onnx_py2")]),
-        (Ver("clang", "3.8"), [X("py2")]),
-        (Ver("clang", "3.9"), [X("py2")]),
-        (Ver("clang", "7"), [XImportant("py2"), XImportant("onnx_py3.6")]),
-        (Ver("android"), [XImportant("py2")]),
-    ]),
-    (Ver("centos", "7"), [
-        (Ver("cuda", "9.0"), [X("py2")]),
-    ]),
-    (Ver("macos", "10.13"), [
-        # TODO ios and system aren't related. system qualifies where the python comes
-        #  from (use the system python instead of homebrew or anaconda)
-        (Ver("ios"), [X("py2")]),
-        (Ver("system"), [XImportant("py2")]),
+        ([Ver("gcc", "5")], [XImportant("onnx_py2")]),
+        ([Ver("clang", "7")], [XImportant("onnx_py3.6")]),
     ]),
 ]
 
@@ -54,13 +29,12 @@ class TreeConfigNode(ConfigNode):
     def is_build_only(self):
         if str(self.find_prop("language_version")) == "onnx_py3.6":
             return False
-        return str(self.find_prop("compiler_version")) in [
-            "gcc4.9",
+        return set(str(c) for c in self.find_prop("compiler_version")).intersection({
             "clang3.8",
             "clang3.9",
             "clang7",
             "android",
-        ] or self.find_prop("distro_version").name == "macos"
+        }) or self.find_prop("distro_version").name == "macos"
 
 
 class TopLevelNode(TreeConfigNode):

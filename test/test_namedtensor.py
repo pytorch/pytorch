@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests, TEST_NUMPY, default_floating_dtype
+from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
@@ -11,23 +11,12 @@ import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
-import os
 import sys
 import warnings
-
-
-def check_env_flag(name, default=''):
-    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
-
-TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
 
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
-
-skipIfNotTestingNamedTensor = \
-    unittest.skipIf(not TEST_NAMEDTENSOR,
-                    'TEST_NAMEDTENSOR=0; set it to 1 to enable named tensor tests')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -154,6 +143,17 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
+    def test_none_names_refcount(self):
+        def scope():
+            unnamed = torch.empty(2, 3)
+            unnamed.names  # materialize [None, None]
+
+        prev_none_refcnt = sys.getrefcount(None)
+        scope()
+        self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
+                         message='Using tensor.names should not change '
+                                 'the refcount of Py_None')
+
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
         none_named = torch.empty(2, 3, names=(None, None))
@@ -238,6 +238,15 @@ class TestNamedTensor(TestCase):
             output = x.index_fill('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
             self.assertEqual(output.names, expected_names)
 
+    def test_equal(self):
+        for device in torch.testing.get_all_device_types():
+            tensor = torch.randn(2, 3, device=device)
+            other = tensor.clone()
+
+            self.assertTrue(torch.equal(tensor.rename('N', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename('M', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename(None, 'C'), other.rename('N', 'C')))
+
     def test_squeeze(self):
         x = create('N:3,C:1,H:1,W:1')
         output = x.squeeze('C')
@@ -275,12 +284,11 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
-    @default_floating_dtype(torch.double)
-    def test_big_tensor_repr(self):
+    def test_big_tensor_repr_has_names(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
-            expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
-            self.assertEqual(repr(named_tensor), expected)
+            names_tag = 'names={}'.format(named_tensor.names)
+            self.assertIn(names_tag, repr(named_tensor))
 
         check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
 
@@ -529,6 +537,15 @@ class TestNamedTensor(TestCase):
             unnamed.resize_as_(named)
             self.assertEqual(unnamed.names, ['N'])
 
+    def test_cdist(self):
+        for device in torch.testing.get_all_device_types():
+            tensor = torch.randn(3, 1, 2, 7, names=('M', 'N', 'first_group', 'features'),
+                                 device=device)
+            other = torch.randn(5, 11, 7, names=('N', 'second_group', 'features'),
+                                device=device)
+            result = torch.cdist(tensor, other)
+            self.assertEqual(result.names, ['M', 'N', 'first_group', 'second_group'])
+
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
         tensor = torch.empty(1, 1, names=('N', 'D'))
@@ -604,6 +621,23 @@ class TestNamedTensor(TestCase):
             x = torch.zeros(3, dtype=torch.bool, device=device, names=('C',))
             self.assertEqual(x.any().names, [])
             self.assertEqual(x.all().names, [])
+
+    def test_addcmul_addcdiv(self):
+        for device in torch.testing.get_all_device_types():
+            names = ['N']
+            a = torch.rand(3, device=device, names=names)
+            b = torch.rand(3, device=device, names=names)
+            # avoid division by 0
+            c = torch.rand(3, device=device, names=names).clamp_min_(0.1)
+            out = torch.randn(3, device=device, names=names)
+
+            self.assertEqual(torch.addcmul(a, b, c).names, names)
+            self.assertEqual(torch.addcmul(a, b, c, out=out).names, names)
+            self.assertEqual(a.addcmul_(b, c).names, names)
+
+            self.assertEqual(torch.addcdiv(a, b, c).names, names)
+            self.assertEqual(torch.addcdiv(a, b, c, out=out).names, names)
+            self.assertEqual(a.addcdiv_(b, c).names, names)
 
     def test_binary_ops(self):
         def test_basic(op):
@@ -890,6 +924,11 @@ class TestNamedTensor(TestCase):
 
             # creation functions
             fn('empty_like'),
+            fn('zeros_like'),
+            fn('ones_like'),
+            fn('full_like', 3.14),
+            fn('rand_like'),
+            fn('randn_like'),
 
             # bernoulli variants
             method('bernoulli_', 0.5),
@@ -1022,6 +1061,14 @@ class TestNamedTensor(TestCase):
             for out in output:
                 self.assertEqual(out.names, expected_names)
 
+        def sum_all_outputs(output):
+            if isinstance(output, torch.Tensor):
+                return output.sum()
+            result = 0
+            for out in output:
+                result = out + result
+            return result.sum()
+
         def test_simple_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             check_output(op(t, 1), ['N', 'L'])
@@ -1031,6 +1078,11 @@ class TestNamedTensor(TestCase):
                 op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
                 op(t, 'H')
+
+        def test_autograd_supports_dimname_overload(op, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device, requires_grad=True)
+            sum_all_outputs(op(t, 'C')).backward()
+            self.assertIsNotNone(t.grad)
 
         def test_complete_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
@@ -1095,6 +1147,7 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op = testcase.op
             test_simple_reduce(op, device)
+            test_autograd_supports_dimname_overload(op, device)
 
             if testcase.supports_keepdim:
                 test_keepdim(op, device)
@@ -1660,7 +1713,7 @@ class TestNamedTensor(TestCase):
             self._test_name_inference(
                 torch.bmm, device=device,
                 args=(create('N:3,A:3,B:3'), create('None:3,N:3,B:3')),
-                maybe_raises_regex='Misaligned')
+                maybe_raises_regex='misaligned')
 
     def test_matmul(self):
         for device in torch.testing.get_all_device_types():
@@ -1740,8 +1793,7 @@ class TestNamedTensor(TestCase):
             self._test_name_inference(
                 torch.matmul, device=device,
                 args=(create('N:3,A:3,B:3'), create('A:3,N:3,B:3')),
-                maybe_raises_regex='Misaligned')
-
+                maybe_raises_regex='do not match')
 
     def test_mv(self):
         for device in torch.testing.get_all_device_types():
@@ -1886,7 +1938,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
+        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':

@@ -1316,7 +1316,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1328,7 +1328,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1340,7 +1340,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(DynamicSliceModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False, example_outputs=example_output)
 
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice_to_the_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1489,9 +1489,20 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(16, 3, 256, 256)
         self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    # InstanceNorm model (used in the subgraph) includes unused weights, 
+    # so skip this in TestCaffe2BackendEmbed
+    @skipIfEmbed
     def test_group_norm(self):
-        c = torch.randn(BATCH_SIZE, 6, 224)
-        model = nn.GroupNorm(3, 6)
+        c = torch.randn(BATCH_SIZE, 6, 224, 224)
+        model = nn.GroupNorm(3, 6, eps=0.0002)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
+
+    # InstanceNorm model (used in the subgraph) includes unused weights,
+    # so skip this in TestCaffe2BackendEmbed
+    @skipIfEmbed
+    def test_group_norm_noaffine(self):
+        c = torch.randn(BATCH_SIZE, 6, 224, 224)
+        model = nn.GroupNorm(3, 6, eps=0.0002, affine=False)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
     def test_rsub(self):
@@ -2233,6 +2244,20 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid(self):
+        class MeshgridModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        model = MeshgridModel()
+        outputs = model(x, y, z)
+        self.run_model_test(model, train=False, input=(x, y, z), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):

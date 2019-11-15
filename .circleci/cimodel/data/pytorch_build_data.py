@@ -10,11 +10,11 @@ CONFIG_TREE_DATA = [
             X("nightly"),
         ]),
         ("gcc", [
-            ("4.8", [X("3.6")]),
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [
-                    ("namedtensor", [XImportant(True)]),
+                    ("parallel_tbb", [XImportant(True)]),
+                    ("parallel_native", [XImportant(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -23,9 +23,6 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
-                ("3.6", [
-                    ("namedtensor", [XImportant(True)]),  # ASAN
-                ]),
             ]),
             ("7", [
                 ("3.6", [
@@ -42,13 +39,9 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
                 XImportant("3.6"),
                 ("3.6", [
                     ("libtorch", [XImportant(True)])
-                ]),
-                ("2.7", [
-                    ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
             ("9.2", [X("3.6")]),
@@ -131,7 +124,8 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
 
         next_nodes = {
             "xla": XlaConfigNode,
-            "namedtensor": NamedTensorConfigNode,
+            "parallel_tbb": ParallelTBBConfigNode,
+            "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "android_abi": AndroidAbiConfigNode,
@@ -149,13 +143,22 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
-
-class NamedTensorConfigNode(TreeConfigNode):
+class ParallelTBBConfigNode(TreeConfigNode):
     def modify_label(self, label):
-        return "NAMEDTENSOR=" + str(label)
+        return "PARALLELTBB=" + str(label)
 
     def init2(self, node_name):
-        self.props["is_namedtensor"] = node_name
+        self.props["parallel_backend"] = "paralleltbb"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class ParallelNativeConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PARALLELNATIVE=" + str(label)
+
+    def init2(self, node_name):
+        self.props["parallel_backend"] = "parallelnative"
 
     def child_constructor(self):
         return ImportantConfigNode

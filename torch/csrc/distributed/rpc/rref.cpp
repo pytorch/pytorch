@@ -1,8 +1,11 @@
 #include <torch/csrc/distributed/rpc/rref.h>
 
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
@@ -19,6 +22,26 @@ constexpr int PARENT_IDX = 5; // index of parent in the tuple
 
 // NB: if more fields are added, make sure this field is also bumped
 constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
+
+template <typename T>
+T& unwrapAutogradMessage(
+    const Message& message,
+    std::unique_ptr<RpcCommandBase>& response) {
+  if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
+    auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(*response);
+
+    // Attach 'recv' autograd function.
+    addRecvRpcBackward(
+        rpcWithAutograd.autogradMetadata(),
+        rpcWithAutograd.tensors(),
+        rpcWithAutograd.fromWorkerId());
+
+    auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
+    return static_cast<T&>(wrappedRpc);
+  } else {
+    return static_cast<T&>(*response);
+  }
+}
 
 } // namespace
 
@@ -93,7 +116,7 @@ RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
   return RRefForkData(
-      ownerId_, rrefId_, ctx->genGloballyUniqueId(), ctx->getWorkerId());
+      ownerId_, rrefId_, ctx.genGloballyUniqueId(), ctx.getWorkerId());
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -115,9 +138,9 @@ template <typename T>
 UserRRef<T>::~UserRRef() {
   // TODO: queue this in RRefContext instead of doing it here.
   auto& ctx = RRefContext::getInstance();
-  if (ctx->getWorkerId() != ownerId_) {
-    auto fm = ctx->agent()->send(
-        ctx->agent()->getWorkerInfo(ownerId_),
+  if (ctx.getWorkerId() != ownerId_) {
+    auto fm = ctx.agent()->send(
+        ctx.agent()->getWorkerInfo(ownerId_),
         RRefUserDelete(rrefId_, forkId_).toMessage());
 
     fm->addCallback(
@@ -132,31 +155,43 @@ const ForkId& UserRRef<T>::forkId() const {
 
 template <>
 IValue UserRRef<IValue>::toHere() {
-  auto& agent = RRefContext::getInstance()->agent();
-  std::shared_ptr<FutureMessage> fm = agent->send(
+  auto agent = RpcAgent::getDefaultRpcAgent();
+
+  // ScriptRRefFetchCall message always carries autograd context id even if
+  // the message itself does not contain any tensor, because the response would
+  // potentially contain tensors.
+  auto futureResponse = autograd::sendMessageWithAutograd(
+      *agent,
       agent->getWorkerInfo(ownerId_),
-      ScriptRRefFetchCall(rrefId()).toMessage());
-  const Message& message = fm->wait();
+      ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
+      true /* forceGradRecording */);
+
+  const Message& message = futureResponse->wait();
   RRefContext::handleException(message);
-  auto rfr = RRefFetchRet::fromMessage(message);
-  TORCH_INTERNAL_ASSERT(
-      rfr->values().size() == 1,
-      "RRef of IValue should contain a single IValue, but got ",
-      rfr->values().size());
-  return rfr->values().front();
+  auto response = deserializeResponse(message);
+  auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
+  return rfr.values().front();
 }
 
 template <>
 py::object UserRRef<py::object>::toHere() {
-  auto& agent = RRefContext::getInstance()->agent();
-  std::shared_ptr<FutureMessage> fm = agent->send(
+  auto agent = RpcAgent::getDefaultRpcAgent();
+
+  // PythonRRefFetchCall message always carries autograd context id even if
+  // the message itself does not contain any tensor, because the response would
+  // potentially contain tensors.
+  auto futureResponse = autograd::sendMessageWithAutograd(
+      *agent,
       agent->getWorkerInfo(ownerId_),
-      PythonRRefFetchCall(rrefId()).toMessage());
-  const Message& message = fm->wait();
+      PythonRRefFetchCall(ownerId_, rrefId()).toMessage(),
+      true /* forceGradRecording */);
+
+  const Message& message = futureResponse->wait();
   RRefContext::handleException(message);
-  auto rfr = RRefFetchRet::fromMessage(message);
+  auto response = deserializeResponse(message);
+  auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
   return PythonRpcHandler::getInstance().deserialize(
-      SerializedPyObj::fromIValues(rfr->values()));
+      SerializedPyObj::fromIValues(rfr.values()));
 }
 
 template class UserRRef<IValue>;

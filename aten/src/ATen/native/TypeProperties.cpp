@@ -72,7 +72,7 @@ ScalarType result_type(TensorList tensors) {
   auto dimResult = ScalarType::Undefined;
   auto zeroResult = ScalarType::Undefined;
   auto wrappedResult = ScalarType::Undefined;
-  for (Tensor tensor : tensors) {
+  for (const Tensor& tensor : tensors) {
     if (!tensor.defined()) {
       continue;
     }
@@ -92,14 +92,14 @@ ScalarType result_type(TensorList tensors) {
 }
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
-  std::vector<Tensor> tensors({tensor, other});
+  std::vector<Tensor> tensors{std::move(tensor), std::move(other)};
   return native::result_type(tensors);
 }
 
 ScalarType result_type(const Tensor &tensor, const Scalar other) {
   auto tensor2 = scalar_to_tensor(other);
   tensor2.unsafeGetTensorImpl()->set_wrapped_number(true);
-  std::vector<Tensor> tensors({tensor, tensor2});
+  std::vector<Tensor> tensors{std::move(tensor), std::move(tensor2)};
   return native::result_type(tensors);
 }
 
@@ -118,7 +118,9 @@ bool can_cast(const at::ScalarType from, const at::ScalarType to) {
 }
 
 ScalarType promote_types(ScalarType type1, ScalarType type2) {
-  return promoteTypes(type1, type2);
+  ScalarType ret = promoteTypes(type1, type2);
+  TORCH_CHECK(ret != ScalarType::Undefined, "Promotion from ", type1, " and ", type2, " is unsupported.");
+  return ret;
 }
 
 }} // namespace at::native

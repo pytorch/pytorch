@@ -62,11 +62,14 @@ namespace jit {
   _(SaveExtraFilesHook)                \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
-  _(ImportTooNew)                      \
   _(ClassDerive)                       \
+  _(ModuleInterfaceSerialization)      \
+  _(ClassTypeAddRemoveAttr)            \
   _(Inliner)                           \
   _(LiteInterpreterAdd)                \
-  _(LiteInterpreterConv)
+  _(LiteInterpreterConv)               \
+  _(LiteInterpreterInline)             \
+  _(CommonAncestor)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

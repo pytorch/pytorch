@@ -36,7 +36,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
     at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
-    See also: :ref:`onnx-export`
+
     Arguments:
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments): the inputs to
@@ -72,8 +72,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         operator_export_type (enum, default OperatorExportTypes.ONNX):
             OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
             OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing,
-                                                    fall back on ATen op.
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
             OperatorExportTypes.RAW: export raw ir.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
@@ -103,7 +102,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in
             corresponding input/output TO the name that is desired to be applied on such axis of
             such input/output during export.
+
             Example. if we have the following shape for inputs and outputs:
+
+            .. code-block:: none
+
                 shape(input_1) = ('b', 3, 'w', 'h')
                 and shape(input_2) = ('b', 4)
                 and shape(output)  = ('b', 'd', 5)
@@ -132,7 +135,9 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             then the behavior is chosen automatically as follows. If operator_export_type
             is OperatorExportTypes.ONNX, the behavior is equivalent to setting this
             argument to False. For other values of operator_export_type, the behavior is
-            equivalent to setting this argument to True.
+            equivalent to setting this argument to True. Note that for ONNX opset version < 9,
+            initializers MUST be part of graph inputs. Therefore, if opset_version argument is
+            set to a 8 or lower, this argument will be ignored.
     """
 
     from torch.onnx import utils
@@ -153,9 +158,9 @@ def _export_to_pretty_string(*args, **kwargs):
     return utils._export_to_pretty_string(*args, **kwargs)
 
 
-def _optimize_trace(trace, operator_export_type):
+def _optimize_trace(graph, operator_export_type):
     from torch.onnx import utils
-    trace.set_graph(utils._optimize_graph(trace.graph(), operator_export_type))
+    return utils._optimize_graph(graph, operator_export_type)
 
 
 def set_training(model, mode):

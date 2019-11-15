@@ -7,25 +7,13 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::unique_ptr<RRefContext> RRefContext::context_ = nullptr;
-
-void RRefContext::initInstance(std::shared_ptr<RpcAgent> agent) {
-  TORCH_CHECK(!RRefContext::context_, "Can only initialize RRefContext once.");
-  TORCH_CHECK(agent, "RRefContext requires a non-null RpcAgent shared_ptr.");
-
-  RRefContext::context_ =
-      std::unique_ptr<RRefContext>(new RRefContext(std::move(agent)));
-}
-
-std::unique_ptr<RRefContext>& RRefContext::getInstance() {
-  TORCH_CHECK(
-      RRefContext::context_, "Have to initialize RRefContext before use.");
-  return RRefContext::context_;
+RRefContext& RRefContext::getInstance() {
+  static RRefContext context(RpcAgent::getDefaultRpcAgent());
+  return context;
 }
 
 void RRefContext::destroyInstance() {
-  RRefContext::getInstance()->checkRRefLeaks();
-  RRefContext::context_.reset();
+  RRefContext::getInstance().checkRRefLeaks();
 }
 
 void RRefContext::handleException(const Message& message) {
@@ -152,6 +140,22 @@ template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
+template <typename T>
+std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
+  // Don't add this OnwerRRef to the owners_ map yet, otherwise
+  // it will never be removed from there. Instead, only add it to the
+  // map in prepareChildFork, in case this local RRef is being passed
+  // to another worker.
+  return std::shared_ptr<OwnerRRef<T>>(
+      new OwnerRRef<T>(getWorkerId(), genGloballyUniqueId()));
+}
+
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
+    IValue>();
+
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
+    py::object>();
+
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
   if (rref->isOwner()) {
@@ -166,6 +170,12 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
     // TODO: When adding failure retries and timeout, this fork needs to be
     // deleted if the owner does not receive the ACK within the timeout.
     addForkOfOwner(rfd.rrefId_, rfd.forkId_);
+    // ensure that this RRef is in the owners_ list to keep it alive.
+    // this is needed for OwnerRRefs that were created locally.
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      owners_[rref->rrefId()] = rref;
+    }
   } else {
     // Note [Useful Phantom Fork ID for User to Owner Call]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -188,10 +198,17 @@ void RRefContext::notifyOwnerAndParentOfFork(
     worker_id_t parent,
     const std::shared_ptr<RRef>& rref) {
   if (parent == rref->owner()) {
-    // If the parent is the owner, this fork has already been added into the
-    // forks_ map when the owner sends the message to the callee user. Hence,
-    // it is not necessary to send another RREF_CHILD_ACCEPT or
-    // RREF_FORK_REQUEST back to the owner. See Note [Early Fork Registration].
+    if (parent == agent_->getWorkerInfo().id_) {
+      // Owner sending RRef to self, remove the forkId as it was added during
+      // pickling
+      delForkOfOwner(rref->rrefId(), forkId);
+    } else {
+      // If the parent is the owner, this fork has already been added into the
+      // forks_ map when the owner sends the message to the callee user. Hence,
+      // it is not necessary to send another RREF_CHILD_ACCEPT or
+      // RREF_FORK_REQUEST back to the owner. See Note [Early Fork
+      // Registration].
+    }
     return;
   }
 
@@ -243,8 +260,6 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
 void RRefContext::addPendingUser(
     const ForkId& forkId,
     const std::shared_ptr<RRef>& rref) {
-  TORCH_INTERNAL_ASSERT(
-      !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingUsers_.find(forkId) == pendingUsers_.end(),
@@ -268,6 +283,25 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
 
   fm->addCallback([](const Message& message) { handleException(message); });
 }
+
+template <typename T>
+void RRefContext::addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto& rrefId = rref->rrefId();
+  owners_[rrefId] = rref;
+  auto& rrefForks = forks_[rrefId];
+  TORCH_INTERNAL_ASSERT(
+      rrefForks.find(rrefId) == rrefForks.end(),
+      "Attempt to add self as fork twice ",
+      rrefId);
+  rrefForks.insert(rrefId);
+}
+
+template void RRefContext::addSelfAsFork<IValue>(
+    std::shared_ptr<OwnerRRef<IValue>>& rref);
+
+template void RRefContext::addSelfAsFork<py::object>(
+    std::shared_ptr<OwnerRRef<py::object>>& rref);
 
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);

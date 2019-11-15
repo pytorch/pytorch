@@ -18,9 +18,9 @@ chmod +x /home/circleci/project/ci_test_script.sh
 
 # Run the docker
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  export id=$(docker run --runtime=nvidia -t -d "${DOCKER_IMAGE}")
+  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d "${DOCKER_IMAGE}")
 else
-  export id=$(docker run -t -d "${DOCKER_IMAGE}")
+  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d "${DOCKER_IMAGE}")
 fi
 
 # Copy the envfile and script with all the code to run into the docker.

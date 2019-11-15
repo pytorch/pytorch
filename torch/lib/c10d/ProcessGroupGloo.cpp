@@ -1017,7 +1017,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
-      outputs.push_back(output.clone());
+      if (output.is_sparse()) {
+        outputs.push_back(output.clone());
+      } else {
+        outputs.push_back(output.clone(at::MemoryFormat::Contiguous));
+      }
     }
   }
 
@@ -1745,6 +1749,126 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
 
 namespace {
 
+class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncAllgatherCoalescedWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<std::vector<at::Tensor>>& output_lists,
+      std::vector<at::Tensor>& input_list,
+      uint32_t tag)
+      : context(context),
+        output_lists(output_lists),
+        input_list(input_list),
+        tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  std::vector<std::vector<at::Tensor>> output_lists;
+  std::vector<at::Tensor> input_list;
+  const uint32_t tag;
+
+  void allgather_coalesced() {
+    assert(!output_lists.empty());
+    assert(!output_lists[0].empty());
+    assert(!input_list.empty());
+
+    const auto& scalarType = input_list[0].scalar_type();
+    gloo::AllgatherOptions opts(context);
+    opts.setTag(tag);
+
+    // Use single flattened input tensor.
+    at::Tensor flatInputTensor = flattenDenseTensors(input_list);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
+
+    // Compute total number of elements we need to allocate for all tensors
+    // requested.
+    int64_t output_numel = 0;
+    for (const auto& t : output_lists[0]) {
+      output_numel += t.numel();
+    }
+    output_numel *= output_lists.size();
+    // Use single flat output tensor.
+    at::Tensor flatOutputTensor =
+        at::empty({output_numel}, output_lists[0][0].options());
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
+    gloo::allgather(opts);
+
+    int64_t current_element = 0;
+    for (auto& output_list : output_lists) {
+      for (auto& output_tensor : output_list) {
+        output_tensor.copy_(
+            flatOutputTensor.narrow(0, current_element, output_tensor.numel())
+                .reshape(output_tensor.sizes()),
+            true);
+        current_element += output_tensor.numel();
+      }
+    }
+  }
+
+  void run() override {
+    allgather_coalesced();
+  }
+};
+
+} // namespace
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& output_lists,
+    std::vector<at::Tensor>& input_list,
+    const AllgatherOptions& /* unused */) {
+  static auto invalidArgument = [](const std::string& msg) {
+    throw std::invalid_argument(
+        "ProcessGroupGloo::allgather_coalesced: " + msg);
+  };
+
+  if (input_list.empty()) {
+    invalidArgument("requires non-empty input tensor list");
+  }
+
+  if (output_lists.size() != getSize()) {
+    invalidArgument("output lists should be equal to world size");
+  }
+
+  assertSameDevice(invalidArgument, input_list);
+
+  // Expect i'th tensor of each list from 'output_lists' match i'th tensor
+  // from 'input_list' in type and size.
+  for (const auto& output_list : output_lists) {
+    if (output_list.size() != input_list.size()) {
+      invalidArgument(
+          "invalid output size: (expected length " +
+          std::to_string(input_list.size()) + ", got " +
+          std::to_string(output_list.size()) + ")");
+    }
+    for (int i = 0; i < output_list.size(); ++i) {
+      const auto expected = input_list[i].sizes();
+      const auto actual = output_list[i].sizes();
+      if (actual != expected) {
+        invalidArgument(
+            "invalid size of output tensor at index " + std::to_string(i) +
+            " (expected length " + toString(expected) + ", got " +
+            toString(actual) + ")");
+      }
+      if (input_list[i].type() != output_list[i].type()) {
+        invalidArgument(
+            "invalid tensor type at index " + std::to_string(i) +
+            " (expected " + input_list[i].type().toString() + ", got " +
+            output_list[i].type().toString() + ")");
+      }
+    }
+  }
+
+  assertDense(invalidArgument, input_list);
+
+  auto tag = nextTag();
+  auto context = getContext(tag);
+  auto work = std::make_shared<AsyncAllgatherCoalescedWork>(
+      std::move(context), output_lists, input_list, tag);
+  enqueue(work);
+  return work;
+}
+
+namespace {
+
 class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncGatherWork(
@@ -1896,11 +2020,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   assertDense(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    if (outputs.size() != 1 ||
-        outputs[0].size() != static_cast<size_t>(getSize())) {
-      invalidArgument(
-          "requires a single-element output list "
-          "containing a list with <size> tensors");
+    if (outputs.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element output list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (outputs[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect output list size " << outputs[0].size()
+         << ". Output list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
     }
 
     const auto& type = inputs[0].type();
@@ -2077,11 +2207,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   assertDense(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
-    if (inputs.size() != 1 ||
-        inputs[0].size() != static_cast<size_t>(getSize())) {
-      invalidArgument(
-          "requires a single-element input list "
-          "containing a list with <size> tensors");
+    if (inputs.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element input list containing a list with "
+         << getSize() << " tensors";
+      invalidArgument(ss.str());
+    } else if (inputs[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect input list size " << inputs[0].size()
+         << ". Input list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
     }
     const auto& type = outputs[0].type();
     const auto& sizes = outputs[0].sizes();

@@ -18,6 +18,8 @@ class BatchSoftmaxLoss(ModelLayer):
         name='batch_softmax_loss',
         label_smoothing_matrix=None,
         label_prob=False,
+        scale=1.0,
+        average_by_batch_size=False,
         **kwargs
     ):
         super(BatchSoftmaxLoss, self).__init__(
@@ -31,6 +33,8 @@ class BatchSoftmaxLoss(ModelLayer):
             input_record
         )
         self.label_prob = label_prob
+        self.scale = scale
+        self.average_by_batch_size = average_by_batch_size
 
         # label smoothing matrix: a K * K matrix where K is the label
         # cardinality; (i, j) element is the value of for label i
@@ -119,4 +123,6 @@ class BatchSoftmaxLoss(ModelLayer):
             softmax_input,
             self.output_schema.field_blobs(),
             label_prob=self.label_prob,
+            scale=self.scale,
+            average_by_batch_size=self.average_by_batch_size,
         )

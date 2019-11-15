@@ -19,8 +19,8 @@ float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float 
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     float result;
-    cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-    cublasSetStream(handle, THCState_getCurrentStream(state));
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
     THCublasCheck(cublasSdot(handle, i_n, x, i_incx, y, i_incy, &result));
     return result;
   }
@@ -42,8 +42,8 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     double result;
-    cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-    cublasSetStream(handle, THCState_getCurrentStream(state));
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
     THCublasCheck(cublasDdot(handle, i_n, x, i_incx, y, i_incy, &result));
     return result;
   }
@@ -63,8 +63,8 @@ at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, 
 
   if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
     at::Half result;
-    cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-    cublasSetStream(handle, THCState_getCurrentStream(state));
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
     THCublasCheck(cublasDotEx(handle, n,
                               x, CUDA_R_16F, incx,
                               y, CUDA_R_16F, incy,
@@ -95,12 +95,12 @@ void adjustLdLevel2(int64_t m, int64_t n, int64_t *lda)
 
 void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy)
 {
-  at::cuda::blas::gemv<float>(THCState_getCurrentStream(state), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
+  at::cuda::blas::gemv<float>(at::cuda::getCurrentCUDAStream().stream(), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double alpha, double *a, int64_t lda, double *x, int64_t incx, double beta, double *y, int64_t incy)
 {
-  at::cuda::blas::gemv<double>(THCState_getCurrentStream(state), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
+  at::cuda::blas::gemv<double>(at::cuda::getCurrentCUDAStream().stream(), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void THCudaBlas_Sger(THCState *state, int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda)
@@ -115,8 +115,8 @@ void THCudaBlas_Sger(THCState *state, int64_t m, int64_t n, float alpha, float *
       int i_incx = (int)incx;
       int i_incy = (int)incy;
 
-      cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-      cublasSetStream(handle, THCState_getCurrentStream(state));
+      cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+      cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
       THCublasCheck(cublasSger(handle, i_m, i_n, &alpha, x, i_incx, y, i_incy, a, i_lda));
       return;
     }
@@ -136,8 +136,8 @@ void THCudaBlas_Dger(THCState *state, int64_t m, int64_t n, double alpha, double
       int i_incx = (int)incx;
       int i_incy = (int)incy;
 
-      cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-      cublasSetStream(handle, THCState_getCurrentStream(state));
+      cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+      cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
       THCublasCheck(cublasDger(handle, i_m, i_n, &alpha, x, i_incx, y, i_incy, a, i_lda));
       return;
     }
@@ -214,7 +214,7 @@ static void checkCuda90Bug(int i_m, int i_n, int i_k)
 void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
   checkCuda90Bug((int)m, (int)n, (int)k);
-  at::cuda::blas::gemm<float>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  at::cuda::blas::gemm<float>(at::cuda::getCurrentCUDAStream().stream(), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 // In CUDA 8.0, definition of data types for sgemmex changed
@@ -225,7 +225,7 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
 {
   checkCuda90Bug((int)m, (int)n, (int)k);
-  at::cuda::blas::gemm<at::Half>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  at::cuda::blas::gemm<at::Half>(at::cuda::getCurrentCUDAStream().stream(), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 void THCudaBlas_Bgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::BFloat16 alpha, at::BFloat16 *a, int64_t lda, at::BFloat16 *b, int64_t ldb, at::BFloat16 beta, at::BFloat16 *c, int64_t ldc)
@@ -235,7 +235,7 @@ void THCudaBlas_Bgemm(THCState *state, char transa, char transb, int64_t m, int6
 
 void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
-  at::cuda::blas::gemm<double>(THCState_getCurrentStream(state), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  at::cuda::blas::gemm<double>(at::cuda::getCurrentCUDAStream().stream(), transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 #if CUDA_VERSION >= 9010  || defined __HIP_PLATFORM_HCC__
@@ -254,8 +254,8 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
   float fAlpha = alpha;
   float fBeta = beta;
 #ifdef __HIP_PLATFORM_HCC__
@@ -335,8 +335,8 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
   THCublasCheck(cublasSgemmBatched(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
@@ -360,8 +360,8 @@ void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, i
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
   THCublasCheck(cublasSgemmStridedBatched(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
@@ -393,8 +393,8 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
   THCublasCheck(cublasDgemmBatched(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, b, (int)ldb, &beta, c, (int)ldc,
@@ -417,8 +417,8 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
   cublasOperation_t opa = convertTransToCublasOperation(transa);
   cublasOperation_t opb = convertTransToCublasOperation(transb);
 
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasSetStream(handle, at::cuda::getCurrentCUDAStream().stream());
   THCublasCheck(cublasDgemmStridedBatched(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
