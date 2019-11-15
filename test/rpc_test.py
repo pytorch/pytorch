@@ -1056,7 +1056,7 @@ class RpcTest(object):
 
         # future should run to completion if the timeout is longer.
         dist.barrier()
-        rpc.set_rpc_timeout(timedelta(seconds=5))
+        rpc.set_rpc_timeout(timedelta(seconds=500))
         rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 
         # future should run to completion if the timeout is zero.

@@ -490,8 +490,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()) -
             futureTimeouts_.begin()->first;
-        // If we calculate that the future has already timed out, then sleep for
-        // 0 ms to immediately process the future.
         sleepTime =
             std::max(rpcTimeout_ - runningTime, std::chrono::milliseconds(0));
       }
