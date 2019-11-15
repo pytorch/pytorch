@@ -320,8 +320,9 @@ struct TORCH_API Node {
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
-  void setCallStack(InlinedCallStackPtr cs);
-  void insertCallStackEntry(Function* f, const SourceRange& sr);
+  void setCallStack(InlinedCallStackPtr cs) {
+    callstack_ = cs;
+  }
 
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -725,7 +726,6 @@ struct TORCH_API Node {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
-    AT_ASSERT(!v.defined() || v.is_variable());
     return setAttr<TensorAttr>(
         name, std::forward<TensorAttr::ConstructorType>(v));
   }
@@ -734,9 +734,6 @@ struct TORCH_API Node {
   }
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
-    for (const at::Tensor& t : v) {
-      AT_ASSERT(!t.defined() || t.is_variable());
-    }
     return setAttr<TensorsAttr>(
         name, std::forward<TensorsAttr::ConstructorType>(v));
   }

@@ -90,28 +90,15 @@ InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
     : fn_(fn), source_range_(std::move(source_range)) {}
 
 InlinedCallStack::InlinedCallStack(
-    InlinedCallStackPtr caller,
+    InlinedCallStackPtr callee,
     Function* fn,
     SourceRange source_range)
-    : caller_(std::move(caller)),
+    : callee_(std::move(callee)),
       fn_(fn),
       source_range_(std::move(source_range)) {}
 
-InlinedCallStackPtr InlinedCallStack::insertCallStackEntry(
-    Function* fn,
-    const SourceRange& source_range) {
-  auto ent = std::make_pair(fn, source_range);
-  if (callees_.count(ent)) {
-    return callees_.at(ent);
-  }
-  auto subscope = c10::make_intrusive<InlinedCallStack>(
-      intrusive_from_this(), fn, source_range);
-  callees_[ent] = subscope;
-  return subscope;
-}
-
-c10::optional<InlinedCallStackPtr> InlinedCallStack::caller() const {
-  return caller_;
+c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
+  return callee_;
 }
 
 std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
@@ -119,7 +106,7 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
   while (current) {
     r.emplace_back(std::make_pair((*current)->fn_, (*current)->source_range_));
-    current = (*current)->caller_;
+    current = (*current)->callee_;
   }
   return r;
 }

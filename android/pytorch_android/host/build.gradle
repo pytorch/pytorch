@@ -31,3 +31,6 @@ dependencies {
     implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
     testImplementation 'junit:junit:4.12'
 }
+
+apply from: rootProject.file('gradle/release.gradle')
+
