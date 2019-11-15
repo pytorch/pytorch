@@ -267,8 +267,8 @@ void testSend(const std::string& path) {
 
   // Sender. Test helper.
   std::thread senderThread([&]() {
-    auto selfRank = 1;
-    auto destRank = 0;
+    auto selfRank = 0;
+    auto destRank = 1;
 
     auto& pg = tests[selfRank].getProcessGroup();
 
@@ -285,7 +285,7 @@ void testSend(const std::string& path) {
     std::thread waitSendWorkThread([&]() { sendCompleted = work->wait(); });
     work->abort();
     waitSendWorkThread.join();
-    AT_ASSERT(!sendCompleted);
+    TORCH_CHECK(!sendCompleted);
 
     // #2 Wait SendWork. Successful.
     work = pg.send(
@@ -294,15 +294,15 @@ void testSend(const std::string& path) {
         tag /* tag */
     );
     sendCompleted = work->wait();
-    AT_ASSERT(sendCompleted);
+    TORCH_CHECK(sendCompleted);
   });
 
   // Receiver. Test helper.
   std::thread receiverThread([&]() {
-    auto selfRank = 0;
-    auto srcRank = 1;
+    auto selfRank = 1;
+    auto srcRank = 0;
 
-    auto& pg = tests[0].getProcessGroup();
+    auto& pg = tests[selfRank].getProcessGroup();
 
     std::vector<at::Tensor> tensors = {
         at::ones({16, 16}),
@@ -340,7 +340,7 @@ void testRecv(const std::string& path) {
     auto selfRank = 0;
     auto srcRank = 1;
 
-    auto& pg = tests[0].getProcessGroup();
+    auto& pg = tests[selfRank].getProcessGroup();
 
     std::vector<at::Tensor> tensors = {
         at::ones({16, 16}),
@@ -356,7 +356,7 @@ void testRecv(const std::string& path) {
     std::thread waitRecvWorkThread([&]() { recvCompleted = work->wait(); });
     work->abort();
     waitRecvWorkThread.join();
-    AT_ASSERT(!recvCompleted);
+    TORCH_CHECK(!recvCompleted);
 
     // #2 Wait RecvWork. Successful.
     work = pg.recv(
@@ -365,7 +365,7 @@ void testRecv(const std::string& path) {
         tag /* tag */
     );
     recvCompleted = work->wait();
-    AT_ASSERT(recvCompleted);
+    TORCH_CHECK(recvCompleted);
   });
 
   // Sender. Test helper.
