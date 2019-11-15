@@ -950,7 +950,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarTyp
   return at::_sparse_sum(input.to(dtype, /*non-blocking*/true, /*copy*/false, at::MemoryFormat::Preserve), dims_to_sum);
 }
 
-Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {lkub
+Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   TORCH_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.")
 
   const int64_t input_dim = input.dim();
