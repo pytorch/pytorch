@@ -98,8 +98,6 @@ inline Tensor local_response_norm(
 
 // ============================================================================
 
-// def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
-
 namespace detail {
 inline Tensor group_norm(
     const Tensor& input,
