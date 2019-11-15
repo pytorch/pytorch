@@ -10,6 +10,89 @@ using namespace torch::nn;
 
 struct FunctionalTest : torch::test::SeedingFixture {};
 
+TEST_F(FunctionalTest, Conv1d) {
+  auto x = torch::arange(30, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 5});
+  auto weight = torch::arange(18, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3});
+  auto y = F::conv1d(x, weight, F::Conv1dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{ 312.,  348.,  384.},
+                                  { 798.,  915., 1032.}},
+
+                                 {{ 852.,  888.,  924.},
+                                  {2553., 2670., 2787.}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv1d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
+TEST_F(FunctionalTest, Conv2dEven) {
+  auto x = torch::arange(75, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5});
+  auto weight = torch::arange(54, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 3});
+  auto y = F::conv2d(x, weight, F::Conv2dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{{15219., 15570., 15921.},
+                                   {16974., 17325., 17676.},
+                                   {18729., 19080., 19431.}},
+
+                                  {{37818., 38898., 39978.},
+                                   {43218., 44298., 45378.},
+                                   {48618., 49698., 50778.}}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv2d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
+TEST_F(FunctionalTest, Conv2dUneven) {
+  auto x = torch::arange(60, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 4});
+  auto weight = torch::arange(36, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 2});
+  auto y = F::conv2d(x, weight, F::Conv2dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{{ 5289.,  5442.,  5595.},
+                                   { 5901.,  6054.,  6207.},
+                                   { 6513.,  6666.,  6819.}},
+
+                                  {{13227., 13704., 14181.},
+                                   {15135., 15612., 16089.},
+                                   {17043., 17520., 17997.}}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv2d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
+TEST_F(FunctionalTest, Conv3d) {
+  auto x = torch::arange(375, torch::dtype(torch::kFloat).requires_grad(true)).reshape({1, 3, 5, 5, 5});
+  auto weight = torch::arange(162, torch::dtype(torch::kFloat).requires_grad(true)).reshape({2, 3, 3, 3, 3});
+  auto y = F::conv3d(x, weight, F::Conv3dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{{{ 700704.,  703944.,  707184.},
+                                    { 716904.,  720144.,  723384.},
+                                    { 733104.,  736344.,  739584.}},
+
+                                   {{ 781704.,  784944.,  788184.},
+                                    { 797904.,  801144.,  804384.},
+                                    { 814104.,  817344.,  820584.}},
+
+                                   {{ 862704.,  865944.,  869184.},
+                                    { 878904.,  882144.,  885384.},
+                                    { 895104.,  898344.,  901584.}}},
+
+
+                                  {{{1724220., 1734021., 1743822.},
+                                    {1773225., 1783026., 1792827.},
+                                    {1822230., 1832031., 1841832.}},
+
+                                   {{1969245., 1979046., 1988847.},
+                                    {2018250., 2028051., 2037852.},
+                                    {2067255., 2077056., 2086857.}},
+
+                                   {{2214270., 2224071., 2233872.},
+                                    {2263275., 2273076., 2282877.},
+                                    {2312280., 2322081., 2331882.}}}}}, torch::kFloat);
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv3d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
 TEST_F(FunctionalTest, MaxPool1d) {
   auto x = torch::ones({1, 1, 5});
   auto y = F::max_pool1d(x, F::MaxPool1dFuncOptions(3).stride(2));
@@ -379,7 +462,7 @@ TEST_F(FunctionalTest, GridSample) {
 TEST_F(FunctionalTest, AffineGrid) {
   {
     // 2D affine.
-    auto theta = torch::arange(1, 13, torch::kDouble)
+    auto theta = torch::arange(1., 13)
                      .view(std::vector<int64_t>({2, 2, 3}));
     auto size = std::vector<int64_t>({2, 3, 2, 2});
     auto align_corners = true;
@@ -397,7 +480,7 @@ TEST_F(FunctionalTest, AffineGrid) {
   }
   {
     // 3D affine.
-    auto theta = torch::arange(1, 13, torch::kDouble)
+    auto theta = torch::arange(1., 13)
                      .view(std::vector<int64_t>({1, 3, 4}));
     auto size = std::vector<int64_t>({1, 1, 3, 2, 2});
     auto align_corners = true;
