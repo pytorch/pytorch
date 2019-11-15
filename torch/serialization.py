@@ -171,40 +171,82 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-class _open_file_like(object):
-    def __init__(self, name_or_buffer, mode):
-        self.is_path = _open_file_like.is_path(name_or_buffer)
-        if self.is_path:
-            self.fname = name_or_buffer
-        else:
-            self.buffer = name_or_buffer
-        self.mode = mode
+def _is_path(name_or_buffer):
+    return isinstance(name_or_buffer, str) or \
+        (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
+        (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
 
-    def open_path(self):
-        return open(self.fname, self.mode)
 
-    def open_handle(self):
-        return self.buffer
-
-    @staticmethod
-    def is_path(name_or_buffer):
-        return isinstance(name_or_buffer, str) or \
-            (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+class _opener(object):
+    def __init__(self, file_like):
+        self.file_like = file_like
 
     def __enter__(self):
-        if self.is_path:
-            file_like = self.open_path()
-        else:
-            file_like = self.open_handle()
-
-        self.file_like = file_like
         return self.file_like
 
     def __exit__(self, *args):
-        if self.is_path:
-            # Only close the `file_like` if it was opened by this object
-            self.file_like.close()
+        pass
+
+
+class _open_file(_opener):
+    def __init__(self, name, mode):
+        super(_open_file, self).__init__(open(name, mode))
+
+    def __exit__(self, *args):
+        self.file_like.close()
+
+
+class _open_buffer_reader(_opener):
+    pass
+
+
+class _open_buffer_writer(_opener):
+    def __exit__(self, *args):
+        self.file_like.flush()
+
+
+def _open_file_like(name_or_buffer, mode):
+    if _is_path(name_or_buffer):
+        return _open_file(name_or_buffer, mode)
+    else:
+        if 'w' in mode:
+            return _open_buffer_writer(name_or_buffer)
+        elif 'r' in mode:
+            return _open_buffer_reader(name_or_buffer)
+        else:
+            raise RuntimeError("Expected 'r' or 'w' in mode but got {}".format(mode))
+
+
+
+class _open_zipfile_reader(_opener):
+    def __init__(self, name_or_buffer):
+        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
+
+
+class _open_zipfile_writer_file(_opener):
+    def __init__(self, name):
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+
+
+class _open_zipfile_writer_buffer(_opener):
+    def __init__(self, buffer):
+        self.buffer = buffer
+        super(_open_zipfile_writer_buffer, self).__init__(torch._C.PyTorchFileWriter(buffer))
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+        self.buffer.flush()
+
+
+def _open_zipfile_writer(name_or_buffer):
+    if _is_path(name_or_buffer):
+        container = _open_zipfile_writer_file
+    else:
+        container = _open_zipfile_writer_buffer
+    return container(name_or_buffer)
 
 
 def _is_compressed_file(f):
