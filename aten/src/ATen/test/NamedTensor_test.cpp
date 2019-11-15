@@ -139,7 +139,7 @@ static std::vector<Dimname> tensornames_unify_from_right(
     DimnameList other_names) {
   auto names_wrapper = at::namedinference::TensorNames(names);
   auto other_wrapper = at::namedinference::TensorNames(other_names);
-  return names_wrapper.unifyFromRight(other_wrapper, "unify").toDimnameVec();
+  return names_wrapper.unifyFromRightInplace(other_wrapper).toDimnameVec();
 }
 
 static void check_unify(

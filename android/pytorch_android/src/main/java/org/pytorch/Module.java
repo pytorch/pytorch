@@ -64,7 +64,7 @@ public class Module {
 
   private static class NativePeer {
     static {
-      NativeLoader.loadLibrary("pytorch");
+      NativeLoader.loadLibrary("pytorch_jni");
     }
 
     private final HybridData mHybridData;
