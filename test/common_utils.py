@@ -156,7 +156,8 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', False))
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
+IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
 TEST_REPORT_FILE_OVERRIDE = os.environ.get('TEST_REPORT_FILE_OVERRIDE')
 
 def run_tests(argv=UNITTEST_ARGS):
@@ -182,7 +183,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
-        if IS_PYTORCH_CI:
+        if IN_CIRCLECI:
             # import here so that non-CI doesn't need xmlrunner installed
             import xmlrunner
             # allow users to override the test file location. We need this
