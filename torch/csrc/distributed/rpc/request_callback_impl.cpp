@@ -1,8 +1,8 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <c10/util/C++17.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>

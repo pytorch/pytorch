@@ -23,6 +23,8 @@ ctx_ids = [-1, -1, -1, -1]
 
 known_context_ids = []
 
+requires_grad_tensor = torch.ones(3, 3, requires_grad=True)
+
 # Send rpc done info and context_id to
 # dst_rank = (self.rank + rank_distance) % self.world_size
 # we don't need a lock here since the GIL is held while executing remote
@@ -74,6 +76,10 @@ def my_rref_add(rref_t1, t2):
 
 def my_nested_rref_add(dst, rref_t1, t2):
     return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
+
+
+def ret_requires_grad():
+    return requires_grad_tensor
 
 
 def my_py_nested_call(t1, t2, dst, world_size, hops):
@@ -581,16 +587,13 @@ class DistAutogradTest(object):
 
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
-            if ExecMode.RPC_SYNC == exec_mode:
-                # prev context id is not passed over as tensors do not require
-                # grads
-                with self.assertRaises(RuntimeError):
-                    ctx = dist_autograd._retrieve_context(ctx_ids[1])
-            elif ExecMode.REMOTE == exec_mode:
-                # NB: RRef.to_here() always passes the autograd context to the
-                # the callee, as the caller does not know whether the return
-                # value would contain a requires_grad tensor or not.
-                pass
+            # NB: RRef.to_here() always passes the autograd context to the
+            # the callee, as the caller does not know whether the return
+            # value would contain a requires_grad tensor or not.
+            #
+            # rpc/remote with udf (_set_rpc_done here) also always passes the
+            # autograd context to the callee due to the same reason.
+            self.assertNotEqual(-1, dist_autograd._retrieve_context(ctx_ids[1]))
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad(self):
@@ -599,6 +602,42 @@ class DistAutogradTest(object):
     @dist_init
     def test_no_graph_with_tensors_not_require_grad_remote(self):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
+
+    def _test_grad_only_on_return_value(self, exec_mode):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(dst_rank),
+                    ret_requires_grad
+                )
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(dst_rank),
+                    ret_requires_grad
+                ).to_here()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
+            dist_autograd.backward([ret.sum()])
+
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done, args=(context_id, 1))
+
+            # Wait for the prev rank to be done with rpc.
+            self._check_rpc_done(1)
+            grads = dist_autograd.get_gradients(ctx_ids[1])
+            self.assertEqual(1, len(grads))
+            self.assertIn(requires_grad_tensor, grads)
+            self.assertEqual(torch.ones_like(ret), grads[requires_grad_tensor])
+
+    @dist_init
+    def test_grad_only_on_return_value(self):
+        self._test_grad_only_on_return_value(ExecMode.RPC_SYNC)
+
+    @dist_init
+    def test_grad_only_on_return_value_remote(self):
+        self._test_grad_only_on_return_value(ExecMode.REMOTE)
 
     def _test_rpc_complex_args(self, exec_mode):
         with dist_autograd.context() as context_id:
@@ -1321,6 +1360,7 @@ class DistAutogradTest(object):
         # https://github.com/pytorch/pytorch/issues/27643, which would inform
         # other nodes about the failure.
         dist.barrier()
+        rpc.join_rpc()
         sys.exit(0)
 
 

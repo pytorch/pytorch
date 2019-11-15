@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/torch.h>

@@ -59,6 +59,10 @@ import hypothesis_utils as hu
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+TEST_LARGE_TENSOR = TEST_CUDA
+if TEST_CUDA:
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+
 if TEST_SCIPY:
     from scipy import stats
     import scipy.ndimage
@@ -3547,6 +3551,46 @@ class TestNN(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
+        input = torch.randint(1, 10, (1, 32, 2 ** 17 + 1, 32), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (1, 32, 10, 32), dtype=torch.float32, device="cuda")
+
+        pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_adaptive_pooling_avg_nhwc_launch_config_forward(self):
+        input = torch.randint(1, 10, (1, 32, 16, 16), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        pool = torch.nn.AdaptiveAvgPool2d((2 ** 17 + 1, 32)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_pool = torch.nn.AdaptiveAvgPool2d((2 ** 17 + 1, 32)).cuda()
+
+        out = pool(input)
+        ref_out = ref_pool(ref_input)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_double_backwards_gpu(self):

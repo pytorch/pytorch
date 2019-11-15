@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace torch {
 namespace distributed {
