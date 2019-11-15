@@ -18,9 +18,153 @@ at::Tensor toOptionalTensor(const c10::IValue& v) {
 at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
 }
+
+void adaptive_avg_pool2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+  auto result_ = at::adaptive_avg_pool2d(
+      (std::move(peek(*stack, 0, 2))).toTensor(),
+      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      );
+  drop(*stack, 2);
+  pack(*stack, std::move(result_));
 }
 
-static auto registry0 = torch::RegisterOperators().op(
+void _convolution_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+  auto result_ = at::_convolution(
+      (std::move(peek(*stack, 0, 12))).toTensor(),
+      (std::move(peek(*stack, 1, 12))).toTensor(),
+      toOptionalTensor((std::move(peek(*stack, 2, 12)))),
+      (std::move(peek(*stack, 3, 12))).toIntListRef(),
+      (std::move(peek(*stack, 4, 12))).toIntListRef(),
+      (std::move(peek(*stack, 5, 12))).toIntListRef(),
+      (std::move(peek(*stack, 6, 12))).toBool(),
+      (std::move(peek(*stack, 7, 12))).toIntListRef(),
+      (std::move(peek(*stack, 8, 12))).toInt(),
+      (std::move(peek(*stack, 9, 12))).toBool(),
+      (std::move(peek(*stack, 10, 12))).toBool(),
+      (std::move(peek(*stack, 11, 12))).toBool()
+      );
+  drop(*stack, 12);
+  pack(*stack, std::move(result_));
+}
+
+void conv2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+    auto result_ = at::conv2d(
+        (std::move(peek(*stack, 0, 7))).toTensor(),
+        (std::move(peek(*stack, 1, 7))).toTensor(),
+        toOptionalTensor((std::move(peek(*stack, 2, 7)))),
+        (std::move(peek(*stack, 3, 7))).toIntListRef(),
+        (std::move(peek(*stack, 4, 7))).toIntListRef(),
+        (std::move(peek(*stack, 5, 7))).toIntListRef(),
+        (std::move(peek(*stack, 6, 7))).toInt()
+        );
+    drop(*stack, 7);
+    pack(*stack, std::move(result_));
+}
+
+void max_pool2d_with_indices_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+    auto result_ = at::max_pool2d_with_indices(
+        (std::move(peek(*stack, 0, 6))).toTensor(),
+        (std::move(peek(*stack, 1, 6))).toIntListRef(),
+        (std::move(peek(*stack, 2, 6))).toIntListRef(),
+        (std::move(peek(*stack, 3, 6))).toIntListRef(),
+        (std::move(peek(*stack, 4, 6))).toIntListRef(),
+        (std::move(peek(*stack, 5, 6))).toBool()
+        );
+    drop(*stack, 6);
+    pack(*stack, std::move(result_));
+}
+
+void max_pool2d_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+  auto result_ = at::max_pool2d(
+      (std::move(peek(*stack, 0, 6))).toTensor(),
+      (std::move(peek(*stack, 1, 6))).toIntListRef(),
+      (std::move(peek(*stack, 2, 6))).toIntListRef(),
+      (std::move(peek(*stack, 3, 6))).toIntListRef(),
+      (std::move(peek(*stack, 4, 6))).toIntListRef(),
+      (std::move(peek(*stack, 5, 6))).toBool()
+      );
+  drop(*stack, 6);
+  pack(*stack, std::move(result_));
+}
+
+void t_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+  auto result_ = at::t(
+  (std::move(peek(*stack, 0, 1))).toTensor()
+  );
+  drop(*stack, 1);
+  pack(*stack, std::move(result_));
+}
+
+void relu_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  #endif
+auto result_ = at::relu(
+    (std::move(peek(*stack, 0, 1))).toTensor()
+  );
+  drop(*stack, 1);
+  pack(*stack, std::move(result_));
+}
+
+void addmm_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+  constexpr size_t nvar = 5;
+  auto result_ = at::addmm(
+    (std::move(peek(*stack, 0, nvar))).toTensor(),
+    (std::move(peek(*stack, 1, nvar))).toTensor(),
+    (std::move(peek(*stack, 2, nvar))).toTensor(),
+    (std::move(peek(*stack, 3, nvar))).toScalar(),
+    (std::move(peek(*stack, 4, nvar))).toScalar()
+    );
+  drop(*stack, 5);
+  pack(*stack, std::move(result_));
+}
+
+void view_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+  auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).view(
+      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      );
+  drop(*stack, 2);
+  pack(*stack, std::move(result_));
+}
+
+void flatten_kernel(OperatorKernel*, const c10::OperatorHandle& op, Stack* stack) {
+#ifdef USE_STATIC_DISPATCH
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
+  auto result_ = at::flatten(
+      (std::move(peek(*stack, 0, 3))).toTensor(),
+      (std::move(peek(*stack, 1, 3))).toInt(),
+      (std::move(peek(*stack, 2, 3))).toInt()
+  );
+  drop(*stack, 3);
+  pack(*stack, std::move(result_));
+}
+
+static auto registry = torch::RegisterOperators().op(
   "_aten::add.Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
@@ -40,18 +184,7 @@ static auto registry0 = torch::RegisterOperators().op(
                                            })
 ).op(
   "_aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-  #ifdef USE_STATIC_DISPATCH
-   at::AutoNonVariableTypeMode non_var_type_mode(true);
-  #endif
-   auto result_ = at::adaptive_avg_pool2d(
-       (std::move(peek(*stack, 0, 2))).toTensor(),
-       (std::move(peek(*stack, 1, 2))).toIntListRef()
-       );
-   drop(*stack, 2);
-   pack(*stack, std::move(result_));
-  })
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &adaptive_avg_pool2d_kernel)
 ).op(
   "_aten::mm",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -60,47 +193,10 @@ static auto registry0 = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-#ifdef USE_STATIC_DISPATCH
-     at::AutoNonVariableTypeMode non_var_type_mode(true);
-#endif
-     auto result_ = at::_convolution(
-         (std::move(peek(*stack, 0, 12))).toTensor(),
-         (std::move(peek(*stack, 1, 12))).toTensor(),
-         toOptionalTensor((std::move(peek(*stack, 2, 12)))),
-         (std::move(peek(*stack, 3, 12))).toIntListRef(),
-         (std::move(peek(*stack, 4, 12))).toIntListRef(),
-         (std::move(peek(*stack, 5, 12))).toIntListRef(),
-         (std::move(peek(*stack, 6, 12))).toBool(),
-         (std::move(peek(*stack, 7, 12))).toIntListRef(),
-         (std::move(peek(*stack, 8, 12))).toInt(),
-         (std::move(peek(*stack, 9, 12))).toBool(),
-         (std::move(peek(*stack, 10, 12))).toBool(),
-         (std::move(peek(*stack, 11, 12))).toBool()
-         );
-     drop(*stack, 12);
-     pack(*stack, std::move(result_));
-   })
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &_convolution_kernel)
 ).op(
   "_aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-#ifdef USE_STATIC_DISPATCH
-     at::AutoNonVariableTypeMode non_var_type_mode(true);
-#endif
-     auto result_ = at::conv2d(
-         (std::move(peek(*stack, 0, 7))).toTensor(),
-         (std::move(peek(*stack, 1, 7))).toTensor(),
-         toOptionalTensor((std::move(peek(*stack, 2, 7)))),
-         (std::move(peek(*stack, 3, 7))).toIntListRef(),
-         (std::move(peek(*stack, 4, 7))).toIntListRef(),
-         (std::move(peek(*stack, 5, 7))).toIntListRef(),
-         (std::move(peek(*stack, 6, 7))).toInt()
-         );
-     drop(*stack, 7);
-     pack(*stack, std::move(result_));
-  })
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &conv2d_kernel)
 ).op(
   "_aten::batch_norm",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -113,40 +209,10 @@ static auto registry0 = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-  #ifdef USE_STATIC_DISPATCH
-     at::AutoNonVariableTypeMode non_var_type_mode(true);
-  #endif
-     auto result_ = at::max_pool2d_with_indices(
-         (std::move(peek(*stack, 0, 6))).toTensor(),
-         (std::move(peek(*stack, 1, 6))).toIntListRef(),
-         (std::move(peek(*stack, 2, 6))).toIntListRef(),
-         (std::move(peek(*stack, 3, 6))).toIntListRef(),
-         (std::move(peek(*stack, 4, 6))).toIntListRef(),
-         (std::move(peek(*stack, 5, 6))).toBool()
-         );
-     drop(*stack, 6);
-     pack(*stack, std::move(result_));
-  })
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &max_pool2d_with_indices_kernel)
 ).op(
   "_aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-#ifdef USE_STATIC_DISPATCH
-   at::AutoNonVariableTypeMode non_var_type_mode(true);
-#endif
-   auto result_ = at::max_pool2d(
-       (std::move(peek(*stack, 0, 6))).toTensor(),
-       (std::move(peek(*stack, 1, 6))).toIntListRef(),
-       (std::move(peek(*stack, 2, 6))).toIntListRef(),
-       (std::move(peek(*stack, 3, 6))).toIntListRef(),
-       (std::move(peek(*stack, 4, 6))).toIntListRef(),
-       (std::move(peek(*stack, 5, 6))).toBool()
-       );
-   drop(*stack, 6);
-   pack(*stack, std::move(result_));
-  })
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &max_pool2d_kernel)
 ).op(
   "_aten::threshold",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -155,18 +221,7 @@ static auto registry0 = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::relu(Tensor self) -> Tensor",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-
-  #ifdef USE_STATIC_DISPATCH
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
-  #endif
-  auto result_ = at::relu(
-  (std::move(peek(*stack, 0, 1))).toTensor()
-  );
-  drop(*stack, 1);
-  pack(*stack, std::move(result_));
-})
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &relu_kernel)
 ).op(
   "_aten::relu_",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -175,18 +230,9 @@ static auto registry0 = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::t(Tensor(a) self) -> Tensor(a)",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-
-  #ifdef USE_STATIC_DISPATCH
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
-  #endif
-  auto result_ = at::t(
-  (std::move(peek(*stack, 0, 1))).toTensor()
-  );
-  drop(*stack, 1);
-  pack(*stack, std::move(result_));
-  }).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+  torch::RegisterOperators::options()
+    .kernel(c10::TensorTypeId::CPUTensorId, &t_kernel)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 ).op(
   "_aten::size.int",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -195,36 +241,12 @@ static auto registry0 = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-
-  #ifdef USE_STATIC_DISPATCH
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
-  #endif
-  constexpr size_t nvar = 5;
-  auto result_ = at::addmm(
-  (std::move(peek(*stack, 0, nvar))).toTensor(),
-  (std::move(peek(*stack, 1, nvar))).toTensor(),
-  (std::move(peek(*stack, 2, nvar))).toTensor(),
-  (std::move(peek(*stack, 3, nvar))).toScalar(),
-  (std::move(peek(*stack, 4, nvar))).toScalar()
-  );
-  drop(*stack, 5);
-  pack(*stack, std::move(result_));
-  })
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &addmm_kernel)
 ).op(
   "_aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-#ifdef USE_STATIC_DISPATCH
-   at::AutoNonVariableTypeMode non_var_type_mode(true);
-#endif
-   auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).view(
-       (std::move(peek(*stack, 1, 2))).toIntListRef()
-       );
-   drop(*stack, 2);
-   pack(*stack, std::move(result_));
-  }).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+  torch::RegisterOperators::options()
+    .kernel(c10::TensorTypeId::CPUTensorId, &view_kernel)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 ).op(
   "_aten::dim",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -249,19 +271,7 @@ static auto registry0 = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-  #ifdef USE_STATIC_DISPATCH
-     at::AutoNonVariableTypeMode non_var_type_mode(true);
-  #endif
-     auto result_ = at::flatten(
-         (std::move(peek(*stack, 0, 3))).toTensor(),
-         (std::move(peek(*stack, 1, 3))).toInt(),
-         (std::move(peek(*stack, 2, 3))).toInt()
-     );
-     drop(*stack, 3);
-     pack(*stack, std::move(result_));
-  })
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId, &flatten_kernel)
 ).op(
   "_aten::Int",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
@@ -301,3 +311,4 @@ static auto registry0 = torch::RegisterOperators().op(
   []() {
   })
 );
+}
