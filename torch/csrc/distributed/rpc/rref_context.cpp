@@ -198,10 +198,17 @@ void RRefContext::notifyOwnerAndParentOfFork(
     worker_id_t parent,
     const std::shared_ptr<RRef>& rref) {
   if (parent == rref->owner()) {
-    // If the parent is the owner, this fork has already been added into the
-    // forks_ map when the owner sends the message to the callee user. Hence,
-    // it is not necessary to send another RREF_CHILD_ACCEPT or
-    // RREF_FORK_REQUEST back to the owner. See Note [Early Fork Registration].
+    if (parent == agent_->getWorkerInfo().id_) {
+      // Owner sending RRef to self, remove the forkId as it was added during
+      // pickling
+      delForkOfOwner(rref->rrefId(), forkId);
+    } else {
+      // If the parent is the owner, this fork has already been added into the
+      // forks_ map when the owner sends the message to the callee user. Hence,
+      // it is not necessary to send another RREF_CHILD_ACCEPT or
+      // RREF_FORK_REQUEST back to the owner. See Note [Early Fork
+      // Registration].
+    }
     return;
   }
 
@@ -253,8 +260,6 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
 void RRefContext::addPendingUser(
     const ForkId& forkId,
     const std::shared_ptr<RRef>& rref) {
-  TORCH_INTERNAL_ASSERT(
-      !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
   std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(
       pendingUsers_.find(forkId) == pendingUsers_.end(),
@@ -278,6 +283,25 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
 
   fm->addCallback([](const Message& message) { handleException(message); });
 }
+
+template <typename T>
+void RRefContext::addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto& rrefId = rref->rrefId();
+  owners_[rrefId] = rref;
+  auto& rrefForks = forks_[rrefId];
+  TORCH_INTERNAL_ASSERT(
+      rrefForks.find(rrefId) == rrefForks.end(),
+      "Attempt to add self as fork twice ",
+      rrefId);
+  rrefForks.insert(rrefId);
+}
+
+template void RRefContext::addSelfAsFork<IValue>(
+    std::shared_ptr<OwnerRRef<IValue>>& rref);
+
+template void RRefContext::addSelfAsFork<py::object>(
+    std::shared_ptr<OwnerRRef<py::object>>& rref);
 
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
