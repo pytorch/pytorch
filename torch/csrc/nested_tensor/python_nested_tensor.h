@@ -4,8 +4,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorTypeId.h>
 #include <exception>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -20,8 +18,6 @@
 
 namespace torch {
 namespace nested_tensor {
-
-namespace py = pybind11;
 
 using namespace at;
 

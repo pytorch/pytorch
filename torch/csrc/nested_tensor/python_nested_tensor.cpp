@@ -35,28 +35,6 @@ namespace py = pybind11;
 
 PyObject *_ListNestedTensorVariableClass = nullptr;
 
-// template <class F> std::vector<py::object> map_fn(_ListNestedTensor nt, F fn)
-// {
-//  std::vector<py::object> result;
-//  if (nt.nested_dim() == 1) {
-//    for (_NestedNode node : nt.get_structure()._children) {
-//      result.push_back(fn(node._tensor_node._tensor));
-//    }
-//  } else {
-//    for (_ListNestedTensor nti : nt.get_structure()._children) {
-//      result.push_back(py::cast(map_fn(nti, fn)));
-//    }
-//  }
-//  return result;
-// }
-
-// std::vector<py::object> _ListNestedTensor::nested_size() {
-//   return map_fn(*this, [](at::Tensor tensor) -> py::object {
-//     return py::reinterpret_borrow<py::object>(
-//         torch::autograd::utils::wrap(tensor.sizes()));
-//   });
-// }
-
 template <class F> static PyObject *_map_member(_NestedNode nested_node, F fn) {
   if (nested_node._children.size() == 0) {
     return fn(nested_node._variable_node._variable);
@@ -99,26 +77,18 @@ PyObject *_ListNestedTensorVariable_to(PyObject *self_, PyObject *args,
     Py_INCREF(self_);
     return self_;
   } else if (!device) {
-    return _ListNestedTensorVariable_Wrap(self.to(
-        scalarType.value(), non_blocking, copy, opt_memory_format));
+    return _ListNestedTensorVariable_Wrap(
+        self.to(scalarType.value(), non_blocking, copy, opt_memory_format));
   } else if (!scalarType) {
     return _ListNestedTensorVariable_Wrap(self.to(
         self.options().device(device), non_blocking, copy, opt_memory_format));
   } else {
     return _ListNestedTensorVariable_Wrap(
-        self.to(device.value(), scalarType.value(), non_blocking,
-                             copy, opt_memory_format));
+        self.to(device.value(), scalarType.value(), non_blocking, copy,
+                opt_memory_format));
   }
   Py_RETURN_NONE;
 }
-
-// std::vector<py::object> _ListNestedTensor::nested_stride() {
-//   return map_fn(*this, [](at::Tensor tensor) -> py::object {
-//     return py::reinterpret_borrow<py::object>(
-//         torch::autograd::utils::wrap(tensor.strides()));
-//   });
-// }
-//
 
 PyObject *_ListNestedTensorVariable_unbind(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
@@ -227,6 +197,7 @@ PyObject *_ListNestedTensorVariable___repr__(PyObject *self_) {
 }
 
 static void _ListNestedTensorVariable_dealloc(_ListNestedTensorVariable *self) {
+  // TODO: Need to revisit this for GC
   // PyObject_GC_UnTrack(self);
   // THPVariable_clear(self);
   self->cdata.~_ListNestedTensor();
@@ -468,17 +439,6 @@ void initialize_python_bindings() {
     Py_DECREF(m);
     throw python_error();
   }
-
-  // auto obj = py::module::import("torch");
-  // auto m = py::handle(obj).cast<py::module>();
-
-  // py::class_<_ListNestedTensor>(m, "_ListNestedTensor")
-  //     .def(py::init<std::vector<py::object>>())
-  //     &_ListNestedTensor::requires_grad)
-  //     .def("size", &_ListNestedTensor::size)
-  //     .def("nested_size", &_ListNestedTensor::nested_size)
-  //     .def("nested_stride", &_ListNestedTensor::nested_stride)
-  //     .def("__len__", &_ListNestedTensor::__len__)
 }
 }
 }
