@@ -72,47 +72,28 @@ struct InlinedCallStack;
  */
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
-struct InlinedCallStackHash {
-  std::size_t operator()(const InlinedCallStackEntry& cs) const {
-    return std::hash<void*>()(cs.first) ^
-        std::hash<void*>()(&*cs.second.source()) ^
-        std::hash<size_t>()(cs.second.start()) ^
-        std::hash<size_t>()(cs.second.end());
-  }
-};
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
-  c10::optional<InlinedCallStackPtr> caller_;
+  c10::optional<InlinedCallStackPtr> callee_;
 
-  std::unordered_map<
-      InlinedCallStackEntry,
-      InlinedCallStackPtr,
-      InlinedCallStackHash>
-      callees_;
   Function* fn_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
 
  public:
-  // Constructor for the root callstack node.
+  // Constructor for a leaf callstack node.
   InlinedCallStack(Function* fn, SourceRange source_range);
 
   // Constructor for an inner callstack node.
   InlinedCallStack(
-      InlinedCallStackPtr caller,
+      InlinedCallStackPtr callee,
       Function* fn,
       SourceRange source_range);
 
-  // Return callstack for the caller.
+  // Return callstack for the callee.
   // Essentially, move one level up in the trie.
-  c10::optional<InlinedCallStackPtr> caller() const;
-
-  // Insert new callee to the callstack.
-  // Essentially, find existing or insert new node into the trie.
-  InlinedCallStackPtr insertCallStackEntry(
-      Function* fn,
-      const SourceRange& source_range);
+  c10::optional<InlinedCallStackPtr> callee() const;
 
   // Flatten callstack to a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();

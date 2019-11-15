@@ -320,8 +320,9 @@ struct TORCH_API Node {
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
-  void setCallStack(InlinedCallStackPtr cs);
-  void insertCallStackEntry(Function* f, const SourceRange& sr);
+  void setCallStack(InlinedCallStackPtr cs) {
+    callstack_ = cs;
+  }
 
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)

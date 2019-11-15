@@ -1702,22 +1702,6 @@ void Graph::freeBlock(Block* b) {
   all_blocks.erase(it);
 }
 
-void Node::setCallStack(InlinedCallStackPtr cs) {
-  callstack_ = cs;
-}
-
-static InlinedCallStackPtr getOrCreateCallStackEntry(
-    InlinedCallStackPtr cs,
-    Function* f,
-    const SourceRange& sr) {
-  return cs ? cs : c10::make_intrusive<InlinedCallStack>(f, sr);
-}
-
-void Node::insertCallStackEntry(Function* f, const SourceRange& sr) {
-  AT_ASSERT(callstack_);
-  callstack_ = (*callstack_)->insertCallStackEntry(f, sr);
-}
-
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   // small peephole optimization to ensure IntArrayRef attributes can still turn
   // into constants e.g. in x.expand([3, 4])
@@ -1737,21 +1721,35 @@ std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
       to_replace->inputs(),
       value_map);
 
+  std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
+      new_callstack_entries;
+
   // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
-  InlinedCallStackPtr new_callstack_entry;
   for (const auto& kv : value_map) {
     Node* new_node = kv.second->node();
-    if (updated_nodes.insert(new_node).second) {
-      if (!new_node->callstack()) {
-        new_callstack_entry = getOrCreateCallStackEntry(
-            new_callstack_entry, callee, to_replace->sourceRange());
-        new_node->setCallStack(new_callstack_entry);
+    if (!updated_nodes.insert(new_node).second) {
+      continue;
+    }
+
+    auto new_node_cs = new_node->callstack();
+
+    InlinedCallStack* raw_callstack_ptr =
+        new_node_cs ? new_node_cs->get() : nullptr;
+
+    if (!new_callstack_entries.count(raw_callstack_ptr)) {
+      if (new_node_cs) {
+        new_callstack_entries[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                *new_node_cs, callee, to_replace->sourceRange());
       } else {
-        new_node->insertCallStackEntry(callee, to_replace->sourceRange());
+        new_callstack_entries[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                callee, to_replace->sourceRange());
       }
     }
+    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
   }
 
   const auto& old_outputs = to_replace->outputs();
