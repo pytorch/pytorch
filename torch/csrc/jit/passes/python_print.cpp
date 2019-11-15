@@ -300,7 +300,6 @@ struct PythonPrintImpl {
         return i;
       }
     }
-    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }
@@ -1200,7 +1199,6 @@ struct PythonPrintImpl {
         enforce_importable_(enforce_importable) {}
 
   void printModuleMetadata(const ClassTypePtr& moduleType) {
-    TORCH_CHECK(moduleType->numConstants() == 0, "Can't serialize module with constants right now, will add support in a separate PR.");
     std::vector<std::string> params;
     size_t numAttrs = moduleType->numAttributes();
     // Populate the __parameters__ field. This tells the importer which
@@ -1241,6 +1239,23 @@ struct PythonPrintImpl {
         //   foo : SomeType
         body_ << name << " : " << type->python_str() << "\n";
       }
+    }
+
+    size_t numConstants = moduleType->numConstants();
+    for (size_t i = 0; i < numConstants; i++) {
+      const auto& name = moduleType->getConstantName(i);
+      const auto& v = moduleType->getConstant(name);
+
+      indent();
+      if (i == 0) {
+        // Iniitalize the constants dict if necessary
+        body_ << "__constants__ = []\n";
+        indent();
+      }
+
+      body_ << "__constants__["
+            << "\"" << name << "\"] = " << v << "\n";
+
     }
   }
 

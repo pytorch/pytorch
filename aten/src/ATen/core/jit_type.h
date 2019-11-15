@@ -1533,6 +1533,12 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       const IValue& value);
 
+  const std::string& getConstantName(size_t slot) const {
+    TORCH_CHECK(constantNames_.size() == constantValues_.size());
+    TORCH_CHECK(slot < constantNames_.size());
+    return constantNames_[slot];
+  }
+
   c10::optional<IValue> getConstant(const std::string& name) const;
 
   size_t numConstants() const {

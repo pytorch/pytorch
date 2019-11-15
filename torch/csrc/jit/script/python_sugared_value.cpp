@@ -283,8 +283,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       // first class so they get returned as SimpleValues
       return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   } else if (selfType->hasConstant(field)) {
-    return std::make_shared<SimpleValue>(
-        m.graph()->insertConstant(selfType->getConstant(field).value(), loc));
+    auto v = selfType->getConstant(field).value();
+    return toSugaredValue(v, m, loc);
   }
 
   // 2. Special case: for module dicts we manually desugar items(), keys(),
@@ -445,6 +445,26 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   }
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
+
+std::shared_ptr<SugaredValue> toSugaredValue(
+    const IValue& v,
+    Function& m,
+    SourceRange loc) {
+  if (v.isTuple()) {
+    auto tp = v.toTuple();
+    std::vector<Value*> values;
+    values.reserve(tp->elements().size());
+    for (const auto& e: tp->elements()) {
+      values.push_back(toSugaredValue(e, m, loc)->asValue(loc, m));
+    }
+    return toSimple(
+        m.graph()->insertNode(m.graph()->createTuple(values))->output());
+  } else {
+    return toSimple(
+        m.graph()->insertConstant(v, loc));
+  }
+}
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
