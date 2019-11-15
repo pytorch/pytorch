@@ -17,6 +17,8 @@
 #include <stddef.h>
 #include <inttypes.h>
 
+#include <c10/macros/Export.h>
+
 #ifdef TH_BLAS_MKL
 #include <mkl_vsl.h>
 #endif
