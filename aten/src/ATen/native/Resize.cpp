@@ -28,8 +28,8 @@ Tensor& resize_as_sparse_(Tensor& self, const Tensor& src);
 // Strides of the output tensor of `resize_as_` operator is defined by input
 // tensor strides and the value of memory_format argument.
 //
-// If memory_format is not defined or equals to MemoryFormat::Contiguous
-// (torch.contiguous_format) output tensor will have contiguous strides.
+// If memory_format is equals to MemoryFormat::Contiguous (torch.contiguous_format)
+// output tensor will have contiguous strides.
 //
 // If memory_format is equal to MemoryFormat::ChannelsLast (torch.channels_last)
 // and input tensor is 4D, output tensor will have channels last memory layout.
