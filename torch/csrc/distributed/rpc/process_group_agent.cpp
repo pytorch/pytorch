@@ -413,16 +413,16 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           std::chrono::milliseconds futureStartTime;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
-            if (futures_.find(id) == futures_.end()) {
+            const auto& futureInfo = futures_.find(id);
+            if (futureInfo == futures_.end()) {
               // Received a completion for a timed out future, drop the recv.
               // RecvCounts will not be incremented here, it will be incremented
               // by the sender who has determined the future has timed out.
               return;
             }
 
-            const auto& futureInfo = futures_[id];
-            fm = futureInfo.future_;
-            futureStartTime = futureInfo.startTime_;
+            fm = futureInfo->second.future_;
+            futureStartTime = futureInfo->second.startTime_;
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
@@ -533,7 +533,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
     const std::chrono::milliseconds& startTime = it->first;
     const std::vector<int64_t>& futureIDs = it->second;
     const auto remainingTime =
-        getRPCRemainingTime(futureTimeouts_.begin()->first, rpcTimeout_.load());
+        getRPCRemainingTime(startTime, rpcTimeout_.load());
     if (rpcTimeout_.load().count() == 0 || remainingTime.count() > 0) {
       // Since the futureTimeouts_ map is ordered by timeout, we don't need
       // to check the remaining futures.
