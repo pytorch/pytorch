@@ -1053,6 +1053,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (i > 0) {
         out << "during call ";
       }
+      int idx = 1;
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          out << idx++ << ". ";
+          p.second.highlight(out);
+        }
+      }
+      out << idx++ << ". ";
       node->sourceRange().highlight(out);
     }
   }
