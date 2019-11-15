@@ -81,6 +81,7 @@ call_analyzer() {
     -load="${BUILD_ROOT}/libOpDependencyPass.so" \
     -op_dependency \
     -disable-output \
+    -op_schema_pattern="aten::,quantized::" \
     -format="${FORMAT}" \
     "${INPUT}" \
     ${OPT_CLOSURE} \
