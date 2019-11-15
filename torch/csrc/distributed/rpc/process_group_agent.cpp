@@ -188,10 +188,10 @@ void ProcessGroupAgent::join() {
   //    effort to fix this problem).
   shutdown_.store(true);
   sync();
-  std::unique_lock<std::mutex> lock(futureMutex_);
   // This is needed in case no futures were created, otherwise the future
   // timeout watchdog would sleep forever.
   futureTimeoutCV_.notify_one();
+  std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
@@ -544,10 +544,11 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
         break;
       } else {
         for (const auto& futureID : futureIDs) {
+          auto it = futures_.find(futureID);
           TORCH_CHECK(
-              futures_.find(futureID) != futures_.end(),
+              it != futures_.end(),
               "Race Condition - Expected future does not exist in map");
-          const auto futInfo = futures_[futureID];
+          const auto futInfo = it->second;
           timedOutFutures.push_back(futInfo);
           futures_.erase(futureID);
         }
