@@ -183,7 +183,11 @@ def run_tests(argv=UNITTEST_ARGS):
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
         if IS_PYTORCH_CI:
+            # import here so that non-CI doesn't need xmlrunner installed
             import xmlrunner
+            # allow users to override the test file location. We need this
+            # because the distributed tests run the same test file multiple
+            # times with different configurations.
             if TEST_REPORT_FILE_OVERRIDE is not None:
                 with open(TEST_REPORT_FILE_OVERRIDE, 'wb') as output:
                     unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=output))

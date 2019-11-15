@@ -13,6 +13,7 @@ echo "Testing pytorch"
 
 # Make directory for test reports
 sudo mkdir /var/lib/jenkins/workspace/test/test-reports
+sudo chown jenkins test/test-reports
 
 if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
