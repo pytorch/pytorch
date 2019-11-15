@@ -1,5 +1,5 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -133,6 +133,7 @@ Arguments:
         computation. All the tensors should be scalars.
 
 Example::
+
     >> import torch.distributed.autograd as dist_autograd
     >> with dist_autograd.context() as context_id:
     >>      pred = model.forward()
@@ -158,6 +159,7 @@ Arguments:
                 gradients.
 
 Example::
+
     >> import torch.distributed.autograd as dist_autograd
     >> with dist_autograd.context() as context_id:
     >>      t1 = torch.rand((3, 3), requires_grad=True)
