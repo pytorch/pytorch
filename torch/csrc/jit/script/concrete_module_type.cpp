@@ -38,7 +38,7 @@ ClassTypePtr ConcreteModuleType::createNewTypeFromThis() {
 
   for (const auto& moduleInfo : modules_) {
     cls->addAttribute(
-        moduleInfo.name, moduleInfo.meta->getJitType(), /*is_parameter=*/false);
+        moduleInfo.name_, moduleInfo.getJitType(), /*is_parameter=*/false);
   }
 
   jitType_ = std::move(cls);
@@ -86,12 +86,12 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   TORCH_INTERNAL_ASSERT(jitType_);
   const auto it = std::find_if(
       modules_.cbegin(), modules_.cend(), [&](const ModuleInfo& info) {
-        return info.name == name;
+        return info.name_ == name;
       });
   if (it == modules_.end()) {
     return nullptr;
   }
-  return it->meta;
+  return it->meta_;
 }
 
 void ConcreteModuleType::setIterableModuleKind(IterableModuleKind kind) {
@@ -154,6 +154,15 @@ void ConcreteModuleType::addModule(
   modules_.emplace_back(ModuleInfo{std::move(name), std::move(meta)});
 }
 
+void ConcreteModuleType::addModuleInterface(
+    std::string name,
+    const TypePtr& type) {
+  TORCH_INTERNAL_ASSERT(!jitType_);
+  TORCH_INTERNAL_ASSERT(type->cast<InterfaceType>() && type->is_module());
+  modules_.emplace_back(ModuleInfo{std::move(name), type});
+}
+
+
 void ConcreteModuleType::addOverload(
     std::string methodName,
     std::vector<std::string> overloadedMethodNames) {
@@ -178,6 +187,7 @@ c10::optional<py::object> ConcreteModuleType::findConstant(
 }
 
 void ConcreteModuleType::dump() const {
+  std::cout << "ConcreteModuleType for: " << py::getattr(pyClass_, "__name__") << "\n";
   std::cout << "Constants: \n";
   for (const auto& pr : constants_) {
     std::cout << "\t" << pr.first << ": " << pr.second.v_ << "\n";
@@ -189,12 +199,17 @@ void ConcreteModuleType::dump() const {
   }
   std::cout << "\nSubmodules: \n";
   for (const auto& info : modules_) {
-    std::cout << "\t" << info.name << ": "
-              << info.meta->getJitType()->python_str() << "\n";
+    std::cout << "\t" << info.name_ << ": "
+          << info.getJitType()->python_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : overloads_) {
     std::cout << "\t" << pr.first << ": " << pr.second << "\n";
+  }
+  std::string isPoisoned = isPoisoned_ ? "true" : "false";
+  std::cout << "isPoisoned: " << isPoisoned << "\n";
+  if (jitType_) {
+    std::cout << "jit type: " << jitType_->python_str() << "\n";
   }
 }
 
@@ -224,11 +239,15 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   return ret;
 }
 
-std::vector<std::string> ConcreteModuleType::getModuleNamesPy() const {
+std::vector<std::pair<std::string, TypePtr>> ConcreteModuleType::getModulesPy()
+    const {
   TORCH_INTERNAL_ASSERT(jitType_);
-  return fmap(modules_, [](const ConcreteModuleType::ModuleInfo& info) {
-    return info.name;
-  });
+  std::vector<std::pair<std::string, TypePtr>> ret;
+
+  for (const ModuleInfo& info: modules_) {
+    ret.emplace_back(std::make_pair(info.name_, info.getJitType()));
+  }
+  return ret;
 }
 
 } // namespace script

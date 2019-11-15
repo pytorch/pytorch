@@ -154,6 +154,7 @@ OPTION_TEMPLATE = CT("""\
 case ${key}: { // ${name}
     ${initialization}
     run_op = [=] {
+        at::AutoNonVariableTypeMode guard;
         ${statements}
         auto the_result = ${invocation};
         ${assignments}
