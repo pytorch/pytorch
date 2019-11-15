@@ -53,6 +53,7 @@ Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_ke
   TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxed() for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
 }
 
+// SFINAE version for ops with returns
 template<class Result, class... Args>
 Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, guts::enable_if_t<supports_boxing<Result, Args...>::value && !std::is_same<void, Result>::value, int> = 0) {
   // TODO Reuse stack vector instead of allocating?
@@ -65,6 +66,7 @@ Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_ke
   return std::move(stack[0]).to<Result>();
 }
 
+// SFINAE version for ops without returns
 template<class Result, class... Args>
 Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, guts::enable_if_t<supports_boxing<Result, Args...>::value && std::is_same<void, Result>::value, int> = 0) {
   // TODO Reuse stack vector instead of allocating?
