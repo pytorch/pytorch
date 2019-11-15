@@ -29,10 +29,7 @@ sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic d
 # comes with Docker.
 sudo apt-get -y install \
   linux-headers-$(uname -r) \
-  linux-image-4.4.0-166-generic \
-  linux-image-generic=4.4.0.166.174 \
-  linux-modules-4.4.0-166-generic \
-  linux-modules-extra-4.4.0-166-generic \
+  linux-image-generic \
   moreutils \
   docker-ce=5:18.09.4~3-0~ubuntu-xenial \
   nvidia-container-runtime=2.0.0+docker18.09.4-1 \

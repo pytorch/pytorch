@@ -519,13 +519,13 @@ class LSTM(RNNBase):
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
-    @torch._jit_internal._overload_method
-    def forward(self, input, hx=None):
+    @torch._jit_internal._overload_method  # noqa: F811
+    def forward(self, input, hx=None):  # noqa: F811
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         pass
 
     @torch._jit_internal._overload_method  # noqa: F811
-    def forward(self, input, hx=None):
+    def forward(self, input, hx=None):  # noqa: F811
         # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
         pass
 
@@ -677,13 +677,13 @@ class GRU(RNNBase):
     def __init__(self, *args, **kwargs):
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
-    @torch._jit_internal._overload_method
-    def forward(self, input, hx=None):
+    @torch._jit_internal._overload_method  # noqa: F811
+    def forward(self, input, hx=None):  # noqa: F811
         # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
         pass
 
     @torch._jit_internal._overload_method  # noqa: F811
-    def forward(self, input, hx=None):
+    def forward(self, input, hx=None):  # noqa: F811
         # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]
         pass
 
