@@ -6066,15 +6066,28 @@ class TestTorchDeviceType(TestCase):
         # diag
         self.assertRaises(RuntimeError, lambda: torch.diag(zero_d))
 
-        # or
         zero_d_int = torch.tensor(1, device=device)
         one_d_int = torch.tensor([1], device=device)
+
+        # lshift, rshift
+        self.assertEqual((), (zero_d_int >> zero_d_int).shape)
+        self.assertEqual((), (zero_d_int >> 1).shape)
+        self.assertEqual((1,), (one_d_int >> zero_d_int).shape)
+        self.assertEqual((1,), (zero_d_int >> one_d_int).shape)
+        self.assertEqual((1,), (one_d_int >> 1).shape)
+
+        self.assertEqual((), (zero_d_int << zero_d_int).shape)
+        self.assertEqual((), (zero_d_int << 1).shape)
+        self.assertEqual((1,), (one_d_int << zero_d_int).shape)
+        self.assertEqual((1,), (zero_d_int << one_d_int).shape)
+        self.assertEqual((1,), (one_d_int << 1).shape)
+
+        # or
         self.assertEqual((), (zero_d_int | zero_d_int).shape)
         self.assertEqual((), (zero_d_int | 1).shape)
         self.assertEqual((1,), (one_d_int | zero_d_int).shape)
         self.assertEqual((1,), (zero_d_int | one_d_int).shape)
         self.assertEqual((1,), (one_d_int | 1).shape)
-
 
     @onlyCPU
     @dtypes(torch.float)
