@@ -1087,17 +1087,17 @@ class RpcTest(object):
     def test_rpc_timeouts(self):
         rpc.set_rpc_timeout(timedelta(milliseconds=1))
         dst_rank = (self.rank + 1) % self.world_size
-        fut = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=())
-        with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
-            fut.wait()
+
+        futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(10)]
+        for fut in futs:
+            with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
+                fut.wait()
 
         # future should run to completion if the timeout is longer.
-        # dist.barrier()
         rpc.set_rpc_timeout(timedelta(seconds=500))
         rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 
         # future should run to completion if the timeout is zero.
-        # dist.barrier()
         rpc.set_rpc_timeout(timedelta(seconds=0))
         rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 

@@ -293,7 +293,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       auto futureInfo =
-          FutureInfo(future, futureStartTime, to.id_, rpcTimeout_);
+          FutureInfo(future, futureStartTime, to.id_, rpcTimeout_.load());
       futures_[requestId] = futureInfo;
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[futureStartTime].push_back(requestId);
@@ -487,16 +487,16 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // for that long.
     // if there are no futures or the RPC timeout is set to 0 (meaning no
     // timeout), then sleep for a set "infinity" time.
-    if (futureTimeouts_.empty() || rpcTimeout_.count() == 0) {
+    if (futureTimeouts_.empty() || rpcTimeout_.load().count() == 0) {
       sleepTime = INFINITY_SLEEP_INTERVAL;
     } else {
-      const auto remainingTime =
-          getRPCRemainingTime(futureTimeouts_.begin()->first, rpcTimeout_);
+      const auto remainingTime = getRPCRemainingTime(
+          futureTimeouts_.begin()->first, rpcTimeout_.load());
       sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
     }
     futureTimeoutCV_.wait_for(lock, sleepTime);
 
-    if (rpcTimeout_.count() == 0) {
+    if (rpcTimeout_.load().count() == 0) {
       continue;
     }
     if (shutdown_.load()) {
@@ -510,7 +510,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     lock.unlock();
     if (!timedOutFutures.empty()) {
       std::ostringstream ss;
-      ss << "RPC ran for more than " << rpcTimeout_.count()
+      ss << "RPC ran for more than " << rpcTimeout_.load().count()
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
@@ -533,8 +533,8 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
     const std::chrono::milliseconds& startTime = it->first;
     const std::vector<int64_t>& futureIDs = it->second;
     const auto remainingTime =
-        getRPCRemainingTime(futureTimeouts_.begin()->first, rpcTimeout_);
-    if (rpcTimeout_.count() == 0 || remainingTime.count() > 0) {
+        getRPCRemainingTime(futureTimeouts_.begin()->first, rpcTimeout_.load());
+    if (rpcTimeout_.load().count() == 0 || remainingTime.count() > 0) {
       // Since the futureTimeouts_ map is ordered by timeout, we don't need
       // to check the remaining futures.
       break;
@@ -548,8 +548,6 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
         timedOutFutures.push_back(futInfo);
         futures_.erase(futureID);
       }
-      // post-fix increment iterator to ensure that correct iteration order
-      // is maintained.
       it = futureTimeouts_.erase(it);
     }
   }
