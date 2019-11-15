@@ -164,7 +164,7 @@
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
-from distutils import core, dir_util
+from distutils import core
 from distutils.core import Distribution
 from distutils.errors import DistutilsArgError
 import setuptools.command.build_ext
@@ -345,9 +345,6 @@ def build_deps():
                 os.remove(sym_file)
         if not same:
             shutil.copyfile(orig_file, sym_file)
-
-    dir_util.copy_tree('third_party/pybind11/include/pybind11/',
-                       'torch/include/pybind11')
 
 ################################################################################
 # Building dependent libraries
@@ -798,6 +795,8 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
                 'include/ATen/detail/*.h',
+                'include/ATen/native/quantized/*.h',
+                'include/ATen/native/quantized/cpu/*.h',
                 'include/caffe2/utils/*.h',
                 'include/caffe2/utils/**/*.h',
                 'include/c10/*.h',
