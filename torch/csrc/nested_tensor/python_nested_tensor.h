@@ -17,6 +17,7 @@
 // - Python exception handling.
 // - Implement NestedSize to avoid expensive python ops in *_nested_size/stride
 // - map and apply functions that accepted JIT-ed functions to avoid unbind
+// - don't make some functions static?
 
 namespace torch {
 namespace nested_tensor {

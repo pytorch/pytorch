@@ -165,6 +165,38 @@ static Py_ssize_t _ListNestedTensorVariable_len(PyObject *self_) {
   return PyLong_AsSsize_t(PyLong_FromLong(self.__len__()));
 }
 
+static PyObject* jit_apply(PyObject *self_, PyObject* fn) {
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  std::cout << "fn" << std::endl;
+  return self_;
+}
+
+static PyObject *    
+_ListNestedTensorVariable_dtype(_ListNestedTensorVariable *self, void *unused) {    
+  HANDLE_TH_ERRORS    
+  auto &self_ = self->cdata;    
+  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));    
+  END_HANDLE_TH_ERRORS    
+}    
+
+static PyObject *    
+_ListNestedTensorVariable_layout(_ListNestedTensorVariable *self,    
+                                 void *unused) {    
+  HANDLE_TH_ERRORS    
+  auto &self_ = self->cdata;    
+  return torch::autograd::utils::wrap(torch::getLayout(self_.backend()));    
+  END_HANDLE_TH_ERRORS    
+}    
+
+static PyObject *    
+_ListNestedTensorVariable_device(_ListNestedTensorVariable *self,    
+                                 void *unused) {    
+  HANDLE_TH_ERRORS    
+  auto &self_ = self->cdata;    
+  return THPDevice_New(self_.device());    
+  END_HANDLE_TH_ERRORS    
+}
+
 static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
     {"dtype", (getter)_ListNestedTensorVariable_dtype, nullptr, nullptr,
      nullptr},

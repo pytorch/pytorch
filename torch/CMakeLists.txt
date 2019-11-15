@@ -91,6 +91,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/serialization.cpp
     ${TORCH_SRC_DIR}/csrc/tensor/python_tensor.cpp
     ${TORCH_SRC_DIR}/csrc/nested_tensor/python_nested_tensor.cpp
+    ${TORCH_SRC_DIR}/csrc/nested_tensor/generated/dispatch.cpp
     ${TORCH_SRC_DIR}/csrc/utils.cpp
     ${TORCH_SRC_DIR}/csrc/utils/cuda_lazy_init.cpp
     ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp

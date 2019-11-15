@@ -63,6 +63,14 @@ inline PyObject* wrap(THPLayout *layout) {
   return (PyObject*)layout;
 }
 
+inline PyObject* wrap(at::Layout layout) {
+  return THPLayout_New(layout, "name");
+}
+
+inline PyObject* wrap(at::Device device) {
+  return THPDevice_New(device);
+}
+
 inline PyObject* wrap(at::Tensor tensor) {
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
