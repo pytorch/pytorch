@@ -59,9 +59,16 @@
 - func: is_leaf(Tensor self) -> bool
   variants: method
 
-# Returns the input index of the gradient `Node` to which this
-# `Variable` is connected.  Note: input indexes of the gradient `Node`
-# correspond to output indexes of the corresponding forward `Node`.
+# Returns the output index of this variable from the forward operation that
+# produced it.  Conversely, it returns the input index of the gradient `Node` to
+# which this `Variable` is connected (because in the gradient computation,
+# inputs and outputs switch meaning).  For example:
+#
+#   y0, y1, y2 = f(x)
+#   assert y0.output_nr == 0
+#   assert y1.output_nr == 1
+#   assert y2.output_nr == 2
+#
 - func: output_nr(Tensor self) -> int
   variants: method
   supports_named_tensor: True
@@ -2361,7 +2368,7 @@
   supports_named_tensor: True
   variants: function, method
 
-# Like `detach()`, but removes this `Variable` in-place. This method may
+# Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
