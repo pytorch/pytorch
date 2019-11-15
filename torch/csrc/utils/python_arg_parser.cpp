@@ -149,7 +149,7 @@ auto FunctionParameter::check(PyObject* obj) -> bool
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
-      if (THPVariable_Check<exact>(obj)) {
+      if (THPVariable_Check(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
         return !var.requires_grad() && var.dim() == 0;
       }
@@ -159,7 +159,7 @@ auto FunctionParameter::check(PyObject* obj) -> bool
       if (THPUtils_checkLong(obj)) {
         return true;
       }
-      if (THPVariable_Check<exact>(obj)) {
+      if (THPVariable_Check(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
