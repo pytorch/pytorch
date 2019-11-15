@@ -1,7 +1,7 @@
 #include <functional>
 
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace torch {
 namespace distributed {

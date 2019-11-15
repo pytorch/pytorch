@@ -3,7 +3,6 @@
 #include <ATen/core/stack.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/List.h>
-#include <regex>
 
 namespace torch {
 namespace jit {
@@ -23,4 +22,3 @@ void tupleUnpackFunc(int num_outputs, Stack& stack);
 void formatFunc(int num_inputs, Stack& stack);
 } // namespace jit
 } // namespace torch
-
