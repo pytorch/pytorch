@@ -15,7 +15,8 @@
 // TODO:
 // - HANDLE_TH_ERRORS
 // - Python exception handling.
-// map and apply functions that accepted JIT-ed functions to avoid unbind
+// - Implement NestedSize to avoid expensive python ops in *_nested_size/stride
+// - map and apply functions that accepted JIT-ed functions to avoid unbind
 
 namespace torch {
 namespace nested_tensor {
@@ -121,7 +122,8 @@ template <typename T, class F> static T map(_NestedNode nested_node, F fn) {
   }
 }
 
-template <typename T, class F, class G> static T map_more(_NestedNode nested_node, F fn, G gfn) {
+template <typename T, class F, class G>
+static T map_more(_NestedNode nested_node, F fn, G gfn) {
   if (nested_node._children.size() == 0) {
     T result = fn(nested_node._variable_node._variable);
     return result;
