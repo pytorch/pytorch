@@ -41,6 +41,8 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
 
   void reset() override;
 
+  void reset_parameters();
+
   /// Pretty prints the `Linear` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
@@ -99,6 +101,8 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
   explicit BilinearImpl(const BilinearOptions& options_);
 
   void reset() override;
+
+  void reset_parameters();
 
   /// Pretty prints the `Bilinear` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
