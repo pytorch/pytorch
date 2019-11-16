@@ -1539,10 +1539,10 @@ TEST_F(ModulesTest, NLLLoss) {
   auto s = output.sum();
   s.backward();
 
-  ASSERT_TRUE(output.allclose(expected, 1e-3));
+  ASSERT_TRUE(output.allclose(expected));
   ASSERT_TRUE(
     NLLLoss(NLLLossOptions().ignore_index(-100).reduction(torch::kMean))
-      ->forward(input, target).allclose(expected, 1e-3));
+      ->forward(input, target).allclose(expected));
 }
 
 TEST_F(ModulesTest, CrossEntropyLoss) {
@@ -1554,11 +1554,11 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
   auto s = output.sum();
   s.backward();
 
-  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_TRUE(output.allclose(expected));
   ASSERT_EQ(input.sizes(), input.grad().sizes());
   ASSERT_TRUE(
     CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
-      ->forward(input, target).allclose(expected, 1e-04));
+      ->forward(input, target).allclose(expected));
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {
