@@ -6055,6 +6055,10 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
         self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
 
+        # this is only implemented on cpu
+        if (torch.device(device).type == 'cpu'):
+            self.assertRaises(RuntimeError, lambda: torch.ormqr(zero_d, zero_d, zero_d))
+
         # max, min
         self.assertEqual((), torch.max(zero_d, zero_d).shape)
         self.assertEqual((1,), torch.max(one_d, zero_d).shape)
