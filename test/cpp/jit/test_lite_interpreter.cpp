@@ -94,5 +94,23 @@ void testLiteInterpreterInline() {
   auto output = bc.run_method("foo3", inputs);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
+
+void testLiteInterpreterTuple() {
+  script::Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return (1, 2, x + 3)
+
+  def forward(self, x):
+      tuple = self.foo(x)
+      return tuple
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.run_method("forward", inputs);
+  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+}
 } // namespace torch
 } // namespace jit
