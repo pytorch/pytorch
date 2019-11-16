@@ -456,6 +456,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
     )
 
   if (NOT INTERN_BUILD_MOBILE)
@@ -491,8 +492,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     if (USE_DISTRIBUTED)
       list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
