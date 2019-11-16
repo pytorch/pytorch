@@ -559,6 +559,8 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+totally_legit_skip_set = None
+
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -614,9 +616,24 @@ class TestCase(expecttest.TestCase):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
     def setUp(self):
+        global totally_legit_skip_set
+        if totally_legit_skip_set is None:
+            try:
+                import urllib.request
+                import json
+                contents = urllib.request.urlopen('https://api.github.com/gists/9b6bf8e7944a2e7ef8e02beccb0803c3', timeout=1).read()
+                the_stuff = json.loads(contents)
+                totally_legit_skip_set = set(the_stuff['files']['gistfile1.txt']['content'].split('\n'))
+            except Exception:
+                print("Couldn't download test skip set, leaving all tests enabled...")
+                totally_legit_skip_set = set()
+
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+        if self.id() in totally_legit_skip_set:
+            raise unittest.SkipTest(
+                "Test is disabled in test disable gist: https://gist.github.com/zdevito/9b6bf8e7944a2e7ef8e02beccb0803c3")
 
         set_rng_seed(SEED)
 
