@@ -310,7 +310,7 @@ Tensor NLLLossImpl::forward(
 // ============================================================================
 
 CrossEntropyLossImpl::CrossEntropyLossImpl(
-    const CrossEntropyLossOptions& options_)
+    const CrossEntropyLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
   reset();
 }
