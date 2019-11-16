@@ -829,7 +829,7 @@ def __or_(g, input, other):
 
 def __rshift_(g, self, other):
     # make sure to cast other to self's type
-    # (when slef is long, make sure that other is not float)
+    # (when self is long, make sure that other is not float)
     if other.type().scalarType() != self.type().scalarType():
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
 
@@ -845,7 +845,7 @@ def __rshift_(g, self, other):
 
 def __lshift_(g, self, other):
     # make sure to cast other to self's type
-    # (when slef is long, make sure that other is not float)
+    # (when self is long, make sure that other is not float)
     if other.type().scalarType() != self.type().scalarType():
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
 
