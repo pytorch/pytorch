@@ -567,8 +567,8 @@ inline Tensor cross_entropy(
       enumtype::get_enum_name(reduction),
       " is not valid");
   }
-  return detail::nll_loss(
-    detail::log_softmax(input, 1, c10::nullopt),
+  return torch::nn::functional::detail::nll_loss(
+    torch::nn::functional::detail::log_softmax(input, 1, c10::nullopt),
     target,
     weight,
     ignore_index,
@@ -580,7 +580,7 @@ inline Tensor cross_entropy(
     const Tensor& input,
     const Tensor& target,
     const CrossEntropyFuncOptions& options = {}) {
-  return torch::detail::cross_entropy(
+  return detail::cross_entropy(
       input,
       target,
       options.weight(),
