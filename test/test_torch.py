@@ -6039,6 +6039,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.remainder(zero_d, one_d).shape)
         self.assertEqual((1,), torch.remainder(one_d, zero_d).shape)
 
+        # fmod
+        self.assertEqual((), torch.fmod(zero_d, zero_d).shape)
+        self.assertEqual((), torch.fmod(zero_d, 2).shape)
+        self.assertEqual((1,), torch.fmod(zero_d, one_d).shape)
+        self.assertEqual((1,), torch.fmod(one_d, zero_d).shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
