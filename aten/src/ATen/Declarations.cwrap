@@ -1414,6 +1414,7 @@
     - CPU
     - CUDA
   return: argument 1,2
+  scalar_check: false
   arguments:
     - arg: THTensor* probs
     - arg: THIndexTensor* J
