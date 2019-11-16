@@ -21,6 +21,8 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
 
   void reset() override;
 
+  void reset_parameters();
+
   /// Pretty prints the `LayerNorm` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
