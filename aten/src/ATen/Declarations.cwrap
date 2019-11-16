@@ -475,6 +475,7 @@
         - THTensor* self
     - cname: cmin
       return: argument 0
+      scalar_check: false
       arguments:
       - arg: THTensor* result
         output: True
@@ -514,6 +515,7 @@
         - THTensor* self
     - cname: cmax
       return: argument 0
+      scalar_check: false
       arguments:
       - arg: THTensor* result
         output: True
