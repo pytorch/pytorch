@@ -1463,6 +1463,7 @@
   backends:
     - CPU
   return: argument 0
+  scalar_check: false
   variants:
     - function
   options:

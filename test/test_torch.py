@@ -6164,6 +6164,16 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.gather(one_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
         self.assertEqual((1,), torch.gather(one_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
 
+        # normal
+        # out shape matches shape of mean
+        self.assertEqual((), torch.normal(zero_d, zero_d).shape)
+        #self.assertEqual((), torch.normal(zero_d, one_d).shape)
+        self.assertEqual((1,), torch.normal(one_d, zero_d).shape)
+        #self.assertEqual((), torch.normal(1, zero_d).shape)
+        #self.assertEqual((), torch.normal(1, one_d).shape)
+        self.assertEqual((), torch.normal(zero_d, 1).shape)
+        self.assertEqual((1,), torch.normal(one_d, 1).shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
