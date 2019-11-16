@@ -13,7 +13,7 @@
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
 
       - binary_linux_build:
           name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
