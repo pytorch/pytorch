@@ -6,8 +6,6 @@ using Stack = std::vector<c10::IValue>;
 using torch::jit::peek;
 using torch::jit::drop;
 using torch::jit::pack;
-using torch::jit::push;
-using torch::jit::pop;
 
 namespace {
 at::Tensor toOptionalTensor(const c10::IValue& v) {
@@ -19,15 +17,6 @@ at::Tensor toOptionalTensor(const c10::IValue& v) {
 
 at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
-}
-
-template <typename T>
-void listAppend(Stack& stack) {
-  T el = pop(stack).to<T>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
-
-  list.push_back(std::move(el));
-  push(stack, std::move(list));
 }
 }
 
@@ -326,17 +315,4 @@ static auto registry0 = torch::RegisterOperators().op(
   torch::RegisterOperators::options().catchAllKernel(
   []() {
   })
-).op(
-  "_aten::append.Tensor(Tensor self) -> void",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-    listAppend<at::Tensor>(*stack);
-  })
-).op(
-  "_aten::append.int(int self) -> void",
-  torch::RegisterOperators::options().catchAllKernel(
-  [](c10::OperatorKernel* kernel, Stack* stack) {
-    listAppend<int64_t>(*stack);
-  })
 );
-
