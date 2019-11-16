@@ -559,7 +559,8 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-totally_legit_skip_set = None
+disabled_test_from_issues = None
+disabled_query = 'is%3Aissue+is%3Aopen+label%3A%22topic%3A+flaky-tests%22+repo:pytorch/pytorch+in%3Atitle+DISABLED'
 
 class TestCase(expecttest.TestCase):
     precision = 1e-5
@@ -616,24 +617,32 @@ class TestCase(expecttest.TestCase):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
     def setUp(self):
-        global totally_legit_skip_set
-        if totally_legit_skip_set is None:
-            try:
-                import urllib.request
-                import json
-                contents = urllib.request.urlopen('https://api.github.com/gists/9b6bf8e7944a2e7ef8e02beccb0803c3', timeout=1).read()
-                the_stuff = json.loads(contents)
-                totally_legit_skip_set = set(the_stuff['files']['gistfile1.txt']['content'].split('\n'))
-            except Exception:
-                print("Couldn't download test skip set, leaving all tests enabled...")
-                totally_legit_skip_set = set()
+        global disabled_test_from_issues
+        if disabled_test_from_issues is None:
+            disabled_test_from_issues = set()
+            if not IS_SANDCASTLE:
+                try:
+                    import urllib.request
+                    import json
+                    url = 'https://api.github.com/search/issues?q={}'.format(disabled_query)
+                    contents = urllib.request.urlopen(url, timeout=1).read()
+                    the_response = json.loads(contents)
+                    for item in the_response['items']:
+                        title = item['title']
+                        key = 'DISABLED '
+                        if title.startswith(key):
+                            test_name = title[len(key):].strip()
+                            disabled_test_from_issues.add(test_name)
+                            print(test_name)
+                except Exception:
+                    print("Couldn't download test skip set, leaving all tests enabled...")
 
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
-        if self.id() in totally_legit_skip_set:
+        if str(self) in disabled_test_from_issues:
             raise unittest.SkipTest(
-                "Test is disabled in test disable gist: https://gist.github.com/zdevito/9b6bf8e7944a2e7ef8e02beccb0803c3")
+                "Test is disabled because an issue exists disabling it: https://github.com/search?q={}".format(disabled_query))
 
         set_rng_seed(SEED)
 
