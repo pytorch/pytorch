@@ -24,6 +24,10 @@ void LayerNormImpl::reset() {
     weight = register_parameter("weight", torch::Tensor(), /*requires_grad=*/false);
     bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
   }
+  reset_parameters();
+}
+
+void LayerNormImpl::reset_parameters() {
   if (options.elementwise_affine()) {
     torch::nn::init::ones_(weight);
     torch::nn::init::zeros_(bias);
