@@ -4,39 +4,51 @@
 namespace torch {
 namespace jit {
 
-void constructFunctionToModuleMap(
-    script::Module& module,
-    std::unordered_map<Function*, script::ModulePtr>& func_to_module) {
+class ReconstructScopesPass {
+ public:
+  ReconstructScopesPass(script::Module& m, Graph& g, const std::string& p)
+      : root_module(&m), graph(&g), prefix(p){};
+  void run();
+
+ private:
+  script::Module* root_module;
+  Graph* graph;
+  std::string prefix;
+
+  std::unordered_map<Function*, script::ModulePtr> func_to_module;
+  std::unordered_map<script::ModulePtr, std::string> module_names;
+
+  void visitBlock(Block* b);
+  void visitNode(Node* n);
+
+  void constructFunctionToModuleMap(script::Module& module);
+  void constructRelativeNamesForModules(
+      script::Module& module,
+      const std::string& prefix);
+
+  std::string getScopeString(Function* f) const;
+};
+
+void ReconstructScopesPass::constructFunctionToModuleMap(
+    script::Module& module) {
   for (auto& method : module.get_methods()) {
     func_to_module[&method.function()] = module.module_object();
   }
   for (script::Module m : module.children()) {
-    constructFunctionToModuleMap(m, func_to_module);
+    constructFunctionToModuleMap(m);
   }
 }
 
-void constructRelativeNamesForModules(
+void ReconstructScopesPass::constructRelativeNamesForModules(
     script::Module& module,
-    std::unordered_map<script::ModulePtr, std::string>& module_names,
     const std::string& prefix) {
   module_names[module.module_object()] = prefix;
   for (script::NameModule s : module.named_children()) {
-    constructRelativeNamesForModules(
-        s.value, module_names, prefix + "." + s.name);
+    constructRelativeNamesForModules(s.value, prefix + "." + s.name);
   }
 }
 
-void ReconstructScopesInBlock(
-    const script::Module& module,
-    Block& b,
-    std::unordered_map<Function*, script::ModulePtr>& func_to_module,
-    std::unordered_map<script::ModulePtr, std::string>& module_names,
-    const std::string& prefix);
-
-std::string getScopeString(
-    Function* f,
-    std::unordered_map<Function*, script::ModulePtr>& func_to_module,
-    std::unordered_map<script::ModulePtr, std::string>& module_names) {
+std::string ReconstructScopesPass::getScopeString(Function* f) const {
   if (!func_to_module.count(f)) {
     return "<null (no func in the map)>";
   }
@@ -47,21 +59,16 @@ std::string getScopeString(
   return module_names.at(m) + "." + f->name();
 }
 
-void ReconstructScopeForNode(
-    const script::Module& module,
-    Node* n,
-    std::unordered_map<Function*, script::ModulePtr>& func_to_module,
-    std::unordered_map<script::ModulePtr, std::string>& module_names,
-    const std::string& prefix = "") {
+void ReconstructScopesPass::visitNode(Node* n) {
   for (auto b : n->blocks()) {
-    ReconstructScopesInBlock(module, *b, func_to_module, module_names, "");
+    visitBlock(b);
   }
   if (!n->callstack()) {
     return;
   }
   ScopePtr sc = c10::make_intrusive<Scope>();
   for (auto frame : (*n->callstack())->vec()) {
-    auto name = getScopeString(frame.first, func_to_module, module_names);
+    auto name = getScopeString(frame.first);
     GRAPH_UPDATE("Adding a scope ", name, " for node ", *n);
     sc = sc->push(Symbol::scope(name));
   }
@@ -69,42 +76,30 @@ void ReconstructScopeForNode(
   GRAPH_UPDATE("Updated node: ", *n);
 }
 
-void ReconstructScopesInBlock(
-    const script::Module& module,
-    Block& b,
-    std::unordered_map<Function*, script::ModulePtr>& func_to_module,
-    std::unordered_map<script::ModulePtr, std::string>& module_names,
-    const std::string& prefix = "") {
-  for (auto n : b.nodes()) {
-    if (!n->callstack()) {
-      continue;
-    }
-    ReconstructScopeForNode(module, n, func_to_module, module_names);
+void ReconstructScopesPass::visitBlock(Block* b) {
+  for (auto n : b->nodes()) {
+    visitNode(n);
   }
 }
 
-void ReconstructScopesInGraph(
-    script::Module& module,
-    Graph& g,
-    std::unordered_map<Function*, script::ModulePtr>& func_to_module,
-    std::unordered_map<script::ModulePtr, std::string>& module_names,
-    const std::string& prefix) {
-  ReconstructScopesInBlock(module, *g.block(), func_to_module, module_names);
+void ReconstructScopesPass::run() {
+  GRAPH_DUMP("Graph before reconstructing scope", graph);
+  func_to_module.clear();
+  module_names.clear();
+
+  constructFunctionToModuleMap(*root_module);
+  constructRelativeNamesForModules(*root_module, prefix);
+
+  visitBlock(graph->block());
+  GRAPH_DUMP("Graph after reconstructing scope", graph);
 }
 
 void ReconstructScopes(
     script::Module& module,
     Graph& g,
     const std::string& prefix = "top") {
-  GRAPH_DUMP("Graph before reconstructing scope", &g);
-  std::unordered_map<Function*, script::ModulePtr> func_to_module;
-  constructFunctionToModuleMap(module, func_to_module);
-
-  std::unordered_map<script::ModulePtr, std::string> module_names;
-  constructRelativeNamesForModules(module, module_names, prefix);
-
-  ReconstructScopesInGraph(module, g, func_to_module, module_names, prefix);
-  GRAPH_DUMP("Graph after reconstructing scope", &g);
+  ReconstructScopesPass p(module, g, prefix);
+  p.run();
 }
 
 } // namespace jit

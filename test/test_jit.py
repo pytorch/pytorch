@@ -1626,6 +1626,31 @@ graph(%Ra, %Rb):
 
         FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
 
+    def test_reconstruct_scopes(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+
+            def bar(self, x):
+                return x + x
+
+            def forward(self, x):
+                return x * self.bar(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                return self.sub(x) + x
+
+        traced = torch.jit.trace(MyModule(), torch.zeros(1))
+        g = traced.graph
+        torch._C._jit_pass_inline(g)
+        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
+        FileCheck().check("scope: top.sub.forward").run(g)
+
     def test_expand_quantlint(self):
         pass
 
