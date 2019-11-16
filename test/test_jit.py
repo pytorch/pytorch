@@ -4359,7 +4359,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:19".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 1)):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -4368,7 +4368,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:23".format(lineno + 2)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 2)):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -4434,7 +4434,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(RuntimeError, 'test_jit.py\", line {}'.format(lineno + 3)):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4460,7 +4460,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py\", line {}'.format(lineno + 3)):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
