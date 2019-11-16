@@ -7427,32 +7427,57 @@ class TestNN(NNTestCase):
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
     def test_conv_cudnn_memory_layout_dominance(self):
-        # desired behavior here is to have the memory_layout of conv.weight to
-        # dominante the layout of output.
-        # which is not the same as current behavior, we'll fix this in
-        # following up PRs and remove the `expectedFailure` tag
+        # desired behavior here is if either input or weight have
+        # `torch.channels_last` memory_layout, the output should be in preserve
+        # the channels_last flag.
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True)
         conv = nn.Conv2d(8, 4, 3).cuda().float()
 
-        out = conv(input)
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
         self.assertTrue(out.is_contiguous())
-
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous())
         input = input.contiguous(memory_format=torch.channels_last)
-        out = conv(input)
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous())
+        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous())
+        input = input.contiguous()
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
         self.assertTrue(out.is_contiguous())
 
-        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
-        out = conv(input)
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-
-        input = input.contiguous()
-        out = conv(input)
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_convert_conv2d_weight_memory_layout(self):
+        with torch.backends.cudnn.flags(True):
+            input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda")
+            model = nn.Sequential(
+                nn.Conv2d(8, 4, 3),
+                nn.BatchNorm2d(4)).cuda().float()
+            for layout in [torch.channels_last, torch.contiguous_format]:
+                model = nn.utils.convert_conv2d_weight_memory_layout(model, layout)
+                out = model(input)
+                self.assertTrue(out.is_contiguous(memory_format=layout))
 
     def test_conv_double_backward(self):
         batch_size = 2

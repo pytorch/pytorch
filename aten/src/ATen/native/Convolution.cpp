@@ -549,6 +549,13 @@ at::Tensor _convolution(
   }
   int64_t dim = k - 2;
 
+  // set convolution memory format to be ChannelsLast if input OR weight are
+  // stored as ChannelsLast
+  auto convolution_memory_format =
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
   ConvParams params;
@@ -565,10 +572,6 @@ at::Tensor _convolution(
   check_shape_forward(input, weight, bias, params, input_is_mkldnn);
 
   if (k == 3) {
-    // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input_is_mkldnn) {
-      input = input.contiguous();
-    }
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -584,9 +587,10 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
-            input.contiguous(input.suggest_memory_format()), weight, bias,
-            padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
-
+            input.contiguous(convolution_memory_format),
+            weight.contiguous(convolution_memory_format),
+            bias, padding, stride, dilation, params.groups,
+            params.benchmark, params.deterministic);
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
@@ -604,12 +608,16 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
-          params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+          input.contiguous(convolution_memory_format),
+          weight.contiguous(convolution_memory_format),
+          bias, params.padding, params.output_padding, params.stride,
+          params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::cudnn_convolution(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
-          params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+          input.contiguous(convolution_memory_format),
+          weight.contiguous(convolution_memory_format),
+          bias, params.padding, params.stride, params.dilation, params.groups,
+          params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
     TORCH_CHECK(input.type() == weight.type(),

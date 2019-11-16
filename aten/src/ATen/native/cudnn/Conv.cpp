@@ -965,7 +965,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+  auto convolution_memory_format =
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  Tensor grad_output = grad_output_t.contiguous(convolution_memory_format);
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
@@ -1090,8 +1094,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+  auto convolution_memory_format =
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  Tensor grad_output = grad_output_t.contiguous(convolution_memory_format);
 
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {
