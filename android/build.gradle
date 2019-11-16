@@ -1,8 +1,4 @@
 allprojects {
-    if (name == "pytorch_host") {
-        return
-    }
-
     buildscript {
         ext {
             minSdkVersion = 21
