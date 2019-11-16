@@ -635,7 +635,7 @@ TEST_F(FunctionalTest, NLLLoss) {
 
 TEST_F(FunctionalTest, CrossEntropy) {
   auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::kFloat);
-  auto target = torch::tensor({0, 1}, torch::long);
+  auto target = torch::tensor({0, 1}, torch::kLong);
   auto output = F::cross_entropy(
       input, target, F::CrossEntropyFuncOptions().ignore_index(-100).reduction(torch::kMean));
   auto expected = torch::tensor({0.6930551}, torch::kFloat);
