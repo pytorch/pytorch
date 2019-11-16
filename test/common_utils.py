@@ -158,7 +158,7 @@ def repeat_test_for_types(dtypes):
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
-TEST_REPORT_FILE_OVERRIDE = os.environ.get('TEST_REPORT_FILE_OVERRIDE')
+TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
@@ -189,11 +189,15 @@ def run_tests(argv=UNITTEST_ARGS):
             # allow users to override the test file location. We need this
             # because the distributed tests run the same test file multiple
             # times with different configurations.
-            if TEST_REPORT_FILE_OVERRIDE is not None:
-                with open(TEST_REPORT_FILE_OVERRIDE, 'wb') as output:
-                    unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=output))
+            if TEST_REPORT_SOURCE_OVERRIDE is not None:
+                test_source = TEST_REPORT_SOURCE_OVERRIDE
             else:
-                unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output='test-reports'))
+                test_source = 'python-unittest'
+
+            test_report_path = os.path.join('test-reports', test_source)
+            os.makedirs(test_report_path)
+
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
         else:
             unittest.main(argv=argv)
 

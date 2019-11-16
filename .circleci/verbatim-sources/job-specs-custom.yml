@@ -152,7 +152,7 @@
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
       - store_test_results:
-          path: test-reports
+          path: test/test-reports
 
   pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
     environment:

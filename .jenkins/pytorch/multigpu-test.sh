@@ -11,9 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch (distributed only)"
 if [ -n "${IN_CIRCLECI}" ]; then
-  sudo mkdir /var/lib/jenkins/workspace/test/test-reports
-  sudo chown jenkins test/test-reports
-
   # TODO move this to docker
   pip_install unittest-xml-reporting
 
