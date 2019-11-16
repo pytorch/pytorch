@@ -633,7 +633,7 @@ class TestCase(expecttest.TestCase):
                         if title.startswith(key):
                             test_name = title[len(key):].strip()
                             disabled_test_from_issues.add(test_name)
-                            print(test_name)
+
                 except Exception:
                     print("Couldn't download test skip set, leaving all tests enabled...")
 
