@@ -69,6 +69,7 @@ namespace jit {
   _(LiteInterpreterAdd)                \
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
+  _(LiteInterpreterTuple)              \
   _(CommonAncestor)
 
 #define TH_FORALL_TESTS_CUDA(_) \
