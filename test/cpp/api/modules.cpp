@@ -2870,10 +2870,10 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
 TEST_F(ModulesTest, PrettyPrintGroupNorm) {
   ASSERT_EQ(
     c10::str(GroupNorm(GroupNormOptions(2, 2))),
-      "torch::nn::GroupNorm(2, 2, eps=1e-05, affine=true)");
-      ASSERT_EQ(
-        c10::str(GroupNorm(GroupNormOptions(2, 2).eps(2e-5).affine(false))),
-          "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
+    "torch::nn::GroupNorm(2, 2, eps=1e-05, affine=true)");
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2).eps(2e-5).affine(false))),
+    "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
