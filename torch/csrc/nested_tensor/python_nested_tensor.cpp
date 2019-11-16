@@ -2,6 +2,7 @@
 #include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 
 #include <structmember.h>
 
@@ -18,6 +19,9 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
+
+#include <pybind11/pybind11.h>
 
 #include <ATen/ATen.h>
 
@@ -165,10 +169,16 @@ static Py_ssize_t _ListNestedTensorVariable_len(PyObject *self_) {
   return PyLong_AsSsize_t(PyLong_FromLong(self.__len__()));
 }
 
-static PyObject* jit_apply(PyObject *self_, PyObject* fn) {
-  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
-  std::cout << "fn" << std::endl;
-  return self_;
+static PyObject* _ListNestedTensorVariable_jit_apply(PyObject *self__, PyObject* fn) {
+   auto &self_ = reinterpret_cast<_ListNestedTensorVariable *>(self__)->cdata;
+  PyObject* child = THPVariable_Wrap(self_.get_structure()._children[0]._variable_node._variable);
+  pybind11::object self = pybind11::reinterpret_borrow<pybind11::object>(child);
+  pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
+  auto sfn = torch::jit::script::as_function(ofn).value();
+  Function& callee = *sfn.function_;
+  py::object result = invokeScriptFunctionFromPython(callee, torch::jit::tuple_slice(py::make_tuple(self)), py::dict());
+  // std::cout << callee << std::endl;
+  return result.ptr();
 }
 
 static PyObject *    
@@ -220,6 +230,8 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      "Detaches and returns."},
     {"requires_grad_", (PyCFunction)_ListNestedTensorVariable_requires_grad_,
      METH_O, "requires_grad_ and returns."},
+    {"jit_apply", (PyCFunction)_ListNestedTensorVariable_jit_apply,
+     METH_O, "jit_apply and returns."},
     {"backward", (PyCFunction)_ListNestedTensorVariable_backward, METH_VARARGS,
      "backward and returns."},
     {"requires_grad", (PyCFunction)_ListNestedTensorVariable_requires_grad,
