@@ -6123,6 +6123,12 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual((1,), torch.masked_select(zero_d_uint8, one_d_uint8).shape)
             self.assertEqual((1,), torch.masked_select(one_d_uint8, zero_d_uint8).shape)
 
+        # mode
+        self.assertEqual([(), ()], [x.shape for x in torch.mode(zero_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.mode(zero_d, dim=0, keepdim=False)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.mode(one_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.mode(one_d, dim=0, keepdim=False)])
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):

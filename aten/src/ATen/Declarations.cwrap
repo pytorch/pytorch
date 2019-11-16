@@ -554,7 +554,7 @@
   variants: function
   cname: mode
   return: argument 0,1
-  scalar_check: self_->dim() == 0|| (keepdim == false && self_->dim() == 1)
+  scalar_check: false
   arguments:
     - arg: THTensor* values
       output: True
