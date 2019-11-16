@@ -14,6 +14,7 @@
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
+#include <pybind11/operators.h>
 
 namespace torch {
 namespace distributed {
@@ -33,9 +34,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(rpc_module).cast<py::module>();
 
-  auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
-                        .def_readonly("name", &WorkerInfo::name_)
-                        .def_readonly("id", &WorkerInfo::id_);
+  auto workerInfo =
+      shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
+          .def_readonly("name", &WorkerInfo::name_)
+          .def_readonly("id", &WorkerInfo::id_)
+          .def("__eq__", &WorkerInfo::operator==, py::is_operator())
+          .def(py::detail::hash(py::self));
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
