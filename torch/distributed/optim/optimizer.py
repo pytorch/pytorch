@@ -44,10 +44,12 @@ class DistributedOptimizer:
     DistributedOptimizer takes remote references to parameters scattered
     across workers and applies the given optimizer locally for each parameter.
 
-    This class uses distributed autograd in order to retrieve the gradients for
-    specific parameters.
+    This class uses :meth:`~torch.distributed.autograd.get_gradients` in order
+    to retrieve the gradients for specific parameters.
 
-    Concurrent calls to step(), either from the same or different clients, will
+    Concurrent calls to
+    :meth:`~torch.distributed.optim.DistributedOptimizer.step`,
+    either from the same or different clients, will
     be serialized on each worker -- as each worker's optimizer can only work
     on one set of gradients at a time. However, there is no guarantee that
     the full forward-backward-optimizer sequence will execute for one client
@@ -83,9 +85,10 @@ class DistributedOptimizer:
         """
         Performs a single optimization step.
 
-        This will call optimizer.step on each worker containing parameters
-        to be optimized, and will block until all workers return. The current
-        distributed autograd context will be used globally.
+        This will call :meth:`torch.optim.Optimizer.step` on each worker
+        containing parameters to be optimized, and will block until all workers
+        return. The current distributed autograd
+        :class:`~torch.distributed.autograd.context` will be used globally.
         """
         autograd_ctx_id = dist_autograd._current_context()._context_id()
         rpc_futs = []

@@ -62,3 +62,9 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 
 .. automodule:: torch.distributed.autograd
     :members: context, backward, get_gradients
+
+Distributed Optimizer
+---------------------
+
+.. automodule:: torch.distributed.optim
+    :members: DistributedOptimizer
