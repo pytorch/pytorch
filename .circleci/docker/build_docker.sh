@@ -13,10 +13,8 @@ retry () {
 last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
 tag="${CIRCLE_BUILD_NUM}"
 
-JOB_BASE_NAME="${CIRCLE_JOB#build_docker_image_}"  ## pattern defined in config.yml
-
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
-image="${registry}/pytorch/${JOB_BASE_NAME}"
+image="${registry}/pytorch/${IMAGE_NAME}"
 
 login() {
   aws ecr get-authorization-token --region us-east-1 --output text --query 'authorizationData[].authorizationToken' |
