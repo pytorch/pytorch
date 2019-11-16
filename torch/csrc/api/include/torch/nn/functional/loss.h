@@ -518,6 +518,7 @@ inline Tensor nll_loss(
       input_ = input_.view({n, c, 1, -1});
     } else {
       input_ = input_.view({n, c, 0, 0});
+    }
     if (target_.numel() > 0) {
       target_ = target_.view({n, 1, -1});
     } else {
@@ -533,7 +534,7 @@ inline Tensor nll_loss(
   }
   return ret;
 }
-}
+} // namespace detail
 
 inline Tensor nll_loss(
     const Tensor& input,
