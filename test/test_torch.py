@@ -6385,12 +6385,14 @@ class TestTorchDeviceType(TestCase):
                 with self.assertRaises(RuntimeError):
                     a = torch.tensor(a_, dtype=dtype, device=device)
                 continue
+            print(dtype)
             a = torch.tensor(a_, dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
                 if device.startswith('xla') and other_dtype == torch.half:  # Skip Half on xla.
                     with self.assertRaises(RuntimeError):
                         b = torch.tensor(b_, dtype=other_dtype, device=device)
                     continue
+                print(other_dtype)
                 b = torch.tensor(b_, dtype=other_dtype, device=device)
 
                 # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
