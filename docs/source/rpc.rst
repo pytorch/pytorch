@@ -1,5 +1,4 @@
-.. role:: hidden
-    :class: hidden-section
+.. _distributed-rpc-framework:
 
 Distributed RPC Framework
 =========================
@@ -25,6 +24,8 @@ and distributed autograd.
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_model_parallel
+
+.. _rref:
 
 RRef
 ----
