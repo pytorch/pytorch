@@ -8,7 +8,8 @@
       # This job failed in the nightly run due to a bad docker image:
       # https://circleci.com/gh/pytorch/pytorch/3620761
       - binary_linux_build:
-          name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          #name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          name: this_build_was_failing_before
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
