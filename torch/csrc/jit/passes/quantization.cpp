@@ -956,9 +956,9 @@ void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     InsertPrepackUnpack(graph);
-    for (script::Module m : module.children()) {
-      InsertPrepackUnpack(m);
-    }
+  }
+  for (script::Module m : module.children()) {
+    InsertPrepackUnpack(m);
   }
 }
 

@@ -293,6 +293,11 @@ def det(g, self):
     return g.op("Det", self)
 
 
+def logdet(g, input):
+    from torch.onnx.symbolic_opset9 import log
+    return log(g, det(g, input))
+
+
 def arange(g, *args):
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')

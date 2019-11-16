@@ -2427,6 +2427,14 @@ class _TestTorchMixin(object):
         x = torch.Tensor([1, nan, 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
+    def test_dtype_is_signed(self):
+        for dtype in torch.testing.get_all_dtypes():
+            self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
+
+        self.assertFalse(torch.quint8.is_signed)
+        self.assertTrue(torch.qint8.is_signed)
+        self.assertTrue(torch.qint32.is_signed)
+
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
@@ -6015,6 +6023,56 @@ class TestTorchDeviceType(TestCase):
             if len(dims_small) < smaller_ndims:
                 dims_small = [ds] + dims_small
         return (dims_small, dims_large, dims_full)
+
+    # collected tests of ops that used scalar_check in Declarations.cwrap for
+    # correctness
+    def test_scalar_check(self, device):
+        zero_d = torch.randn((), device=device)
+        one_d = torch.randn((1,), device=device)
+
+        # _multinomial_alias_setup
+        self.assertRaises(RuntimeError, lambda: torch._multinomial_alias_setup(zero_d))
+
+        # remainder
+        self.assertEqual((), torch.remainder(zero_d, zero_d).shape)
+        self.assertEqual((), torch.remainder(zero_d, 2).shape)
+        self.assertEqual((1,), torch.remainder(zero_d, one_d).shape)
+        self.assertEqual((1,), torch.remainder(one_d, zero_d).shape)
+
+        # fmod
+        self.assertEqual((), torch.fmod(zero_d, zero_d).shape)
+        self.assertEqual((), torch.fmod(zero_d, 2).shape)
+        self.assertEqual((1,), torch.fmod(zero_d, one_d).shape)
+        self.assertEqual((1,), torch.fmod(one_d, zero_d).shape)
+
+        # cumsum / cumprod
+        self.assertEqual((), torch.cumsum(zero_d, 0).shape)
+        self.assertEqual((), torch.cumprod(zero_d, 0).shape)
+
+        # renorm
+        self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
+
+        # sort
+        self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
+        self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
+
+        # lstsq (gels)
+        self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
+
+        # eig
+        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
+        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
+
+        # max, min
+        self.assertEqual((), torch.max(zero_d, zero_d).shape)
+        self.assertEqual((1,), torch.max(one_d, zero_d).shape)
+        self.assertEqual((1,), torch.max(zero_d, one_d).shape)
+        self.assertEqual((), torch.min(zero_d, zero_d).shape)
+        self.assertEqual((1,), torch.min(one_d, zero_d).shape)
+        self.assertEqual((1,), torch.min(zero_d, one_d).shape)
+
+        # diag
+        self.assertRaises(RuntimeError, lambda: torch.diag(zero_d))
 
     @onlyCPU
     @dtypes(torch.float)
