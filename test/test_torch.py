@@ -6024,6 +6024,12 @@ class TestTorchDeviceType(TestCase):
                 dims_small = [ds] + dims_small
         return (dims_small, dims_large, dims_full)
 
+    # collected tests of ops that used scalar_check in Declarations.cwrap for
+    # correctness
+    def test_scalar_check(self, device):
+        zero_d = torch.randn((), device=device)
+        self.assertRaises(RuntimeError, lambda: torch._multinomial_alias_setup(zero_d))
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
