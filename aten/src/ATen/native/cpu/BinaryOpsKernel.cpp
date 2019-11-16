@@ -116,7 +116,49 @@ void bitwise_xor_kernel(TensorIterator& iter) {
   }
 }
 
+void logical_and_kernel(TensorIterator& iter) {
+  // We use if-else here specifically for bool instead of using iter.common_dtype() like the CUDA implementation because
+  // common_dtype() is unavailable for bfloat16.
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_and_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> bool {
+          return a && b;
+        });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "logical_and_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(a && b);
+        });
+    });
+  }
+}
+
+void logical_or_kernel(TensorIterator& iter) {
+  // We use if-else here specifically for bool instead of using iter.common_dtype() like the CUDA implementation because
+  // common_dtype() is unavailable for bfloat16.
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_or_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> bool {
+          return a || b;
+        });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.dtype(), "logical_or_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(a || b);
+        });
+      });
+  }
+}
+
 void logical_xor_kernel(TensorIterator& iter) {
+  // We use if-else here specifically for bool instead of using iter.common_dtype() like the CUDA implementation because
+  // common_dtype() is unavailable for bfloat16.
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_xor_cpu", [&]() {
       cpu_kernel(iter,
@@ -275,6 +317,8 @@ REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
+REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
+REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel);
 REGISTER_DISPATCH(lt_stub, &lt_kernel);
 REGISTER_DISPATCH(le_stub, &le_kernel);
 REGISTER_DISPATCH(gt_stub, &gt_kernel);
