@@ -642,7 +642,6 @@ TEST_F(FunctionalTest, CrossEntropy) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_TRUE(F::cross_entropy(input, target).allclose(expected, 1e-3));
-  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(FunctionalTest, MaxUnpool1d) {
