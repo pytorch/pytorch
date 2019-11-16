@@ -1,0 +1,4 @@
+scheme("TestAppTests")
+open_report(false)
+clean(true)
+prelaunch_simulator(true)
