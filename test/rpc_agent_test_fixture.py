@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-import distributed.rpc.dist_utils as dist_utils
+import dist_utils
+import torch.distributed.rpc as rpc
 
 
 class RpcAgentTestFixture(object):
@@ -14,6 +15,8 @@ class RpcAgentTestFixture(object):
 
     @property
     def rpc_backend(self):
-        raise NotImplementedError(
-            "self.rpc_backend property is required to be implemented."
-        )
+        return rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name]
+
+    @property
+    def rpc_agent_options(self):
+        return dist_utils.TEST_CONFIG.build_rpc_agent_options(self)

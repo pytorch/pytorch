@@ -6,19 +6,15 @@ import torch
 # dist_autograd_fork tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+from dist_autograd_test import DistAutogradTest
 from common_distributed import MultiProcessTestCase
 from common_utils import run_tests
-from distributed.rpc.process_group.dist_autograd_test import (
-    ProcessGroupDistAutogradTest,
-)
 
 
-class ProcessGroupDistAutogradTestWithFork(
-    MultiProcessTestCase, ProcessGroupDistAutogradTest
-):
+class DistAutogradTestWithFork(MultiProcessTestCase, DistAutogradTest):
 
     def setUp(self):
-        super(ProcessGroupDistAutogradTestWithFork, self).setUp()
+        super(DistAutogradTestWithFork, self).setUp()
         self._fork_processes()
 
 if __name__ == '__main__':

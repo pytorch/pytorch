@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import threading
 from functools import partial, wraps
+from os import getenv
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -12,6 +13,16 @@ if not dist.is_available():
     sys.exit(0)
 
 
+class TestConfig:
+    __slots__ = ["rpc_backend_name"]
+
+    def __init__(self, *args, **kwargs):
+        assert len(args) == 0, "TestConfig only takes kwargs."
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+TEST_CONFIG = TestConfig(rpc_backend_name=getenv("RPC_BACKEND_NAME", "PROCESS_GROUP"))
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 

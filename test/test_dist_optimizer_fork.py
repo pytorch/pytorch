@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from dist_optimizer_test import DistOptimizerTest
 from common_distributed import MultiProcessTestCase
 from common_utils import run_tests
-from distributed.rpc.process_group.dist_optimizer_test import (
-    ProcessGroupDistOptimizerTest,
-)
 
 
-class DistOptimizerTestWithFork(MultiProcessTestCase, ProcessGroupDistOptimizerTest):
+class DistOptimizerTestWithFork(MultiProcessTestCase, DistOptimizerTest):
 
     def setUp(self):
         super(DistOptimizerTestWithFork, self).setUp()
