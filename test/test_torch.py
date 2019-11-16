@@ -6096,6 +6096,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), (zero_d_int & one_d_int).shape)
         self.assertEqual((1,), (one_d_int & 1).shape)
 
+        # _multinomial_alias_draw
+        self.assertRaises(RuntimeError, lambda: torch._multinomial_alias_draw(zero_d, zero_d_int, 10))
+
         # clone
         self.assertEqual((), zero_d.clone().shape)
 
