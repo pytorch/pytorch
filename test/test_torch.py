@@ -6049,6 +6049,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
 
+        # renorm
+        self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
