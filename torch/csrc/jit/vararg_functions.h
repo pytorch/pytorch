@@ -22,7 +22,3 @@ void tupleUnpackFunc(int num_outputs, Stack& stack);
 void formatFunc(int num_inputs, Stack& stack);
 } // namespace jit
 } // namespace torch
-<<<<<<< HEAD
-=======
-
->>>>>>> OPN ops TupleConstruct/Unpack and format.
