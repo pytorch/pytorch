@@ -5,7 +5,6 @@
 
 namespace at { namespace native {
 
-#ifdef BUILD_NAMEDTENSOR
 inline Tensor& resize_named_tensor_(Tensor& self, IntArrayRef size) {
   TORCH_INTERNAL_ASSERT(self.has_names());
   TORCH_CHECK(
@@ -16,6 +15,5 @@ inline Tensor& resize_named_tensor_(Tensor& self, IntArrayRef size) {
       "as an `out=` argument; please ensure that the sizes are the same. ");
   return self;
 }
-#endif
 
 }}

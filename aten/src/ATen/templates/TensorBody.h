@@ -179,7 +179,6 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef BUILD_NAMEDTENSOR
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
   optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
@@ -188,7 +187,6 @@ class CAFFE2_API Tensor {
   DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
-#endif
   int64_t ndimension() const {
     return dim();
   }
@@ -291,14 +289,12 @@ class CAFFE2_API Tensor {
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
 
-#ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool has_names() const;
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
   NamedTensorMeta* get_named_tensor_meta();
-#endif
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.

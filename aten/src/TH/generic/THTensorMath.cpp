@@ -270,14 +270,10 @@ static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTens
 
 void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha) {
   {
-#ifdef BUILD_NAMEDTENSOR
     at::NoNamesGuard guard;
-#endif
     THTensor_(addmmImpl)(r_, t, m1, m2, beta, alpha);
   }
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
-#endif
 }
 
 static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
@@ -355,14 +351,10 @@ static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTen
 
 void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha) {
   {
-#ifdef BUILD_NAMEDTENSOR
     at::NoNamesGuard guard;
-#endif
     THTensor_(addmvImpl)(r_, t, mat, vec, beta, alpha);
   }
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
-#endif
 }
 
 void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)

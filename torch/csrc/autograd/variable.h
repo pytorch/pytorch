@@ -636,9 +636,7 @@ inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
 
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, *this, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false);
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(var, *this);
-#endif
   return var;
 }
 

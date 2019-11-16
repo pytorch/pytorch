@@ -504,14 +504,12 @@ void addInputs(
     n->addInput(none);
   }
 }
-#ifdef BUILD_NAMEDTENSOR
 void addInputs(
     Node* n,
     const char* name,
     c10::optional<at::DimnameList> value) {
   TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
 }
-#endif
 void addInputs(
     Node* n,
     const char* name,

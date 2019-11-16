@@ -47,9 +47,7 @@ ${return_type} ${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
@@ -62,9 +60,7 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     ${type_definition_body}
 }
@@ -94,9 +90,7 @@ ${return_type} ${api_name}(${type_method_formals});
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
@@ -104,9 +98,7 @@ ${return_type} ${api_name}(${type_method_formals}) {
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
@@ -278,9 +270,8 @@ OPERATOR_NAME = CodeTemplate("""\
 """)
 
 NAMEDTENSOR_CHECK = CodeTemplate("""\
-#ifdef BUILD_NAMEDTENSOR
 ${code}
-#endif""")
+""")
 
 # scalar_name, c_type, accreal, is_floating_type
 scalar_types = [

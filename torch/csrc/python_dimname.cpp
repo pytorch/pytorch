@@ -4,7 +4,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace torch {
 
 struct InternedStringsTable {
@@ -100,4 +99,3 @@ at::Dimname THPDimname_parse(PyObject* obj) {
   return dimname;
 }
 
-#endif

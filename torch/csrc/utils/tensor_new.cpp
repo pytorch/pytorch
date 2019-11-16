@@ -573,18 +573,10 @@ Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_t
 
 Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-#ifdef BUILD_NAMEDTENSOR
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
-#else
-    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-#endif
   });
 
-#ifdef BUILD_NAMEDTENSOR
   constexpr int ctor_num_args = 6;
-#else
-  constexpr int ctor_num_args = 5;
-#endif
   ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -607,12 +599,10 @@ Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObje
                true,
                type_inference,
                pin_memory);
-#ifdef BUILD_NAMEDTENSOR
     auto names = r.toDimnameListOptional(5);
     if (names) {
       at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
     }
-#endif
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;

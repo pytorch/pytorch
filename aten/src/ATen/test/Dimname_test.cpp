@@ -5,7 +5,6 @@
 #include <c10/util/Optional.h>
 #include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 using at::NameType;
 using at::Symbol;
 using at::Dimname;
@@ -66,4 +65,3 @@ TEST(DimnameTest, unifyAndMatch) {
   check_unify_and_match("*", "*", "*");
   check_unify_and_match("a", "b", c10::nullopt);
 }
-#endif

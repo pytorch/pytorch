@@ -150,16 +150,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
-#endif
     copy_impl(self, src, non_blocking);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
-#endif
   return self;
 }
 

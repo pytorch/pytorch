@@ -25,7 +25,6 @@ int64_t stride(const Tensor& self, int64_t dim) {
   return self.strides()[dim];
 }
 
-#ifdef BUILD_NAMEDTENSOR
 int64_t size(const Tensor& self, Dimname dim) {
   size_t pos_dim = dimname_to_position(self, dim);
   return self.sizes()[pos_dim];
@@ -35,7 +34,6 @@ int64_t stride(const Tensor& self, Dimname dim) {
   size_t pos_dim = dimname_to_position(self, dim);
   return self.strides()[pos_dim];
 }
-#endif
 
 bool cudnn_is_acceptable(const Tensor& self) {
   if (!globalContext().userEnabledCuDNN()) return false;

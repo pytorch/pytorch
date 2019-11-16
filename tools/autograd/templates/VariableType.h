@@ -24,10 +24,8 @@ namespace torch { namespace autograd {
 struct Variable;
 using at::Context;
 using at::Device;
-#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
-#endif
 using at::Generator;
 using at::IntArrayRef;
 using at::MemoryFormat;

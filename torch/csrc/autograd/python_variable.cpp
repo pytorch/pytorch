@@ -25,9 +25,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/tracer.h>
 #include <ATen/core/EnableNamedTensor.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
@@ -323,7 +321,6 @@ PyObject *THPVariable_get_ndim(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef BUILD_NAMEDTENSOR
 PyObject *THPVariable_get_names(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -370,7 +367,6 @@ int THPVariable_set_names(THPVariable *self, PyObject *names) {
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
-#endif
 
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj, void *unused)
 {
@@ -522,9 +518,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
-#ifdef BUILD_NAMEDTENSOR
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
-#endif
   {nullptr}
 };
 
