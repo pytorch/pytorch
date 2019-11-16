@@ -285,7 +285,7 @@ Tensor MarginRankingLossImpl::forward(const Tensor& input1,
 NLLLossImpl::NLLLossImpl(
     const NLLLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
-    reset();
+  reset();
 }
 
 void NLLLossImpl::pretty_print(std::ostream& stream) const {
@@ -299,7 +299,12 @@ void NLLLossImpl::reset() {
 Tensor NLLLossImpl::forward(
     const Tensor& input,
     const Tensor& target) {
-  return F::nll_loss(input, target, options);
+  return F::detail::nll_loss(
+    input,
+    target,
+    weight,
+    options.ignore_index(),
+    options.reduction());
 }
 
 // ============================================================================

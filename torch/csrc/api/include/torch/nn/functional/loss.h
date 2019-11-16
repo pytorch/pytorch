@@ -474,48 +474,59 @@ inline Tensor nll_loss(
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,
-    const double& ignore_index,
-    const NLLLossOptions::reduction_t reduction) {
-    if(input.dim() < 2){
-      TORCH_WARN("Expected 2 or more dimensions (got ", input.dim(), ")");
-    }
-    if(input.sizes()[0] != target.sizes()[0]){
-      TORCH_WARN("Expected input batch_size (", input.sizes()[0], ") to match target batch_size (", target.sizes()[0], ")");
-    }
+    int64_t ignore_index,
+    const NLLLossFuncOptions::reduction_t reduction) {
+  if (input.dim() < 2){
+    TORCH_CHECK(false, "Expected 2 or more dimensions (got ", input.dim(), ")");
+  }
+
+  if (input.sizes()[0] != target.sizes()[0]) {
+    TORCH_CHECK(false, "Expected input batch_size (", input.sizes()[0], ") to match target batch_size (", target.sizes()[0], ").");
+  }
 
   torch::Tensor ret;
-  if(input.dim() == 2){
+  torch::Tensor input_ = input;
+  torch::Tensor target_ = target;
+  if (input_.dim() == 2) {
     ret = torch::nll_loss(
-          input,
-          target,
+          input_,
+          target_,
           weight,
-          ignore_index,
-          enumtype::reduction_get_enum(reduction));
-  }
-  else if(input.dim() == 4){
+          enumtype::reduction_get_enum(reduction),
+          ignore_index);
+  } else if (input_.dim() == 4) {
     ret = torch::nll_loss2d(
-          input,
-          target,
+          input_,
+          target_,
           weight,
-          ignore_index,
-          enumtype::reduction_get_enum(reduction));
-  }
-  else{
-    auto n = input.sizes()[0];
-    auto c = input.sizes()[1];
-    auto out_size = input.sizes().slice(0, 1).vec();
-    auto temp = input.sizes().slice(2, input.dim() - 2).vec();
-    out_size.insert(out_size.end(), temp.begin(), temp.end());
-    if(target.sizes().slice(1, target.dim() - 1) != input.sizes().slice(2, input.dim() - 2)){
-      TORCH_WARN("Expected target size{", out_size, "} got {", target.sizes().vec(), "}");
+          enumtype::reduction_get_enum(reduction),
+          ignore_index);
+  } else {
+    // dim == 3 or dim > 4
+    auto n = input_.sizes()[0];
+    auto c = input_.sizes()[1];
+    auto out_size = input_.sizes().slice(2).vec();
+    out_size.insert(out_size.begin(), n);
+    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
+      TORCH_CHECK(false, "Expected target size ", at::IntArrayRef(out_size), ", got ", target_.sizes());
     }
-    torch::Tensor input_reshaped = input.contiguous().view({n, c, 1, -1});
-    torch::Tensor target_reshaped = target.contiguous().view({n, 1, -1});
-    if (c10::get_if<enumtype::kNone>(&reduction)){
-      ret = torch::nll_loss2d(input_reshaped, target_reshaped, weight, enumtype::reduction_get_enum(reduction), ignore_index);
+    input_ = input_.contiguous();
+    target_ = target_.contiguous();
+    // support empty batches, see #15870
+    if (input_.numel() > 0) {
+      input_ = input_.view({n, c, 1, -1});
+    } else {
+      input_ = input_.view({n, c, 0, 0});
+    if (target_.numel() > 0) {
+      target_ = target_.view({n, 1, -1});
+    } else {
+      target_ = target_.view({n, 0, 0});
     }
-    else{
-      auto out = torch::nll_loss2d(input_reshaped, target_reshaped, weight, enumtype::reduction_get_enum(reduction), ignore_index);
+    auto reduction_enum = enumtype::reduction_get_enum(reduction);
+    if (!c10::get_if<enumtype::kNone>(&reduction)) {
+      ret = torch::nll_loss2d(input_, target_, weight, reduction_enum, ignore_index);
+    } else {
+      auto out = torch::nll_loss2d(input_, target_, weight, reduction_enum, ignore_index);
       ret = out.view(out_size);
     }
   }
@@ -527,7 +538,12 @@ inline Tensor nll_loss(
     const Tensor& input,
     const Tensor& target,
     const NLLLossOptions& options = {}) {
-  return detail::nll_loss(input, target, options.weight(), options.ignore_index(), options.reduction());
+  return detail::nll_loss(
+    input,
+    target,
+    options.weight(),
+    options.ignore_index(),
+    options.reduction());
 }
 
 inline Tensor cross_entropy_loss(

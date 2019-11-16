@@ -1540,6 +1540,9 @@ TEST_F(ModulesTest, NLLLoss) {
   s.backward();
 
   ASSERT_TRUE(output.allclose(expected, 1e-3));
+  ASSERT_TRUE(
+    NLLLoss(NLLLossOptions().ignore_index(-100).reduction(torch::kMean))
+      ->forward(input, target).allclose(expected, 1e-3));
 }
 
 TEST_F(ModulesTest, CrossEntropyLoss) {

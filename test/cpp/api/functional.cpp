@@ -627,9 +627,10 @@ TEST_F(FunctionalTest, NLLLoss) {
                              torch::kFloat);
   auto target = torch::tensor({1, 0, 2}, torch::kLong); 
   auto output = F::nll_loss(
-      input, target, NLLLossOptions());
+      input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
   auto expected = torch::tensor({4.146}, torch::kFloat);
   ASSERT_TRUE(output.allclose(expected, 1e-3));
+  ASSERT_TRUE(F::nll_loss(input, target).allclose(expected, 1e-3));
 }
 
 TEST_F(FunctionalTest, CrossEntropyLoss) {
