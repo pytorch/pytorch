@@ -628,7 +628,7 @@ class TestONNXRuntime(unittest.TestCase):
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
-        modes = ["nearest", "linear", "bicubic"]
+        modes = ["nearest", "linear"]  # TODO : enable bicubic when ORT nightly has Resize bug fix
         if self.opset_version < 11:
             modes = ["nearest"]
         x = [torch.randn(1, 2, 6, requires_grad=True),
