@@ -288,12 +288,12 @@ NLLLossImpl::NLLLossImpl(
   reset();
 }
 
-void NLLLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::NLLLoss()";
-}
-
 void NLLLossImpl::reset() {
   weight = register_buffer("weight", options.weight());
+}
+
+void NLLLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::NLLLoss()";
 }
 
 Tensor NLLLossImpl::forward(
@@ -312,22 +312,26 @@ Tensor NLLLossImpl::forward(
 CrossEntropyLossImpl::CrossEntropyLossImpl(
     const CrossEntropyLossOptions& options_)
     : options(options_) {
-    reset();
-}
-
-void CrossEntropyLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::CrossEntropyLoss()";
+  reset();
 }
 
 void CrossEntropyLossImpl::reset() {
   weight = register_buffer("weight", options.weight());
 }
 
+void CrossEntropyLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CrossEntropyLoss()";
+}
+
 Tensor CrossEntropyLossImpl::forward(
     const Tensor& input,
     const Tensor& target) {
-    const Tensor& log_softmax_input = F::log_softmax(input);
-  return F::nll_loss(log_softmax_input, target, options);
+  return F::detail::cross_entropy(
+    input,
+    target,
+    weight,
+    options.ignore_index(),
+    options.reduction());
 }
 
 } // namespace nn

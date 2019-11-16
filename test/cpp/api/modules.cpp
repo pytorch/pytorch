@@ -1546,7 +1546,7 @@ TEST_F(ModulesTest, NLLLoss) {
 }
 
 TEST_F(ModulesTest, CrossEntropyLoss) {
-  CrossEntropyLoss loss(CrossEntropyLossOptions());
+  CrossEntropyLoss loss;
   auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::requires_grad());
   auto target = torch::tensor({0, 1}, torch::long);
   auto output = loss->forward(input, target);
@@ -1556,6 +1556,9 @@ TEST_F(ModulesTest, CrossEntropyLoss) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(
+    CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
+      ->forward(input, target).allclose(expected, 1e-04));
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {

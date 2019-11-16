@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ExpandUtils.h>
+#include <torch/nn/functional/activation.h>
 #include <torch/nn/options/loss.h>
 
 namespace torch {
@@ -546,17 +547,45 @@ inline Tensor nll_loss(
     options.reduction());
 }
 
-inline Tensor cross_entropy_loss(
+namespace detail {
+inline Tensor cross_entropy(
     const Tensor& input,
     const Tensor& target,
-    const CrossEntropyLossOptions& options = {}) {
-    const Tensor& log_softmax_input = torch::log_softmax(input);
-  return torch::nll_loss(
-      log_softmax_input,
+    const Tensor& weight,
+    int64_t ignore_index,
+    CrossEntropyFuncOptions::reduction_t reduction) {
+  NLLLossFuncOptions::reduction_t reduction_;
+  if (c10::get_if<enumtype::kNone>(&reduction)) {
+    reduction_ = torch::kNone;
+  } else if (c10::get_if<enumtype::kMean>(&reduction)) {
+    reduction_ = torch::kMean;
+  } else if (c10::get_if<enumtype::kSum>(&reduction)) {
+    reduction_ = torch::kSum;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+      false,
+      enumtype::get_enum_name(reduction),
+      " is not valid");
+  }
+  return detail::nll_loss(
+    detail::log_softmax(input, 1, c10::nullopt),
+    target,
+    weight,
+    ignore_index,
+    reduction_);
+}
+} // namespace detail
+
+inline Tensor cross_entropy(
+    const Tensor& input,
+    const Tensor& target,
+    const CrossEntropyFuncOptions& options = {}) {
+  return torch::detail::cross_entropy(
+      input,
       target,
       options.weight(),
       options.ignore_index(),
-      enumtype::reduction_get_enum(options.reduction()));
+      options.reduction());
 }
 
 } // namespace functional

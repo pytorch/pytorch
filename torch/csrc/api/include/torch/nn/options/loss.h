@@ -296,12 +296,13 @@ struct TORCH_API CrossEntropyLossOptions {
   /// of size C
   TORCH_ARG(Tensor, weight) = {};
   /// Specifies a target value that is ignored
-  /// and does not contribute to the input gradient. When :attr:`size_average` is
-  /// ``True``, the loss is averaged over non-ignored targets.
-  TORCH_ARG(double, ignore_index) = -100;
+  /// and does not contribute to the input gradient.
+  TORCH_ARG(int64_t, ignore_index) = -100;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CrossEntropyLoss, CrossEntropyFuncOptions)
 
 } // namespace nn
 } // namespace torch
