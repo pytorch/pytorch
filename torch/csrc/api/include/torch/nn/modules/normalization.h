@@ -48,8 +48,8 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
   Tensor bias;
 };
 
-/// A `ModuleHolder` subclass for `LayerNorm`.
-/// See the documentation for `LayerNorm` class to learn what methods it
+/// A `ModuleHolder` subclass for `LayerNormImpl`.
+/// See the documentation for `LayerNormImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(LayerNorm);
@@ -128,8 +128,8 @@ class TORCH_API GroupNormImpl : public torch::nn::Cloneable<GroupNormImpl> {
   Tensor bias;
 };
 
-/// A `ModuleHolder` subclass for `GroupNorm`.
-/// See the documentation for `GroupNorm` class to learn what methods it
+/// A `ModuleHolder` subclass for `GroupNormImpl`.
+/// See the documentation for `GroupNormImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(GroupNorm);
