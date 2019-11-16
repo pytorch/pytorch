@@ -2493,11 +2493,11 @@ RegisterOperators reg2({
           listReverse<value_type>,                                             \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
-          "prim::min." decl_type "( " decl_type "[] self) -> " decl_type,                     \
+          "prim::min( " decl_type "[] self) -> " decl_type,                     \
           listMin<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
-          "prim::max." decl_type "( " decl_type "[] self) -> " decl_type,                     \
+          "prim::max( " decl_type "[] self) -> " decl_type,                     \
           listMax<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
