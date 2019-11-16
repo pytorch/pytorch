@@ -15,6 +15,7 @@
         - THTensor* self
         - THTensor* source
     - cname: setStorage
+      scalar_check: false
       arguments:
         - THTensor* self
         - THStorage* source
