@@ -8,6 +8,9 @@ training through a set of primitives to allow for remote communication, and a
 higher-level API to automatically differentiate models split across several
 machines.
 
+.. warning::
+  The RPC API is experimental and subject to change.
+
 RPC and RRef Framework
 ----------------------
 
@@ -59,8 +62,7 @@ used for applications such as model parallel training. In short, applications
 may send and receive gradient recording tensors over RPC. In the forward pass,
 we record when gradient recording tensors are sent over RPC and during the
 backward pass we use this information to perform a distributed backward pass
-using RPC. For more details see the design doc
-`here <https://github.com/pytorch/pytorch/pull/29175>`_.
+using RPC. For more details see the design doc for distributed autograd: :doc:`/notes/distributed_autograd`.
 
 .. automodule:: torch.distributed.autograd
     :members:
