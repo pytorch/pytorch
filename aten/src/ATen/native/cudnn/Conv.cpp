@@ -879,9 +879,9 @@ void raw_cudnn_convolution_forward_out(
       input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
       weight.is_contiguous(at::MemoryFormat::ChannelsLast) &&
       output.is_contiguous(at::MemoryFormat::ChannelsLast);
-  args.idesc.set(input, overwrite_nhwc);
+  args.idesc.set(input, 0, overwrite_nhwc);
   args.wdesc.set(weight, 0, overwrite_nhwc);
-  args.odesc.set(output, overwrite_nhwc);
+  args.odesc.set(output, 0, overwrite_nhwc);
 
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -980,7 +980,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+  auto convolution_memory_format =
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  Tensor grad_output = grad_output_t.contiguous(convolution_memory_format);
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
@@ -1039,9 +1043,9 @@ void raw_cudnn_convolution_backward_input_out(
     printf("grad_output nhwc\n");
   }
   printf("actual format: %d\n", overwrite_nhwc);
-  args.idesc.set(grad_input, overwrite_nhwc);
+  args.idesc.set(grad_input, 0, overwrite_nhwc);
   args.wdesc.set(weight, 0, overwrite_nhwc);
-  args.odesc.set(grad_output, overwrite_nhwc);
+  args.odesc.set(grad_output, 0, overwrite_nhwc);
 
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -1131,8 +1135,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+  auto convolution_memory_format =
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  Tensor grad_output = grad_output_t.contiguous(convolution_memory_format);
 
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {

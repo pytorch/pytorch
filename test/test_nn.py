@@ -7327,32 +7327,57 @@ class TestNN(NNTestCase):
 
         return gradgradcheck(func, inputs, (grad_y,))
 
-    @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
     def test_conv_cudnn_memory_layout_dominance(self):
-        # desired behavior here is to have the memory_layout of conv.weight to
-        # dominante the layout of output.
-        # which is not the same as current behavior, we'll fix this in
-        # following up PRs and remove the `expectedFailure` tag
+        # desired behavior here is if either input or weight have
+        # `torch.channels_last` memory_layout, the output should be in preserve
+        # the channels_last flag.
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True)
         conv = nn.Conv2d(8, 4, 3).cuda().float()
 
-        out = conv(input)
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
         self.assertTrue(out.is_contiguous())
-
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous())
         input = input.contiguous(memory_format=torch.channels_last)
-        out = conv(input)
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous())
+        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous())
+        input = input.contiguous()
+        with torch.backends.cudnn.flags(True):
+            out = conv(input)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        with torch.backends.cudnn.flags(False):
+            out = conv(input)
         self.assertTrue(out.is_contiguous())
 
-        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
-        out = conv(input)
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-
-        input = input.contiguous()
-        out = conv(input)
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_convert_conv2d_weight_memory_layout(self):
+        with torch.backends.cudnn.flags(True):
+            input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda")
+            model = nn.Sequential(
+                nn.Conv2d(8, 4, 3),
+                nn.BatchNorm2d(4)).cuda().float()
+            for layout in [torch.channels_last, torch.contiguous_format]:
+                model = nn.utils.convert_conv2d_weight_memory_layout(model, layout)
+                out = model(input)
+                self.assertTrue(out.is_contiguous(memory_format=layout))
 
     def test_conv_double_backward(self):
         batch_size = 2
@@ -10298,36 +10323,6 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @skipCUDAIfRocm
-    def test_conv_cudnn_nhwc(self, device):
-        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device, requires_grad=True)
-        input = input.contiguous(memory_format=torch.channels_last)
-        input.retain_grad()
-        grad = torch.rand(2, 4, 2, 2, dtype=torch.float32, device=device)
-        grad = grad.contiguous(memory_format=torch.channels_last)
-        conv = nn.Conv2d(8, 4, 3).to(device).float()
-        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
-
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_conv = nn.Conv2d(8, 4, 3).to(device).float()
-        # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
-        ref_conv.load_state_dict(conv.state_dict())
-
-        out = conv(input)
-        out.backward(grad)
-        ref_out = ref_conv(ref_input)
-        ref_out.backward(ref_grad)
-
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
-        self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
-        self.assertEqual(input.grad, ref_input.grad)
-
-    @onlyCUDA
-    @skipCUDAIfNoCudnn
-    @skipCUDAIfRocm
     def test_conv_cudnn_nhwc_size_1_filter(self, device):
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device, requires_grad=True)
         input = input.contiguous(memory_format=torch.channels_last)
@@ -10364,43 +10359,49 @@ class TestNNDeviceType(NNTestCase):
         grad = grad.contiguous(memory_format=grad_format)
         out = conv(input)
         out.backward(grad)
-        #self.assertTrue(out.is_contiguous(memory_format=output_format))
+        self.assertTrue(out.is_contiguous(memory_format=output_format))
         self.assertEqual(out, ref_out)
         self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
         self.assertEqual(input.grad, ref_input.grad)
+        print("run 1")
 
     def _test_conv_cudnn_nhwc_nchw(self, n, c, h, w, k, filter_size, device):
         data = torch.randint(1, 10, (n, c, h, w), dtype=torch.float32, device=device)
 
         ref_input = data.clone().contiguous().requires_grad_(True)
         ref_conv = nn.Conv2d(c, k, filter_size).float().to(device)
+        print(ref_input.size())
+        print(c, k, filter_size)
         ref_out = ref_conv(ref_input)
-        grad = torch.randint(1, 10, ref_out.size(), dtype=torch.float32, device="cuda")
-        ref_out.backward(grad)
+        print("end")
+        #grad = torch.randint(1, 10, ref_out.size(), dtype=torch.float32, device="cuda")
+        #ref_out.backward(grad)
+        '''
         format_list = [
             [torch.channels_last, torch.channels_last, torch.channels_last, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.channels_last, torch.channels_last],
-            [torch.channels_last, torch.contiguous_format, torch.channels_last, torch.channels_last],
-            [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
-            [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last],
+            #[torch.contiguous_format, torch.channels_last, torch.channels_last, torch.channels_last],
+            #[torch.channels_last, torch.contiguous_format, torch.channels_last, torch.channels_last],
+            #[torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
+            #[torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
+            #[torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
+            #[torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last],
             ]
 
         for i_f, w_f, g_f, o_f in format_list:
             self._run_conv(device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
+        '''
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @skipCUDAIfRocm
     def test_conv_cudnn_nhwc(self, device):
         configs = [
-            #[4, 2, 8, 8, 4, 2],
+            [4, 2, 8, 8, 4, 2],
             #[4, 1, 8, 8, 4, 2],
             #[1, 1, 8, 8, 4, 2],
             #[4, 1, 8, 8, 4, 1],
-            [4, 2, 1, 8, 4, 1],
+            #[4, 2, 1, 8, 4, 1],
             #[4, 2, 8, 8, 4, 1],
         ]
         for n, c, h, w, k, filter_size in configs:
