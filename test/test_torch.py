@@ -6129,6 +6129,18 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual([(1,), (1,)], [x.shape for x in torch.mode(one_d, dim=0, keepdim=True)])
         self.assertEqual([(), ()], [x.shape for x in torch.mode(one_d, dim=0, keepdim=False)])
 
+        # max
+        self.assertEqual([(), ()], [x.shape for x in torch.max(zero_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.max(zero_d, dim=0, keepdim=False)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.max(one_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.max(one_d, dim=0, keepdim=False)])
+
+        # min
+        self.assertEqual([(), ()], [x.shape for x in torch.min(zero_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.min(zero_d, dim=0, keepdim=False)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.min(one_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.min(one_d, dim=0, keepdim=False)])
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
