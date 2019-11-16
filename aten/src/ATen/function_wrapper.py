@@ -1690,7 +1690,7 @@ def create_derived(backend_type_env, declarations):
                     arguments_indices = ret['arguments']
                     arguments = [option['arguments'][argi]
                                  for argi in arguments_indices]
-                    if scalar_check is not None:
+                    if scalar_check is not None and scalar_check != 'false':
                         if not isinstance(scalar_check, dict):
                             if len(arguments) > 1:
                                 case_body.append("bool maybe_scalar = {};".format(scalar_check))
