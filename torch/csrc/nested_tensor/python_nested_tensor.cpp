@@ -1,8 +1,8 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/jit/script/python_sugared_value.h>
 
 #include <structmember.h>
 
@@ -14,12 +14,12 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/utils/cuda_enabled.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
 
 #include <pybind11/pybind11.h>
 
@@ -169,42 +169,60 @@ static Py_ssize_t _ListNestedTensorVariable_len(PyObject *self_) {
   return PyLong_AsSsize_t(PyLong_FromLong(self.__len__()));
 }
 
-static PyObject* _ListNestedTensorVariable_jit_apply(PyObject *self__, PyObject* fn) {
-   auto &self_ = reinterpret_cast<_ListNestedTensorVariable *>(self__)->cdata;
-  PyObject* child = THPVariable_Wrap(self_.get_structure()._children[0]._variable_node._variable);
+// TODO: This could be multithreaded by inlining invokeScriptFunctionFromPython 
+// and accumulating all AutoNoGIL code.
+static _NestedNode apply_jit_function(const _NestedNode nested_node, Function& fn) {
+  if (nested_node._children.size() == 0) {
+  Variable child_variable = nested_node._variable_node._variable;
+  PyObject *child = THPVariable_Wrap(child_variable);
   pybind11::object self = pybind11::reinterpret_borrow<pybind11::object>(child);
-  pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
-  auto sfn = torch::jit::script::as_function(ofn).value();
-  Function& callee = *sfn.function_;
-  py::object result = invokeScriptFunctionFromPython(callee, torch::jit::tuple_slice(py::make_tuple(self)), py::dict());
-  // std::cout << callee << std::endl;
-  return result.ptr();
+  py::object result = invokeScriptFunctionFromPython(
+      fn, torch::jit::tuple_slice(py::make_tuple(self)), py::dict());
+  return _NestedNode(result.cast<Variable>());
+
+  } else { 
+    std::vector<_NestedNode> result;
+    for (size_t i= 0; i < nested_node._children.size(); i++){
+      result.push_back(apply_jit_function(nested_node._children[i], fn));
+    }
+    return _NestedNode(result);
+  }
 }
 
-static PyObject *    
-_ListNestedTensorVariable_dtype(_ListNestedTensorVariable *self, void *unused) {    
-  HANDLE_TH_ERRORS    
-  auto &self_ = self->cdata;    
-  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));    
-  END_HANDLE_TH_ERRORS    
-}    
 
-static PyObject *    
-_ListNestedTensorVariable_layout(_ListNestedTensorVariable *self,    
-                                 void *unused) {    
-  HANDLE_TH_ERRORS    
-  auto &self_ = self->cdata;    
-  return torch::autograd::utils::wrap(torch::getLayout(self_.backend()));    
-  END_HANDLE_TH_ERRORS    
-}    
+static PyObject *_ListNestedTensorVariable_jit_apply(PyObject *self__,
+                                                     PyObject *fn) {
+  auto &self_ = reinterpret_cast<_ListNestedTensorVariable *>(self__)->cdata;
+  pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
+  auto sfn = torch::jit::script::as_function(ofn).value();
+  Function &callee = *sfn.function_;
+  return _ListNestedTensorVariable_Wrap(_ListNestedTensor(apply_jit_function(self_.get_structure(), callee)));
+}
 
-static PyObject *    
-_ListNestedTensorVariable_device(_ListNestedTensorVariable *self,    
-                                 void *unused) {    
-  HANDLE_TH_ERRORS    
-  auto &self_ = self->cdata;    
-  return THPDevice_New(self_.device());    
-  END_HANDLE_TH_ERRORS    
+static PyObject *
+_ListNestedTensorVariable_dtype(_ListNestedTensorVariable *self, void *unused) {
+  HANDLE_TH_ERRORS
+  auto &self_ = self->cdata;
+  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *
+_ListNestedTensorVariable_layout(_ListNestedTensorVariable *self,
+                                 void *unused) {
+  HANDLE_TH_ERRORS
+  auto &self_ = self->cdata;
+  return torch::autograd::utils::wrap(torch::getLayout(self_.backend()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *
+_ListNestedTensorVariable_device(_ListNestedTensorVariable *self,
+                                 void *unused) {
+  HANDLE_TH_ERRORS
+  auto &self_ = self->cdata;
+  return THPDevice_New(self_.device());
+  END_HANDLE_TH_ERRORS
 }
 
 static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
@@ -230,8 +248,8 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      "Detaches and returns."},
     {"requires_grad_", (PyCFunction)_ListNestedTensorVariable_requires_grad_,
      METH_O, "requires_grad_ and returns."},
-    {"jit_apply", (PyCFunction)_ListNestedTensorVariable_jit_apply,
-     METH_O, "jit_apply and returns."},
+    {"jit_apply", (PyCFunction)_ListNestedTensorVariable_jit_apply, METH_O,
+     "jit_apply and returns."},
     {"backward", (PyCFunction)_ListNestedTensorVariable_backward, METH_VARARGS,
      "backward and returns."},
     {"requires_grad", (PyCFunction)_ListNestedTensorVariable_requires_grad,

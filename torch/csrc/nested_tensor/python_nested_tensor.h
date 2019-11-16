@@ -35,7 +35,7 @@ struct _VariableNode {
 
 THP_API PyObject *_ListNestedTensorVariableClass;
 
-// If is_leaf tensors are available, otherwise children.
+// The implicit contract is that, if there are no children, variable_node is defined.
 struct _NestedNode {
   _NestedNode() {}
   _NestedNode(const std::vector<_NestedNode> children) : _children(children) {}
