@@ -1532,10 +1532,10 @@ TEST_F(ModulesTest, NLLLoss) {
   auto input = torch::tensor({{-0.1315, -3.1315, -2.5315}, 
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
-                             torch::requires_grad());
+                             torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({1, 0, 2}, torch::kLong);
   auto output = loss->forward(input, target);
-  auto expected = torch::tensor({4.146}, torch::kFloat);
+  auto expected = torch::tensor(2.4258, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -1547,10 +1547,10 @@ TEST_F(ModulesTest, NLLLoss) {
 
 TEST_F(ModulesTest, CrossEntropyLoss) {
   CrossEntropyLoss loss;
-  auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::requires_grad());
+  auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0, 1}, torch::kLong);
   auto output = loss->forward(input, target);
-  auto expected = torch::tensor({0.6930551}, torch::kFloat);
+  auto expected = torch::tensor(0.6931, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
