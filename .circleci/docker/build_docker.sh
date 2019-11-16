@@ -38,9 +38,9 @@ if [ -n "${last_tag}" ]; then
 fi
 
 # Build new image
-./build.sh ${JOB_BASE_NAME} -t "${image}:${tag}"
+./build.sh ${IMAGE_NAME} -t "${image}:${tag}"
 
 docker push "${image}:${tag}"
 
-docker save -o "${JOB_BASE_NAME}:${tag}.tar" "${image}:${tag}"
-aws s3 cp "${JOB_BASE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${JOB_BASE_NAME}:${tag}.tar" --acl public-read
+docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
+aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read
