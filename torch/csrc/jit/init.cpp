@@ -225,9 +225,14 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_reconstruct_scopes",
-          [](script::Module& module, std::shared_ptr<Graph>& g) {
-            ReconstructScopes(module, *g, "top");
-          })
+          [](script::Module& module,
+             std::shared_ptr<Graph>& g,
+             const std::string& prefix) {
+            ReconstructScopes(module, *g, prefix);
+          },
+          py::arg("module"),
+          py::arg("graph"),
+          py::arg("prefix") = "top")
       .def(
           "_jit_pass_remove_inplace_ops",
           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
