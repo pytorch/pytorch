@@ -1548,7 +1548,7 @@ TEST_F(ModulesTest, NLLLoss) {
 TEST_F(ModulesTest, CrossEntropyLoss) {
   CrossEntropyLoss loss;
   auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::requires_grad());
-  auto target = torch::tensor({0, 1}, torch::long);
+  auto target = torch::tensor({0, 1}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.6930551}, torch::kFloat);
   auto s = output.sum();
