@@ -625,11 +625,10 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModel(mode, use_size, is_upsample, align_corners)
         self.run_test(model, x)
 
-    # TODO: Enable bicubic, linear1d and linear3d when implemented in ORT
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
-        modes = ["nearest", "linear"]  # TODO : add "bicubic" when enabled in ORT
+        modes = ["nearest", "linear", "bicubic"]
         if self.opset_version < 11:
             modes = ["nearest"]
         x = [torch.randn(1, 2, 6, requires_grad=True),
@@ -639,7 +638,8 @@ class TestONNXRuntime(unittest.TestCase):
         for mode in modes:
             for xi in x:
                 mode_i = mode
-                if mode == "bicubic" and xi.dim() != 4:
+                # TODO: enable bicubic downsample when ORT precision loss fixed
+                if mode == "bicubic" and (xi.dim() != 4 or not is_upsample):
                     continue
                 elif mode == "linear":
                     if xi.dim() == 3:

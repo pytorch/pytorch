@@ -162,11 +162,7 @@ def _if_scalar_type_as(g, self, tensor):
 
 
 def _is_none(x):
-    try:
-        return x.node().mustBeNone()
-    except AttributeError:
-        pass
-    return x is None
+    return x.node().mustBeNone()
 
 def _is_value(x):
     return isinstance(x, torch._C.Value)
@@ -292,6 +288,16 @@ def _interpolate_get_scales_if_available(g, scales):
     return scales
 
 
+def _get_interpolate_attributes(g, mode, args):
+    if mode == 'nearest':
+        align_corners = None
+        scales = args[0:]
+    else:
+        align_corners = args[0]
+        scales = args[1:]
+    scales = _interpolate_get_scales_if_available(g, scales)
+    return scales, align_corners
+
 def _interpolate_get_scales(g, scale_factor, dim):
     from torch.onnx.symbolic_opset9 import unsqueeze
 
@@ -341,21 +347,6 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     else:
         return _unimplemented("Both size and scales are None in __interpolate")
     return scale_factor, mode
-
-
-def get_interpolate_attributes(mode, args):
-    if mode == 'nearest':
-        align_corners = None
-        scales = args[0:]
-    else:
-        align_corners = args[0]
-        scales = args[1:]
-    if len(scales) == 1:
-        return scales[0], align_corners
-    elif len(scales) == 2:
-        return scales[0], scales[1], align_corners
-    else:
-        return scales[0], scales[1], scales[2], align_corners
 
 
 def _scatter_helper(g, self, dim, index, src):
