@@ -79,7 +79,7 @@ TORCH_MODULE(BatchNorm);
 
 /// Base class for all (dimension-specialized) batchnorm modules.
 template <size_t D, typename Derived>
-class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
+class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
  protected:
   virtual void _check_input_dim(const Tensor& input) = 0;
 
