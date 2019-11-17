@@ -239,7 +239,6 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/options/batchnorm.cpp",
         "torch/csrc/api/src/nn/options/conv.cpp",
         "torch/csrc/api/src/nn/options/dropout.cpp",
-        "torch/csrc/api/src/nn/options/instancenorm.cpp"
         "torch/csrc/api/src/nn/options/linear.cpp",
         "torch/csrc/api/src/nn/options/normalization.cpp",
         "torch/csrc/api/src/nn/options/embedding.cpp",
