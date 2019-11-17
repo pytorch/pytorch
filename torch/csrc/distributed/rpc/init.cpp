@@ -180,7 +180,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       )");
 
   module.def(
-      "set_rpc_timeout",
+      "_set_rpc_timeout",
       [](const std::chrono::milliseconds& rpcTimeout) {
         RpcAgent::getDefaultRpcAgent()->setRpcTimeout(rpcTimeout);
       },

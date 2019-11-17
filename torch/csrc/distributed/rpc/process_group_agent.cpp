@@ -490,16 +490,14 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     std::unique_lock<std::mutex> lock{futureMutex_};
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
-    // if there are no futures or the RPC timeout is set to 0 (meaning no
-    // timeout), then sleep for a set "infinity" time.
-    // TODO: remove the 2nd check since its no longer true.
+    // if there are no futures or the first future's RPC timeout is set to 0
+    // (meaning no timeout), then sleep for a set "infinity" time.
     if (futureTimeouts_.empty() ||
         futureTimeouts_.begin()->first == INFINITE_TIMEOUT) {
       sleepTime = INFINITE_TIMEOUT;
     } else {
       const auto minFutureExpirationTime = futureTimeouts_.begin()->first;
       const auto remainingTime = getRPCRemainingTime(minFutureExpirationTime);
-
       sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
     }
 
@@ -519,19 +517,17 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // Do not hold the lock while marking futures completed, as markCompleted()
     // could invoke callbacks.
     lock.unlock();
-    if (!timedOutFutures.empty()) {
-      for (const auto& timedOutFuture : timedOutFutures) {
-        std::ostringstream ss;
-        ss << "RPC ran for more than " << timedOutFuture.timeout_.count()
-           << " milliseconds and timed out.";
-        const auto exceptionMsg = createExceptionResponse(
-            Message({}, {}, MessageType::EXCEPTION), ss.str());
-        timedOutFuture.future_->markCompleted(exceptionMsg);
+    for (const auto& timedOutFuture : timedOutFutures) {
+      std::ostringstream ss;
+      ss << "RPC ran for more than " << timedOutFuture.timeout_.count()
+         << " milliseconds and timed out.";
+      const auto exceptionMsg = createExceptionResponse(
+          Message({}, {}, MessageType::EXCEPTION), ss.str());
+      timedOutFuture.future_->markCompleted(exceptionMsg);
 
-        const int dst = timedOutFuture.dstRank_;
-        recvCounts_.increment(dst);
-        futureCV_.notify_all();
-      }
+      const int dst = timedOutFuture.dstRank_;
+      recvCounts_.increment(dst);
+      futureCV_.notify_all();
     }
   }
 }
@@ -542,7 +538,6 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
   for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
        /* intentional no increment */) {
     const std::chrono::milliseconds& endTime = it->first;
-    const std::vector<int64_t>& futureIDs = it->second;
     const auto remainingTime = getRPCRemainingTime(endTime);
 
     if (remainingTime.count() > 0) {
@@ -550,6 +545,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
       // to check the remaining futures.
       break;
     } else {
+      const std::vector<int64_t>& futureIDs = it->second;
       for (const auto& futureID : futureIDs) {
         auto it = futures_.find(futureID);
         TORCH_INTERNAL_ASSERT(
