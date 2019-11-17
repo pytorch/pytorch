@@ -9,7 +9,7 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) instance norm modules
 template <size_t D, typename Derived>
-class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImplBase<D, Derived> {
+class InstanceNormImpl : public torch::nn::BatchNormImplBase<D, Derived> {
  protected:
   virtual void _check_input_dim(const Tensor& input) override;
 
