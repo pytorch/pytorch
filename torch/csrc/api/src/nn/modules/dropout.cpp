@@ -77,16 +77,26 @@ void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
-AlphaDropoutImpl::AlphaDropoutImpl(const AlphaDropoutOptions& options_)
-    : DropoutImplBase(options_) {}
-
-Tensor AlphaDropoutImpl::forward(Tensor input) {
-  return F::alpha_dropout(input, options.p(), this->is_training());
+Tensor AlphaDropoutImpl::forward(const Tensor& input) {
+  return F::detail::alpha_dropout(input, options.p(), is_training(), /*inplace=*/false);
 }
 
 void AlphaDropoutImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AlphaDropout(p=" << options.p();
-  stream << ", inplace=" << std::boolalpha << options.inplace() << ")";
+  stream << std::boolalpha
+         << "torch::nn::AlphaDropout(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
+}
+
+// ============================================================================
+
+Tensor FeatureAlphaDropoutImpl::forward(const Tensor& input) {
+  return F::detail::feature_alpha_dropout(input, options.p(), is_training(), /*inplace=*/false);
+}
+
+void FeatureAlphaDropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::FeatureAlphaDropout(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
 }
 
 } // namespace nn

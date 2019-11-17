@@ -50,6 +50,24 @@ using Dropout2dFuncOptions = DropoutFuncOptions;
 
 using Dropout3dFuncOptions = DropoutFuncOptions;
 
+/// Options for `AlphaDropout` functional.
+struct TORCH_API AlphaDropoutFuncOptions {
+  TORCH_ARG(double, p) = 0.5;
+
+  TORCH_ARG(bool, training) = false;
+
+  TORCH_ARG(bool, inplace) = false;
+};
+
+/// Options for `FeatureAlphaDropout` functional.
+struct TORCH_API FeatureAlphaDropoutFuncOptions {
+  TORCH_ARG(double, p) = 0.5;
+
+  TORCH_ARG(bool, training) = false;
+
+  TORCH_ARG(bool, inplace) = false;
+};
+
 } // namespace functional
 
 } // namespace nn
