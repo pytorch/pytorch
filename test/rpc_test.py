@@ -117,9 +117,9 @@ def my_function(a, b, c):
 def my_tensor_function(a, b):
     return a + b
 
-def my_sleep_func():
+def my_sleep_func(seconds=1):
     import time
-    time.sleep(1)
+    time.sleep(seconds)
 
 
 def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
@@ -1085,21 +1085,32 @@ class RpcTest(object):
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_timeouts(self):
-        rpc.set_rpc_timeout(timedelta(milliseconds=1))
         dst_rank = (self.rank + 1) % self.world_size
+        rpc.set_rpc_timeout(timedelta(milliseconds=1))
 
         futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(10)]
         for fut in futs:
             with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
                 fut.wait()
 
-        # future should run to completion if the timeout is longer.
-        rpc.set_rpc_timeout(timedelta(seconds=500))
-        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
+
+        # set a long timeout
+        rpc.set_rpc_timeout(timedelta(seconds=200))
+        # create a longstanding RPC.
+        f = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        # now, set a new timeout.
+        rpc.set_rpc_timeout(timedelta(milliseconds=1))
+        # f2 should time out, f should not.
+        f2 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        with self.assertRaises(RuntimeError):
+            f2.wait()
+        f.wait()
+
+        print("done with the second test.")
 
         # future should run to completion if the timeout is zero.
-        rpc.set_rpc_timeout(timedelta(seconds=0))
-        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
+        # rpc.set_rpc_timeout(timedelta(seconds=0))
+        # rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
         rpc.set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)

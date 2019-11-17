@@ -84,8 +84,8 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
-const std::chrono::milliseconds INFINITY_SLEEP_INTERVAL =
-    std::chrono::hours(std::numeric_limits<int64_t>::max());
+const std::chrono::milliseconds INFINITE_TIMEOUT =
+    std::chrono::milliseconds::max();
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -190,6 +190,7 @@ void ProcessGroupAgent::join() {
   sync();
   // This is needed in case no futures were created, otherwise the future
   // timeout watchdog would sleep forever.
+
   futureTimeoutCV_.notify_one();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
@@ -199,6 +200,7 @@ void ProcessGroupAgent::join() {
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(
       SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
+
   threadPool_.waitWorkComplete();
   listenerThread_.join();
   futureTimeoutThread_.join();
@@ -292,16 +294,25 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
             std::chrono::steady_clock::now().time_since_epoch());
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
-      auto futureInfo =
-          FutureInfo(future, futureStartTime, to.id_, rpcTimeout_.load());
+      // Set infinite timeout if specified.
+      auto timeout = rpcTimeout_.load();
+      // TODO; this overflows.
+      if (timeout.count() == 0) {
+        timeout = INFINITE_TIMEOUT;
+      }
+      auto futureInfo = FutureInfo(future, futureStartTime, to.id_, timeout);
       futures_[requestId] = futureInfo;
       // insert future into timeouts map to keep track of its timeout
-      futureTimeouts_[futureStartTime].push_back(requestId);
+      futureTimeouts_
+          [futureInfo.timeout_ != INFINITE_TIMEOUT
+               ? futureStartTime + futureInfo.timeout_
+               : futureInfo.timeout_]
+              .push_back(requestId);
       // Signal the watchdog for future timeouts to begin if this is the first
-      // future created
-      // TODO (https://github.com/pytorch/pytorch/issues/29892) - modify this
-      // to notify the CV when a new RPC with a shorter TTL is created.
-      if (futures_.size() == 1) {
+      // future created or if an RPC with a shorter TTL has been created.
+      if (futures_.size() == 1 ||
+          futureTimeouts_.begin()->first ==
+              futureStartTime + futureInfo.timeout_) {
         futureTimeoutCV_.notify_one();
       }
     }
@@ -411,6 +422,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
           std::chrono::milliseconds futureStartTime;
+          std::chrono::milliseconds futureTimeout;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
             const auto& futureInfo = futures_.find(id);
@@ -423,10 +435,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 
             fm = futureInfo->second.future_;
             futureStartTime = futureInfo->second.startTime_;
+            futureTimeout = futureInfo->second.timeout_;
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
-            auto& futuresAtTime = futureTimeouts_[futureStartTime];
+            auto& futuresAtTime =
+                futureTimeouts_[futureStartTime + futureTimeout];
             auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
@@ -434,7 +448,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             futuresAtTime.erase(it);
             if (futuresAtTime.empty()) {
               // remove the key from futureTimeouts_
-              futureTimeouts_.erase(futureStartTime);
+              futureTimeouts_.erase(futureStartTime + futureTimeout);
             }
           }
           // Not holding lock on markCompleted as this could run callbacks that
@@ -487,18 +501,26 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // for that long.
     // if there are no futures or the RPC timeout is set to 0 (meaning no
     // timeout), then sleep for a set "infinity" time.
-    if (futureTimeouts_.empty() || rpcTimeout_.load().count() == 0) {
-      sleepTime = INFINITY_SLEEP_INTERVAL;
+    // TODO: remove the 2nd check since its no longer true.
+    if (futureTimeouts_.empty() ||
+        futureTimeouts_.begin()->first == INFINITE_TIMEOUT) {
+      sleepTime = INFINITE_TIMEOUT;
     } else {
-      const auto remainingTime = getRPCRemainingTime(
-          futureTimeouts_.begin()->first, rpcTimeout_.load());
+      const auto minFutureExpirationTime = futureTimeouts_.begin()->first;
+      const auto remainingTime =
+          minFutureExpirationTime -
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch());
       sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
     }
-    futureTimeoutCV_.wait_for(lock, sleepTime);
 
-    if (rpcTimeout_.load().count() == 0) {
-      continue;
+    if (sleepTime == INFINITE_TIMEOUT) {
+      futureTimeoutCV_.wait_until(
+          lock, std::chrono::time_point<std::chrono::system_clock>::max());
+    } else {
+      futureTimeoutCV_.wait_for(lock, sleepTime);
     }
+
     if (shutdown_.load()) {
       return;
     }
@@ -509,12 +531,12 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     // could invoke callbacks.
     lock.unlock();
     if (!timedOutFutures.empty()) {
-      std::ostringstream ss;
-      ss << "RPC ran for more than " << rpcTimeout_.load().count()
-         << " milliseconds and timed out.";
-      const auto exceptionMsg = createExceptionResponse(
-          Message({}, {}, MessageType::EXCEPTION), ss.str());
       for (const auto& timedOutFuture : timedOutFutures) {
+        std::ostringstream ss;
+        ss << "RPC ran for more than " << timedOutFuture.timeout_.count()
+           << " milliseconds and timed out.";
+        const auto exceptionMsg = createExceptionResponse(
+            Message({}, {}, MessageType::EXCEPTION), ss.str());
         timedOutFuture.future_->markCompleted(exceptionMsg);
 
         const int dst = timedOutFuture.dstRank_;
@@ -530,10 +552,13 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
   std::vector<FutureInfo> timedOutFutures;
   for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
        /* intentional no increment */) {
-    const std::chrono::milliseconds& startTime = it->first;
+    const std::chrono::milliseconds& endTime = it->first;
     const std::vector<int64_t>& futureIDs = it->second;
     const auto remainingTime =
-        getRPCRemainingTime(startTime, rpcTimeout_.load());
+        endTime -
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch());
+
     if (rpcTimeout_.load().count() == 0 || remainingTime.count() > 0) {
       // Since the futureTimeouts_ map is ordered by timeout, we don't need
       // to check the remaining futures.
