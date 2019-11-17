@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/functional/batchnorm.h>
+#include <torch/nn/functional/conv.h>
 #include <torch/nn/functional/distance.h>
 #include <torch/nn/functional/dropout.h>
 #include <torch/nn/functional/embedding.h>

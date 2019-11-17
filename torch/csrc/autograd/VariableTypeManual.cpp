@@ -15,7 +15,7 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   res.reserve(backends.size());
   for (auto p : backends) {
     for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
-      auto& type = getNonVariableDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
       res.emplace_back(&type);
     }
   }
@@ -38,18 +38,12 @@ const Variable & checked_cast_variable(const Tensor & t, const char * name, int 
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
-  }
   return as_variable_ref(t);
 }
 
 Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
-  }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -75,10 +69,6 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
     const auto &t = tl[i];
     if (!t.defined()) {
       continue;
-    }
-    if (!t.is_variable()) {
-      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t);
   }
