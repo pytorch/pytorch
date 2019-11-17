@@ -668,21 +668,33 @@ class ScriptModuleSerializer {
         TORCH_CHECK(isOpSupportedInMobile(ins.op), toString(ins.op),
                     " is not supported in mobile module.");
         if (ins.op == OP) {
-          if (opnames[ins.X].name == "prim::ListConstruct") {
+          if (opnames[ins.X].name == "prim::ListConstruct" ||
+              opnames[ins.X].name == "prim::TupleConstruct" ||
+              opnames[ins.X].name == "prim::TupleUnpack" ||
+              opnames[ins.X].name == "aten::format") {
             auto node = code.instructions_source()[i];
             ins.op = OPN;
-            ins.N = node->inputs().size();
-            ListTypePtr lt = node->output()->type()->expect<ListType>();
-            if (lt->getElementType() == IntType::get()) {
-              opnames[ins.X].overload_name = "int";
-            } else if (lt->getElementType() == FloatType::get()) {
-              opnames[ins.X].overload_name = "float";
-            } else if (lt->getElementType() == BoolType::get()) {
-              opnames[ins.X].overload_name = "bool";
-            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
-              opnames[ins.X].overload_name = "Tensor";
+            if (opnames[ins.X].name == "prim::TupleUnpack") {
+              ins.N = node->outputs().size();
             } else {
-              opnames[ins.X].overload_name = "generic";
+              ins.N = node->inputs().size();
+            }
+            if (opnames[ins.X].name == "prim::ListConstruct") {
+              ListTypePtr lt = node->output()->type()->expect<ListType>();
+              if (lt->getElementType() == IntType::get()) {
+                opnames[ins.X].overload_name = "int";
+              } else if (lt->getElementType() == FloatType::get()) {
+                opnames[ins.X].overload_name = "float";
+              } else if (lt->getElementType() == BoolType::get()) {
+                opnames[ins.X].overload_name = "bool";
+              } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
+                opnames[ins.X].overload_name = "Tensor";
+              } else {
+                opnames[ins.X].overload_name = "generic";
+              }
+            } else if (opnames[ins.X].name == "prim::TupleConstruct" &&
+                       node->output()->type()->expect<TupleType>()->name().has_value()) {
+              AT_WARN("Named tuple is serialized as un-named tuple.");
             }
           }
         }
