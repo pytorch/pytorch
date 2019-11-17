@@ -195,7 +195,8 @@ def run_tests(argv=UNITTEST_ARGS):
                 test_source = 'python-unittest'
 
             test_report_path = os.path.join('test-reports', test_source)
-            os.makedirs(test_report_path)
+            if not os.path.exists(test_report_path):
+                os.makedirs(test_report_path)
 
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
         else:
