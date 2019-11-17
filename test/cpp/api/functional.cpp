@@ -620,6 +620,30 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+TEST_F(FunctionalTest, NLLLoss) {
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
+                              {-3.7038, -0.1038, -2.6038},
+                              {-2.3422, -1.3422, -0.4422}},
+                             torch::kFloat);
+  auto target = torch::tensor({1, 0, 2}, torch::kLong); 
+  auto output = F::nll_loss(
+      input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
+  auto expected = torch::tensor(2.4258, torch::kFloat);
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_TRUE(F::nll_loss(input, target).allclose(expected, 1e-04));
+}
+
+TEST_F(FunctionalTest, CrossEntropy) {
+  auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::kFloat);
+  auto target = torch::tensor({0, 1}, torch::kLong);
+  auto output = F::cross_entropy(
+      input, target, F::CrossEntropyFuncOptions().ignore_index(-100).reduction(torch::kMean));
+  auto expected = torch::tensor(0.6931, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_TRUE(F::cross_entropy(input, target).allclose(expected, 1e-04));
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -1897,3 +1921,47 @@ TEST_F(FunctionalTest, ConvTranspose1d) {
   }}})));
 }
 
+TEST_F(FunctionalTest, Dropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::dropout(input, F::DropoutFuncOptions().p(rate));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  }
+  auto output = F::dropout(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+}
+
+TEST_F(FunctionalTest, Dropout2d) {
+  auto input = torch::randn({50, 100});
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::dropout2d(input, F::Dropout2dFuncOptions().p(rate));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  }
+  auto output = F::dropout2d(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+}
+
+TEST_F(FunctionalTest, Dropout3d) {
+  auto input = torch::randn({50, 10, 10});
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::dropout3d(input, F::Dropout3dFuncOptions().p(rate));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  }
+  auto output = F::dropout3d(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+}
