@@ -39,6 +39,8 @@ inline Tensor dropout(Tensor& input,
       input, options.p(), options.training(), options.inplace());
 }
 
+// ============================================================================
+
 namespace detail {
 
 inline Tensor dropout2d(Tensor& input, double p, bool training, bool inplace) {
@@ -85,7 +87,6 @@ inline Tensor dropout3d(Tensor& input,
       input, options.p(), options.training(), options.inplace());
 }
 
->>>>>>> 93c5d799536614bbd172e8b3043fd278f2b66aa8
 } // namespace functional
 } // namespace nn
 } // namespace torch

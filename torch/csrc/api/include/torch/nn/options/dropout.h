@@ -8,13 +8,14 @@
 namespace torch {
 namespace nn {
 
-/// Options for `Dropout` and `FeatureDropout`.
+/// Options for `Dropout` module.
 struct TORCH_API DropoutOptions {
   /* implicit */ DropoutOptions(double p = 0.5);
-  /// The probability with which a particular component of the input is set to
-  /// zero.
-  /// Changes to this parameter at runtime are effective.
-  TORCH_ARG(double, p);
+
+  /// The probability of an element to be zeroed. Default: 0.5
+  TORCH_ARG(double, p) = 0.5;
+
+  /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
 };
 
