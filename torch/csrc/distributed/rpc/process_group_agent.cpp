@@ -296,19 +296,18 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       std::lock_guard<std::mutex> lock{futureMutex_};
       // Set infinite timeout if specified.
       auto timeout = rpcTimeout_.load();
-      // TODO; this overflows.
       if (timeout.count() == 0) {
         timeout = INFINITE_TIMEOUT;
       }
       auto futureInfo = FutureInfo(future, futureStartTime, to.id_, timeout);
       futures_[requestId] = futureInfo;
+      auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
-      futureTimeouts_[getRPCEndTime(futureInfo)].push_back(requestId);
+      futureTimeouts_[rpcEndTime].push_back(requestId);
       // Signal the watchdog for future timeouts to begin if this is the first
       // future created or if an RPC with a shorter TTL has been created.
       if (futures_.size() == 1 ||
-          futureTimeouts_.begin()->first ==
-              futureStartTime + futureInfo.timeout_) {
+          futureTimeouts_.begin()->first == rpcEndTime) {
         futureTimeoutCV_.notify_one();
       }
     }
