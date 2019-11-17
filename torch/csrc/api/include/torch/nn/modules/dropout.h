@@ -14,8 +14,6 @@
 namespace torch {
 namespace nn {
 
-using AlphaDropoutOptions = DropoutOptions;
-
 namespace detail {
 
 template <typename Derived>

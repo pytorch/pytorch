@@ -27,6 +27,12 @@ using Dropout3dOptions = DropoutOptions;
 /// Options for `FeatureDropout` module.
 using FeatureDropoutOptions = DropoutOptions;
 
+/// Options for `AlphaDropout` module.
+using AlphaDropoutOptions = DropoutOptions;
+
+/// Options for `FeatureAlphaDropout` module.
+using FeatureAlphaDropoutOptions = DropoutOptions;
+
 namespace functional {
 
 /// Options for `Dropout` functional.

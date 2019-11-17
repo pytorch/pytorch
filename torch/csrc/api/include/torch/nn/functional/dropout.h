@@ -6,8 +6,6 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-using AlphaDropoutOptions = DropoutOptions;
-
 inline Tensor alpha_dropout(Tensor input, const AlphaDropoutOptions& options = {}, bool training = false) {
   TORCH_CHECK(
     options.p() >= 0 && options.p() <= 1,
