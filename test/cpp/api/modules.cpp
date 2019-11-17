@@ -2006,6 +2006,25 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
+TEST_F(ModulesTest, GLU) {
+  int64_t dim = 1;
+  GLU model(dim);
+  auto input = torch::randn({4, 2}, torch::requires_grad());
+  auto output = model->forward(input);
+  auto input_size = input.sizes()[dim] / 2;
+  auto first_half = input.narrow(dim, 0, input_size);
+  auto second_half = input.narrow(dim, input_size, input_size);
+  auto expected = first_half * torch::sigmoid(second_half);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(output.allclose(expected));
+
+  GLU model_default_options;
+  ASSERT_TRUE(model_default_options->forward(input).allclose(expected));
+}
+
 TEST_F(ModulesTest, GELU) {
   GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
@@ -3201,6 +3220,11 @@ TEST_F(ModulesTest, PrettyPrintSELU) {
   ASSERT_EQ(c10::str(SELU()), "torch::nn::SELU()");
   ASSERT_EQ(c10::str(SELU(SELUOptions().inplace(true))),
             "torch::nn::SELU(inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintGLU) {
+  ASSERT_EQ(c10::str(GLU()), "torch::nn::GLU(dim=-1)");
+  ASSERT_EQ(c10::str(GLU(1)), "torch::nn::GLU(dim=1)");
 }
 
 TEST_F(ModulesTest, PrettyPrintHardshrink) {

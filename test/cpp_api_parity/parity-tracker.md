@@ -64,7 +64,7 @@ torch.nn.Softsign|Yes|No
 torch.nn.Tanh|Yes|No
 torch.nn.Tanhshrink|Yes|No
 torch.nn.Threshold|Yes|No
-torch.nn.GLU|No|No
+torch.nn.GLU|Yes|No
 torch.nn.Softmin|Yes|No
 torch.nn.Softmax|Yes|No
 torch.nn.Softmax2d|Yes|No
