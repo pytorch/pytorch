@@ -73,7 +73,7 @@ torch.nn.AdaptiveLogSoftmaxWithLoss|No|No
 torch.nn.BatchNorm1d|Yes|No
 torch.nn.BatchNorm2d|Yes|No
 torch.nn.BatchNorm3d|Yes|No
-torch.nn.GroupNorm|No|No
+torch.nn.GroupNorm|Yes|No
 torch.nn.SyncBatchNorm|No|No
 torch.nn.InstanceNorm1d|No|No
 torch.nn.InstanceNorm2d|No|No
