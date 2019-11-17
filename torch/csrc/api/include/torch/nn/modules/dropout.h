@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/functional/dropout.h>
 #include <torch/nn/options/dropout.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
