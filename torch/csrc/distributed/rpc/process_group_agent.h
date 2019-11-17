@@ -71,6 +71,9 @@ class ProcessGroupAgent : public RpcAgent {
     std::mutex mutex_;
   };
 
+  // The FutureInfo struct stores a shared_ptr to the future, as well as
+  // additional information to manage timeouts and destination information,
+  // which is needed for termination detection.
   struct FutureInfo {
     std::shared_ptr<FutureMessage> future_;
     std::chrono::milliseconds startTime_;
@@ -99,11 +102,14 @@ class ProcessGroupAgent : public RpcAgent {
   void pollTimedOutRPCs();
   // process timed out futures
   const std::vector<FutureInfo> processTimedOutFutures();
-  // compute the remaining time for an RPC, given its absolute start time and
-  // its timeout.
+  // compute the remaining time for an RPC, given its end time.
   const std::chrono::milliseconds getRPCRemainingTime(
-      const std::chrono::milliseconds& rpcStartTime,
-      const std::chrono::milliseconds& rpcTimeout);
+      const std::chrono::milliseconds& rpcEndTime) const;
+  // compute the time an RPC will time out with millisecond level precision.
+  // This helper function can be used to key into the futureTimeouts_ map, and
+  // it returns INFINITE_TIMEOUT to indicate that an RPC has no timeout.
+  const std::chrono::milliseconds getRPCEndTime(
+      const FutureInfo& futureInfo) const;
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -164,14 +170,14 @@ class ProcessGroupAgent : public RpcAgent {
   //     NB: Ideally, this should be addressed by supporting asynchronous UDF.
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
-  // Mapping of request id to (future, future timeout) pair. We store the future
-  // timeout for efficient lookups into the futureTimeouts_ map.
+  // Mapping of request id to FutureInfo struct.
   std::unordered_map<int64_t, FutureInfo> futures_;
   // A map to keep track of when futures time out. The map is keyed by the time
-  // (millisecond level precision) the future started, and the values correspond
-  // to a vector of futures that started at that time. When futures time out,
-  // the entry in this map is cleared and the corresponding future in the
-  // futures_ map is deleted.
+  // (millisecond level precision) the future will expire. This is so that timed
+  // out futures can be efficiently cleaned up, and we can quickly exit if we
+  // find a future that has not timed out. The values correspond to a vector of
+  // future ids that started at that time. This map must be kept in sync with
+  // the above futures_ map.
   std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
