@@ -1087,30 +1087,27 @@ class RpcTest(object):
     def test_rpc_timeouts(self):
         dst_rank = (self.rank + 1) % self.world_size
         rpc.set_rpc_timeout(timedelta(milliseconds=1))
-
+        # futures should time out and be marked with an exception indicating it as such.
         futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(10)]
         for fut in futs:
             with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
                 fut.wait()
 
-
-        # set a long timeout
+        # ensure that if a new timeout is set old futures don't time out but new ones do.
         rpc.set_rpc_timeout(timedelta(seconds=200))
         # create a longstanding RPC.
-        f = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
-        # now, set a new timeout.
+        fut1 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        # now, set a short timeout.
         rpc.set_rpc_timeout(timedelta(milliseconds=1))
         # f2 should time out, f should not.
-        f2 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        fut2 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
         with self.assertRaises(RuntimeError):
-            f2.wait()
-        f.wait()
-
-        print("done with the second test.")
+            fut2.wait()
+        fut1.wait()
 
         # future should run to completion if the timeout is zero.
-        # rpc.set_rpc_timeout(timedelta(seconds=0))
-        # rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
+        rpc.set_rpc_timeout(timedelta(seconds=0))
+        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
 
         # reset to default timeout so shutdown messages can process cleanly.
         rpc.set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)

@@ -439,8 +439,10 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
-            auto& futuresAtTime =
-                futureTimeouts_[futureStartTime + futureTimeout];
+            auto& futuresAtTime = futureTimeouts_
+                [futureTimeout != INFINITE_TIMEOUT
+                     ? futureStartTime + futureTimeout
+                     : INFINITE_TIMEOUT];
             auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
@@ -448,7 +450,10 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             futuresAtTime.erase(it);
             if (futuresAtTime.empty()) {
               // remove the key from futureTimeouts_
-              futureTimeouts_.erase(futureStartTime + futureTimeout);
+              futureTimeouts_.erase(
+                  futureTimeout != INFINITE_TIMEOUT
+                      ? futureStartTime + futureTimeout
+                      : INFINITE_TIMEOUT);
             }
           }
           // Not holding lock on markCompleted as this could run callbacks that
