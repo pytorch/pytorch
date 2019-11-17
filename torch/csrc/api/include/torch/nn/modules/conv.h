@@ -110,7 +110,7 @@ TORCH_MODULE(Conv3d);
 
 /// Base class for all (dimension-specialized) convolution transpose modules.
 template <size_t D, typename Derived>
-class TORCH_API ConvTransposeImpl : public ConvImpl<D, Derived> {
+class ConvTransposeImpl : public ConvImpl<D, Derived> {
  public:
   ConvTransposeImpl(
       int64_t input_channels,
@@ -118,14 +118,14 @@ class TORCH_API ConvTransposeImpl : public ConvImpl<D, Derived> {
       ExpandingArray<D> kernel_size)
       : ConvTransposeImpl(ConvTransposeOptions<D>(input_channels, output_channels, kernel_size)) {
   }
-  explicit ConvTransposeImpl(const ConvTransposeOptions<D>& options_);
+  explicit ConvTransposeImpl(ConvTransposeOptions<D> options_);
 
   /// Pretty prints the `ConvTranspose{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
  protected:
   std::vector<int64_t> _output_padding(
-      const Tensor& input, const std::vector<int64_t>& output_size,
+      const Tensor& input, const c10::optional<at::IntArrayRef>& output_size,
       const ExpandingArray<D>& stride, const ExpandingArray<D>& padding,
       const ExpandingArray<D>& kernel_size);
 };
@@ -140,7 +140,7 @@ class TORCH_API ConvTranspose1dImpl : public ConvTransposeImpl<1, ConvTranspose1
   using ConvTransposeImpl<1, ConvTranspose1dImpl>::ConvTransposeImpl;
 
   Tensor forward(const Tensor& input,
-                 at::IntArrayRef output_size = {});
+                 const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
 };
 
 TORCH_MODULE(ConvTranspose1d);
@@ -155,7 +155,7 @@ class TORCH_API ConvTranspose2dImpl : public ConvTransposeImpl<2, ConvTranspose2
   using ConvTransposeImpl<2, ConvTranspose2dImpl>::ConvTransposeImpl;
 
   Tensor forward(const Tensor& input,
-                 at::IntArrayRef output_size = {});
+                 const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
 };
 
 TORCH_MODULE(ConvTranspose2d);
@@ -170,7 +170,7 @@ class TORCH_API ConvTranspose3dImpl : public ConvTransposeImpl<3, ConvTranspose3
   using ConvTransposeImpl<3, ConvTranspose3dImpl>::ConvTransposeImpl;
 
   Tensor forward(const Tensor& input,
-                 at::IntArrayRef output_size = {});
+                 const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
 };
 
 TORCH_MODULE(ConvTranspose3d);

@@ -189,32 +189,32 @@ template class ConvImpl<3, Conv3dImpl>;
 
 template <size_t D, typename Derived>
 ConvTransposeImpl<D, Derived>::ConvTransposeImpl(
-    ConvTransposeOptions<D> options_) : options(options_.transposed(true)) {}
+    ConvTransposeOptions<D> options_) : ConvImpl<D, Derived>(options_.transposed(true)) {}
 
 template <size_t D, typename Derived>
 void ConvTransposeImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ConvTranspose" << D << "d"
-         << "(" << options.in_channels()
-         << ", " << options.out_channels()
-         << ", kernel_size=" << options.kernel_size()
-         << ", stride=" << options.stride();
-  if (*options.padding() != *ExpandingArray<D>(0)) {
-    stream << ", padding=" << options.padding();
+         << "(" << this->options.in_channels()
+         << ", " << this->options.out_channels()
+         << ", kernel_size=" << this->options.kernel_size()
+         << ", stride=" << this->options.stride();
+  if (*this->options.padding() != *ExpandingArray<D>(0)) {
+    stream << ", padding=" << this->options.padding();
   }
-  if (*options.dilation() != *ExpandingArray<D>(1)) {
-    stream << ", dilation=" << options.dilation();
+  if (*this->options.dilation() != *ExpandingArray<D>(1)) {
+    stream << ", dilation=" << this->options.dilation();
   }
-  if (*options.output_padding() != *ExpandingArray<D>(0)) {
-    stream << ", output_padding=" << options.output_padding();
+  if (*this->options.output_padding() != *ExpandingArray<D>(0)) {
+    stream << ", output_padding=" << this->options.output_padding();
   }
-  if (options.groups() != 1) {
-    stream << ", groups=" << options.groups();
+  if (this->options.groups() != 1) {
+    stream << ", groups=" << this->options.groups();
   }
-  if (!options.bias()) {
+  if (!this->options.bias()) {
     stream << ", bias=" << std::boolalpha << false;
   }
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
-    stream << ", padding_mode=" << enumtype::get_enum_name(options.padding_mode());
+  if (!c10::get_if<enumtype::kZeros>(&this->options.padding_mode())) {
+    stream << ", padding_mode=" << enumtype::get_enum_name(this->options.padding_mode());
   }
   stream << ")";
 }
@@ -228,7 +228,7 @@ std::vector<int64_t> ConvTransposeImpl<D, Derived>::_output_padding(
   c10::optional<at::IntArrayRef> output_size_ = output_size;
 
   if (output_size_ == c10::nullopt) {
-    ret = options.output_padding().vec();
+    ret = at::IntArrayRef(this->options.output_padding()).vec();
   } else {
     auto k = input.dim() - 2;
     if (output_size_.value().size() == k + 2) {
@@ -266,7 +266,7 @@ std::vector<int64_t> ConvTransposeImpl<D, Derived>::_output_padding(
 }
 
 Tensor ConvTranspose1dImpl::forward(
-    const Tensor& input, at::IntArrayRef output_size = {}) {
+    const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose1d");
   }
@@ -280,7 +280,7 @@ Tensor ConvTranspose1dImpl::forward(
 }
 
 Tensor ConvTranspose2dImpl::forward(
-    const Tensor& input, at::IntArrayRef output_size = {}) {
+    const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose2d");
   }
@@ -294,7 +294,7 @@ Tensor ConvTranspose2dImpl::forward(
 }
 
 Tensor ConvTranspose3dImpl::forward(
-    const Tensor& input, at::IntArrayRef output_size = {}) {
+    const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose3d");
   }

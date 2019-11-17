@@ -129,7 +129,7 @@ using Conv3dFuncOptions = ConvFuncOptions<3>;
 
 // ============================================================================
 
-template<class D>
+template<size_t D>
 using ConvTransposeOptions = ConvOptions<D>;
 
 /// `ConvTransposeOptions` specialized for 1-D convolution.
@@ -171,7 +171,7 @@ struct ConvTransposeFuncOptions {
   /// The spacing between kernel elements.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
-  TORCH_ARG(ExpandingArray<D>, dilation) = 1;  
+  TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 };
 
 /// `ConvTransposeFuncOptions` specialized for 1-D convolution.

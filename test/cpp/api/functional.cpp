@@ -625,7 +625,7 @@ TEST_F(FunctionalTest, NLLLoss) {
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::kFloat);
-  auto target = torch::tensor({1, 0, 2}, torch::kLong); 
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
   auto output = F::nll_loss(
       input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
   auto expected = torch::tensor(2.4258, torch::kFloat);
@@ -1911,7 +1911,7 @@ TEST_F(FunctionalTest, ConvTranspose1d) {
   auto input = torch::ones({batch_size, in_channels, l_in_size});
   auto weight = torch::ones({in_channels, out_channels / groups, kernel_size});
   auto bias = torch::ones({out_channels});
-  auto output = F::conv_transpose1d(
+  auto output = F::detail::conv_transpose1d(
       input, weight, bias, stride, padding, output_padding, groups, dilation);
 
   int64_t expected_l_out_size = (l_in_size - 1) * stride[0] - 2 * padding[0] + dilation[0] * (kernel_size - 1) + output_padding[0] + 1;
