@@ -625,7 +625,7 @@ TEST_F(FunctionalTest, NLLLoss) {
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::kFloat);
-  auto target = torch::tensor({1, 0, 2}, torch::kLong); 
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
   auto output = F::nll_loss(
       input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
   auto expected = torch::tensor(2.4258, torch::kFloat);
@@ -1902,11 +1902,11 @@ TEST_F(FunctionalTest, AlphaDropout) {
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
-    auto output = F::alpha_dropout(input, rate, false);
+    auto output = F::detail::alpha_dropout(input, rate, false, false);
     ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
     ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
   }
-  auto output = F::alpha_dropout(input);
+  auto output = F::detail::alpha_dropout(input, 0.5, false, false);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
   ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
 }
