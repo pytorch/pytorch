@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/vararg_functions.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -25,6 +26,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <bitset>
@@ -104,11 +106,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
-    auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    c10::List<dtype> vals =
-        c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
-    drop(stack, num_inputs);
-    push(stack, std::move(vals));
+    listConstructFunc<dtype>(num_inputs, stack);
     return 0;
   };
 }
@@ -324,7 +322,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Scalar s;
            pop(stack, s);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
+           push(stack, at::scalar_to_tensor(s));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -335,7 +333,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            bool b;
            pop(stack, b);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(b)));
+           push(stack, at::scalar_to_tensor(b));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -1014,18 +1012,7 @@ RegisterOperators reg(
          [](const Node* node) -> Operation {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
-             auto tuple = pop(stack).toTuple();
-             if (tuple->elements().size() != num_elems) {
-               AT_ERROR(
-                   "Expected a tuple of ",
-                   num_elems,
-                   " elements, but got ",
-                   tuple->elements().size());
-             }
-             stack.insert(
-                 stack.end(),
-                 tuple->elements().begin(),
-                 tuple->elements().end());
+             tupleUnpackFunc(num_elems, stack);
              return 0;
            };
          },
@@ -1194,14 +1181,7 @@ RegisterOperators reg(
              return listConstruct<bool>(num_inputs);
            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
              return [=](Stack& stack) {
-               const size_t stack_size = stack.size();
-               c10::List<at::Tensor> vals;
-               vals.reserve(num_inputs);
-               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                 vals.emplace_back(std::move(stack[i]).toTensor());
-               }
-               drop(stack, num_inputs);
-               push(stack, std::move(vals));
+               tensorListConstructFunc(num_inputs, stack);
                return 0;
              };
            } else {
@@ -2398,7 +2378,8 @@ RegisterOperators reg2({
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          char c = string.at(index);
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
           return 0;
         },
@@ -2755,7 +2736,8 @@ RegisterOperators reg2({
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          char c = string.at(index);
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
           return 0;
         },

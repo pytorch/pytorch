@@ -3,6 +3,7 @@
 #include <torch/arg.h>
 #include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -18,6 +19,8 @@ struct TORCH_API L1LossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(L1Loss, L1LossFuncOptions)
+
 // ============================================================================
 
 /// Options for a KLDiv loss module.
@@ -30,6 +33,8 @@ struct TORCH_API KLDivLossOptions {
   /// ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``. Default: ``'mean'``
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(KLDivLoss, KLDivLossFuncOptions)
 
 // ============================================================================
 
@@ -44,6 +49,8 @@ struct TORCH_API MSELossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MSELoss, MSELossFuncOptions)
+
 // ============================================================================
 
 /// Options for a BCE loss module.
@@ -57,6 +64,8 @@ struct TORCH_API BCELossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCELoss, BCELossFuncOptions)
+
 // ============================================================================
 
 /// Options for a Hinge Embedding loss functional and module.
@@ -69,6 +78,8 @@ struct TORCH_API HingeEmbeddingLossOptions {
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(HingeEmbeddingLoss, HingeEmbeddingLossFuncOptions)
 
 // ============================================================================
 
@@ -92,6 +103,8 @@ struct TORCH_API MultiMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiMarginLoss, MultiMarginLossFuncOptions)
+
 // ============================================================================
 
 /// Options for a Hinge Embedding loss functional and module.
@@ -105,6 +118,8 @@ struct TORCH_API CosineEmbeddingLossOptions {
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CosineEmbeddingLoss, CosineEmbeddingLossFuncOptions)
 
 // ============================================================================
 
@@ -121,6 +136,8 @@ struct TORCH_API MultiLabelMarginLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelMarginLoss, MultiLabelMarginLossFuncOptions)
+
 // ============================================================================
 
 /// Options for a soft margin loss functional and module.
@@ -135,6 +152,8 @@ struct TORCH_API SoftMarginLossOptions {
   /// be summed. Default: 'mean'
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SoftMarginLoss, SoftMarginLossFuncOptions)
 
 // ============================================================================
 
@@ -153,6 +172,8 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
   /// be summed. Default: 'mean'
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MultiLabelSoftMarginLoss, MultiLabelSoftMarginLossFuncOptions)
 
 // ============================================================================
 
@@ -173,6 +194,115 @@ struct TORCH_API TripletMarginLossOptions {
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(TripletMarginLoss, TripletMarginLossFuncOptions)
+
+// ============================================================================
+
+/// Options for The Connectionist Temporal Classification loss functional and module.
+struct TORCH_API CTCLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// blank label. Default `0`.
+  TORCH_ARG(int64_t, blank) = 0;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Whether to zero infinite losses and the associated gradients.
+  /// Default: `false`. Infinite losses mainly occur when the inputs are
+  /// too short to be aligned to the targets.
+  TORCH_ARG(bool, zero_infinity) = false;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CTCLoss, CTCLossFuncOptions)
+
+// ============================================================================
+
+/// Options for a smooth L1 loss functional and module.
+struct TORCH_API SmoothL1LossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  TORCH_OPTIONS_CTOR_VARIANT_ARG3(SmoothL1LossOptions, reduction, kNone, kMean, kSum)
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SmoothL1Loss, SmoothL1LossFuncOptions)
+
+// ============================================================================
+
+/// Options for PoissonNLLLoss functional and module.
+struct TORCH_API PoissonNLLLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// if true the loss is computed as `exp(input) - target * input`,
+  /// if false the loss is `input - target * log(input + eps)`.
+  TORCH_ARG(bool, log_input) = true;
+  /// whether to compute full loss, i.e. to add the Stirling approximation term
+  /// target * log(target) - target + 0.5 * log(2 * pi * target).
+  TORCH_ARG(bool, full) = false;
+  /// Small value to avoid evaluation of `log(0)` when `log_input = false`.
+  /// Default: 1e-8
+  TORCH_ARG(double, eps) = 1e-8;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PoissonNLLLoss, PoissonNLLLossFuncOptions)
+
+// ============================================================================
+
+/// Options for MarginRankingLoss functional and module.
+struct TORCH_API MarginRankingLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// Has a default value of `0`.
+  TORCH_ARG(double, margin) = 0;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MarginRankingLoss, MarginRankingLossFuncOptions)
+
+// ============================================================================
+
+/// Options for an nll-loss functional and module.
+struct TORCH_API NLLLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// A manual rescaling weight given to each
+  /// class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+  /// treated as if having all ones.
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies a target value that is ignored
+  /// and does not contribute to the input gradient.
+  TORCH_ARG(int64_t, ignore_index) = -100;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(NLLLoss, NLLLossFuncOptions)
+
+// ============================================================================
+
+/// Options for a cross-entropy-Loss functional and module.
+struct TORCH_API CrossEntropyLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// A manual rescaling weight given to each class. If given, has to be a Tensor
+  /// of size C
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies a target value that is ignored
+  /// and does not contribute to the input gradient.
+  TORCH_ARG(int64_t, ignore_index) = -100;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CrossEntropyLoss, CrossEntropyFuncOptions)
 
 } // namespace nn
 } // namespace torch

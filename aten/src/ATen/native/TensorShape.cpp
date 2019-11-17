@@ -30,7 +30,7 @@ Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
 }
 
 Tensor _shape_as_tensor(const Tensor& self) {
-  auto options = TensorOptions(at::kLong).is_variable(self.options().is_variable());
+  auto options = TensorOptions(at::kLong);
   return at::tensor(self.sizes(), options);
 }
 
@@ -62,14 +62,14 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   {
     NoNamesGuard guard;
 #endif
     at::_cat_out(result, tensors, dim);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -214,7 +214,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
 #endif
   Tensor result;
   {
@@ -224,7 +224,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
     result = at::_cat(tensors, dim);
   }
 #ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -411,7 +411,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-    return self.narrow(dim, start, length).clone();
+    return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -495,8 +495,16 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    return self.as_strided(shape, *stride);
+  if (THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
+    // `THTensor_compute_stride` returns the proper strides to use if this 
+    // `reshape` can be just a view.
+    //
+    // NB: Even though we have viewable geometry and the target strides here,
+    //     we do not just call `as_strided` on `self` because the backward
+    //     for `as_strided` is not as efficient as that of `view` (since the
+    //     former is meant to handle general cases). We will redo a
+    //     `THTensor_compute_stride` in `view` but that is quite cheap anyways.
+    return self.view(shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
@@ -810,7 +818,7 @@ static Tensor& propagate_transposed_names(
   if (other.has_names()) {
     auto names = other.names().vec();
     std::swap(names[dim0], names[dim1]);
-    namedinference::propagate_names(result, names);
+    namedinference::propagate_names_if_nonempty(result, names);
   }
   return result;
 }
@@ -940,8 +948,8 @@ Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_squeeze_outnames(self);
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }

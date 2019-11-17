@@ -88,9 +88,11 @@ class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
 
   Tensor forward(const Tensor& input);
 
+  void reset() override;
+
   void reset_running_stats();
 
-  void reset() override;
+  void reset_parameters();
 
   /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -131,6 +133,32 @@ class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
 };
 
 TORCH_MODULE(BatchNorm1d);
+
+/// Applies the BatchNorm2d function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
+/// about the exact behavior of this module.
+class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) override;
+
+ public:
+  using BatchNormImplBase<2, BatchNorm2dImpl>::BatchNormImplBase;
+};
+
+TORCH_MODULE(BatchNorm2d);
+
+/// Applies the BatchNorm3d function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
+/// about the exact behavior of this module.
+class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) override;
+
+ public:
+  using BatchNormImplBase<3, BatchNorm3dImpl>::BatchNormImplBase;
+};
+
+TORCH_MODULE(BatchNorm3d);
 
 } // namespace nn
 } // namespace torch

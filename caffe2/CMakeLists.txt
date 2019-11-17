@@ -400,6 +400,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/fixup_trace_scope_blocks.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
@@ -455,6 +456,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
     )
 
   if (NOT INTERN_BUILD_MOBILE)
@@ -490,8 +492,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     if (USE_DISTRIBUTED)
       list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
@@ -504,9 +506,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_resp.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
@@ -542,9 +544,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
     # See NOTE [ ATen NVRTC Stub and HIP ]
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
-    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${PYTORCH_HIP_HCC_LIBRARIES} ${ROCM_HIPRTC_LIB})
-    target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
-    target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_HCC_LIBRARIES} ${ROCM_HIPRTC_LIB})
     target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
     install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
@@ -562,6 +562,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/_functions.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/normalization.cpp
@@ -582,6 +583,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/embedding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
@@ -662,8 +664,6 @@ if (NOT INTERN_BUILD_MOBILE)
 endif()
 
 if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-  target_compile_definitions(torch PUBLIC _THP_CORE)
-
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -1058,7 +1058,7 @@ install(TARGETS torch EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}
 caffe2_interface_library(torch torch_library)
 list(APPEND Caffe2_MAIN_LIBS torch_library)
 if (USE_TBB)
-  list(APPEND Caffe2_MAIN_LIB tbb)
+  list(APPEND Caffe2_MAIN_LIBS tbb)
 endif()
 
 # Install PDB files for MSVC builds

@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
 namespace torch {
@@ -49,7 +49,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
 
     // Compute the root edges and generate the appropriate gradients.
     rootEdges.push_back(root.gradient_edge());
-    grads.push_back(at::ones_like(root));
+    grads.push_back(at::ones_like(root, at::MemoryFormat::Contiguous));
   }
 
   // Validate rootEdges and grads.

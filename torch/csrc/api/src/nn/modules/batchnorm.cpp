@@ -18,7 +18,7 @@ namespace torch {
 namespace nn {
 
 BatchNormImpl::BatchNormImpl(const BatchNormOptions& options_) : options(options_) {
-  TORCH_WARN("torch::nn::BatchNorm module is deprecated."
+  TORCH_WARN("torch::nn::BatchNorm module is deprecated and will be removed in 1.5. "
              "Use BatchNorm{1,2,3}d instead.");
   reset();
 }
@@ -85,15 +85,6 @@ BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormOptions& options
 }
 
 template <size_t D, typename Derived>
-void BatchNormImplBase<D, Derived>::reset_running_stats() {
-  if (options.track_running_stats()) {
-    running_mean.zero_();
-    running_var.fill_(1);
-    num_batches_tracked.zero_();
-  }
-}
-
-template <size_t D, typename Derived>
 void BatchNormImplBase<D, Derived>::reset() {
   if (options.affine()) {
     weight = this->register_parameter("weight", torch::empty({options.num_features()}));
@@ -111,7 +102,20 @@ void BatchNormImplBase<D, Derived>::reset() {
     running_var = this->register_buffer("running_var", Tensor());
     num_batches_tracked = this->register_buffer("num_batches_tracked", Tensor());
   }
+  reset_parameters();
+}
 
+template <size_t D, typename Derived>
+void BatchNormImplBase<D, Derived>::reset_running_stats() {
+  if (options.track_running_stats()) {
+    running_mean.zero_();
+    running_var.fill_(1);
+    num_batches_tracked.zero_();
+  }
+}
+
+template <size_t D, typename Derived>
+void BatchNormImplBase<D, Derived>::reset_parameters() {
   reset_running_stats();
   if (options.affine()) {
     torch::nn::init::ones_(weight);
@@ -152,12 +156,15 @@ Tensor BatchNormImplBase<D, Derived>::forward(const Tensor& input) {
     }
   }
 
-  return F::batch_norm(
+  return F::detail::batch_norm(
       input,
       running_mean,
       running_var,
-      BatchNormOptions().weight(weight).bias(bias).momentum(exponential_average_factor).eps(options.eps()),
-      this->is_training() || !options.track_running_stats());
+      weight,
+      bias,
+      this->is_training() || !options.track_running_stats(),
+      /*momentum=*/exponential_average_factor,
+      options.eps());
 }
 
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
@@ -166,7 +173,21 @@ void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
       "expected 2D or 3D input (got ", input.dim(), "D input)");
 }
 
+void BatchNorm2dImpl::_check_input_dim(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() == 4,
+      "expected 4D input (got ", input.dim(), "D input)");
+}
+
+void BatchNorm3dImpl::_check_input_dim(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() == 5,
+      "expected 5D input (got ", input.dim(), "D input)");
+}
+
 template class BatchNormImplBase<1, BatchNorm1dImpl>;
+template class BatchNormImplBase<2, BatchNorm2dImpl>;
+template class BatchNormImplBase<3, BatchNorm3dImpl>;
 
 } // namespace nn
 } // namespace torch
