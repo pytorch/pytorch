@@ -10,6 +10,11 @@ InstanceNormImpl<D, Derived>::InstanceNormImpl(const InstanceNormOptions& option
     : BatchNormImplBase<D, Derived>(options_) {}
 
 template <size_t D, typename Derived>
+void InstanceNormImpl<D, Derived>::_check_input_dim(const Tensor& input) {
+  TORCH_CHECK(false, "NotImplementedError");
+}
+
+template <size_t D, typename Derived>
 Tensor InstanceNormImpl<D, Derived>::forward(const Tensor& input) {
   _check_input_dim(input);
   return F::detail::instance_norm(
