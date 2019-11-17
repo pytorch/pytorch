@@ -129,7 +129,8 @@ using Conv3dFuncOptions = ConvFuncOptions<3>;
 
 // ============================================================================
 
-using ConvTransposeOptions = ConvOptions;
+template<class D>
+using ConvTransposeOptions = ConvOptions<D>;
 
 /// `ConvTransposeOptions` specialized for 1-D convolution.
 using ConvTranspose1dOptions = ConvTransposeOptions<1>;
