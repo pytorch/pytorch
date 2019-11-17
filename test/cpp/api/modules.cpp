@@ -902,6 +902,24 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, GroupNorm) {
+  GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = model(x);
+  auto y_exp = torch::group_norm(x, 2, model->weight, model->bias, 2e-5);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (auto i = 0; i < 2; i++) {
+    ASSERT_EQ(y.size(i), 2);
+  }
+
+  ASSERT_EQ(model->weight.grad().numel(), 2);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, Bilinear) {
   Bilinear model(5, 3, 2);
   auto x1 = torch::randn({10, 5}, torch::requires_grad());
@@ -1593,6 +1611,40 @@ TEST_F(ModulesTest, TripletMarginLoss) {
   ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
 }
 
+TEST_F(ModulesTest, NLLLoss) {
+  NLLLoss loss;
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315}, 
+                              {-3.7038, -0.1038, -2.6038},
+                              {-2.3422, -1.3422, -0.4422}},
+                             torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor(2.4258, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_TRUE(
+    NLLLoss(NLLLossOptions().ignore_index(-100).reduction(torch::kMean))
+      ->forward(input, target).allclose(expected, 1e-04));
+}
+
+TEST_F(ModulesTest, CrossEntropyLoss) {
+  CrossEntropyLoss loss;
+  auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0, 1}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor(0.6931, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(
+    CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
+      ->forward(input, target).allclose(expected, 1e-04));
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -1952,6 +2004,25 @@ TEST_F(ModulesTest, CELU) {
         torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
+}
+
+TEST_F(ModulesTest, GLU) {
+  int64_t dim = 1;
+  GLU model(dim);
+  auto input = torch::randn({4, 2}, torch::requires_grad());
+  auto output = model->forward(input);
+  auto input_size = input.sizes()[dim] / 2;
+  auto first_half = input.narrow(dim, 0, input_size);
+  auto second_half = input.narrow(dim, input_size, input_size);
+  auto expected = first_half * torch::sigmoid(second_half);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(output.allclose(expected));
+
+  GLU model_default_options;
+  ASSERT_TRUE(model_default_options->forward(input).allclose(expected));
 }
 
 TEST_F(ModulesTest, GELU) {
@@ -2914,6 +2985,15 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
+TEST_F(ModulesTest, PrettyPrintGroupNorm) {
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2))),
+    "torch::nn::GroupNorm(2, 2, eps=1e-05, affine=true)");
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2).eps(2e-5).affine(false))),
+    "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
+}
+
 TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
   ASSERT_EQ(
     c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
@@ -2986,6 +3066,16 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintNLLLoss) {
+  ASSERT_EQ(
+      c10::str(NLLLoss()), "torch::nn::NLLLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrinCrossEntropyLoss) {
+  ASSERT_EQ(
+      c10::str(CrossEntropyLoss()), "torch::nn::CrossEntropyLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintMultiLabelMarginLoss) {
@@ -3130,6 +3220,11 @@ TEST_F(ModulesTest, PrettyPrintSELU) {
   ASSERT_EQ(c10::str(SELU()), "torch::nn::SELU()");
   ASSERT_EQ(c10::str(SELU(SELUOptions().inplace(true))),
             "torch::nn::SELU(inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintGLU) {
+  ASSERT_EQ(c10::str(GLU()), "torch::nn::GLU(dim=-1)");
+  ASSERT_EQ(c10::str(GLU(1)), "torch::nn::GLU(dim=1)");
 }
 
 TEST_F(ModulesTest, PrettyPrintHardshrink) {
