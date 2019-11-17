@@ -6,13 +6,19 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
+#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
-// We manually overload abs because std::abs does not work with ROCm.
+// We manually overload abs because std::abs does not work with thrust types and ROCm.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t abs_wrapper(scalar_t v) {
   return ::abs(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> abs_wrapper(thrust::complex<T> v) {
+  return thrust::abs(v);
 }
 
 __host__ __device__ static inline uint8_t abs_wrapper(uint8_t v) {
@@ -24,8 +30,9 @@ __host__ __device__ static inline bool abs_wrapper(bool v) {
 }
 
 void abs_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
       return abs_wrapper(a);
     });
   });
@@ -54,18 +61,42 @@ void logical_not_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload acos because std::acos does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t acos_wrapper(scalar_t v) {
+  return ::acos(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> acos_wrapper(thrust::complex<T> v) {
+  return thrust::acos(v);
+}
+
 void acos_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "acos_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::acos(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "acos_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return acos_wrapper(a);
     });
   });
 }
 
+// We manually overload asin because std::asin does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t asin_wrapper(scalar_t v) {
+  return ::asin(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> asin_wrapper(thrust::complex<T> v) {
+  return thrust::asin(v);
+}
+
 void asin_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "asin_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::asin(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "asin_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return asin_wrapper(a);
     });
   });
 }
@@ -103,18 +134,42 @@ void floor_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload log because std::log does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t log_wrapper(scalar_t v) {
+  return ::log(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> log_wrapper(thrust::complex<T> v) {
+  return thrust::log(v);
+}
+
 void log_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return std::log(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "log_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return log_wrapper(a);
     });
   });
 }
 
+// We manually overload log10 because std::log10 does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t log10_wrapper(scalar_t v) {
+  return ::log10(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> log10_wrapper(thrust::complex<T> v) {
+  return thrust::log10(v);
+}
+
 void log10_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log10_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::log10(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "log10_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return log10_wrapper(a);
     });
   });
 }
@@ -127,10 +182,23 @@ void log1p_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload log2 because std::log2 does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t log2_wrapper(scalar_t v) {
+  return ::log2(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> log2_wrapper(thrust::complex<T> v) {
+  const thrust::complex<T> log2 = thrust::complex<T>(::log(2.0), 0.0);
+  return thrust::log(v)/log2;
+}
+
 void log2_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log2_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::log2(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "log2_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return log2_wrapper(a);
     });
   });
 }
@@ -204,26 +272,62 @@ void sign_kernel_cuda(TensorIterator& iter){
     }
 }
 
+// We manually overload sin because std::sin does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t sin_wrapper(scalar_t v) {
+  return ::sin(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> sin_wrapper(thrust::complex<T> v) {
+  return thrust::sin(v);
+}
+
 void sin_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sin_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::sin(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sin_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return sin_wrapper(a);
     });
   });
+}
+
+// We manually overload sinh because std::sinh does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t sinh_wrapper(scalar_t v) {
+  return ::sinh(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> sinh_wrapper(thrust::complex<T> v) {
+  return thrust::sinh(v);
 }
 
 void sinh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sinh_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::sinh(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sinh_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return sinh_wrapper(a);
     });
   });
 }
 
+// We manually overload sqrt because std::sqrt does not work with thrust types.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t sqrt_wrapper(scalar_t v) {
+  return ::sqrt(v);
+}
+
+template<typename T>
+__host__ __device__ static inline thrust::complex<T> sqrt_wrapper(thrust::complex<T> v) {
+  return thrust::sqrt(v);
+}
+
 void sqrt_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sqrt_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::sqrt(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sqrt_cuda", [&]() {
+    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+      return sqrt_wrapper(a);
     });
   });
 }
