@@ -185,122 +185,131 @@ template class ConvImpl<1, Conv1dImpl>;
 template class ConvImpl<2, Conv2dImpl>;
 template class ConvImpl<3, Conv3dImpl>;
 
-template <size_t D, typename Derived>
-ConvTransposeImplBase<D, Derived>::ConvTransposeImplBase(
-    const ConvTransposeOptionsBase<D>& options_)
-    : options(options_) {
-  TORCH_CHECK((options.in_channels() % options.groups()) == 0,
-              "in_channels must be divisible by groups");
-  TORCH_CHECK((options.out_channels() % options.groups()) == 0,
-              "out_channels must be divisible by groups");
-
-  std::vector<int64_t> dims = {
-    options.in_channels(), options.out_channels() / options.groups()
-  };
-  for (auto& d : *(options.kernel_size())) {
-    dims.push_back(d);
-  }
-  weight = this->register_parameter("weight", torch::empty(dims));
-  if (options.bias()) {
-    bias = this->register_parameter("bias", torch::empty({options.out_channels()}));
-  } else {
-    bias = this->register_parameter("bias", Tensor());
-  }
-  this->reset_parameters();
-}
+// ============================================================================
 
 template <size_t D, typename Derived>
-void ConvTransposeImplBase<D, Derived>::reset_parameters() {
-  torch::nn::init::kaiming_uniform_(weight, std::sqrt(5));
-  if (bias.defined()) {
-    auto fan_in = std::get<0>(torch::nn::init::_calculate_fan_in_and_fan_out(weight));
-    double bound = 1 / std::sqrt(fan_in);
-    torch::nn::init::uniform_(bias, -bound, bound);
-  }
-}
+ConvTransposeImpl<D, Derived>::ConvTransposeImpl(
+    ConvTransposeOptions<D> options_) : options(options_.transposed(true)) {}
 
 template <size_t D, typename Derived>
-void ConvTransposeImplBase<D, Derived>::reset() {
-  this->reset_parameters();
-}
-
-template <size_t D, typename Derived>
-void ConvTransposeImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha
-         << "torch::nn::ConvTranspose" << D << "d"
-         << "(input_channels=" << options.in_channels()
-         << ", output_channels=" << options.out_channels()
+void ConvTransposeImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ConvTranspose" << D << "d"
+         << "(" << options.in_channels()
+         << ", " << options.out_channels()
          << ", kernel_size=" << options.kernel_size()
-         << ", stride=" << options.stride()
-         << ", padding=" << options.padding()
-         << ", output_padding=" << options.output_padding()
-         << ", groups=" << options.groups()
-         << ", bias=" << options.bias()
-         << ", dilation=" << options.dilation()
-         << ", padding_mode=" << options.padding_mode() << ")";
+         << ", stride=" << options.stride();
+  if (*options.padding() != *ExpandingArray<D>(0)) {
+    stream << ", padding=" << options.padding();
+  }
+  if (*options.dilation() != *ExpandingArray<D>(1)) {
+    stream << ", dilation=" << options.dilation();
+  }
+  if (*options.output_padding() != *ExpandingArray<D>(0)) {
+    stream << ", output_padding=" << options.output_padding();
+  }
+  if (options.groups() != 1) {
+    stream << ", groups=" << options.groups();
+  }
+  if (!options.bias()) {
+    stream << ", bias=" << std::boolalpha << false;
+  }
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+    stream << ", padding_mode=" << enumtype::get_enum_name(options.padding_mode());
+  }
+  stream << ")";
 }
 
 template <size_t D, typename Derived>
-ExpandingArray<D> ConvTransposeImplBase<D, Derived>::_output_padding(
-    const Tensor& input, const std::vector<int64_t>& output_size,
+std::vector<int64_t> ConvTransposeImpl<D, Derived>::_output_padding(
+    const Tensor& input, const c10::optional<at::IntArrayRef>& output_size,
     const ExpandingArray<D>& stride, const ExpandingArray<D>& padding,
     const ExpandingArray<D>& kernel_size) {
   std::vector<int64_t> ret;
-  if (output_size.empty()) {
-    ret.push_back(0);
+  c10::optional<at::IntArrayRef> output_size_ = output_size;
+
+  if (output_size_ == c10::nullopt) {
+    ret = options.output_padding().vec();
   } else {
     auto k = input.dim() - 2;
-    std::vector<int64_t> output_size_resized = output_size;
-    if (output_size.size() == k + 2) {
-      output_size_resized = std::vector<int64_t>(output_size.begin() + 2,
-                                                 output_size.end());
+    if (output_size_.value().size() == k + 2) {
+      output_size_ = output_size_.value().slice(2);
     }
-    TORCH_CHECK(output_size_resized.size() != k,
-                "ouput_size must have %d or %d elements (got %d)",
-                k, k + 2, output_size_resized.size());
+    if (output_size_.value().size() != k) {
+      TORCH_CHECK(false,
+        "output_size must have ", k, " or ", k + 2, " elements (got ", output_size_.value().size(), ")");
+    }
 
     std::vector<int64_t> min_sizes;
     std::vector<int64_t> max_sizes;
-    for (int d = 0; d < k; d++) {
-      int64_t dim_size = ((input.size(d + 2) - 1) * (*stride)[d] - 2 * (*padding)[d] + (*kernel_size)[d]);
+    for (int64_t d = 0; d < k; d++) {
+      int64_t dim_size = ((input.sizes()[d + 2] - 1) * (*stride)[d] - 2 * (*padding)[d] + (*kernel_size)[d]);
       min_sizes.push_back(dim_size);
       max_sizes.push_back(min_sizes[d] + (*stride)[d] - 1);
     }
 
-    for (int i = 0; i < output_size_resized.size(); i++) {
-      int64_t size = output_size_resized[i];
+    for (size_t i = 0; i < output_size_.value().size(); i++) {
+      int64_t size = output_size_.value()[i];
       int64_t min_size = min_sizes[i];
       int64_t max_size = max_sizes[i];
-      TORCH_CHECK((size < min_size) || (size > max_size),
-                  "requested an output size of [%s], but valid sizes range "
-                  "from [%s] to [%s] (for an input of [%s])",
-                  c10::Join(",", output_size_resized), c10::Join(",", min_sizes),
-                  c10::Join(",", max_sizes),
-                  c10::Join(",", std::vector<int64_t>(input.sizes().begin() + 2, input.sizes().end())));
+      if (size < min_size || size > max_size) {
+        TORCH_CHECK(false,
+          "requested an output size of ", output_size_.value(), ", but valid sizes range "
+          "from ", min_sizes, " to ", max_sizes, " (for an input of ", input.sizes().slice(2), ")");
+      }
     }
 
-    for (int d = 0; d < k; d++) {
-      ret.push_back(output_size_resized[d] - min_sizes[d]);
+    for (int64_t d = 0; d < k; d++) {
+      ret.push_back(output_size_.value()[d] - min_sizes[d]);
     }
   }
-
-  return ExpandingArray<D>(ret);
+  return ret;
 }
 
 Tensor ConvTranspose1dImpl::forward(
-    const Tensor& input, const std::vector<int64_t>& output_size) {
-  TORCH_CHECK(options.padding_mode() == std::string("zeros"),
-              "Only `zeros` padding mode is supported for ConvTransposed1d");
+    const Tensor& input, at::IntArrayRef output_size = {}) {
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+    TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose1d");
+  }
 
-  ExpandingArray<1> output_padding = this->_output_padding(
-      input, output_size, options.stride(), options.padding(),
-      options.kernel_size());
-  return F::conv_transpose1d(input, weight, bias, options.stride(),
-                             options.padding(), output_padding,
-                             options.groups(), options.dilation());
+  std::vector<int64_t> output_padding = _output_padding(
+    input, output_size, options.stride(), options.padding(), options.kernel_size());
+
+  return F::detail::conv_transpose1d(
+    input, weight, bias, options.stride(), options.padding(),
+    output_padding, options.groups(), options.dilation());
 }
 
-template class ConvTransposeImplBase<1, ConvTranspose1dImpl>;
+Tensor ConvTranspose2dImpl::forward(
+    const Tensor& input, at::IntArrayRef output_size = {}) {
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+    TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose2d");
+  }
+
+  std::vector<int64_t> output_padding = _output_padding(
+    input, output_size, options.stride(), options.padding(), options.kernel_size());
+
+  return F::detail::conv_transpose2d(
+    input, weight, bias, options.stride(), options.padding(),
+    output_padding, options.groups(), options.dilation());
+}
+
+Tensor ConvTranspose3dImpl::forward(
+    const Tensor& input, at::IntArrayRef output_size = {}) {
+  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+    TORCH_CHECK(false, "Only `zeros` padding mode is supported for ConvTranspose3d");
+  }
+
+  std::vector<int64_t> output_padding = _output_padding(
+    input, output_size, options.stride(), options.padding(), options.kernel_size());
+
+  return F::detail::conv_transpose3d(
+    input, weight, bias, options.stride(), options.padding(),
+    output_padding, options.groups(), options.dilation());
+}
+
+template class ConvTransposeImpl<1, ConvTranspose1dImpl>;
+template class ConvTransposeImpl<2, ConvTranspose2dImpl>;
+template class ConvTransposeImpl<3, ConvTranspose3dImpl>;
 
 } // namespace nn
 } // namespace torch

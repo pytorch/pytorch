@@ -129,70 +129,60 @@ using Conv3dFuncOptions = ConvFuncOptions<3>;
 
 // ============================================================================
 
-/// Options for a `D`-dimensional convolution module.
+using ConvTransposeOptions = ConvOptions;
+
+/// `ConvTransposeOptions` specialized for 1-D convolution.
+using ConvTranspose1dOptions = ConvTransposeOptions<1>;
+
+/// `ConvTransposeOptions` specialized for 2-D convolution.
+using ConvTranspose2dOptions = ConvTransposeOptions<2>;
+
+/// `ConvTransposeOptions` specialized for 3-D convolution.
+using ConvTranspose3dOptions = ConvTransposeOptions<3>;
+
+// ============================================================================
+
+namespace functional {
+
+/// Options for a `D`-dimensional convolution functional.
 template <size_t D>
-struct ConvTransposeOptionsBase {
-  ConvTransposeOptionsBase(
-      int64_t in_channels,
-      int64_t out_channels,
-      ExpandingArray<D> kernel_size) :
-                in_channels_(in_channels),
-                out_channels_(out_channels),
-                kernel_size_(std::move(kernel_size)) {}
+struct ConvTransposeFuncOptions {
+  /// optional bias of shape `(out_channels)`. Default: ``None``
+  TORCH_ARG(torch::Tensor, bias) = Tensor();
 
-  /// The number of channels the input volumes will have.
-  /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG(int64_t, in_channels);
-
-  /// The number of output channels the convolution should produce.
-  /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG(int64_t, out_channels);
-
-  /// The kernel size to use.
+  /// The stride of the convolving kernel.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
-  /// This parameter __can__ be changed after construction.
-  TORCH_ARG(ExpandingArray<D>, kernel_size) = 1;
-
-  /// The stride of the convolution.
-  /// For a `D`-dim convolution, must be a single number or a list of `D`
-  /// numbers.
-  /// This parameter __can__ be changed after construction.
   TORCH_ARG(ExpandingArray<D>, stride) = 1;
 
-  /// The padding to add to the input volumes.
+  /// Implicit paddings on both sides of the input.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
-  /// This parameter __can__ be changed after construction.
   TORCH_ARG(ExpandingArray<D>, padding) = 0;
 
-    /// For transpose convolutions, the padding to add to output volumes.
-  /// For a `D`-dim convolution, must be a single number or a list of `D`
-  /// numbers.
-  /// This parameter __can__ be changed after construction.
+  /// Additional size added to one side of each dimension in the output shape. Default: 0
   TORCH_ARG(ExpandingArray<D>, output_padding) = 0;
 
-  /// The number of convolution groups.
-  /// This parameter __can__ be changed after construction.
+  /// Split input into groups, `in_channels` should be divisible by
+  /// the number of groups.
   TORCH_ARG(int64_t, groups) = 1;
 
-  /// Whether to add a bias after individual applications of the kernel.
-  /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG(bool, bias) = true;
-
-  /// The kernel dilation.
+  /// The spacing between kernel elements.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
   /// numbers.
-  /// This parameter __can__ be changed after construction.
-  TORCH_ARG(ExpandingArray<D>, dilation) = 1;
-
-  /// The padding mode.
-  /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG(std::string, padding_mode) = "zeros";
+  TORCH_ARG(ExpandingArray<D>, dilation) = 1;  
 };
- 
-/// `ConvTransposeOptionsBase` specialized for 1-D convolution.
-using ConvTranspose1dOptions = ConvTransposeOptionsBase<1>;
+
+/// `ConvTransposeFuncOptions` specialized for 1-D convolution.
+using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
+
+/// `ConvTransposeFuncOptions` specialized for 2-D convolution.
+using ConvTranspose2dFuncOptions = ConvTransposeFuncOptions<2>;
+
+/// `ConvTransposeFuncOptions` specialized for 3-D convolution.
+using ConvTranspose3dFuncOptions = ConvTransposeFuncOptions<3>;
+
+} // namespace functional
 
 } // namespace nn
 } // namespace torch
