@@ -449,6 +449,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return type_set_.has(TensorTypeId::MkldnnCPUTensorId);
   }
 
+  bool is_lazy() const {
+    return type_set_.has(TensorTypeId::LazyTensorId);
+  }
+
   int64_t get_device() const {
     TORCH_CHECK(
         device_opt_.has_value(),

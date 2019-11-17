@@ -442,25 +442,25 @@ void validate_outputs(
       continue;
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
-        std::stringstream ss;
-        ss << "invalid gradient at index " << i << " - got ";
-        ss << grads[i].sizes() << " but expected shape compatible with ";
-        ss << metadata.shape();
-        AT_ERROR(format_error(ss.str()));
-      }
+      //if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+      //  std::stringstream ss;
+      //  ss << "invalid gradient at index " << i << " - got ";
+      //  ss << grads[i].sizes() << " but expected shape compatible with ";
+      //  ss << metadata.shape();
+      //  AT_ERROR(format_error(ss.str()));
+      //}
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
     TORCH_CHECK(isFloatingType(grads[i].type().scalarType()));
     if (metadata.type().scalarType() != grads[i].type().scalarType()) {
       grads[i] = grads[i].to(metadata.type().scalarType());
     }
-    if (!is_compatible_type(metadata.type(), grads[i].type())) {
-       std::stringstream ss;
-       ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.type() << " but got " << grads[i].type();
-       AT_ERROR(format_error(ss.str()));
-    }
+    //if (!is_compatible_type(metadata.type(), grads[i].type())) {
+    //   std::stringstream ss;
+    //   ss << "invalid gradient at index " << i << " - expected type ";
+    //   ss << metadata.type() << " but got " << grads[i].type();
+    //   AT_ERROR(format_error(ss.str()));
+    //}
     auto output_device = output.device();
     if (output_device != metadata.device()) {
       std::stringstream ss;

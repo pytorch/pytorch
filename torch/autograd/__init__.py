@@ -21,12 +21,12 @@ def _make_grads(outputs, grads):
     new_grads = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
-            if not out.shape == grad.shape:
-                raise RuntimeError("Mismatch in shape: grad_output["
-                                   + str(grads.index(grad)) + "] has a shape of "
-                                   + str(grad.shape) + " and output["
-                                   + str(outputs.index(out)) + "] has a shape of "
-                                   + str(out.shape) + ".")
+            #if not out.shape == grad.shape:
+            #    raise RuntimeError("Mismatch in shape: grad_output["
+            #                       + str(grads.index(grad)) + "] has a shape of "
+            #                       + str(grad.shape) + " and output["
+            #                       + str(outputs.index(out)) + "] has a shape of "
+            #                       + str(out.shape) + ".")
             new_grads.append(grad)
         elif grad is None:
             if out.requires_grad:

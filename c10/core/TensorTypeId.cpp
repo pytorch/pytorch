@@ -44,6 +44,8 @@ const char* toString(TensorTypeId t) {
       return "TESTING_ONLY_GenericModeTensorId";
     case TensorTypeId::TESTING_ONLY_GenericWrapperTensorId:
       return "TESTING_ONLY_GenericWrapperTensorId";
+    case TensorTypeId::LazyTensorId:
+      return "LazyTensorId";
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }

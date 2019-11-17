@@ -237,6 +237,7 @@ class BatchNorm2d(_BatchNorm):
     """
 
     def _check_input_dim(self, input):
+        return
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
                              .format(input.dim()))

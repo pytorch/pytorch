@@ -25,7 +25,23 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, ComplexCPU, ComplexCUDA, Undefined, MkldnnCPU, NumOptions };
+enum class Backend {
+  CPU,
+  CUDA,
+  HIP,
+  SparseCPU,
+  SparseCUDA,
+  SparseHIP,
+  MSNPU,
+  XLA,
+  QuantizedCPU,
+  ComplexCPU,
+  ComplexCUDA,
+  Undefined,
+  MkldnnCPU,
+  Lazy,
+  NumOptions
+};
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -100,6 +116,8 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::ComplexCPU;
   } else if (t == TensorTypeId::ComplexCUDATensorId) {
     return Backend::ComplexCUDA;
+  } else if (t == TensorTypeId::LazyTensorId) {
+    return Backend::Lazy;
   } else if (t == TensorTypeId::UndefinedTensorId) {
     return Backend::Undefined;
   } else {
@@ -133,6 +151,8 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return TensorTypeId::ComplexCPUTensorId;
     case Backend::ComplexCUDA:
       return TensorTypeId::ComplexCUDATensorId;
+    case Backend::Lazy:
+      return TensorTypeId::LazyTensorId;
     case Backend::Undefined:
       return TensorTypeId::UndefinedTensorId;
     default:

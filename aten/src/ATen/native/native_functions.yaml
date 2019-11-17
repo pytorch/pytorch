@@ -3368,6 +3368,12 @@
   variants: function, method
   supports_named_tensor: True
 
+- func: to_lazy(Tensor self) -> Tensor
+  variants: method
+
+- func: to_eager(Tensor self) -> Tensor
+  variants: method
+
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   use_c10_dispatcher: full
   variants: method
