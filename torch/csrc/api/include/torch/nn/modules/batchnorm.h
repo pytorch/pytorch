@@ -86,7 +86,7 @@ class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
  public:
   explicit BatchNormImplBase(const BatchNormOptions& options_);
 
-  Tensor forward(const Tensor& input);
+  virtual Tensor forward(const Tensor& input);
 
   void reset() override;
 
