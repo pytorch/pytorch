@@ -126,7 +126,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
             # since we need to shutdown the RPC agent. If we don't shutdown the
             # RPC agent, tests would fail since RPC agent threads, locks and
             # condition variables are not properly terminated.
-            rpc.join_rpc()
+            rpc.wait_all_workers()
 
         return return_value
 
