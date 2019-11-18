@@ -430,7 +430,7 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
 
 Tensor inverse(const Tensor &self) {
   if (self.size(-1) == 0) {
-    return at::empty_like(self, at::MemoryFormat::Contiguous);
+    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
   return at::_inverse_helper(self);
@@ -549,7 +549,7 @@ Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
 
 Tensor cholesky(const Tensor &self, bool upper) {
   if (self.size(-1) == 0) {
-    return at::empty_like(self, at::MemoryFormat::Contiguous);
+    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
 
@@ -610,7 +610,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
 
   Tensor self_working_copy;
   if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self, at::MemoryFormat::Contiguous);
+    self_working_copy = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cpu", [&]{
@@ -892,7 +892,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
   auto eigvals = at::empty(self_sizes, self.options());
 
   if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, at::MemoryFormat::Contiguous));
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   }
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
