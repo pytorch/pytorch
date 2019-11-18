@@ -81,6 +81,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   // from the python_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
   virtual bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const;
+  virtual bool is_module() const;
   bool isSubtypeOf(const TypePtr rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
   }
@@ -1215,6 +1216,8 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
+CAFFE2_API c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements);
+
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {
@@ -1361,6 +1364,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 // does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
+
 /**
  * User Defined Types
  */
@@ -1397,6 +1401,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
+  const std::vector<Function*>& methods() const;
+
   TypePtr getAttribute(const std::string& name) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
@@ -1413,6 +1419,11 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeTypes_[pos];
   }
 
+  size_t numAttributes() const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    return attributeNames_.size();
+  }
+
   const TypePtr& getAttribute(size_t slot) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     AT_ASSERT(slot < attributeTypes_.size());
@@ -1423,18 +1434,6 @@ struct CAFFE2_API ClassType : public NamedType {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     AT_ASSERT(slot < attributeTypes_.size());
     return attributeNames_[slot];
-  }
-
-  Function* getMethod(const std::string& name) const;
-  const std::vector<Function*>& methods() const;
-  void addMethod(Function* method);
-
-  std::shared_ptr<CompilationUnit> compilation_unit();
-  std::shared_ptr<const CompilationUnit> compilation_unit() const;
-
-  size_t numAttributes() const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
-    return attributeNames_.size();
   }
 
   // Attributes are stored in a specific slot at runtime for effiency.
@@ -1476,6 +1475,14 @@ struct CAFFE2_API ClassType : public NamedType {
       TypePtr type,
       bool is_parameter = false);
 
+  // [Internal Only] Remove attribute from the ClassType,
+  // caller is responsible to make sure the modification is safe:
+  // it is unsafe to having existing allocations
+  // of this object around anymore, and any code that works on
+  // the attribute is now invalid. Only newly created code is
+  // valid again.
+  void unsafeRemoveAttribute(const std::string& name);
+
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
   size_t addOrCheckAttribute(
@@ -1493,10 +1500,16 @@ struct CAFFE2_API ClassType : public NamedType {
         name,
         "'");
     TypePtr atype = getAttribute(*slot_idx);
-    TORCH_CHECK(ty->isSubtypeOf(atype));
+    TORCH_CHECK(
+      ty->isSubtypeOf(atype),
+      ty->python_str(),
+      " is not compatible with the type ",
+      atype->python_str(),
+      " for the field '",
+      name,
+      "'");
     return *slot_idx;
   }
-
 
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
@@ -1505,14 +1518,6 @@ struct CAFFE2_API ClassType : public NamedType {
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
   }
-
-  // generate a refined version of this class.
-  // It has the same name but the slot Types are subtypes of
-  // the original slots. It is only valid to refine a class type in a context
-  // where it is know that there are not assignments to the objects slots
-  // that would invalidate the refinement.
-  // These variants are not registered in the global class table.
-  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_);
@@ -1528,14 +1533,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return ptr;
   }
 
-  bool is_module() const {
+  bool is_module() const override {
     return bool(parameterSlots_);
-  }
-  bool is_module(size_t slot) const {
-    if (auto cls = getAttribute(slot)->cast<at::ClassType>()) {
-      return cls->is_module();
-    }
-    return false;
   }
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
@@ -1543,7 +1542,22 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
+  void addMethod(Function* method);
+  Function* getMethod(const std::string& name) const;
+
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
+
+  // generate a refined version of this class.
+  // It has the same name but the slot Types are subtypes of
+  // the original slots. It is only valid to refine a class type in a context
+  // where it is know that there are not assignments to the objects slots
+  // that would invalidate the refinement.
+  // These variants are not registered in the global class table.
+  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
@@ -1572,7 +1586,6 @@ struct CAFFE2_API ClassType : public NamedType {
 
 };
 
-
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
 using ::torch::jit::script::CompilationUnit;
@@ -1580,9 +1593,14 @@ using ::torch::jit::Function;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
+
+// Subtype relations for Interface with ClassType:
+// lhs (ClassType or InterfaceType) is a subtype of rhs if:
+// 1. lhs methods are a superset of rhs methods
+// 2. if rhs is module interface, the lhs must be module interface or module itself
 struct CAFFE2_API InterfaceType : public NamedType {
   static InterfaceTypePtr create(
-      QualifiedName qualifiedName);
+      QualifiedName qualifiedName, bool is_module=false);
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<InterfaceType>()) {
@@ -1608,14 +1626,20 @@ struct CAFFE2_API InterfaceType : public NamedType {
   const std::vector<FunctionSchema>& methods() {
     return *methods_;
   }
+
+  bool is_module() const override{
+    return is_module_;
+  }
   static const TypeKind Kind = TypeKind::InterfaceType;
   ~InterfaceType() override;
  private:
-  InterfaceType(QualifiedName name);
+  InterfaceType(QualifiedName name, bool is_module);
 
   // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
+  // flag to distinguish if it's an interface type from a module or not
+  bool is_module_;
 };
 
 } // namespace c10

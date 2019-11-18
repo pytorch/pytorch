@@ -61,9 +61,6 @@
     THArgCheck(COND, ARG, FORMAT, s1.str);        \
   }
 
-#include <THNN/generic/AbsCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/BCECriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -99,15 +96,3 @@
 
 #include <THNN/generic/Tanh.c>
 #include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateLongType.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialClassNLLCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateBFloat16Type.h>

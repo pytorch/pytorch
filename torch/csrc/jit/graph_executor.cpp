@@ -261,7 +261,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   void addOutputForTensor(const at::Tensor& tensor) {
     auto v = Variable(tensor);
-    add_next_edge(v.defined() ? v.gradient_edge() : autograd::Edge{});
+    add_next_edge(v.defined() ? torch::autograd::impl::gradient_edge(v) : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
@@ -495,7 +495,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   }
 
   ExecutionPlan getPlanFor(Stack& stack) override {
-    return getGraphExecutorOptimize() ? getOrCompile(stack)
+   return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
 
@@ -713,10 +713,6 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 }
 
 void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
-  // run custom passes that different backends can register
-  for (const auto& pass : getCustomPasses()) {
-    pass(graph);
-  }
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
   DecomposeOps(graph);
@@ -732,6 +728,12 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   QuantFusion(graph);
 
   FuseGraph(graph);
+
+  // Run custom passes that different backends can register.
+  // This is done last to give internal optimization passes priority.
+  for (const auto& pass : getCustomPasses()) {
+    pass(graph);
+  }
 }
 
 void runOptimization(std::shared_ptr<Graph>& graph) {

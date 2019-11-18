@@ -20,11 +20,11 @@ softmax_configs_short = op_bench.config_list(
         'N', 'C', 'H', 'W'
     ],
     attrs=[
+        [1, 3, 256, 256],
         [4, 3, 256, 256],
-        [8, 3, 512, 512],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short']
 )
@@ -32,10 +32,10 @@ softmax_configs_short = op_bench.config_list(
 
 softmax_configs_long = op_bench.cross_product_configs(
     N=[8, 16],
-    C=[3, 64],
-    H=[64, 128],
-    W=[64, 128],
-    device=['cpu'],
+    C=[3],
+    H=[256, 512],
+    W=[256, 512],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 
