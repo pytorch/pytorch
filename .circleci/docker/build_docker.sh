@@ -13,6 +13,8 @@ retry () {
 last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
 tag="${CIRCLE_BUILD_NUM}"
 
+tag="mingbo_test"
+
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
 image="${registry}/pytorch/${IMAGE_NAME}"
 
