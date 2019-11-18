@@ -312,6 +312,11 @@ ${statements}
 #endif
 """)
 
+# Generate a file that lists all functions and their schema string. Used for XLA
+REGISTRATION_DECLARATION = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
+""")
+
 
 FACTORY_FUNCTION_NAMES = None
 
@@ -502,6 +507,18 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
+    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
+    registration_declarations = []
+
+    # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
+    for declaration in aten_declarations:
+        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'einsum'):
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
+
+    env = {
+        'registration_declarations': registration_declarations,
+    }
+    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -797,12 +814,10 @@ def emit_body(declaration):
                 output_var = return_info['name']
                 if output_idx in view_info_dict:
                     stmt = wrap_view_single(output_var, view_info_dict[output_idx])
-                elif 'Tensor' in return_info['type']:
-                    stmt = '{output_var} = as_variable({output_var});'.format(output_var=output_var)
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable(std::move({}))'.format(call), []
+            return 'std::move({})'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
