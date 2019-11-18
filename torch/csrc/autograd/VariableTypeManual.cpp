@@ -178,7 +178,10 @@ Tensor & resize_(Tensor & self, IntArrayRef size) {
   return self;
 }
 
-Tensor & resize_as_(Tensor & self, const Tensor & the_template) {
+Tensor& resize_as_(
+    Tensor& self,
+    const Tensor& the_template,
+    c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
@@ -190,7 +193,7 @@ Tensor & resize_as_(Tensor & self, const Tensor & the_template) {
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(self_, the_template_);
+    at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
   return self;
 }
