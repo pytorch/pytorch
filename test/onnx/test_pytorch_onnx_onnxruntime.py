@@ -1619,6 +1619,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
 
+    @skipIfNoLapack
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_logdet(self):
+        class LogDet(torch.nn.Module):
+            def forward(self, x):
+                return torch.logdet(x)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(LogDet(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
