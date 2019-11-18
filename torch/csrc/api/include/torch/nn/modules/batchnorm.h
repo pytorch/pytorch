@@ -1,11 +1,14 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
+#include <torch/nn/functional/batchnorm.h>
 #include <torch/nn/options/batchnorm.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
 #include <cstdint>
+
+namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
@@ -86,7 +89,37 @@ class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
  public:
   BatchNormImplBase(const BatchNormOptions& options_);
 
-  virtual Tensor forward(const Tensor& input);
+  virtual Tensor forward(const Tensor& input) {
+    _check_input_dim(input);
+
+    double exponential_average_factor;
+    if (options.momentum() == c10::nullopt) {
+      exponential_average_factor = 0.0;
+    } else {
+      exponential_average_factor = options.momentum().value();
+    }
+
+    if (this->is_training() && options.track_running_stats()) {
+      if (num_batches_tracked.defined()) {
+        num_batches_tracked += 1;
+        if (options.momentum() == c10::nullopt) {  // use cumulative moving average
+          exponential_average_factor = 1.0 / num_batches_tracked.item<double>();
+        } else {  // use exponential moving average
+          exponential_average_factor = options.momentum().value();
+        }
+      }
+    }
+
+    return F::detail::batch_norm(
+        input,
+        running_mean,
+        running_var,
+        weight,
+        bias,
+        this->is_training() || !options.track_running_stats(),
+        /*momentum=*/exponential_average_factor,
+        options.eps());
+  }
 
   void reset() override {
     if (options.affine()) {
@@ -110,7 +143,13 @@ class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
 
   void reset_running_stats();
 
-  void reset_parameters();
+  void reset_parameters() {
+    reset_running_stats();
+    if (options.affine()) {
+      torch::nn::init::ones_(weight);
+      torch::nn::init::zeros_(bias);
+    }
+  }
 
   /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {

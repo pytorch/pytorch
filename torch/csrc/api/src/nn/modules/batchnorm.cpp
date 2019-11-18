@@ -1,4 +1,3 @@
-#include <torch/nn/functional/batchnorm.h>
 #include <torch/nn/modules/batchnorm.h>
 
 #include <torch/cuda.h>
@@ -11,8 +10,6 @@
 #include <ostream>
 #include <utility>
 #include <vector>
-
-namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
@@ -91,48 +88,6 @@ void BatchNormImplBase<D, Derived>::reset_running_stats() {
     running_var.fill_(1);
     num_batches_tracked.zero_();
   }
-}
-
-template <size_t D, typename Derived>
-void BatchNormImplBase<D, Derived>::reset_parameters() {
-  reset_running_stats();
-  if (options.affine()) {
-    torch::nn::init::ones_(weight);
-    torch::nn::init::zeros_(bias);
-  }
-}
-
-template <size_t D, typename Derived>
-Tensor BatchNormImplBase<D, Derived>::forward(const Tensor& input) {
-  _check_input_dim(input);
-
-  double exponential_average_factor;
-  if (options.momentum() == c10::nullopt) {
-    exponential_average_factor = 0.0;
-  } else {
-    exponential_average_factor = options.momentum().value();
-  }
-
-  if (this->is_training() && options.track_running_stats()) {
-    if (num_batches_tracked.defined()) {
-      num_batches_tracked += 1;
-      if (options.momentum() == c10::nullopt) {  // use cumulative moving average
-        exponential_average_factor = 1.0 / num_batches_tracked.item<double>();
-      } else {  // use exponential moving average
-        exponential_average_factor = options.momentum().value();
-      }
-    }
-  }
-
-  return F::detail::batch_norm(
-      input,
-      running_mean,
-      running_var,
-      weight,
-      bias,
-      this->is_training() || !options.track_running_stats(),
-      /*momentum=*/exponential_average_factor,
-      options.eps());
 }
 
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
