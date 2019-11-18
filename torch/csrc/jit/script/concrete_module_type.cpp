@@ -39,6 +39,7 @@ ClassTypePtr createTypeFromData(const ConcreteModuleTypeData& data) {
 
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromInterface(
     InterfaceTypePtr interface) {
+  TORCH_INTERNAL_ASSERT(interface->is_module());
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
   ret->jitType_ = std::move(interface);
   return ret;
