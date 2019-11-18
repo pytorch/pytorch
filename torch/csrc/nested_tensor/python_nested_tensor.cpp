@@ -42,6 +42,9 @@ PyObject *_ListNestedTensorVariableClass = nullptr;
 
 PyObject *_ListNestedTensorVariable_nested_size(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  if (self.nested_dim() == 0) {
+    return PyTuple_New(0);
+  }
   return map_more<PyObject *>(
       self.get_structure(),
       [](at::Tensor tensor) -> PyObject * { return wrap(tensor.sizes()); },
@@ -50,6 +53,9 @@ PyObject *_ListNestedTensorVariable_nested_size(PyObject *self_) {
 
 PyObject *_ListNestedTensorVariable_nested_stride(PyObject *self_) {
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  if (self.nested_dim() == 0) {
+    return PyTuple_New(0);
+  }
   return map_more<PyObject *>(
       self.get_structure(),
       [](at::Tensor tensor) -> PyObject * { return wrap(tensor.strides()); },
@@ -233,11 +239,14 @@ static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
     {"device", (getter)_ListNestedTensorVariable_device, nullptr, nullptr,
      nullptr},
     {"grad", (getter)_ListNestedTensorVariable_grad, nullptr, nullptr, nullptr},
+    {"requires_grad", (getter)_ListNestedTensorVariable_requires_grad, nullptr, nullptr, nullptr},
     {nullptr}};
 
 static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {"element_size", (PyCFunction)_ListNestedTensorVariable_element_size,
      METH_NOARGS, "Return element size."},
+    {"nested_dim", (PyCFunction)_ListNestedTensorVariable_nested_dim,
+     METH_NOARGS, "Return nested dim."},
     {"nested_size", (PyCFunction)_ListNestedTensorVariable_nested_size,
      METH_NOARGS, "Return nested_size."},
     {"nested_stride", (PyCFunction)_ListNestedTensorVariable_nested_stride,
@@ -252,8 +261,6 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      "jit_apply and returns."},
     {"backward", (PyCFunction)_ListNestedTensorVariable_backward, METH_VARARGS,
      "backward and returns."},
-    {"requires_grad", (PyCFunction)_ListNestedTensorVariable_requires_grad,
-     METH_NOARGS, "Returns requires_grad."},
     {"is_pinned", (PyCFunction)_ListNestedTensorVariable_is_pinned, METH_NOARGS,
      "Returns is_pinned."},
     {"is_contiguous", (PyCFunction)_ListNestedTensorVariable_is_contiguous,

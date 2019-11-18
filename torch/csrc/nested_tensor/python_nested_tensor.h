@@ -10,6 +10,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/include/torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/tensor_new.h>
 #include <typeinfo>
 
 // TODO:
@@ -91,7 +92,14 @@ static torch::autograd::Variable _get_first_variable(_NestedNode nested_node) {
   while (start->_children.size()) {
     start = &start->_children[0];
   }
+  if (start->_variable_node._variable.defined()) {
   return start->_variable_node._variable;
+  } else {
+    PyObject* fake_args = PyTuple_New(0);
+    PyObject* fake_kwargs = PyDict_New();
+    // TODO: Update if python_variable updates it too
+    return torch::utils::legacy_tensor_ctor(torch::tensors::get_default_tensor_type_id(), torch::tensors::get_default_scalar_type(), fake_args, fake_kwargs);
+  }
 }
 
 static std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {

@@ -21,6 +21,8 @@ PyObject *_ListNestedTensorVariable_is_contiguous(PyObject *self_);
 
 PyObject *_ListNestedTensorVariable_is_pinned(PyObject *self_);
 
+PyObject *_ListNestedTensorVariable_nested_dim(PyObject *self_);
+
 PyObject *_ListNestedTensorVariable_numel(PyObject *self_);
 
 PyObject *_ListNestedTensorVariable_pin_memory(PyObject *self_);

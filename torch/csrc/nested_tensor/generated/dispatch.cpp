@@ -59,6 +59,13 @@ PyObject *_ListNestedTensorVariable_is_pinned(PyObject *self_) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *_ListNestedTensorVariable_nested_dim(PyObject *self_) {
+  HANDLE_TH_ERRORS
+  auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;
+  return torch::autograd::utils::wrap(self.nested_dim());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *_ListNestedTensorVariable_numel(PyObject *self_) {
   HANDLE_TH_ERRORS
   auto &self = reinterpret_cast<_ListNestedTensorVariable *>(self_)->cdata;

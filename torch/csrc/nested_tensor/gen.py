@@ -44,6 +44,7 @@ method_names = [
     "grad",
     "is_contiguous",
     "is_pinned",
+    "nested_dim",
     "numel",
     "pin_memory",
     "requires_grad",
