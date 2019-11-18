@@ -1,4 +1,7 @@
+#include <torch/nn/functional/instancenorm.h>
 #include <torch/nn/modules/instancenorm.h>
+
+namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
@@ -6,6 +9,14 @@ namespace nn {
 template <size_t D, typename Derived>
 void InstanceNormImpl<D, Derived>::_check_input_dim(const Tensor& input) {
   TORCH_CHECK(false, "NotImplementedError");
+}
+
+template <size_t D, typename Derived>
+Tensor InstanceNormImpl<D, Derived>::forward(const Tensor& input) {
+  _check_input_dim(input);
+  return F::detail::instance_norm(
+    input, this->running_mean, this->running_var, this->weight, this->bias,
+    this->is_training() || !this->options.track_running_stats(), this->options.momentum().value(), this->options.eps());
 }
 
 void InstanceNorm1dImpl::_check_input_dim(const Tensor& input) {
