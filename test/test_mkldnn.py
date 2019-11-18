@@ -312,6 +312,13 @@ class TestMkldnn(TestCase):
                     self.assertEqual(
                         bn(x),
                         mkldnn_bn(x.to_mkldnn()).to_dense())
+                    if train and track_running_stats:
+                        self.assertEqual(
+                            bn.running_mean,
+                            mkldnn_bn.running_mean)
+                        self.assertEqual(
+                            bn.running_var,
+                            mkldnn_bn.running_var)
                     if (not train and track_running_stats):
                         self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
                         self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))

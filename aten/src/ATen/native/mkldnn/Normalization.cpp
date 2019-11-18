@@ -68,14 +68,16 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   if (train) {
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
+    ideep::batch_normalization_forward_training::compute<AllocForMKLDNN>(
+        x, w, b, y, saved_mean, saved_var, momentum, eps);
     if (use_running_stat) {
+      auto len = x.get_nelems() / w.get_nelems(); // n*h*w
       ideep::tensor m = itensor_from_tensor(running_mean);
       ideep::tensor v = itensor_from_tensor(running_var);
-      ideep::batch_normalization_forward_training::compute<AllocForMKLDNN>(
-          x, w, b, y, saved_mean, saved_var, m, v, momentum, eps);
-    } else {
-      ideep::batch_normalization_forward_training::compute<AllocForMKLDNN>(
-          x, w, b, y, saved_mean, saved_var, momentum, eps);
+      const std::vector<float> scales_mean{1 - momentum, momentum};
+      const std::vector<float> scales_var{1 - momentum , momentum * len / (len - 1)};
+      ideep::sum::compute(scales_mean, {m, saved_mean}, m);
+      ideep::sum::compute(scales_var, {v, saved_var}, v);
     }
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), input.options()),
