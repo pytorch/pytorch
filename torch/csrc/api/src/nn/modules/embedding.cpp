@@ -31,14 +31,18 @@ void EmbeddingImpl::reset() {
   if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
-    torch::nn::init::normal_(weight);
-    if (options.padding_idx() != c10::nullopt) {
-      torch::NoGradGuard no_grad;
-      weight[*options.padding_idx()].fill_(0);
-    }
+    reset_parameters();
   } else {
     TORCH_CHECK(options._weight().sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}), "Shape of _weight does not match num_embeddings and embedding_dim");
     weight = register_parameter("weight", options._weight());
+  }
+}
+
+void EmbeddingImpl::reset_parameters() {
+  torch::nn::init::normal_(weight);
+  if (options.padding_idx() != c10::nullopt) {
+    torch::NoGradGuard no_grad;
+    weight[*options.padding_idx()].fill_(0);
   }
 }
 
@@ -82,13 +86,17 @@ void EmbeddingBagImpl::reset() {
   if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
-    torch::nn::init::normal_(weight);
+    reset_parameters();
   } else {
     TORCH_CHECK(
       options._weight().sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}),
       "Shape of weight does not match num_embeddings and embedding_dim");
     weight = register_parameter("weight", options._weight());
   }
+}
+
+void EmbeddingBagImpl::reset_parameters() {
+  torch::nn::init::normal_(weight);
 }
 
 torch::Tensor EmbeddingBagImpl::forward(const Tensor& input, const Tensor& offsets, const Tensor& per_sample_weights) {
