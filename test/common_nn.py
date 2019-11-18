@@ -3277,19 +3277,21 @@ new_criterion_tests = [
         check_gradgrad=False,
         check_half=False,
     ),
-    dict(
-        module_name='CTCLoss',
-        desc='1d_target',
-        constructor_args=(14,),  # blank=14
-        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
-        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
-        reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_half=False,
-    ),
+    # Test is flaky
+    # See https://github.com/pytorch/pytorch/issues/29380.
+    # dict(
+    #     module_name='CTCLoss',
+    #     desc='1d_target',
+    #     constructor_args=(14,),  # blank=14
+    #     extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+    #     input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+    #     target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
+    #     reference_fn=lambda i, t, il, tl, m:
+    #         ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
+    #     check_sum_reduction=True,
+    #     check_gradgrad=False,
+    #     check_half=False,
+    # ),
     dict(
         module_name='CTCLoss',
         desc='2d_int_target',
