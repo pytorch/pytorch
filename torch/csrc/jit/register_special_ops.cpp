@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/vararg_functions.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
@@ -195,8 +196,8 @@ Operation createTensorFromList(const Node* node) {
       pop(stack, data, dtype, device);
     }
     auto sizes = compute_sizes(data);
-    auto tensor = autograd::make_variable(at::empty(
-        sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
+    auto tensor = at::empty(
+        sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
     recursiveStore(
         (char*)tensor.data_ptr(),
@@ -308,32 +309,8 @@ RegisterOperators reg({
         "aten::format(str self, ...) -> str",
         [](const Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
-          std::regex unsupported_options("\\{(.*?)\\}");
-          return [num_inputs, unsupported_options](Stack& stack) {
-            auto format = peek(stack, 0, num_inputs).toStringRef();
-
-            if (std::regex_search(format, unsupported_options)) {
-              AT_WARN("Format options are not supported.");
-            }
-
-            auto args = last(stack, num_inputs - 1);
-            std::stringstream ss;
-            for (size_t begin = 0, used_args = 0; true; ++used_args) {
-              size_t loc = format.find("{}", begin);
-              if (loc == std::string::npos) {
-                ss << format.substr(begin);
-                break;
-              }
-              ss << format.substr(begin, loc - begin);
-              if (used_args >= args.size()) {
-                AT_ERROR("Too few arguments for format string: ", format);
-              }
-              ss << args[used_args];
-              begin = loc + 2;
-            }
-
-            drop(stack, num_inputs);
-            push(stack, ss.str());
+          return [num_inputs](Stack& stack) {
+            formatFunc(num_inputs, stack);
             return 0;
           };
         },
@@ -350,7 +327,7 @@ RegisterOperators reg({
         IValue device;                                                     \
         bool requires_grad;                                                \
         pop(stack, scalar_val, dtype, device, requires_grad);              \
-        auto tensor = autograd::make_variable(tensor_creation_op);         \
+        auto tensor = tensor_creation_op;                                  \
         tensor = castTensorTo(tensor, dtype, device);                      \
         tensor.set_requires_grad(requires_grad);                           \
         push(stack, std::move(tensor));                                    \
@@ -365,7 +342,7 @@ RegisterOperators reg({
             IValue dtype;                                                  \
             IValue device;                                                 \
             pop(stack, scalar_val, dtype, device);                         \
-            auto tensor = autograd::make_variable(tensor_creation_op);     \
+            auto tensor = tensor_creation_op;                              \
             tensor = castTensorTo(tensor, dtype, device);                  \
             push(stack, std::move(tensor));                                \
             return 0;                                                      \
