@@ -23,63 +23,6 @@ namespace torch {
 namespace autograd {
 
 
-void Variable::detach_() {
-  if (is_view()) {
-    AT_ERROR("Can't detach views in-place. Use detach() instead");
-  }
-  // I think the choice here is conservative.  In principle, doing
-  // an in-place detach should give us the ability to just clear
-  // the autograd meta.  But this function ONLY resets requires_grad,
-  // grad_fn and output_nr; there's other metadata like debug name
-  // and hooks which aren't cleared.  Is this function supposed to
-  // clear those too? I'm not too sure, so I'm leaving it be for now.
-  auto autograd_meta = impl::materialize_autograd_meta(*this);
-  autograd_meta->set_requires_grad(false, unsafeGetTensorImpl());
-  autograd_meta->grad_fn_.reset();
-  autograd_meta->output_nr_ = 0;
-}
-
-void Variable::backward(
-    const Tensor& gradient,
-    bool keep_graph,
-    bool create_graph) const {
-  torch::autograd::backward({*this}, {gradient}, keep_graph, create_graph);
-}
-
-void Variable::set_data(const at::Tensor &new_data) const {
-  // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
-  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
-  // tensor type.
-  TORCH_CHECK(
-    _has_compatible_shallow_copy_type(*this, new_data),
-    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
-
-  // Resets gradient accumulator if metadata is out of date
-  AutogradMeta* autograd_meta = impl::get_autograd_meta(*this);
-  if (autograd_meta) {
-    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
-    auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
-    if (prior_accumulator) {
-      const auto prior_device = prior_accumulator->input_metadata(0).device();
-      const auto new_device = new_data.device();
-
-      if (new_data.type() != type() || prior_device != new_device) {
-        autograd_meta->grad_accumulator_.reset();
-      }
-    }
-  }
-
-  // Version counter is not shared when we replace a `Variable`'s tensor data
-  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
-  // See NOTE [ Version Counter Sharing ] for details.
-  //
-  // `var.set_data(new_data)` always ignores `var`'s `allow_tensor_metadata_change_`, because
-  // users need this API as an escape hatch for changing a tensor's metadata regardless of its
-  // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
-  // the behavior they want.
-  unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
-}
-
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base)
     : AutogradMeta(self_impl, false) {
   base_ = std::move(base);
@@ -108,7 +51,7 @@ const std::shared_ptr<Node>& Variable::grad_fn() const {
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
-    auto current_version = this->current_version();
+    auto current_version = this->_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<generated::AsStridedBackward>();
@@ -139,10 +82,6 @@ void Variable::remove_hook(unsigned pos) {
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
-}
-
-uint32_t Variable::current_version() const noexcept {
-  return unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 namespace {
