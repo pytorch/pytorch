@@ -108,6 +108,7 @@ ${cond} (_r.idx == ${i}) {
 """)
 
 # handler for output/no-output overload pair
+# (plugged into PY_VARIABLE_CASE as ${call_dispatch})
 PY_VARIABLE_OUT = CodeTemplate("""\
 if (_r.isNone(${out_idx})) {
   ${call_dispatch}
@@ -137,6 +138,7 @@ ${call_dispatch}.set_requires_grad(${requires_grad})""")
 
 # Unpack parsed args to locals, call the op, and wrap the result.
 # Lambda ensures that any RAII in ${inits} is out of the way by wrap() time.
+# This is important for GIL handling, as wrap can do allocation.
 # Captures are normally only the python args array _r, and sometimes self.
 PY_VARIABLE_WRAP = CodeTemplate("""\
 auto result = [&](){
@@ -146,12 +148,15 @@ auto result = [&](){
 return utils::wrap(${namedtuple_return_type}result);
 """)
 
+# PyMethodDef entry
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
 
+# PyMethodDef entry for binary op, throws not implemented error
 PY_VARIABLE_METHOD_BINOP_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycfunc_voidcast}TypeError_to_NotImplemented_<${pycname}>, ${flags}, NULL},""")
 
+# named tuple data structures
 PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\
 static PyStructSequence_Field fields${namedtuple_type_index}[] = {
   ${namedtuple_fields} {nullptr}
