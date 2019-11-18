@@ -4,6 +4,8 @@
 #include <torch/nn/options/instancenorm.h>
 #include <torch/nn/functional/instancenorm.h>
 
+namespace F = torch::nn::functional;
+
 namespace torch {
 namespace nn {
 
@@ -16,7 +18,12 @@ class InstanceNormImpl : public torch::nn::BatchNormImplBase<D, Derived> {
  public:
   using torch::nn::BatchNormImplBase<D, Derived>::BatchNormImplBase;
 
-  Tensor forward(const Tensor& input) override;
+  Tensor forward(const Tensor& input) override {
+    _check_input_dim(input);
+    return F::detail::instance_norm(
+      input, this->running_mean, this->running_var, this->weight, this->bias,
+      this->is_training() || !this->options.track_running_stats(), this->options.momentum().value(), this->options.eps());
+  }
 };
 
 /// Applies the InstanceNorm1d function.

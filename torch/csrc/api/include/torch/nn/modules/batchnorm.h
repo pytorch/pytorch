@@ -88,14 +88,40 @@ class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
 
   virtual Tensor forward(const Tensor& input);
 
-  void reset() override;
+  void reset() override {
+    if (options.affine()) {
+      weight = this->register_parameter("weight", torch::empty({options.num_features()}));
+      bias = this->register_parameter("bias", torch::empty({options.num_features()}));
+    } else {
+      weight = this->register_parameter("weight", Tensor());
+      bias = this->register_parameter("bias", Tensor());
+    }
+    if (options.track_running_stats()) {
+      running_mean = this->register_buffer("running_mean", torch::zeros({options.num_features()}));
+      running_var = this->register_buffer("running_var", torch::ones({options.num_features()}));
+      num_batches_tracked = this->register_buffer("num_batches_tracked", torch::tensor(0, torch::dtype(torch::kLong)));
+    } else {
+      running_mean = this->register_buffer("running_mean", Tensor());
+      running_var = this->register_buffer("running_var", Tensor());
+      num_batches_tracked = this->register_buffer("num_batches_tracked", Tensor());
+    }
+    reset_parameters();
+  }
 
   void reset_running_stats();
 
   void reset_parameters();
 
   /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+  void pretty_print(std::ostream& stream) const override {
+    stream << std::boolalpha
+           << "torch::nn::BatchNorm" << D << "d("
+           << options.num_features() << ", "
+           << "eps=" << options.eps() << ", "
+           << "momentum=" << options.momentum().value() << ", "
+           << "affine=" << options.affine() << ", "
+           << "track_running_stats=" << options.track_running_stats() << ")";
+  }
 
   /// The options with which this module was constructed.
   BatchNormOptions options;
