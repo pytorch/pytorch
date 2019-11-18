@@ -538,6 +538,9 @@ at::Tensor _convolution(
 
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
+  if (!input_is_mkldnn) {
+    input = input.contiguous();
+  }
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
@@ -564,10 +567,6 @@ at::Tensor _convolution(
   check_shape_forward(input, weight, bias, params, input_is_mkldnn);
 
   if (k == 3) {
-    // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input_is_mkldnn) {
-      input = input.contiguous();
-    }
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -583,15 +582,15 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
-            input.contiguous(input.suggest_memory_format()), weight, bias,
+            input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
 
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
-            input.contiguous(), weight, bias,
+            input, weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
-          output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+          output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
       }
   } else if (params.use_cudnn(input)) {
     TORCH_CHECK(input.type() == weight.type(),
@@ -603,11 +602,11 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input, weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::cudnn_convolution(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
@@ -620,11 +619,11 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::miopen_convolution_transpose(
-          input.contiguous(), weight, bias,
+          input, weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::miopen_convolution(
-          input.contiguous(), weight, bias,
+          input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input)) {
@@ -636,7 +635,7 @@ at::Tensor _convolution(
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
     if (!input_is_mkldnn) {
-      output = at::mkldnn_convolution(input.contiguous(), weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
+      output = at::mkldnn_convolution(input, weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
                                       params.padding, params.stride, params.dilation, params.groups);
     } else {
       // do not call contiguous on mkldnn tensor
@@ -650,10 +649,9 @@ at::Tensor _convolution(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
     } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
-          input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+          input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {
       std::vector<Tensor> outputs(params.groups);
-      input = input.contiguous();
       for (int g = 0; g < params.groups; ++g) {
         auto input_g = subtensor(input, 1, params.groups, g);
         auto weight_g = subtensor(weight, 0, params.groups, g);
