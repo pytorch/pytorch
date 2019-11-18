@@ -142,7 +142,13 @@ class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
     reset_parameters();
   }
 
-  void reset_running_stats();
+  void reset_running_stats() {
+    if (options.track_running_stats()) {
+      running_mean.zero_();
+      running_var.fill_(1);
+      num_batches_tracked.zero_();
+    }
+  }
 
   void reset_parameters() {
     reset_running_stats();

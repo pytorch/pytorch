@@ -80,15 +80,6 @@ BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormOptions& options
   reset();
 }
 
-template <size_t D, typename Derived>
-void BatchNormImplBase<D, Derived>::reset_running_stats() {
-  if (options.track_running_stats()) {
-    running_mean.zero_();
-    running_var.fill_(1);
-    num_batches_tracked.zero_();
-  }
-}
-
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
   TORCH_CHECK(
       input.dim() == 2 || input.dim() == 3,
