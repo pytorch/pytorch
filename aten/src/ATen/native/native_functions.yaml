@@ -1015,7 +1015,7 @@
     CPU: empty_per_channel_affine_quantized_other_backends_stub
     QuantizedCPU: empty_per_channel_affine_quantized_cpu
 
-- func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
+- func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   supports_named_tensor: True
   variants: method
   device_guard: False
