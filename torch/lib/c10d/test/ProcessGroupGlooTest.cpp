@@ -368,54 +368,54 @@ void testRecv(const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-    {
-      TemporaryFile file;
-      auto work = testSignal(file.path, SIGSTOP);
-      try {
-        std::rethrow_exception(work->exception());
-      } catch (const std::exception& ex) {
-        std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
-      }
+  {
+    TemporaryFile file;
+    auto work = testSignal(file.path, SIGSTOP);
+    try {
+      std::rethrow_exception(work->exception());
+    } catch (const std::exception& ex) {
+      std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
     }
+  }
 
-    {
-      TemporaryFile file;
-      auto work = testSignal(file.path, SIGKILL);
-      try {
-        std::rethrow_exception(work->exception());
-      } catch (const std::exception& ex) {
-        std::cout << "SIGKILL test got: " << ex.what() << std::endl;
-      }
+  {
+    TemporaryFile file;
+    auto work = testSignal(file.path, SIGKILL);
+    try {
+      std::rethrow_exception(work->exception());
+    } catch (const std::exception& ex) {
+      std::cout << "SIGKILL test got: " << ex.what() << std::endl;
     }
+  }
 
-    {
-      TemporaryFile file;
-      testAllreduce(file.path, at::DeviceType::CPU);
-    }
+  {
+    TemporaryFile file;
+    testAllreduce(file.path, at::DeviceType::CPU);
+  }
 
-  #ifdef USE_CUDA
-    {
-      TemporaryFile file;
-      testAllreduce(file.path, at::DeviceType::CUDA);
-    }
-  #endif
+#ifdef USE_CUDA
+  {
+    TemporaryFile file;
+    testAllreduce(file.path, at::DeviceType::CUDA);
+  }
+#endif
 
-    {
-      TemporaryFile file;
-      testBroadcast(file.path, at::DeviceType::CPU);
-    }
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, at::DeviceType::CPU);
+  }
 
-  #ifdef USE_CUDA
-    {
-      TemporaryFile file;
-      testBroadcast(file.path, at::DeviceType::CUDA);
-    }
-  #endif
+#ifdef USE_CUDA
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, at::DeviceType::CUDA);
+  }
+#endif
 
-    {
-      TemporaryFile file;
-      testBarrier(file.path);
-    }
+  {
+    TemporaryFile file;
+    testBarrier(file.path);
+  }
 
   {
     TemporaryFile file;
