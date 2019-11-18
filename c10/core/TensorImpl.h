@@ -809,19 +809,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t stride(int64_t d) const;
 
   /**
-   * True if we will dispatch to the Variable handler for this tensor.  This has
-   * nothing to do with the variable-ness of a tensor (as every tensor is a
-   * variable; see also the invariant on type_set_), it just consults thread
-   * local state.
-   *
-   * TODO: Remove this in favor of a more direct test that doesn't mention
-   * Tensor at all.
-   */
-  bool is_variable() const {
-    return !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
-  }
-
-  /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
