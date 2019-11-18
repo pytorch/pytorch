@@ -19,24 +19,6 @@ namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
-template <size_t D, typename Derived>
-ConvImpl<D, Derived>::ConvImpl(ConvOptions<D> options_)
-    : options(std::move(options_)) {
-  reset();
-}
-
-template <size_t D, typename Derived>
-void ConvImpl<D, Derived>::reset_parameters() {
-  init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));  // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-
-  if (bias.defined()) {
-    int64_t fan_in, fan_out;
-    std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
-    auto bound = 1 / std::sqrt(fan_in);
-    init::uniform_(bias, -bound, bound);
-  }
-}
-
 Conv1dImpl::Conv1dImpl(
     ConvOptions<1> options_)
     : ConvImpl(options_.transposed(false).output_padding(0)) {}

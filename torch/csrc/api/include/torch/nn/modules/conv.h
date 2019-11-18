@@ -18,7 +18,9 @@ namespace nn {
 template <size_t D, typename Derived>
 class ConvImpl : public torch::nn::Cloneable<Derived> {
  public:
-  explicit ConvImpl(ConvOptions<D> options_);
+  explicit ConvImpl(ConvOptions<D> options_) : options(std::move(options_)) {
+    reset();
+  }
 
   void reset() override {
     TORCH_CHECK(
@@ -55,7 +57,16 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
     reset_parameters();
   }
 
-  void reset_parameters();
+  void reset_parameters() {
+    init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));  // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+
+    if (bias.defined()) {
+      int64_t fan_in, fan_out;
+      std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
+      auto bound = 1 / std::sqrt(fan_in);
+      init::uniform_(bias, -bound, bound);
+    }
+  }
 
   /// Pretty prints the `Conv{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
