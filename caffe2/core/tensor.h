@@ -197,7 +197,7 @@ class CAFFE2_API Tensor final {
   void CopyFrom(const Tensor& src, bool async = false) {
     // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    AT_ASSERT(!impl_->is_variable() || !(impl_->requires_grad() && at::GradMode::is_enabled()));
+    AT_ASSERT(!(impl_->requires_grad() && at::GradMode::is_enabled()));
 #endif
     AT_ASSERTM(
         src.impl_->is_contiguous(),
