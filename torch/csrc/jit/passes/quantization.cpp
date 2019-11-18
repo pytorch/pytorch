@@ -692,6 +692,141 @@ c10::optional<IValue> toTwoElementIntList(Value* v) {
   }
   return c10::nullopt;
 }
+
+script::Module findChildModule(
+    const script::Module& module,
+    const std::vector<std::string>& path) {
+  script::Module m = module;
+  for (size_t i = 0; i < path.size(); ++i) {
+    m = m.attr(path[i]).toModule();
+  }
+  return m;
+}
+
+std::string addChildModule(
+    script::Module module,
+    const script::Module& child_module,
+    const std::vector<std::string>& path) {
+  script::Module cur = module;
+  for (size_t i = 0; i < path.size() - 1; ++i) {
+    cur = module.attr(path[i]).toModule();
+  }
+
+  std::string cur_name = path[path.size() - 1];
+  int uid = 0;
+  std::string child_name = cur_name + "_" + c10::to_string(uid++);
+  while (module.hasattr(child_name)) {
+    child_name = cur_name + "_" + c10::to_string(uid++);
+  }
+  module.register_module(child_name, child_module.clone());
+  return child_name;
+}
+
+// Check if v is the input of the graph
+bool hitGraphInput(Value* value) {
+  bool hit_graph_input = false;
+  Graph* graph = value->owningGraph();
+  for (size_t i = 0; i < graph->inputs().size(); ++i) {
+    // calling GetAttr on an input of the graph
+    // which means the module instance we call GetAttr on is
+    // passed in as input
+    hit_graph_input |= value == graph->inputs()[i];
+  }
+  return hit_graph_input;
+}
+
+// A helper class to make uses of module unique
+class ModuleUseDeduper {
+ public:
+  ModuleUseDeduper(script::Module& module) : module_(module) {}
+  void dedup() {
+    for (auto& method: module_.get_methods()) {
+      findModuleUses(method.name());
+    }
+
+    for (auto& method: module_.get_methods()) {
+      dedupModuleUses(method.name());
+    }
+  }
+
+  // Analyze the code to record necessary information
+  // to dedup the module uses
+  void findModuleUses(
+      const std::string& method_name) {
+    script::Method method = module_.get_method(method_name);
+    auto graph = method.graph();
+
+    std::stack<Block*> blocks_to_visit;
+    blocks_to_visit.push(graph->block());
+    Value* self = graph->inputs()[0];
+    while (!blocks_to_visit.empty()) {
+      Block* b = blocks_to_visit.top();
+      blocks_to_visit.pop();
+      for (Node* n : b->nodes()) {
+        if (n->kind() != prim::CallMethod) {
+          continue;
+        }
+        std::vector<std::string> path;
+        Value* instance = n->inputs()[0];
+        // Iterator to traverse back the GetAttr calls
+        Value* iter = instance;
+        // trace back the instance to recover the path of the submodule
+        while (!hitGraphInput(iter)) {
+          Node* get_attr = iter->node();
+          // record the name of GetAttr
+          path.push_back(get_attr->s(attr::name));
+          // trace back the chain of GetAttr
+          iter = get_attr->inputs()[0];
+        }
+
+        if (iter == self) {
+          value_to_path_map_[instance] = path;
+          auto m = findChildModule(module_, path);
+          if (module_set_.find(m.module_object()) == module_set_.end()) {
+            module_set_.insert(m.module_object());
+          } else {
+            use_to_rewrite_.push_back(instance);
+          }
+        } else {
+          GRAPH_DEBUG("Can't handle the case of calling GetAttr on input ",
+                      " of the graph in make submodule uses unique");
+        }
+
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
+      }
+    }
+  }
+
+  // Deduplicate module uses given the information we recorded before
+  void dedupModuleUses(
+      const std::string& method_name) {
+    for (Value* v : use_to_rewrite_) {
+      const auto& path = value_to_path_map_[v];
+      const auto& m = findChildModule(module_, path);
+      // add a clone of the child module to the parent of the duplicated module
+      const auto& child_name = addChildModule(module_, m, path);
+      TORCH_INTERNAL_ASSERT(v->node()->kind() == prim::GetAttr);
+      // change the name in GetAttr call
+      auto original_name = v->node()->s(attr::name);
+      v->node()->s_(attr::name, child_name);
+      GRAPH_DEBUG("Module use dedup: changing original module ",
+                  original_name,
+                  " to ",
+                  child_name);
+    }
+  }
+
+ private:
+  script::Module module_;
+  // Map from value of module instance to the list of names of submodules starting from
+  // the top level module, e.g. ["sub1", "sub2", "relu"]
+  std::unordered_map<Value*, std::vector<std::string>> value_to_path_map_;
+  std::unordered_set<script::ModulePtr> module_set_;
+  std::vector<Value*> use_to_rewrite_;
+};
+
 } // namespace
 
 TORCH_API script::Module InsertObservers(
@@ -1083,5 +1218,12 @@ void FoldPrepackedWeightIntoModule(
     }
   }
 }
+
+void DedupModuleUses(
+    script::Module& module) {
+  ModuleUseDeduper d(module);
+  d.dedup();
+}
+
 } // namespace jit
 } // namespace torch

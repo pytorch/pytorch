@@ -137,5 +137,13 @@ TORCH_API void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const script::Module& linear_params_module,
     const script::Module& conv_params_module);
+
+
+/** Deduplicate multiple uses of the same module by
+ *  creating a new module for each use of the module
+ */
+TORCH_API void DedupModuleUses(
+    script::Module& module);
+
 } // namespace jit
 } // namespace torch

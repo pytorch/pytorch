@@ -1488,6 +1488,31 @@ graph(%input, %weight):
             loaded_res = loaded_mod._c._get_method('forward')(data)
             self.assertEqual(ref_res, loaded_res)
 
+    def test_dedup_module_uses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(x)
+                x -= 0.5
+                return self.relu(x)
+
+        x = torch.randn((2, 2))
+        m = torch.jit.script(M())
+        ref_res = m(x)
+        assert len([x for x, _ in m._modules._c.items()
+                    if x.startswith('relu')]) == 1, \
+                "Expected to have 1 relu modules after dedup module uses"
+        torch._C._jit_pass_dedup_module_uses(m._c)
+        m = torch.jit._recursive.wrap_cpp_module(m._c)
+        res = m(x)
+        assert len([x for x, _ in m._modules._c.items()
+                    if x.startswith('relu')]) == 2, \
+                "Expected to have 2 relu modules after dedup module uses"
+        self.assertEqual(res, ref_res)
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)

@@ -197,6 +197,7 @@ void initJITBindings(PyObject* module) {
             FoldQuantizeCallIntoBuffer(module, method_name);
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
+      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
