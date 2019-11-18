@@ -518,6 +518,8 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
+    _check_seekable(f)
+
     if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
         pickle_load_args['encoding'] = 'utf-8'
 

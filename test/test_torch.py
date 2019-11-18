@@ -4428,7 +4428,8 @@ class _TestTorchMixin(object):
         resource = FilelikeMock(data=b"data")
         delattr(resource, "tell")
         delattr(resource, "seek")
-        self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
+        with self.assertRaisesRegex(AttributeError, expected_err_msg):
+            torch.load(resource)
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
