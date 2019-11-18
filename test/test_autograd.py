@@ -2595,6 +2595,18 @@ class TestAutograd(TestCase):
         print(prof.table())
         print(prof.key_averages(group_by_input_shape=True).table())
 
+    def test_profiler_no_cuda(self):
+        print("")
+        layer = torch.nn.Linear(20, 30)
+        x = torch.randn(128, 20)
+        with profile(use_cuda=False) as prof:
+            layer(x)
+
+        prof_str = str(prof)
+        print(prof_str)
+        self.assertTrue('cpu' in prof_str.lower())
+        self.assertTrue('cuda' not in prof_str.lower())
+
     def test_profiler_aggregation_lstm(self):
         print("")
         rnn = torch.nn.LSTM(10, 20, 2)
@@ -3349,7 +3361,7 @@ def gradgradcheck_method_precision_override(test_name):
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, nondet_tol=1e-10))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
