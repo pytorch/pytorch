@@ -164,7 +164,7 @@ class BenchmarkRunner(object):
     def __init__(self, args):
         # TODO: consider time-bound constraints as well.
         self.args = args
-        self.iters = 200
+        self.iters = 100
         self.has_explicit_iteration_count = False
         self.multiplier = 2
         self.predefined_minimum_secs = 1
@@ -249,7 +249,7 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        cuda_sync = True if 'cuda' in test_case.test_config.test_name else False 
+        cuda_sync = True if 'cuda' in test_case.test_config.test_name else False
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
@@ -336,7 +336,7 @@ class BenchmarkRunner(object):
                 (self.args.tag_filter == 'all' or
                     self._check_keep(op_test_config.tag, self.args.tag_filter)) and
                 (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only) and
-                (self.args.device == 'None' or 'device' not in op_test_config.test_name or 
+                (self.args.device == 'None' or 'device' not in op_test_config.test_name or
                     self.args.device in op_test_config.test_name)):
             return True
 
