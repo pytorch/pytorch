@@ -1562,24 +1562,28 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
   double eps = 1e-05;
   double momentum = 0.1;
 
-  auto input = torch::randn({2, 5});
-  auto mean = torch::randn(5);
-  auto variance = torch::rand(5);
+  auto input = torch::ones({2, 5});
+  auto mean = torch::ones(5);
+  auto variance = torch::ones({num_features});
   auto weight = torch::ones({num_features});
   auto bias = torch::zeros({num_features});
   auto output = F::instance_norm(
-    input, mean, variance,
-    F::InstanceNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
-  auto expected = (input - mean) / torch::sqrt(variance + eps);
+    input,
+    F::InstanceNormFuncOptions()
+      .running_mean(mean)
+      .running_var(variance)
+      .weight(weight)
+      .bias(bias)
+      .momentum(momentum)
+      .eps(eps));
+  auto expected = torch::ones({2, 5});
   ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, InstanceNorm1dDefaultOptions) {
-  auto input = torch::randn({2, 5});
-  auto mean = torch::randn(5);
-  auto variance = torch::rand(5);
-  auto output = F::instance_norm(input, mean, variance);
-  auto expected = (input - mean) / torch::sqrt(variance + 1e-5);
+  auto input = torch::ones({2, 5});
+  auto output = F::instance_norm(input);
+  auto expected = torch::ones({2, 5});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1588,15 +1592,21 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
   double eps = 1e-05;
   double momentum = 0.1;
 
-  auto input = torch::randn({2, num_features, 4, 4});
-  auto mean = torch::randn(num_features);
-  auto variance = torch::rand(num_features);
+  auto input = torch::ones({2, num_features, 4, 4});
+  auto mean = torch::ones(num_features);
+  auto variance = torch::ones({num_features});
   auto weight = torch::ones({num_features});
   auto bias = torch::zeros({num_features});
   auto output = F::instance_norm(
-    input, mean, variance,
-    F::InstanceNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
-  auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
+    input,
+    F::InstanceNormFuncOptions()
+      .running_mean(mean)
+      .running_var(variance)
+      .weight(weight)
+      .bias(bias)
+      .momentum(momentum)
+      .eps(eps));
+  auto expected = torch::ones({2, num_features, 4, 4});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1604,11 +1614,9 @@ TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
 
-  auto input = torch::randn({2, num_features, 4, 4});
-  auto mean = torch::randn(num_features);
-  auto variance = torch::rand(num_features);
-  auto output = F::instance_norm(input, mean, variance);
-  auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
+  auto input = torch::ones({2, num_features, 4, 4});
+  auto output = F::instance_norm(input);
+  auto expected = torch::ones({2, num_features, 4, 4});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1617,15 +1625,21 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
   double eps = 1e-05;
   double momentum = 0.1;
 
-  auto input = torch::randn({2, num_features, 2, 2, 2});
-  auto mean = torch::randn(num_features);
-  auto variance = torch::rand(num_features);
+  auto input = torch::ones({2, num_features, 2, 2, 2});
+  auto mean = torch::ones({num_features});
+  auto variance = torch::ones({num_features});
   auto weight = torch::ones({num_features});
   auto bias = torch::zeros({num_features});
   auto output = F::instance_norm(
-    input, mean, variance,
-    F::InstanceNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
-  auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
+    input,
+    F::InstanceNormFuncOptions()
+      .running_mean(mean)
+      .running_var(variance)
+      .weight(weight)
+      .bias(bias)
+      .momentum(momentum)
+      .eps(eps));
+  auto expected = torch::ones({2, num_features, 2, 2, 2});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1633,11 +1647,9 @@ TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
 
-  auto input = torch::randn({2, num_features, 2, 2, 2});
-  auto mean = torch::randn(num_features);
-  auto variance = torch::rand(num_features);
-  auto output = F::instance_norm(input, mean, variance);
-  auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
+  auto input = torch::ones({2, num_features, 2, 2, 2});
+  auto output = F::instance_norm(input);
+  auto expected = torch::ones({2, num_features, 2, 2, 2});
   ASSERT_TRUE(output.allclose(expected));
 }
 
