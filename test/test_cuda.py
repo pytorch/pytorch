@@ -760,10 +760,10 @@ class TestCuda(TestCase):
             torch.cuda.manual_seed(2)
             self.assertEqual(torch.cuda.initial_seed(), 2)
             x.uniform_()
-            a = torch.bernoulli(torch.full_like(x, 0.5))
+            a = torch.bernoulli(torch.full_like(x, 0.5, memory_format=torch.preserve_format))
             torch.cuda.manual_seed(2)
             y = x.clone().uniform_()
-            b = torch.bernoulli(torch.full_like(x, 0.5))
+            b = torch.bernoulli(torch.full_like(x, 0.5, memory_format=torch.preserve_format))
             self.assertEqual(x, y)
             self.assertEqual(a, b)
             self.assertEqual(torch.cuda.initial_seed(), 2)
@@ -1861,7 +1861,7 @@ class TestCuda(TestCase):
             output = MultiplyInStream.apply(x)
             output.sum().backward()
 
-        self.assertEqual(x.grad, torch.ones_like(x) * 2)
+        self.assertEqual(x.grad, torch.ones_like(x, memory_format=torch.preserve_format) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
 
     def test_streaming_backwards_multiple_streams(self):
@@ -1896,7 +1896,7 @@ class TestCuda(TestCase):
             model = StreamModel().cuda()
             model(x).sum().backward()
 
-        self.assertEqual(x.grad, torch.ones_like(x) * 5)
+        self.assertEqual(x.grad, torch.ones_like(x, memory_format=torch.preserve_format) * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_cuda_init_race(self):
