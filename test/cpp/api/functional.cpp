@@ -1986,6 +1986,7 @@ void test_isfinite(const at::Device& device) {
       inf
     }, torch::TensorOptions().dtype(S).device(device));
     ASSERT_TRUE(torch::allclose(
+      // torch::allclose does not support comparing torch::kBool
       torch::isfinite(x).toType(torch::kInt),
       torch::tensor(
         {false, true, true, true, true, true, true, false},
