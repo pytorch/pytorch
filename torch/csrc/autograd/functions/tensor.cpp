@@ -19,7 +19,7 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   auto& grad = grads[0];
   variable_list grad_inputs(2);
   if (should_compute_output(0)) {
-    grad_inputs[0] = at::zeros_like(grad, at::MemoryFormat::Contiguous);
+    grad_inputs[0] = at::zeros_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (should_compute_output(1)) {
     at::DeviceGuard device_guard(src_device);
