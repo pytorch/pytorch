@@ -653,7 +653,7 @@ class TestCase(expecttest.TestCase):
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
         if is_uncoalesced:
-            v = torch.cat([v, torch.randn_like(v)], 0)
+            v = torch.cat([v, torch.randn_like(v, memory_format=torch.contiguous_format)], 0)
             i = torch.cat([i, i], 1)
 
         x = torch.sparse_coo_tensor(i, v, torch.Size(size))
@@ -1287,8 +1287,7 @@ def do_test_empty_full(self, dtypes, layout, device):
                 check_value(v.new_full(shape, fv + 3, dtype=int64_dtype, device=device, requires_grad=False),
                             int64_dtype, layout, device, fv + 3, False)
                 check_value(fake_full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
-                check_value(fake_full_like(v, fv + 5,
-                                            dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                check_value(fake_full_like(v, fv + 5, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                             int64_dtype, layout, device, fv + 5, False)
 
 
