@@ -200,7 +200,6 @@ void ProcessGroupAgent::join() {
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   enqueueSend(
       SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
-
   threadPool_.waitWorkComplete();
   listenerThread_.join();
   futureTimeoutThread_.join();
@@ -311,7 +310,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
         futureTimeoutCV_.notify_one();
       }
     }
-
     message.setId(requestId);
   } else {
     future->markCompleted();
@@ -537,7 +535,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
   std::vector<FutureInfo> timedOutFutures;
   for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
        /* intentional no increment */) {
-    const std::chrono::milliseconds& endTime = it->first;
+    const auto& endTime = it->first;
     const auto remainingTime = getRPCRemainingTime(endTime);
 
     if (remainingTime.count() > 0) {
