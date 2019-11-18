@@ -315,7 +315,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      constexpr int N = 5;
      auto result_ = at::embedding(
          (std::move(peek(*stack, 0, N))).toTensor(),
@@ -330,7 +330,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::dropout(Tensor input, float p, bool train) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::dropout(
          (std::move(peek(*stack, 0, 3))).toTensor(),
          (std::move(peek(*stack, 1, 3))).toDouble(),
@@ -342,7 +342,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).permute(
          (std::move(peek(*stack, 1, 2))).toIntListRef()
      );
@@ -352,7 +352,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::matmul(Tensor self, Tensor other) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::matmul(
          (std::move(peek(*stack, 0, 2))).toTensor(),
          (std::move(peek(*stack, 1, 2))).toTensor()
@@ -363,7 +363,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::mul(
          (std::move(peek(*stack, 0, 2))).toTensor(),
          (std::move(peek(*stack, 1, 2))).toTensor()
@@ -374,7 +374,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::tanh(Tensor self) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::tanh(
          (std::move(peek(*stack, 0, 1))).toTensor()
      );
@@ -384,7 +384,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::max(
          (std::move(peek(*stack, 0, 3))).toTensor(),
          (std::move(peek(*stack, 1, 3))).toInt(),
@@ -396,7 +396,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::cat(
          (std::move(peek(*stack, 0, 2))).toTensorListRef(),
          (std::move(peek(*stack, 1, 2))).toInt()
@@ -407,7 +407,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
   torch::RegisterOperators::options().catchAllKernel(
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
       c10::IValue self, obj;
       pop(*stack, self, obj);
       push(*stack, self.isSameIdentity(obj));
@@ -415,7 +415,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::log_softmax(
        (std::move(peek(*stack, 0, 3))).toTensor(),
        (std::move(peek(*stack, 1, 3))).toInt(),
@@ -427,7 +427,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::softmax(
        (std::move(peek(*stack, 0, 3))).toTensor(),
        (std::move(peek(*stack, 1, 3))).toInt(),
@@ -439,7 +439,7 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::warn() -> void",
   torch::RegisterOperators::options().catchAllKernel(
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
     drop(*stack, 1);
     pop(*stack);
   })
@@ -466,13 +466,13 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::append.Tensor(Tensor self) -> void",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
     listAppend<at::Tensor>(*stack);
   })
 ).op(
   "_aten::append.int(int self) -> void",
   torch::RegisterOperators::options().catchAllKernel(
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
     listAppend<int64_t>(*stack);
   })
 );
