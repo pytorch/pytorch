@@ -23,6 +23,8 @@ struct PeepholeOptimizeImpl {
       const std::shared_ptr<Graph>& graph,
       bool addmm_fusion_enabled)
       : aliasDb_(torch::make_unique<torch::jit::AliasDb>(graph)),
+        graph_(graph),
+        changed_(false),
         addmm_fusion_enabled_(addmm_fusion_enabled) {
     run(graph->block());
   }
@@ -49,66 +51,50 @@ struct PeepholeOptimizeImpl {
       for (Block* sub_block : node->blocks()) {
         run(sub_block);
       }
-
-      // if either inputs or outputs have writes to them
-      // transformations below are invalid
+      // if either the inputs or outputs of an op alias graph's inputs or
+      // outputs, the transformations below are invalid
       // An example:
-      // %1 = aten::add(%0, 0, 1)  # x + 0 == x
-      // %2 = aten::add_(%1, 2, 1) # a write to an output
-      // %3 = aten::add_(%0, 3, 1) # a write to an input
-      // return (%0, %1)
+      //
+      // def test_write(x):
+      //     s = 0
+      //     s += x
+      //     s += x
+      //     return s
+      //
       // any transformations that are still valid despite
-      // writes to their inputs/outputs can be pulled
-      // above this statement
-      if (aliasDb_->hasWriters(node)) {
-        continue;
-      }
+      // should be pulled above this statement
 
-      // XXX: remember that if you want to simplify an expression by combining
-      // multiple nodes into a different one, then you need to check that they
-      // all belong to the given block
-      if (node->matches(
-              "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
-              /*const_inputs=*/attr::size)) {
-        // x.expand(x.size()) == x
-        if (auto input_type =
-                node->namedInput(attr::self)->type()->cast<TensorType>()) {
-          auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
-          auto input_type_sizes = input_type->sizes().concrete_sizes();
-          if (expanded_sizes.has_value() && input_type_sizes &&
-              expanded_sizes.vec() == *input_type_sizes) {
-            GRAPH_UPDATE(
-                *node,
-                " (x.expand(x.size()) == x) is replaced with ",
-                node->namedInput(attr::self)->debugName());
-            node->output()->replaceAllUsesWith(node->namedInput(attr::self));
-          }
-        }
-      } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
-        // x.t().t() == x
-        Node* input_node = node->input()->node();
-        if (input_node->matches("aten::t(Tensor self) -> Tensor")) {
+
+      // _grad_sum_to_size peephole foldings are exempted from aliasing restrictions below
+      if (
+          node->matches(
+              "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
+        if (node->input(1)->mustBeNone()) {
           GRAPH_UPDATE(
               *node,
-              " (x.t().t() == x) is replaced with ",
-              input_node->input()->debugName());
-          node->output()->replaceAllUsesWith(input_node->input());
-        }
-      } else if (node->matches(
-                     "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-        // x.type_as(y) == x iff x.type() == y.type()
-        auto self_type = node->input(0)->type()->expect<TensorType>();
-        auto other_type = node->input(1)->type()->expect<TensorType>();
-        if (mustBeEqual(self_type->scalarType(), other_type->scalarType()) &&
-            mustBeEqual(self_type->device(), other_type->device())) {
-          GRAPH_UPDATE(
-              *node,
-              " (x.type_as(y) == x) is replaced with ",
+              " (x._grad_sum_to_size(x, None) == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
+          changed_ = true;
+        } else {
+          auto uses = node->output()->uses();
+          for (Use u : uses) {
+            if (u.user->matches(
+                    "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
+                u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+              GRAPH_UPDATE(
+                  *node,
+                  " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
+                  node->inputs().at(0)->debugName());
+              u.user->replaceInput(0, node->inputs().at(0));
+              changed_ = true;
+            }
+          }
         }
-      } else if (
-          node->matches(
+      }
+
+      // addmm is exempted from aliasing restrictions below
+      if (node->matches(
               "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
               /*const_inputs=*/attr::alpha)) {
         // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
@@ -206,11 +192,82 @@ struct PeepholeOptimizeImpl {
                   " into ",
                   addmm_value->debugName());
               node->output()->replaceAllUsesWith(addmm_value);
+              changed_ = true;
+              continue;
             }
           }
         }
         // TODO: this doesn't work with Scalar-Tensor ops! We should
         // canonicalize those
+      }
+
+      if (changed_) {
+        aliasDb_ = torch::make_unique<AliasDb>(graph_);
+        changed_ = false;
+      }
+
+      if (aliasDb_->mayContainAlias(
+              node->outputs(), node->owningGraph()->outputs()) &&
+          (aliasDb_->mayContainAlias(
+               node->inputs(), node->owningGraph()->inputs()) ||
+           aliasDb_->mayContainAlias(
+               node->inputs(), node->owningGraph()->outputs()))) {
+        continue;
+      }
+
+      // also, if there are writes to either inputs or outputs
+      // the peephole transformations are invalid
+
+      if (aliasDb_->hasWriters(node)) {
+        continue;
+      }
+
+      // XXX: remember that if you want to simplify an expression by combining
+      // multiple nodes into a different one, then you need to check that they
+      // all belong to the given block
+      if (node->matches(
+              "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
+              /*const_inputs=*/attr::size)) {
+        // x.expand(x.size()) == x
+        if (auto input_type =
+                node->namedInput(attr::self)->type()->cast<TensorType>()) {
+          auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
+          auto input_type_sizes = input_type->sizes().concrete_sizes();
+          if (expanded_sizes.has_value() && input_type_sizes &&
+              c10::impl::toVector(*expanded_sizes) == *input_type_sizes) {
+            GRAPH_UPDATE(
+                *node,
+                " (x.expand(x.size()) == x) is replaced with ",
+                node->namedInput(attr::self)->debugName());
+            node->output()->replaceAllUsesWith(node->namedInput(attr::self));
+            changed_ = true;
+          }
+        }
+      } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
+        // x.t().t() == x
+        Node* input_node = node->input()->node();
+        if (input_node->matches("aten::t(Tensor self) -> Tensor")) {
+          GRAPH_UPDATE(
+              *node,
+              " (x.t().t() == x) is replaced with ",
+              input_node->input()->debugName());
+          node->output()->replaceAllUsesWith(input_node->input());
+          changed_ = true;
+        }
+      } else if (node->matches(
+                     "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+        // x.type_as(y) == x iff x.type() == y.type()
+        auto self_type = node->input(0)->type()->expect<TensorType>();
+        auto other_type = node->input(1)->type()->expect<TensorType>();
+        if (mustBeEqual(self_type->scalarType(), other_type->scalarType()) &&
+            mustBeEqual(self_type->device(), other_type->device())) {
+          GRAPH_UPDATE(
+              *node,
+              " (x.type_as(y) == x) is replaced with ",
+              node->input(0)->debugName());
+          node->output()->replaceAllUsesWith(node->input(0));
+          changed_ = true;
+        }
       } else if (
           node->matches(
               "aten::mul(Tensor self, Scalar other) -> Tensor",
@@ -225,6 +282,7 @@ struct PeepholeOptimizeImpl {
               " (x * 1 == x / 1 == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
+          changed_ = true;
         }
       } else if (
           node->matches(
@@ -241,6 +299,7 @@ struct PeepholeOptimizeImpl {
               " (x + 0 == x - 0 == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
+          changed_ = true;
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
@@ -252,6 +311,7 @@ struct PeepholeOptimizeImpl {
               " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
+          changed_ = true;
         }
       } else if (node->matches("aten::size(Tensor self) -> int[]")) {
         if (auto ptt = node->input()->type()->cast<TensorType>()) {
@@ -260,29 +320,7 @@ struct PeepholeOptimizeImpl {
             IValue ival(sizes);
             auto const_sizes_val = node->owningGraph()->insertConstant(ival);
             node->output()->replaceAllUsesWith(const_sizes_val);
-          }
-        }
-      } else if (
-          node->matches(
-              "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
-        if (node->input(1)->mustBeNone()) {
-          GRAPH_UPDATE(
-              *node,
-              " (x._grad_sum_to_size(x, None) == x) is replaced with ",
-              node->input(0)->debugName());
-          node->output()->replaceAllUsesWith(node->input(0));
-        } else {
-          auto uses = node->output()->uses();
-          for (Use u : uses) {
-            if (u.user->matches(
-                    "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
-                u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
-              GRAPH_UPDATE(
-                  *node,
-                  " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
-                  node->inputs().at(0)->debugName());
-              u.user->replaceInput(0, node->inputs().at(0));
-            }
+            changed_ = true;
           }
         }
       } else if (node->kind() == prim::If) {
@@ -306,6 +344,7 @@ struct PeepholeOptimizeImpl {
                 " (True or False) with ",
                 n.cond()->debugName());
             n.outputs().at(i)->replaceAllUsesWith(n.cond());
+            changed_ = true;
           }
         }
       } else if (
@@ -325,6 +364,7 @@ struct PeepholeOptimizeImpl {
                 node->kind() == aten::__isnot__);
             GRAPH_UPDATE("Folding ", *node, " to ", output->debugName());
             node->output()->replaceAllUsesWith(output);
+            changed_ = true;
           }
         }
       } else if (
@@ -340,6 +380,7 @@ struct PeepholeOptimizeImpl {
               node->input(),
               " can't be optional");
           node->output()->replaceAllUsesWith(node->input());
+          changed_ = true;
         }
       } else if (node->kind() == prim::unchecked_cast) {
         // unchecked_cast is not generated for tensor properties, so we are not
@@ -363,6 +404,7 @@ struct PeepholeOptimizeImpl {
               " with a type constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed_ = true;
         }
       } else if (node->matches("prim::device(Tensor a) -> Device")) {
         auto ptt = node->input()->type()->expect<TensorType>();
@@ -375,6 +417,7 @@ struct PeepholeOptimizeImpl {
               " with a device constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed_ = true;
         }
       } else if (node->matches("aten::dim(Tensor self) -> int")) {
         auto ptt = node->input()->type()->expect<TensorType>();
@@ -388,6 +431,7 @@ struct PeepholeOptimizeImpl {
               " with a \"dim\" constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed_ = true;
         }
       } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
         auto ptt = node->input()->type()->expect<TensorType>();
@@ -401,6 +445,7 @@ struct PeepholeOptimizeImpl {
               " with a is_cuda constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+          changed_ = true;
         }
       }
     }
@@ -408,6 +453,8 @@ struct PeepholeOptimizeImpl {
 
  private:
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  std::shared_ptr<Graph> graph_;
+  bool changed_;
   bool addmm_fusion_enabled_;
 };
 
