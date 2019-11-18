@@ -39,6 +39,8 @@ using BatchNorm1dOptions = BatchNormOptions;
 using BatchNorm2dOptions = BatchNormOptions;
 using BatchNorm3dOptions = BatchNormOptions;
 
+// ============================================================================
+
 namespace functional {
 
 /// Options for the `BatchNorm` module.
