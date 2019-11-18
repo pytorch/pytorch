@@ -56,6 +56,22 @@ class TestQuantizedOps(unittest.TestCase):
     def test_quantized_relu(self):
         self.generic_unary_test(torch.nn.ReLU())
 
+    def export_to_onnx(self, model, input, input_names):
+        outputs = model(input)
+
+        traced = torch.jit.trace(model, input)
+        buf = io.BytesIO()
+        torch.jit.save(traced, buf)
+        buf.seek(0)
+
+        model = torch.jit.load(buf)
+        f = io.BytesIO()
+        torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        f.seek(0)
+
+        onnx_model = onnx.load(f)
+        return onnx_model
+
     def test_qlinear_model(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):
@@ -77,17 +93,9 @@ class TestQuantizedOps(unittest.TestCase):
         x_numpy = np.random.rand(1, 2, 5).astype(np.float32)
         x = torch.from_numpy(x_numpy).to(dtype=torch.float)
         outputs = model(x)
-        traced = torch.jit.trace(model, x)
-        buf = io.BytesIO()
-        torch.jit.save(traced, buf)
-        buf.seek(0)
-
-        model = torch.jit.load(buf)
         input_names = ["x"]
-        f = io.BytesIO()
-        torch.onnx.export(model, x, f, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        f.seek(0)
-        onnx_model = onnx.load(f)
+        onnx_model = self.export_to_onnx(model, x, input_names)
+
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, x_numpy)))[0]
         np.testing.assert_almost_equal(np.squeeze(outputs.numpy()), caffe_res, decimal=3)
 
@@ -109,22 +117,17 @@ class TestQuantizedOps(unittest.TestCase):
         model = torch.quantization.convert(model)
 
         x_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-
         x = torch.from_numpy(x_numpy).to(dtype=torch.float)
         outputs = model(x)
-        traced = torch.jit.trace(model, x)
-        buf = io.BytesIO()
-        torch.jit.save(traced, buf)
-        buf.seek(0)
-        model = torch.jit.load(buf)
         input_names = ["x"]
-        f = io.BytesIO()
-        torch.onnx.export(model, x, f, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        f.seek(0)
-        onnx_model = onnx.load(f)
+        onnx_model = self.export_to_onnx(model, x, input_names)
+
+        # Permute the input as caffe2 expects NHWC
         x_c2 = np.transpose(x_numpy, [0, 2, 3, 1])
         y = np.expand_dims(x_c2, axis=0)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, y)))[0]
+
+        # Permute pytorch output to NHWC
         np.testing.assert_almost_equal(outputs.permute(0, 2, 3, 1).numpy(), caffe_res, decimal=3)
 
 if __name__ == '__main__':
