@@ -26,42 +26,6 @@ ConvImpl<D, Derived>::ConvImpl(ConvOptions<D> options_)
 }
 
 template <size_t D, typename Derived>
-void ConvImpl<D, Derived>::reset() {
-  TORCH_CHECK(
-    options.in_channels() % options.groups() == 0,
-    "in_channels must be divisible by groups");
-  TORCH_CHECK(
-    options.out_channels() % options.groups() == 0,
-    "out_channels must be divisible by groups");
-
-  if (options.transposed()) {
-    std::vector<int64_t> weight_sizes = {
-      options.in_channels(),
-      options.out_channels() / options.groups()};
-    weight_sizes.insert(weight_sizes.end(), (*options.kernel_size()).begin(), (*options.kernel_size()).end());
-    weight = this->register_parameter(
-      "weight",
-      torch::empty(weight_sizes));
-  } else {
-    std::vector<int64_t> weight_sizes = {
-      options.out_channels(),
-      options.in_channels() / options.groups()};
-    weight_sizes.insert(weight_sizes.end(), (*options.kernel_size()).begin(), (*options.kernel_size()).end());
-    weight = this->register_parameter(
-      "weight",
-      torch::empty(weight_sizes));
-  }
-
-  if (options.bias()) {
-    bias = this->register_parameter("bias", torch::empty({options.out_channels()}));
-  } else {
-    this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
-  }
-
-  reset_parameters();
-}
-
-template <size_t D, typename Derived>
 void ConvImpl<D, Derived>::reset_parameters() {
   init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));  // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
@@ -71,34 +35,6 @@ void ConvImpl<D, Derived>::reset_parameters() {
     auto bound = 1 / std::sqrt(fan_in);
     init::uniform_(bias, -bound, bound);
   }
-}
-
-template <size_t D, typename Derived>
-void ConvImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Conv" << D << "d"
-         << "(" << options.in_channels()
-         << ", " << options.out_channels()
-         << ", kernel_size=" << options.kernel_size()
-         << ", stride=" << options.stride();
-  if (*options.padding() != *ExpandingArray<D>(0)) {
-    stream << ", padding=" << options.padding();
-  }
-  if (*options.dilation() != *ExpandingArray<D>(1)) {
-    stream << ", dilation=" << options.dilation();
-  }
-  if (*options.output_padding() != *ExpandingArray<D>(0)) {
-    stream << ", output_padding=" << options.output_padding();
-  }
-  if (options.groups() != 1) {
-    stream << ", groups=" << options.groups();
-  }
-  if (!options.bias()) {
-    stream << ", bias=" << std::boolalpha << false;
-  }
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
-    stream << ", padding_mode=" << enumtype::get_enum_name(options.padding_mode());
-  }
-  stream << ")";
 }
 
 Conv1dImpl::Conv1dImpl(
