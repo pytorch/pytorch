@@ -13,7 +13,7 @@
 namespace torch {
 namespace nn {
 
-BatchNormImpl::BatchNormImpl(const BatchNormOptions& options_) : options(options_) {
+BatchNormImpl::BatchNormImpl(const BatchNormOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
   TORCH_WARN("torch::nn::BatchNorm module is deprecated and will be removed in 1.5. "
              "Use BatchNorm{1,2,3}d instead.");
   reset();

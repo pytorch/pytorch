@@ -44,7 +44,7 @@ void InstanceNorm2dImpl::_check_input_dim(const Tensor& input) {
 }
 
 void InstanceNorm3dImpl::_check_input_dim(const Tensor& input) {
-  if (input.dim() != 5) {
+  if (input.dim() != 5) { // NOLINT(cppcoreguidelines-avoid-magic-numbers)
     TORCH_CHECK(
       false,
       "expected 5D input (got ", input.dim(), "D input)");
