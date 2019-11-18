@@ -2102,28 +2102,32 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2)
 
     def test_randint(self):
-        torch.manual_seed(123456)
-        res1 = torch.randint(0, 6, (SIZE, SIZE))
-        res2 = torch.Tensor()
-        torch.manual_seed(123456)
-        torch.randint(0, 6, (SIZE, SIZE), out=res2)
-        torch.manual_seed(123456)
-        res3 = torch.randint(6, (SIZE, SIZE))
-        res4 = torch.Tensor()
-        torch.manual_seed(123456)
-        torch.randint(6, (SIZE, SIZE), out=res4)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
-        self.assertEqual(res1, res4)
-        self.assertEqual(res2, res3)
-        self.assertEqual(res2, res4)
-        self.assertEqual(res3, res4)
-        res1 = res1.view(-1)
-        high = (res1 < 6).type(torch.LongTensor)
-        low = (res1 >= 0).type(torch.LongTensor)
-        tensorSize = res1.size()[0]
-        assert(tensorSize == high.sum())
-        assert(tensorSize == low.sum())
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        for generator in (None, torch.Generator()):
+            generator = seed(generator)
+            res1 = torch.randint(0, 6, (SIZE, SIZE), generator=generator)
+            res2 = torch.empty(())
+            generator = seed(generator)
+            torch.randint(0, 6, (SIZE, SIZE), generator=generator, out=res2)
+            generator = seed(generator)
+            res3 = torch.randint(6, (SIZE, SIZE), generator=generator)
+            res4 = torch.empty(())
+            generator = seed(generator)
+            torch.randint(6, (SIZE, SIZE), out=res4, generator=generator)
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res3)
+            self.assertEqual(res1, res4)
+            self.assertEqual(res2, res3)
+            self.assertEqual(res2, res4)
+            self.assertEqual(res3, res4)
+            self.assertTrue((res1 < 6).all().item())
+            self.assertTrue((res1 >= 0).all().item())
 
     def test_randn(self):
         torch.manual_seed(123456)
