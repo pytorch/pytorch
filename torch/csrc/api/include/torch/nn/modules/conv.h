@@ -182,13 +182,7 @@ TORCH_MODULE(Conv3d);
 template <size_t D, typename Derived>
 class ConvTransposeImpl : public ConvImpl<D, Derived> {
  public:
-  ConvTransposeImpl(
-      int64_t input_channels,
-      int64_t output_channels,
-      ExpandingArray<D> kernel_size)
-      : ConvTransposeImpl(ConvTransposeOptions<D>(input_channels, output_channels, kernel_size)) {
-  }
-  explicit ConvTransposeImpl(ConvTransposeOptions<D> options_);
+  using torch::nn::ConvImpl<D, Derived>::ConvImpl;
 
   /// Pretty prints the `ConvTranspose{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -207,8 +201,13 @@ class ConvTransposeImpl : public ConvImpl<D, Derived> {
 /// learn about the exact behavior of this module.
 class TORCH_API ConvTranspose1dImpl : public ConvTransposeImpl<1, ConvTranspose1dImpl> {
  public:
-  using ConvTransposeImpl<1, ConvTranspose1dImpl>::ConvTransposeImpl;
-
+  ConvTranspose1dImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<1> kernel_size)
+      : ConvTranspose1dImpl(ConvTransposeOptions<1>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit ConvTranspose1dImpl(ConvTransposeOptions<1> options_);
   Tensor forward(const Tensor& input,
                  const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
 };
@@ -222,8 +221,13 @@ TORCH_MODULE(ConvTranspose1d);
 /// learn about the exact behavior of this module.
 class TORCH_API ConvTranspose2dImpl : public ConvTransposeImpl<2, ConvTranspose2dImpl> {
  public:
-  using ConvTransposeImpl<2, ConvTranspose2dImpl>::ConvTransposeImpl;
-
+  ConvTranspose2dImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<2> kernel_size)
+      : ConvTranspose2dImpl(ConvTransposeOptions<2>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit ConvTranspose2dImpl(ConvTransposeOptions<2> options_);
   Tensor forward(const Tensor& input,
                  const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
 };
@@ -237,8 +241,13 @@ TORCH_MODULE(ConvTranspose2d);
 /// learn about the exact behavior of this module.
 class TORCH_API ConvTranspose3dImpl : public ConvTransposeImpl<3, ConvTranspose3dImpl> {
  public:
-  using ConvTransposeImpl<3, ConvTranspose3dImpl>::ConvTransposeImpl;
-
+  ConvTranspose3dImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<3> kernel_size)
+      : ConvTranspose3dImpl(ConvTransposeOptions<3>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit ConvTranspose3dImpl(ConvTransposeOptions<3> options_);
   Tensor forward(const Tensor& input,
                  const c10::optional<at::IntArrayRef>& output_size = c10::nullopt);
 };

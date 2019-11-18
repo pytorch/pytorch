@@ -105,10 +105,6 @@ template class ConvImpl<3, Conv3dImpl>;
 // ============================================================================
 
 template <size_t D, typename Derived>
-ConvTransposeImpl<D, Derived>::ConvTransposeImpl(
-    ConvTransposeOptions<D> options_) : ConvImpl<D, Derived>(options_.transposed(true)) {}
-
-template <size_t D, typename Derived>
 void ConvTransposeImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ConvTranspose" << D << "d"
          << "(" << this->options.in_channels()
@@ -182,6 +178,9 @@ std::vector<int64_t> ConvTransposeImpl<D, Derived>::_output_padding(
   return ret;
 }
 
+ConvTranspose1dImpl::ConvTranspose1dImpl(
+    ConvTransposeOptions<1> options_) : ConvTransposeImpl(options_.transposed(true)) {}
+
 Tensor ConvTranspose1dImpl::forward(
     const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
@@ -196,6 +195,9 @@ Tensor ConvTranspose1dImpl::forward(
     output_padding, options.groups(), options.dilation());
 }
 
+ConvTranspose2dImpl::ConvTranspose2dImpl(
+    ConvTransposeOptions<2> options_) : ConvTransposeImpl(options_.transposed(true)) {}
+
 Tensor ConvTranspose2dImpl::forward(
     const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
@@ -209,6 +211,9 @@ Tensor ConvTranspose2dImpl::forward(
     input, weight, bias, options.stride(), options.padding(),
     output_padding, options.groups(), options.dilation());
 }
+
+ConvTranspose3dImpl::ConvTranspose3dImpl(
+    ConvTransposeOptions<3> options_) : ConvTransposeImpl(options_.transposed(true)) {}
 
 Tensor ConvTranspose3dImpl::forward(
     const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
