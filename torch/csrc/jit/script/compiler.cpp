@@ -439,6 +439,7 @@ struct Environment {
                "__str__",
                std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", SpecialFormValue::create(prim::GetAttr)},
+          {"hasattr", SpecialFormValue::create(prim::HasAttr)},
           {"isinstance", SpecialFormValue::create(prim::isinstance)},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
@@ -564,6 +565,23 @@ struct DefContext {
   TypePtr merged_return_type_; // nullptr if a Return has not been seen yet
 };
 
+enum class LoopStatus { NOT_IN_LOOP, IN_LOOP, IN_UNROLLED_LOOP };
+
+struct WithLoopStatus {
+  WithLoopStatus(LoopStatus* prev, LoopStatus new_status) {
+    prev_value_ = *prev;
+    prev_ptr_ = prev;
+    *prev = new_status;
+  }
+  ~WithLoopStatus() {
+    *prev_ptr_ = prev_value_;
+  }
+
+ private:
+  LoopStatus* prev_ptr_;
+  LoopStatus prev_value_;
+};
+
 struct to_ir {
   to_ir(
       const Def& def,
@@ -609,6 +627,7 @@ struct to_ir {
   std::unordered_map<double, Value*> fp_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
+  LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -817,6 +836,7 @@ struct to_ir {
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
     {
       WithInsertPoint guard(block);
       pushFrame(block, /*starts_def=*/true);
@@ -843,13 +863,28 @@ struct to_ir {
         /*annotated_type=*/nullptr);
   }
 
+  void checkBreakContinue(
+      const SourceRange& loc,
+      const std::string& stmt_name) {
+    if (loop_status_ == LoopStatus::NOT_IN_LOOP) {
+      throw ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
+                             << " outside loop";
+    } else if (loop_status_ == LoopStatus::IN_UNROLLED_LOOP) {
+      throw ErrorReport(loc)
+          << "Because we emit iteration over modulelists or tuples as "
+             "unrolled loops, we do not support break or continue inside the body of these loops";
+    }
+  }
+
   void emitBreak(const Break& stmt) {
+    checkBreakContinue(stmt.range(), "break");
     auto break_node =
         graph->create(prim::BreakStmt, {}, 0)->setSourceRange(stmt.range());
     graph->insertNode(break_node);
   }
 
   void emitContinue(const Continue& stmt) {
+    checkBreakContinue(stmt.range(), "continue");
     auto continue_node =
         graph->create(prim::ContinueStmt, {}, 0)->setSourceRange(stmt.range());
     graph->insertNode(continue_node);
@@ -1050,10 +1085,15 @@ struct to_ir {
         if (expr.kind() == TK_APPLY) {
           auto apply = Apply(expr);
           auto callee = Apply(expr).callee();
-          if (callee.kind() == TK_VAR &&
-              Var(callee).name().name() == "isinstance") {
-            checkApplyNumInputs(apply, 2);
-            return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+          if (callee.kind() == TK_VAR) {
+            if (Var(callee).name().name() == "isinstance") {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+            if (Var(callee).name().name() == "hasattr") {
+              checkApplyNumInputs(apply, 2);
+              return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+            }
           }
         }
         return CondValue(
@@ -1401,7 +1441,26 @@ struct to_ir {
     }
   }
 
-  CondValue emitIsInstance(Expr obj, Expr classinfo) {
+  CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
+    auto obj = emitExpr(objExpr);
+    const auto& type = obj->type();
+    if (attrExpr.kind() != TK_STRINGLITERAL) {
+      throw ErrorReport(attrExpr)
+          << "hasattr's second argument must be a string literal";
+    }
+    auto cls = type->cast<ClassType>();
+    if (!cls) {
+      throw ErrorReport(objExpr)
+          << "hasattr's first argument must be an object, got "
+          << type->python_str() << " instead";
+    }
+
+    const std::string& name = StringLiteral(attrExpr).text();
+    const bool hasAttr = cls->hasAttribute(name);
+    return CondValue(*graph, objExpr.range(), hasAttr, {});
+  }
+
+  CondValue emitIsInstance(const Expr& obj, const Expr& classinfo) {
     // turn (float, (int, tuple)) into a flat list of types and type kind
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
@@ -1551,6 +1610,7 @@ struct to_ir {
     }
     n->addInput(max_trip_count_val);
 
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::IN_LOOP);
     Value* trip_count =
         body_block->addInput()->setType(IntType::get()); // Iteration num
     {
@@ -1587,7 +1647,7 @@ struct to_ir {
     TORCH_INTERNAL_ASSERT(
         static_len, "Unrolled loop iter should have static length");
     int64_t len = *static_len;
-
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::IN_UNROLLED_LOOP);
     // In order to support ModuleLists which return different types,
     // as with an nn.Sequential which has a module that returns a Dict and then
     // a module which returns a Tensor,
@@ -2401,6 +2461,11 @@ struct to_ir {
         auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
       }
+      case prim::HasAttr: {
+        checkApplyNumInputs(apply, 2);
+        const auto result = emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+        return std::make_shared<SimpleValue>(result.value());
+      } break;
       // This represents the "__new__" method on classes
       // because it takes a ClassValue as input.
       // So if we see:

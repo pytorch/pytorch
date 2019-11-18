@@ -11,7 +11,7 @@ from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import PY2, PY37, with_metaclass, string_classes
+from torch._six import PY2, PY37, with_metaclass, string_classes, get_function_from_type
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 from torch.utils import set_module
@@ -26,7 +26,6 @@ import os
 import pickle
 import sys
 import textwrap
-import types
 import warnings
 
 from collections import OrderedDict
@@ -1332,8 +1331,8 @@ def script_method(fn):
 #  len(view)
 
 class OrderedDictWrapper(object):
-    def __init__(self, module):
-        self.module = module
+    def __init__(self, _c):
+        self._c = _c
 
     def keys(self):
         return [k for k, v in self.items()]
@@ -1348,21 +1347,26 @@ class OrderedDictWrapper(object):
         raise RuntimeError("cannot delete methods or parameters of a script module")
 
     def items(self):
-        raise NotImplementedError
-
-    def __contains__(self, k):
-        raise NotImplementedError
-
-    def __getitem__(self, k):
-        raise NotImplementedError
+        return self._c.items()
 
     def __setitem__(self, k, v):
-        raise NotImplementedError
+        if k not in self:
+            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
+                               " Tried to add '{}".format(k))
+        self._c.setattr(k, v)
+
+    def __contains__(self, k):
+        return self._c.contains(k)
+
+    def __getitem__(self, k):
+        if k not in self:
+            raise KeyError(k)
+        return self._c.getattr(k)
 
 
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module, python_dict):
-        super(OrderedModuleDict, self).__init__(module)
+        super(OrderedModuleDict, self).__init__(torch._C.ModuleDict(module))
         # contains _both_ script modules and non-script python-only modules
 
         # because script modules are subclassed in python and the
@@ -1389,7 +1393,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # Note: the value to be swapped in has to be ScriptModule instead of nn.Module,
         # otherwise it's illegal and we throw error.
         if isinstance(v, ScriptModule):
-            self.module._set_attribute(k, v)
+            self._c.setattr(k, v)
             self._python_modules[k] = v
         else:
             raise RuntimeError("Cannot re-assign modules in a ScriptModule with non-scripted "
@@ -1398,72 +1402,6 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __getitem__(self, k):
         return self._python_modules[k]
-
-
-class OrderedParameterDict(OrderedDictWrapper):
-    def __init__(self, module):
-        super(OrderedParameterDict, self).__init__(module)
-
-    def items(self):
-        return [(name, param) for name, param in self.module._get_parameters()]
-
-    def __setitem__(self, k, v):
-        if not self.module._has_parameter(k):
-            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
-                               " Tried to add '{}".format(k))
-        self.module._set_parameter(k, v)
-
-    def __contains__(self, k):
-        return self.module._has_parameter(k)
-
-    def __getitem__(self, k):
-        if k not in self:
-            raise KeyError(k)
-        return self.module._get_parameter(k)
-
-
-class OrderedBufferDict(OrderedDictWrapper):
-    def __init__(self, module):
-        super(OrderedBufferDict, self).__init__(module)
-
-    def items(self):
-        return [(name, param) for name, param in self.module._get_buffers()]
-
-    def __setitem__(self, k, v):
-        if not self.module._has_buffer(k):
-            raise RuntimeError("Can't add a new parameter after ScriptModule construction."
-                               " Tried to add '{}".format(k))
-        self.module._set_attribute(k, v)
-
-    def __contains__(self, k):
-        return self.module._has_buffer(k)
-
-    def __getitem__(self, k):
-        if k not in self:
-            raise KeyError(k)
-        return self.module._get_buffer(k)
-
-# base types that can be constants
-# in addition, tuples and lists of these base types are also considered constants
-# If you edit this list, then you also need to edit the handlers in
-# ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
-
-
-def _get_valid_constant(attr, v):
-    if isinstance(v, _constant_types):
-        return v
-    elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(attr, x) for x in v)
-    constants = ", ".join(typ.__name__ for typ in _constant_types)
-    raise TypeError(textwrap.dedent("""
-        '{}' object for attribute '{}' is not a valid constant.
-        Valid constants are:
-          1. a nn.ModuleList
-          2. a value of type {{{}}}
-          3. a list or tuple of (2)
-        """.format(type(v).__name__, attr, constants)))
-
 
 # For each user-defined class that subclasses ScriptModule, this meta-class:
 # (1) finds all the methods annotated with @script_method in a ScriptModule and
@@ -1644,8 +1582,8 @@ if _enabled:
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
-            script_module._parameters = OrderedParameterDict(script_module._c)
-            script_module._buffers = OrderedBufferDict(script_module._c)
+            script_module._parameters = OrderedDictWrapper(torch._C.ParameterDict(script_module._c))
+            script_module._buffers = OrderedDictWrapper(torch._C.BufferDict(script_module._c))
             script_module._modules = OrderedModuleDict(script_module._c, script_module._modules)
             script_module._initializing = False
             return script_module
@@ -1689,9 +1627,9 @@ if _enabled:
 
         @property
         def original_name(self):
-            if type(self) == self._c.name:
+            if type(self) == str(self._c._type().name()):
                 return ''
-            return self._c.name
+            return str(self._c._type().name())
 
         def define(self, src):
             # We use frames_up=1 to get to the proper surrounding scope. The stack
@@ -1712,32 +1650,29 @@ if _enabled:
             if self._initializing:
                 return super(RecursiveScriptModule, self).__getattr__(attr)
 
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
-            if self._c._has_method(attr):
+            # _modules check is before hasattr since modules are included as attributes in _c,
+            # but we want to get the python wrapper from _modules instead of the raw _c object.
+            if attr in self._modules:
+                return self._modules[attr]
+            elif self._c.hasattr(attr):
+                return self._c.getattr(attr)
+            elif self._c._has_method(attr):
                 script_method = self._c._get_method(attr)
                 # cache method so future calls do not go through __getattr__
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
 
-            # parameters, buffers, and submodules can be handled by delegating
-            # to nn.Module, which will index into our custom OrderedXDicts
             return super(RecursiveScriptModule, self).__getattr__(attr)
 
         def __setattr__(self, attr, value):
             if self._initializing:
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
-            if self._c._has_attribute(attr):
-                self._c._set_attribute(attr, value)
-            elif self._c._has_buffer(attr):
-                # XXX: buffers are implemented as attributes in the JIT
-                self._c._set_attribute(attr, value)
-            elif self._c._has_module(attr):
+            if attr in self._modules:
                 self._modules[attr] = value
-            elif self._c._has_parameter(attr):
-                self._c._set_parameter(attr, value)
+            elif self._c.hasattr(attr):
+                self._c.setattr(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
                 # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
                 # We should encode constants as class type attributes (or something) so it persists across save/load.
@@ -1760,6 +1695,45 @@ if _enabled:
                 "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
+
+        # Python magic methods do method lookups on an object's class type, instead of looking up
+        # the method defines on the class instance. In order to continue to expose the magic methods
+        # of builtin-containers (ModuleList, Sequential, ModuleDict) to python we
+        # define magic methods here as a shim to the correct attribute.
+        def forward_magic_method(self, method_name, *args, **kwargs):
+            self_method = getattr(self, method_name)
+            if getattr(self_method, "__func__", None) == getattr(RecursiveScriptModule, method_name):
+                raise NotImplementedError()
+            return self_method(*args, **kwargs)
+
+        def __iter__(self):
+            return self.forward_magic_method("__iter__")
+
+        def __getitem__(self, idx):
+            return self.forward_magic_method("__getitem__", idx)
+
+        def __len__(self):
+            return self.forward_magic_method("__len__")
+
+        def __contains__(self, key):
+            return self.forward_magic_method("__contains__", key)
+
+        # dir is defined by the base nn.Module, so instead of throwing if
+        # it is not overriden, we call into the nn.Module __dir__ method
+        def __dir__(self):
+            self_method = getattr(self, "__dir__")
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__dir__"):
+                return super(RecursiveScriptModule, self).__dir__()
+            return self_method()
+
+        # to resolve bool(value), python looks if __bool__ is defined then __iter__
+        # is defined then returns true for classes. because __iter__() on this
+        # class throws if it isn't overriden, we define __bool__ to preserve default behavior
+        def __bool__(self):
+            self_method = getattr(self, "__bool__")
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__bool__"):
+                return True
+            return self_method()
 
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
@@ -1875,101 +1849,6 @@ class TracedModule(ScriptModule):
 if _enabled:
     class TopLevelTracedModule(TracedModule):
         forward = _CachedForward()
-
-
-class _ConstModuleList(ScriptModule):
-    def __init__(self, modules):
-        super(_ConstModuleList, self).__init__()
-
-        if isinstance(modules, OrderedDict):
-            for key, module in modules.items():
-                if isinstance(module, torch.nn.Module):
-                    module = torch.jit._recursive.recursive_script(module)
-                self.add_module(key, module)
-        else:
-            for i, module in enumerate(modules):
-                if isinstance(module, torch.nn.Module):
-                    module = torch.jit._recursive.recursive_script(module)
-                self.add_module(str(i), module)
-
-    def __getitem__(self, idx):
-        if isinstance(idx, slice):
-            return _ConstModuleList(list(self._modules.values())[idx])
-        else:
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            return self._modules[str(idx)]
-
-    def __len__(self):
-        return len(self._modules)
-
-    def __iter__(self):
-        return iter(self._modules.values())
-
-    def __dir__(self):
-        keys = super(_ConstModuleList, self).__dir__()
-        keys = [key for key in keys if not key.isdigit()]
-        return keys
-
-class _ConstModuleDict(ScriptModule):
-    def __init__(self, modules):
-        super(_ConstModuleDict, self).__init__()
-
-        assert isinstance(modules, OrderedDict)
-
-        for key, module in modules.items():
-            if isinstance(module, torch.nn.Module):
-                module = torch.jit._recursive.recursive_script(module)
-            self.add_module(key, module)
-
-
-    def __getitem__(self, key):
-        return self._modules[key]
-
-    def __contains__(self, key):
-        return key in self._modules
-
-    def keys(self):
-        r"""Return an iterable of the ModuleDict keys.
-        """
-        return self._modules.keys()
-
-    def items(self):
-        r"""Return an iterable of the ModuleDict key/value pairs.
-        """
-        return self._modules.items()
-
-    def values(self):
-        r"""Return an iterable of the ModuleDict values.
-        """
-        return self._modules.values()
-
-    def __len__(self):
-        return len(self._modules)
-
-    def __iter__(self):
-        return iter(self._modules.values())
-
-    def forward(self):
-        raise NotImplementedError()
-
-class _ConstSequential(_ConstModuleList):
-    def __init__(self, mods):
-        super(_ConstSequential, self).__init__(mods._modules)
-
-        # we define the forward method via self.define rather than
-        # making it a direct class member (with a @script) annotation
-        # because, in optimized runtime environments where only .pyc files
-        # are shipped, we cant retrieve the source code.
-        # TODO: find a workaround for this and remove this hack
-        self.define("""
-        def forward(self, input):
-            for m in self:
-                input = m(input)
-            return input
-        """)
 
 def is_scripting():
     r"""

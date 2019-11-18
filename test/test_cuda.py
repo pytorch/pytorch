@@ -732,6 +732,17 @@ class TestCuda(TestCase):
     def test_gather_dim(self):
         self._test_gather(1)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_memory_format_scatter_gather(self):
+        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
+        results = torch.cuda.comm.scatter(nhwc, (0, 1), None, 0)
+        for result in results:
+            self.assertFalse(result.is_contiguous())
+            self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+        gathered = torch.cuda.comm.gather(results)
+        self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
+
     def test_torch_manual_seed_seeds_cuda_devices(self):
         with freeze_rng_state():
             x = torch.zeros(4, 4).float().cuda()
@@ -1811,6 +1822,8 @@ class TestCuda(TestCase):
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    # See https://github.com/pytorch/pytorch/issues/26838
+    @unittest.expectedFailure
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
@@ -2008,6 +2021,61 @@ t2.start()
                 for t in range(num_threads):
                     self.assertEqual(results[t].sum().item(),
                                      (2048 - test_iters) * (2048 - test_iters))
+
+    @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
+    def test_cusparse_multiple_threads_same_device(self):
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 500
+
+        def ones_sparse(size):
+            a = torch.arange(size, device='cuda')
+            indices = torch.cartesian_prod(a, a).t()
+            values = torch.ones(size * size, device='cuda')
+            return torch.sparse_coo_tensor(indices, values)
+
+        weight = ones_sparse(size)
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = weight.mm(results[t])
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
 
 
 if __name__ == '__main__':
