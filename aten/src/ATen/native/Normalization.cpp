@@ -393,8 +393,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
           if (train) {
             // when in training mode
             // Q(X) = X - E[x] ; i.e. input centered to zero mean
-            // Y = Q(X) / σ    ; i.e. BN output before weight and bias
-            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
+            // Y = Q(X) / sigma    ; i.e. BN output before weight and bias
+            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / sigma * w
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
