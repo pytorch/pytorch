@@ -70,7 +70,7 @@ namespace VariableType {
   int64_t _version(const Tensor & self);
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking);
   Tensor & resize_(Tensor & self, IntArrayRef size);
-  Tensor & resize_as_(Tensor & self, const Tensor & the_template);
+  Tensor & resize_as_(Tensor & self, const Tensor & the_template, c10::optional<MemoryFormat> optional_memory_format);
   Tensor detach(const Tensor & self);
   Tensor & detach_(Tensor & self);
   Tensor& requires_grad_(Tensor& self, bool _requires_grad);

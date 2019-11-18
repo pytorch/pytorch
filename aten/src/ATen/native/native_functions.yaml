@@ -2936,7 +2936,7 @@
     QuantizedCPU: quantized_clone
   supports_named_tensor: True
 
-- func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
+- func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
 
