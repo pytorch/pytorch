@@ -303,7 +303,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[rpcEndTime].push_back(requestId);
-      // Signal the watchdog for future timeouts to begin if this is the first
+      // Signal the watchdog to monitor future timeouts if this is the first
       // future created or if an RPC with a shorter TTL has been created.
       if (futures_.size() == 1 ||
           futureTimeouts_.begin()->first == rpcEndTime) {

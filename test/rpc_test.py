@@ -1068,7 +1068,7 @@ class RpcTest(object):
 
 
     @dist_init(setup_model_parallel=False)
-    def test_set_rpc_timeout(self):
+    def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
