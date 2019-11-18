@@ -74,12 +74,6 @@ Tensor BatchNormImpl::pure_forward(
       torch::cuda::cudnn_is_available());
 }
 
-template <size_t D, typename Derived>
-BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormOptions& options_)
-    : options(options_) {
-  reset();
-}
-
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
   TORCH_CHECK(
       input.dim() == 2 || input.dim() == 3,

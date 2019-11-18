@@ -88,7 +88,9 @@ class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
   virtual void _check_input_dim(const Tensor& input) = 0;
 
  public:
-  BatchNormImplBase(const BatchNormOptions& options_);
+  BatchNormImplBase(const BatchNormOptions& options_) : options(options_) {
+    reset();
+  }
 
   virtual Tensor forward(const Tensor& input) {
     _check_input_dim(input);
