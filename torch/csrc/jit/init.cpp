@@ -267,7 +267,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_lower_graph",
           [](std::shared_ptr<Graph>& graph, const script::Module& self) {
-            return LowerGraph(*graph, self.module_object());
+            return LowerGraph(*graph, self._ivalue());
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(

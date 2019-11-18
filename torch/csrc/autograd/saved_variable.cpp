@@ -25,13 +25,13 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
     if (variable.is_leaf()) {
-      grad_accumulator_ = variable.grad_accumulator();
+      grad_accumulator_ = impl::grad_accumulator(variable);
     } else if (!is_output) {
       grad_fn_ = variable.grad_fn();
     } else if (is_inplace_view) {
       weak_grad_fn_ = variable.grad_fn();
     }
-    version_counter_ = variable.version_counter();
+    version_counter_ = impl::version_counter(variable);
     saved_version_ = version_counter_.current_version();
   }
 }
@@ -87,7 +87,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   } else {
     var = make_variable(data_, requires_grad_);
   }
-  var.set_version_counter(saved_version_);
+  impl::set_version_counter(var, saved_version_);
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
   // should have saved the grad accumulator. Even if the Variable no longer
@@ -95,7 +95,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // graph).
   if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
     throw std::logic_error("No grad accumulator for a saved leaf!");
-  var.set_grad_accumulator(grad_accumulator_);
+  impl::set_grad_accumulator(var, grad_accumulator_);
 
   return var;
 }
