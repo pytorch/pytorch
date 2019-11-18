@@ -412,7 +412,7 @@ jobs:
 
           retrieve_test_reports() {
             echo "retrieving test reports"
-            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./
+            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
           }
           trap "retrieve_test_reports" ERR
 
