@@ -11,6 +11,10 @@ ASMoutput::ASMoutput(const Tensor& output_, const double& loss_): output(output_
 
 AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(const AdaptiveLogSoftmaxWithLossOptions& options_)
     : options(options_) {
+  reset();
+}
+
+void AdaptiveLogSoftmaxWithLossImpl::reset() {
   TORCH_CHECK( std::is_sorted(options.cutoffs().begin(), options.cutoffs().end()) &&
           *std::min_element(options.cutoffs().begin(), options.cutoffs().end()) > 0 &&
           *std::max_element(options.cutoffs().begin(), options.cutoffs().end()) <= (options.n_classes() - 1) &&
@@ -36,15 +40,16 @@ AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(const AdaptiveLog
         Linear(LinearOptions(hsz, osz).bias(false)));
     tail->push_back(projection);
   }
+  reset_parameters();
 }
 
-void AdaptiveLogSoftmaxWithLossImpl::reset() {
-  head->reset();
+void AdaptiveLogSoftmaxWithLossImpl::reset_parameters() {
+  head->reset_parameters();
   for (size_t i = 0; i < tail->size(); ++i) {
-    auto i2h = tail[i]->modules()[0]->as<Linear>();
-    auto h2o = tail[i]->modules()[1]->as<Linear>();
-    i2h->reset();
-    h2o->reset();
+    auto i2h = tail[i]->children()[0]->as<Linear>();
+    auto h2o = tail[i]->children()[1]->as<Linear>();
+    i2h->reset_parameters();
+    h2o->reset_parameters();
   }
 }
 

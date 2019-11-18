@@ -62,6 +62,8 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
 
   void reset() override;
 
+  void reset_parameters();
+
   /// Pretty prints the `LocalResponseNormImpl` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
