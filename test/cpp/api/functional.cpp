@@ -1577,6 +1577,8 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
       .momentum(momentum)
       .eps(eps));
   auto expected = torch::ones({2, 5});
+  std::cout << output << std::endl;
+  std::cout << expected << std::endl;
   ASSERT_TRUE(output.allclose(expected));
 }
 
