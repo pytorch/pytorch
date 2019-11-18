@@ -40,6 +40,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.quantization import QConfig
 from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
+from fake_operators import fake_empty_like, fake_rand_like, fake_randint_like, fake_randn_like, fake_ones_like, fake_zeros_like, fake_full_like
+
 
 # Testing utils
 import jit_utils
@@ -395,7 +397,7 @@ class TestJit(JitTestCase):
                     if flag:
                         return x
                     else:
-                        return torch.zeros_like(x)
+                        return torch.zeros_like(x, memory_format=torch.contiguous_format)
                 x = torch.neg(x)
                 return make_decision(flag, x)
 
@@ -7145,10 +7147,10 @@ a")
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, s(t, 't.to(t, non_blocking=non_blocking)', non_blocking))
             self.assertIs(t, s(t, 't.to(t.dtype, non_blocking=non_blocking)', non_blocking))
-            self.assertIs(t, s(t, 't.to(torch.empty_like(t), non_blocking=non_blocking)', non_blocking))
+            self.assertIs(t, s(t, 't.to(torch.empty_like(t, memory_format=torch.contiguous_format), non_blocking=non_blocking)', non_blocking))
             self.assertIsNot(t, s(t, 't.to(t, non_blocking=non_blocking, copy=True)', non_blocking))
             self.assertIsNot(t, s(t, 't.to(t.dtype, non_blocking=non_blocking, copy=True)', non_blocking))
-            self.assertIsNot(t, s(t, 't.to(torch.empty_like(t), non_blocking=non_blocking, copy=True)', non_blocking))
+            self.assertIsNot(t, s(t, 't.to(torch.empty_like(t, memory_format=torch.contiguous_format), non_blocking=non_blocking, copy=True)', non_blocking))
 
             devices = [t.device]
             if t.device.type == 'cuda':
@@ -8073,9 +8075,9 @@ a")
             d = m2.sub2.a.mm(input)
             ref = a + b + m2.bias + m2.sub.weight + a + c + d
             self.assertEqual(ref, m2.forward(input))
-            m2.weight = nn.Parameter(torch.zeros_like(m2.weight))
-            m2.bias = nn.Parameter(torch.zeros_like(m2.bias))
-            m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
+            m2.weight = nn.Parameter(fake_zeros_like(m2.weight))
+            m2.bias = nn.Parameter(fake_zeros_like(m2.bias))
+            m2.sub.weight = nn.Parameter(fake_zeros_like(m2.sub.weight))
             m2.sub2.a.data.zero_()
             self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
@@ -13225,7 +13227,7 @@ a")
             fb = FooBar()
             fb.linear1.weight = torch.nn.Parameter(
                 torch.tensor([[-150, 100], [100, -150]], dtype=torch.float), requires_grad=False)
-            fb.linear1.bias = torch.nn.Parameter(torch.zeros_like(fb.linear1.bias), requires_grad=False)
+            fb.linear1.bias = torch.nn.Parameter(fake_zeros_like(fb.linear1.bias), requires_grad=False)
 
             x = (torch.rand(1, K1).float() - 0.5) / 10.0
             value = torch.tensor([[100, -150]], dtype=torch.float)
@@ -15661,7 +15663,7 @@ a")
                   result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
                                     non_blocking=False, copy=False)
                   result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"), memory_format=torch.contiguous_format)
+                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"), memory_format=1)
                   _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
                   return _2
                 ''',
@@ -17105,6 +17107,8 @@ for test in criterion_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
+    # import os
+    # input(os.getpid())
     run_tests()
     if not PY2:
         import test_jit_py3
