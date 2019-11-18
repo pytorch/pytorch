@@ -73,7 +73,7 @@ class ProcessGroup {
 
     // Waits until request completes. Blocking operation.
     // Throws if the work completed with an exception.
-    // Returns false if the work is aboorted.
+    // Returns false if the work is aborted.
     // Otherwise, it always returns true, indicating the work is completed.
     //
     // Functionally equivalent to:
