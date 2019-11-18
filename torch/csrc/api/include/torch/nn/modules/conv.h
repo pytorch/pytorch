@@ -2,6 +2,7 @@
 
 #include <torch/expanding_array.h>
 #include <torch/nn/cloneable.h>
+#include <torch/nn/init.h>
 #include <torch/nn/options/conv.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
