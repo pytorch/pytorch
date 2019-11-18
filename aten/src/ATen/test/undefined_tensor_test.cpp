@@ -27,6 +27,7 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_ANY_THROW(und.add(5));
   ASSERT_ANY_THROW(und.mm(und));
 
+  // public variable API
   ASSERT_ANY_THROW(und.variable_data());
   ASSERT_ANY_THROW(und.tensor_data());
   ASSERT_ANY_THROW(und.is_view());
