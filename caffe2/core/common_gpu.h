@@ -32,6 +32,9 @@
 #define CAFFE2_CUDA_EXPORT C10_EXPORT
 #define CAFFE2_CUDA_API TORCH_CUDA_API
 
+#define CAFFE2_HIP_EXPORT C10_EXPORT
+#define CAFFE2_HIP_API TORCH_HIP_API
+
 // This is a macro defined for cuda fp16 support. In default, cuda fp16 is
 // supported by NVCC 7.5, but it is also included in the Tegra X1 platform with
 // a (custom?) NVCC 7.0. As a result, we would normally just check the cuda

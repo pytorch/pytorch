@@ -107,4 +107,10 @@
 #define TORCH_CUDA_API C10_IMPORT
 #endif
 
+#if defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_HIP_API C10_EXPORT
+#else
+#define TORCH_HIP_API C10_IMPORT
+#endif
+
 #endif // C10_MACROS_MACROS_H_
