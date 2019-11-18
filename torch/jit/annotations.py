@@ -10,7 +10,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType
 
 from textwrap import dedent
-from torch._six import builtins
+from torch._six import builtins, PY2
 from torch._utils_internal import get_source_lines_and_file
 
 
@@ -79,7 +79,11 @@ def get_signature(fn, rcb, loc, is_method):
 
 
 def get_param_names(fn, is_method):
-    arg_names = inspect.getfullargspec(fn).args
+    if PY2:
+        arg_names = inspect.getargspec(fn).args
+    else:
+        arg_names = inspect.getfullargspec(fn).args
+    print(inspect.getfullargspec(fn))
     if is_method:
         # Chop off `self` arg
         arg_names = arg_names[1:]
