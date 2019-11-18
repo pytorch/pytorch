@@ -275,33 +275,54 @@ DimVector TensorIterator::invert_perm(IntArrayRef input) const {
   return res;
 }
 
+DimVector TensorIterator::apply_perm_and_mul(IntArrayRef input, int mul) const {
+  TORCH_INTERNAL_ASSERT(!has_coalesced_dimensions_);
+  auto res = DimVector(input.size(), 0);
+  for (size_t i = 0; i < input.size(); i++) {
+    res[i] = input[perm_[i]] * mul;
+  }
+  return res;
+}
+
 void TensorIterator::allocate_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.dtype);
-      op.stride_bytes = compatible_stride(element_size);
-      //check if permutation is just an inverted order
-      bool inverted = true;
-      for (int i = 1; i <= ndim(); i++) {
-        if (perm_[i-1] != ndim() - i) {
-          inverted = false;
-          break;
-        }
-      }
-      auto tensor_shape = invert_perm(shape_);
-      if (inverted) {
-        // can just return contiguous output
-        // it is faster because it avoids allocating 0 size tensor and resizing and restriding it
+      if (requires_channels_last_output_ && ndim() == 4) {
+        auto tensor_shape = invert_perm(shape_);
         op.tensor = at::empty(tensor_shape, op.options());
+        op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
+            MemoryFormat::ChannelsLast);
+        // As we are allocating output after permutations is done, we need to
+        // make sure that operand's strides are matching element size and
+        // dimensions permutations which are stored in _perm
+        op.stride_bytes = apply_perm_and_mul(op.tensor.strides(), element_size);
       } else {
-        auto tensor_stride = invert_perm(op.stride_bytes);
-        for (int dim = 0; dim < ndim(); dim++) {
-          tensor_stride[dim] /= element_size;
+        op.stride_bytes = compatible_stride(element_size);
+        // check if permutation is just an inverted order
+        bool inverted = true;
+        for (int i = 1; i <= ndim(); i++) {
+          if (perm_[i - 1] != ndim() - i) {
+            inverted = false;
+            break;
+          }
         }
-        op.tensor =
-            at::empty_strided(tensor_shape, tensor_stride, op.options());
+        auto tensor_shape = invert_perm(shape_);
+        if (inverted) {
+          // can just return contiguous output
+          // it is faster because it avoids allocating 0 size tensor and
+          // resizing and restriding it
+          op.tensor = at::empty(tensor_shape, op.options());
+        } else {
+          auto tensor_stride = invert_perm(op.stride_bytes);
+          for (int dim = 0; dim < ndim(); dim++) {
+            tensor_stride[dim] /= element_size;
+          }
+          op.tensor =
+              at::empty_strided(tensor_shape, tensor_stride, op.options());
+        }
       }
     }
   }
@@ -791,6 +812,11 @@ void TensorIterator::compute_shape() {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
         tensor.resize_(shape_);
+        if (requires_channels_last_output_ && tensor.dim() == 4) {
+          // Temporary stick to 4d tensor, will update with arbitrary batched later on
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(
+              MemoryFormat::ChannelsLast);
+        }
         continue;
       }
       if (!is_reduction_) {
@@ -819,6 +845,15 @@ void TensorIterator::compute_strides() {
           op.stride_bytes[offset + i] = original_stride[i] * element_size_in_bytes;
         }
       }
+    }
+  }
+}
+
+void TensorIterator::analyze_memory_format() {
+  for (auto& op : operands_) {
+    if (op.tensor.defined() &&
+        op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+      requires_channels_last_output_ = true;
     }
   }
 }
@@ -920,6 +955,8 @@ bool TensorIterator::can_use_fast_set_up() {
 }
 
 void TensorIterator::build() {
+  // check input tensors memory format to use it during output allocation
+  analyze_memory_format();
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
   // Check that the outputs have no internal overlap
