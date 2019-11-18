@@ -3,6 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/functional/batchnorm.h>
 #include <torch/nn/options/batchnorm.h>
+#include <torch/nn/init.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 

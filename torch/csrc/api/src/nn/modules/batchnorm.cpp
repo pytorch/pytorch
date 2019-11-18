@@ -2,7 +2,6 @@
 
 #include <torch/cuda.h>
 #include <torch/types.h>
-#include <torch/nn/init.h>
 
 #include <c10/util/Exception.h>
 
