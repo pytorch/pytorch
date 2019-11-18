@@ -137,12 +137,12 @@ PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
 ${call_dispatch}.set_requires_grad(${requires_grad})""")
 
 # Unpack parsed args to locals, call the op, and wrap the result.
-# Lambda ensures that any RAII in ${inits} is out of the way by wrap() time.
+# Lambda is so GIL is back on by wrap() time.
 # This is important for GIL handling, as wrap can do allocation.
-# Captures are normally only the python args array _r, and sometimes self.
 PY_VARIABLE_WRAP = CodeTemplate("""\
-auto result = [&](){
-  ${inits}
+${inits}
+${simple_return_type} result = [&](){
+  ${auto_no_gil}
   return ${call_dispatch};
 }();
 return utils::wrap(${namedtuple_return_type}result);
@@ -540,9 +540,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
         env['dispatch_call'] = dispatch_call
-
-        if not declaration['with_gil']:
-            inits.append('AutoNoGIL no_gil;')
+        env['auto_no_gil'] = ['AutoNoGIL no_gil;'] if not declaration['with_gil'] else []
 
         # Use the simple_return_type (Tensor) rather than the fancy return type
         # (Tensor &).  This is important because the dispatch functions take
