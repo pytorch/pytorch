@@ -140,7 +140,7 @@ namespace std {
 template <>
 struct hash<torch::distributed::rpc::WorkerInfo> {
   std::size_t operator()(
-      const torch::distributed::rpc::WorkerInfo worker_info) const noexcept {
+      const torch::distributed::rpc::WorkerInfo& worker_info) const noexcept {
     return worker_info.id_;
   }
 };

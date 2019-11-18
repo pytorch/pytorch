@@ -39,6 +39,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def_readonly("name", &WorkerInfo::name_)
           .def_readonly("id", &WorkerInfo::id_)
           .def("__eq__", &WorkerInfo::operator==, py::is_operator())
+          // pybind11 suggests the syntax  .def(hash(py::self)), with the
+          // unqualified "hash" function call. However the
+          // argument-dependent lookup for the function "hash" doesn't get
+          // triggered in this context because it conflicts with the struct
+          // torch::hash, so  we need to use the qualified name
+          // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self));
 
   auto rpcAgent =
