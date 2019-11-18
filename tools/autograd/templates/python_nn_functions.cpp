@@ -12,11 +12,12 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
 
-#include "python_nn_functions_dispatch.h"
-
 using at::Tensor;
 using at::Scalar;
 using at::MemoryFormat;
+using at::Generator;
+using at::IntArrayRef;
+
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {

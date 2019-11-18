@@ -70,6 +70,7 @@ BINARY_OP_NAMES = [
     '__or__', '__ror__', '__ior__',
 ]
 
+# python binding for all overloads of a particular function/method
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
@@ -79,7 +80,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+  auto _r = parser.parse(args, kwargs, parsed_args);
   ${declare_namedtuple_return_types}
   ${dispatch}
   Py_RETURN_NONE;
@@ -87,56 +88,62 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 }
 """)
 
+# python binding for a method with no args, shortcuts parsing
 PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
   ${declare_namedtuple_return_types}
   ${unpack_self}
-  return wrap(${namedtuple_return_type}${dispatch_name}(${actuals}));
+  ${dispatch}
   END_HANDLE_TH_ERRORS
 }
 """)
 
+# handler for a single parsed signature - may be a single overload or
+# a pair of overloads that whose signatures only differ in output params
 PY_VARIABLE_CASE = CodeTemplate("""\
-${cond} (r.idx == ${i}) {
+${cond} (_r.idx == ${i}) {
   ${call_dispatch}
 """)
 
+# handler for output/no-output overload pair
 PY_VARIABLE_OUT = CodeTemplate("""\
-if (r.isNone(${out_idx})) {
+if (_r.isNone(${out_idx})) {
   ${call_dispatch}
 } else {
   ${call_dispatch_out}
 }
 """)
 
+# variation of output/no-output handler in which tensor options params
+# (if present) are checked against properties of a tensor output param
 PY_VARIABLE_OUT_CHECK_TYPE = CodeTemplate("""\
-if (r.isNone(${out_idx})) {
+if (_r.isNone(${out_idx})) {
   ${call_dispatch}
 } else {
-  check_out_type_matches(r.tensor(${out_idx}), r.scalartype(${type_idx}), r.isNone(${type_idx}),
-                         r.layout(${layout_idx}), r.isNone(${layout_idx}),
-                         r.device(${device_idx}), r.isNone(${device_idx}));
+  check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}), _r.isNone(${type_idx}),
+                         _r.layout(${layout_idx}), _r.isNone(${layout_idx}),
+                         _r.device(${device_idx}), _r.isNone(${device_idx}));
   ${call_dispatch_out}
 }
 """)
 
 PY_VARIABLE_CALL_DISPATCH = CodeTemplate("""\
-${dispatch_name}(${actuals})""")
+${dispatch_call}(${dispatch_args})""")
 
 PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
 ${call_dispatch}.set_requires_grad(${requires_grad})""")
 
+# Unpack parsed args to locals, call the op, and wrap the result.
+# Lambda ensures that any RAII in ${inits} is out of the way by wrap() time.
+# Captures are normally only the python args array _r, and sometimes self.
 PY_VARIABLE_WRAP = CodeTemplate("""\
-return wrap(${namedtuple_return_type}${call_dispatch});""")
-
-PY_VARIABLE_DISPATCH = CodeTemplate("""\
-inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
-  ${initialize_cuda}
-  ${AutoNoGIL}
-  return ${dispatch_call}(${dispatch_args});
-}
+auto result = [&](){
+  ${inits}
+  return ${call_dispatch};
+}();
+return utils::wrap(${namedtuple_return_type}result);
 """)
 
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
@@ -162,7 +169,10 @@ if (!namedtuple_type_initialized${namedtuple_type_index}) {
 }
 """)
 
-UNPACK_SELF = "auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
+# NOTE: we type the unpacked self as Tensor not Variable to avoid return type
+# discrepancies on method resolution (e.g. Variable::detach_ returns void
+# rather than Tensor &)
+UNPACK_SELF = "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
 
 PYTHON_FUNCTION_SIGNATURE = CodeTemplate("""\
 ${name}(${py_formal_args})""")
@@ -227,13 +237,11 @@ def get_py_variable_methods(declarations):
 
 def gen_py_variable_methods(out, declarations, template_path):
     PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
-    PY_VARIABLE_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_variable_methods_dispatch.h')
 
     py_variable_methods = get_py_variable_methods(declarations)
 
     env = create_python_bindings(py_variable_methods, True)
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
-    write(out, 'python_variable_methods_dispatch.h', PY_VARIABLE_DISPATCH_H, env)
 
 
 def get_py_nn_functions(declarations):
@@ -251,14 +259,12 @@ def get_py_nn_functions(declarations):
 def gen_py_nn_functions(out, declarations, template_path):
     PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
     PY_NN_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_nn_functions.h')
-    PY_NN_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_nn_functions_dispatch.h')
 
     py_nn_functions = get_py_nn_functions(declarations)
 
     env = create_python_bindings(py_nn_functions, has_self=False, is_module=True)
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
     write(out, 'python_nn_functions.h', PY_NN_FUNCTIONS_H, env)
-    write(out, 'python_nn_functions_dispatch.h', PY_NN_DISPATCH_H, env)
 
 
 def get_py_torch_functions(declarations):
@@ -277,13 +283,11 @@ def get_py_torch_functions(declarations):
 
 def gen_py_torch_functions(out, declarations, template_path):
     PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
-    PY_TORCH_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_torch_functions_dispatch.h')
 
     py_torch_functions = get_py_torch_functions(declarations)
 
     env = create_python_bindings(py_torch_functions, has_self=False)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
-    write(out, 'python_torch_functions_dispatch.h', PY_TORCH_DISPATCH_H, env)
 
 
 def group_declarations_by_name(declarations, should_bind_fn):
@@ -312,7 +316,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     """Generates Python bindings to ATen functions"""
     py_methods = []
     py_method_defs = []
-    py_method_dispatch = []
 
     unpack_methods = {
         'const Tensor &': 'tensor',
@@ -348,14 +351,28 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     }
 
     def emit_single_dispatch(declaration, out_idx, base_env):
+        """
+        Emit dispatch code for a single declared overload.
+
+        - declaration: the single op overload to generate code for.
+
+        - out_idx:     some overloads come in pairs, with signatures that match
+                       except for optional output params. For these pairs, the
+                       generated binding uses a single signature. out_idx is the
+                       index of the first output argument in the signature, whether
+                       we're emitting the output or no-output sibling. For singleton
+                       no-output overloads, out_idx is None. (Singleton overloads with
+                       output are prohibited.)
+
+        - base_env:    dictionary with stuff that applies to all overloads
+        """
         env = {}
         simple_return_type = declaration['return_type'].replace(' &', '')
         assert simple_return_type in SUPPORTED_RETURN_TYPES, \
             declaration['name'] + ' returns unsupported type: ' + simple_return_type
 
-        body = []
+        inits = []
         actuals = []
-        formal_args = []
         arg_idx = 0
 
         def is_output(arg):
@@ -408,28 +425,16 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     '`{}` type is not supported in python_default_init'.format(typename)
                 unpack_with_default = unpack_with_default_methods.get(typename)
                 default_expr = arg.get('python_default_init')
-                expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
+                expr = '_r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
                 unpack = unpack_methods.get(typename, typename.lower())
-                expr = 'r.{}({})'.format(unpack, arg_index)
+                expr = '_r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
-                body.extend(unpack_variable(name, expr, typename))
+                inits.extend(unpack_variable(name, expr, typename))
                 expr = name
 
-            dispatch_type = typename
-            if dispatch_type == 'Tensor':
-                dispatch_type = 'const Tensor &'
-            elif dispatch_type == 'Tensor &':
-                dispatch_type = 'Tensor'
-            elif dispatch_type == 'const Device &':
-                dispatch_type = 'c10::optional<int32_t>'
-            formal = '{} {}'.format(dispatch_type, name)
-            return expr, formal
-
-        def append_actuals_formals(actual, formal):
-            actuals.append(actual)
-            formal_args.append(formal)
+            return expr
 
         # We always want to unpack when we have TensorOptions.
         unpack = has_tensor_options
@@ -437,20 +442,20 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if arg['simple_type'] in ['Type', 'TensorOptions']:
                 continue
             if has_self and arg['name'] == 'self':
-                formal_args.append('Tensor & self')
                 actuals.append('self')
                 continue
-            append_actuals_formals(*parse_arg(arg, arg_idx, unpack))
+            actuals.append(parse_arg(arg, arg_idx, unpack_args=True))
             arg_idx += 1
 
         if len(outputs) == 1:
-            append_actuals_formals(*parse_arg(outputs[0], arg_idx))
+            actuals.append(parse_arg(outputs[0], arg_idx, unpack_args=True))
         elif len(outputs) > 1:
             N = len(outputs)
-            body.append('auto results = r.tensorlist_n<{}>({});'.format(N, arg_idx))
+            inits.append('auto results = _r.tensorlist_n<{}>({});'.format(N, arg_idx))
+
             for i, arg in enumerate(outputs):
-                formal_args.append('Tensor & {}'.format(arg['name']))
-                actuals.append('results[{}]'.format(i))
+                inits.extend(unpack_variable(arg['name'], 'results[{}]'.format(i), 'Tensor & '))
+                actuals.append(arg['name'])
 
         layout = None
         parsed_type_args = None
@@ -461,7 +466,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             arg_idx += 1
 
         # check python_binding_arguments
-        has_device_bind = False
         requires_grad = None
         python_binding_arguments = declaration.get('python_binding_arguments', [])
         if 'dtype' in (a['name'] for a in python_binding_arguments):
@@ -480,68 +484,60 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             elif arg['name'] == 'layout' and arg['simple_type'] == 'Layout':
                 # out(s) determines the type and layout if it is present, so only use this if there are no outputs.
                 if len(outputs) == 0:
-                    layout = parse_arg(arg, layout_idx)[0]
+                    layout = parse_arg(arg, layout_idx)
             elif arg['name'] == 'device' and arg['simple_type'] == 'Device':
                 if len(outputs) == 0:
                     assert parsed_type_args
                     assert layout
-                    device, device_type = parse_arg(arg, device_idx, True)
-
-                    if not has_tensor_options:
-                        # add type, device formals and corresponding actuals.
-                        # The type actual is the ATen type mapped from (ScalarType, Layout, Device)
-                        # The device actual is the corresponding AutoGPU index for the Device.
-                        formal_args.append(parsed_type_args[1])
-                        formal_args.append(device_type)
-                        actuals.append("torch::getVariableType({}, {}, {})".format(parsed_type_args[0], layout, device))
-                        actuals.append('{}.index()'.format(device))
-
-                    has_device_bind = True
+                    device = parse_arg(arg, device_idx, unpack_args=True)
             elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
-                requires_grad = parse_arg(arg, requires_grad_idx)[0]
+                requires_grad = parse_arg(arg, requires_grad_idx)
             elif arg['name'] == 'pin_memory' and arg['simple_type'] == 'bool':
-                pin_memory = parse_arg(arg, pin_memory_idx)[0]
+                pin_memory = parse_arg(arg, pin_memory_idx)
             else:
                 raise RuntimeError(("found {} in python_binding_arguments but only "
                                     "\"bool pin_memory\", \"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
                                     "\"Device device\" are supported".format(arg)))
 
-        dtype = parsed_type_args[0] if parsed_type_args else None
+        dtype = parsed_type_args
         if has_tensor_options and all([dtype, device, layout, requires_grad]):
-            body.append(TENSOR_OPTIONS.substitute({
+            inits.append(TENSOR_OPTIONS.substitute({
                 'dtype': dtype,
                 'layout': layout,
                 'device': device,
                 'requires_grad': requires_grad,
                 'pin_memory': pin_memory,
             }))
-            formal_args.append('const TensorOptions & options')
             actuals.append('options')
 
         env['unpack_args'] = []
-        env['formal_args'] = formal_args
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
-        else:
-            env['initialize_cuda'] = ''
+            inits.append('torch::utils::maybe_initialize_cuda(options);')
 
         if 'call_args' in declaration:
+            # NOTE: declaration['call_args'] is added to a deprecated op declaration by
+            # load_deprecated_signatures() in gen_autograd.py, on its way from
+            # deprecated.yaml to Declarations.yaml. Typically deprecated.yaml adds extra
+            # constant args to fill out a smaller deprecated param list.
             env['dispatch_args'] = declaration['call_args']
         else:
             env['dispatch_args'] = [arg['name'] for arg in declaration['arguments']]
 
         if 'Tensor' in declaration['method_of']:
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
-            env['dispatch_call'] = 'self.{}'.format(declaration['name'])
+            dispatch_call = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
             namespace = 'torch' if (has_tensor_options or declaration['name'].endswith('_like')) else 'at'
-            env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
+            dispatch_call = '{}::{}'.format(namespace, declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
-        env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
+        env['dispatch_call'] = dispatch_call
+
+        if not declaration['with_gil']:
+            inits.append('AutoNoGIL no_gil;')
 
         # Use the simple_return_type (Tensor) rather than the fancy return type
         # (Tensor &).  This is important because the dispatch functions take
@@ -568,15 +564,28 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if requires_grad and not has_tensor_options:
             call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch,
                                                                      requires_grad=requires_grad)
+        body = []
         if simple_return_type == 'void':
+            body = inits
             body.append('{call_dispatch};'.format(call_dispatch=call_dispatch))
             body.append('Py_RETURN_NONE;')
         else:
-            body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
-        py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
+            body.append(PY_VARIABLE_WRAP.substitute(env, inits=inits, call_dispatch=call_dispatch))
         return body
 
     def emit_dispatch(i, dictionary, base_env):
+        """
+        Emit dispatch code for a single parsed signature. This may correspond to either one
+        or two declared overloads: those that differ only in optional output params are paired
+        up in the generated binding.
+
+        - i:            this signature's position in generated binding's signature list
+
+        - dictionary:   contains a no-output overload declaration under 'base', and optionally
+                        a second overload with outputs under 'out'
+
+        - base_env:     dictionary containing stuff that applies to all overloads
+        """
         if 'out' in dictionary:
             out_idx = len([arg for arg in dictionary['out']['arguments']
                            if not arg.get('output', False)])
@@ -715,6 +724,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         return PY_RETURN_NAMEDTUPLE_DEF.substitute(declaration), next_index + 1
 
     def process_function(name, declarations):
+        """
+        Generate a python binding for all overloads of an op.
+        """
         for declaration in declarations:
             declaration['python_binding_arguments'] = get_python_binding_arguments(declaration)
 
@@ -740,33 +752,35 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['declare_namedtuple_return_types'] += typedef
 
         # emit dispatch
-        grouped = group_declarations(declarations)
-        for i, dictionary in enumerate(grouped):
-            signature = dictionary['signature']
-            if has_self:
-                signature = signature.replace('Tensor self, ', '')
-                signature = signature.replace('Tensor self', '')
-            if not has_self:
-                # Use 'input' instead of 'self' for NN functions
-                signature = signature.replace('Tensor self', 'Tensor input')
-            if dictionary['base'].get('deprecated', False):
-                signature += '|deprecated'
-            env['signatures'].append('"{}",'.format(signature))
-            env['dispatch'].append(emit_dispatch(i, dictionary, env))
-
-        env['dispatch'].append('}')
-
-        env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
-
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
+            # special codegen for dispatch to methods with no arguments
             tmpl = PY_VARIABLE_METHOD_NOARGS
-            env['actuals'] = ['self']
             env['flags'] = 'METH_NOARGS'
-            env['namedtuple_return_type'] = declarations[0]['namedtuple_return_type']
+            decl = declarations[0].copy()
+            decl['with_gil'] = True
+            env['dispatch'] = emit_single_dispatch(decl, 0, env)
         else:
             tmpl = PY_VARIABLE_METHOD_VARARGS
             env['flags'] = 'METH_VARARGS | METH_KEYWORDS'
             env['pycfunc_voidcast'] = '(void(*)(void))'
+
+            grouped = group_declarations(declarations)
+            for i, dictionary in enumerate(grouped):
+                signature = dictionary['signature']
+                if has_self:
+                    signature = signature.replace('Tensor self, ', '')
+                    signature = signature.replace('Tensor self', '')
+                if not has_self:
+                    # Use 'input' instead of 'self' for NN functions
+                    signature = signature.replace('Tensor self', 'Tensor input')
+                if dictionary['base'].get('deprecated', False):
+                    signature += '|deprecated'
+                env['signatures'].append('"{}",'.format(signature))
+                env['dispatch'].append(emit_dispatch(i, dictionary, env))
+
+            env['dispatch'].append('}')
+
+        env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
 
         if not is_module and not has_self:
             env['flags'] += ' | METH_STATIC'
@@ -777,13 +791,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             py_method_defs.append(PY_VARIABLE_METHOD_DEF.substitute(env))
 
+    # process_function mainline
     for name in sorted(python_functions.keys()):
         process_function(name, python_functions[name])
 
     return {
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
-        'py_method_dispatch': py_method_dispatch,
     }
 
 
