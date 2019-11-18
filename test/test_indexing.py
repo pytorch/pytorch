@@ -184,7 +184,7 @@ class TestIndexing(TestCase):
         for a in tensors:
             # prefix with a 1,1, to ensure we are compatible with numpy which cuts off prefix 1s
             # (some of these ops already prefix a 1 to the size)
-            neg_ones = torch.ones_like(a) * -1
+            neg_ones = torch.ones_like(a, memory_format=torch.preserve_format) * -1
             neg_ones_expanded = neg_ones.unsqueeze(0).unsqueeze(0)
             a[True] = neg_ones_expanded
             self.assertEqual(a, neg_ones)
