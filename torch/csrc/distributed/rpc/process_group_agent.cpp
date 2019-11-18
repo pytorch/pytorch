@@ -162,6 +162,10 @@ ProcessGroupAgent::ProcessGroupAgent(
   }
 }
 
+ProcessGroupAgent::~ProcessGroupAgent() {
+  localShutdown();
+}
+
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
     const std::string& workerName) const {
   const auto idIter = nameMap_.find(workerName);
@@ -259,12 +263,46 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
+  fprintf(stderr, "STARTING PROCESS GROUP AGFENT....\n");
+  start_.store(true);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
+}
+
+void ProcessGroupAgent::localShutdown() {
+  if (!start_.load()) {
+    return;
+  }
+  LOG(INFO) << "Stopping ProcessGroupAgent.";
+  // CV to make sure we don't abort it in an invalid state.
+  fprintf(stderr, "waiting for lock inn stop\n");
+  {
+    std::unique_lock<std::mutex> lock(recvWorkMutex_);
+    fprintf(stderr, "got lock, waiting to be woken up now\n");
+    recvWorkCV_.wait(lock, [this]() { return recvWork_; });
+    fprintf(stderr, "i was woken up\n");
+    recvWork_->abort();
+    fprintf(stderr, "called abort too...\n");
+    start_.store(false);
+  }
+  fprintf(stderr, "done waiting for the lock\n");
+  // start_.store(true);
+  // Interrupt listenerThread's recvWork_->wait(), in case it is waiting for a
+  // message.
+  // CV to make sure we don't abort it in an invalid state.
+  // {
+  //   std::unique_lock<std::mutex> lock(recvWorkMutex_);
+  //   recvWorkCV_.wait(lock, [this]() { return recvWork_; });
+  //   recvWork_->abort();
+  // }
+  threadPool_.waitWorkComplete();
+  listenerThread_.join();
+  PythonRpcHandler::getInstance().cleanup();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  TORCH_CHECK(start_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
       "Destination rank is out of bound, got ",
@@ -423,10 +461,30 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  while (true) {
+  fprintf(stderr, "listenloop: am i even going to run\n");
+  while (start_.load()) {
+    fprintf(stderr, "listenloop: running right now\n");
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
-    pg_->recvAnysource(preamble, pg_->getRank())->wait();
+    fprintf(stderr, "listenloop: about to get the lock\n");
+    {
+      std::lock_guard<std::mutex> guard(recvWorkMutex_);
+      fprintf(stderr, "about to call into  recvAnysource\n");
+      recvWork_ = pg_->recvAnysource(preamble, pg_->getRank());
+    }
+
+    recvWorkCV_.notify_one();
+
+    if (!start_.load()) {
+      return;
+    }
+    fprintf(stderr, "listenloop: about to wait\n");
+    bool aborted = !recvWork_->wait();
+    fprintf(stderr, "listenloop: done waiting\n");
+    if (aborted) {
+      continue;
+    }
+
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];

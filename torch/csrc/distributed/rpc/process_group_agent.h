@@ -40,6 +40,7 @@ class ProcessGroupAgent : public RpcAgent {
       std::shared_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout);
+  virtual ~ProcessGroupAgent() override;
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
@@ -50,6 +51,8 @@ class ProcessGroupAgent : public RpcAgent {
   void sync() override;
 
   void start() override;
+
+  void localShutdown() override;
 
  protected:
   // This method wraps the destination information and the message into a
@@ -117,10 +120,16 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
+  // tracks if the listenerThread_ that processes
+  // incoming messages should be running.
+  std::atomic<bool> start_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
   std::thread listenerThread_;
+  std::mutex recvWorkMutex_;
+  std::condition_variable recvWorkCV_;
+  std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
   // A threadPool that processing both SendWork and RecvWork. There are two
   // motivations for adding a ThreadPool:
   // (1) RPC serialization/deserialization and processing can be expensive,

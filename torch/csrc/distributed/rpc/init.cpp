@@ -123,6 +123,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
     agent->start();
   });
 
+  module.def("local_shutdown_rpc", []() {
+    auto agent = RpcAgent::getDefaultRpcAgent();
+    agent->localShutdown();
+  });
+
   module.def("_destroy_rref_context", []() {
     RRefContext::getInstance().destroyInstance();
   });

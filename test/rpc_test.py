@@ -1062,6 +1062,27 @@ class RpcTest(object):
 
         self.assertEqual(result, sum(vals))
 
+    @dist_init(setup_model_parallel=False)
+    def test_rpc_agent_destructor(self):
+        rpc.init_model_parallel(
+            self_name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
+            init_method=self.init_method,
+        )
+
+    @dist_init(setup_model_parallel=False)
+    def test_local_shutdown_rpc(self):
+        rpc.init_model_parallel(
+            self_name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
+            init_method=self.init_method,
+        )
+        rpc.local_shutdown_rpc()
+
     @dist_init
     def test_get_default_rpc_timeout(self):
         timeout = rpc.get_rpc_timeout()
