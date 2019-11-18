@@ -1063,6 +1063,7 @@ class RpcTest(object):
         self.assertEqual(result, sum(vals))
 
     @dist_init(setup_model_parallel=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_agent_destructor(self):
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
@@ -1073,6 +1074,7 @@ class RpcTest(object):
         )
 
     @dist_init(setup_model_parallel=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_local_shutdown_rpc(self):
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
