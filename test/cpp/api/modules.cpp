@@ -1462,13 +1462,13 @@ TEST_F(ModulesTest, InstanceNorm1d) {
   InstanceNorm1d instance_norm(5);
   instance_norm->eval();
 
-  auto input = torch::randn({2, 5}, torch::requires_grad());
+  auto input = torch::randn({2}, torch::requires_grad());
   auto output = instance_norm->forward(input);
   auto s = output.sum();
   s.backward();
 
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5})));
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2})));
 }
 
 TEST_F(ModulesTest, InstanceNorm2dStateful) {

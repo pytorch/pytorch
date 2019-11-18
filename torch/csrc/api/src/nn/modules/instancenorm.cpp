@@ -19,6 +19,17 @@ Tensor InstanceNormImpl<D, Derived>::forward(const Tensor& input) {
     this->is_training() || !this->options.track_running_stats(), this->options.momentum().value(), this->options.eps());
 }
 
+template <size_t D, typename Derived>
+void InstanceNormImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::InstanceNorm" << D << "d("
+         << options.num_features() << ", "
+         << "eps=" << options.eps() << ", "
+         << "momentum=" << options.momentum().value() << ", "
+         << "affine=" << options.affine() << ", "
+         << "track_running_stats=" << options.track_running_stats() << ")";
+}
+
 void InstanceNorm1dImpl::_check_input_dim(const Tensor& input) {
   if (input.dim() == 2) {
     TORCH_CHECK(

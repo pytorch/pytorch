@@ -16,6 +16,9 @@ class InstanceNormImpl : public torch::nn::BatchNormImplBase<D, Derived> {
   using torch::nn::BatchNormImplBase<D, Derived>::BatchNormImplBase;
 
   Tensor forward(const Tensor& input) override;
+
+  /// Pretty prints the `InstanceNorm{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 };
 
 /// Applies the InstanceNorm1d function.
