@@ -1272,7 +1272,7 @@ TEST_F(ModulesTest, BatchNormLegacyWarning) {
 }
 
 TEST_F(ModulesTest, BatchNorm1dStateful) {
-  BatchNorm1d bn(BatchNorm1dOptions(5));
+  BatchNorm1d bn(5);
 
   ASSERT_TRUE(bn->options.track_running_stats());
 
@@ -1309,7 +1309,7 @@ TEST_F(ModulesTest, BatchNorm1dStateless) {
 }
 
 TEST_F(ModulesTest, BatchNorm1d) {
-  BatchNorm1d bn(BatchNorm1dOptions(5));
+  BatchNorm1d bn(5);
   bn->eval();
 
   auto input = torch::randn({2, 5}, torch::requires_grad());
@@ -1322,7 +1322,7 @@ TEST_F(ModulesTest, BatchNorm1d) {
 }
 
 TEST_F(ModulesTest, BatchNorm2dStateful) {
-  BatchNorm2d bn(BatchNorm2dOptions(5));
+  BatchNorm2d bn(5);
 
   ASSERT_TRUE(bn->options.track_running_stats());
 
@@ -1359,7 +1359,7 @@ TEST_F(ModulesTest, BatchNorm2dStateless) {
 }
 
 TEST_F(ModulesTest, BatchNorm2d) {
-  BatchNorm2d bn(BatchNorm2dOptions(5));
+  BatchNorm2d bn(5);
   bn->eval();
 
   auto input = torch::randn({2, 5, 4, 4}, torch::requires_grad());
@@ -1372,7 +1372,7 @@ TEST_F(ModulesTest, BatchNorm2d) {
 }
 
 TEST_F(ModulesTest, BatchNorm3dStateful) {
-  BatchNorm3d bn(BatchNorm3dOptions(5));
+  BatchNorm3d bn(5);
 
   ASSERT_TRUE(bn->options.track_running_stats());
 
@@ -1409,7 +1409,7 @@ TEST_F(ModulesTest, BatchNorm3dStateless) {
 }
 
 TEST_F(ModulesTest, BatchNorm3d) {
-  BatchNorm3d bn(BatchNorm3dOptions(5));
+  BatchNorm3d bn(5);
   bn->eval();
 
   auto input = torch::randn({2, 5, 4, 4, 4}, torch::requires_grad());
