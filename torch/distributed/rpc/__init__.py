@@ -35,10 +35,9 @@ if is_available():
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current
-        process ready to send and receive RPCs. The caller needs to make
-        sure the specified backend is properly intialized before calling
-        this method. For example, to use ``pg`` (ProcessGroup) backend,
-        ``init_process_group`` must be invoked prior to this method.
+        process ready to send and receive RPCs. This method also properly
+        initializes a default process group backend that uses gloo for
+        collective communication.
 
         Arguments:
             backend (Enum): type of RPC backend implementation.
@@ -54,7 +53,7 @@ if is_available():
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
             rpc_timeout (datetime.timedelta): Timeout for RPCs. Defaults to 60 seconds.
-                0 means infinity.
+                If 0, no timeout is enforced.
         """
         # Rendezvous.
         world_size = len(worker_name_to_id)

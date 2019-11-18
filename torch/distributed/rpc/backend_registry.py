@@ -59,7 +59,7 @@ def _process_group_init_backend_handler(
 
     world_size = len(worker_name_to_id)
     dist.init_process_group(
-        backend="gloo", store=store, rank=self_rank, world_size=world_size
+        backend=dc10d.Backend.GLOO, store=store, rank=self_rank, world_size=world_size
     )
 
     try:
@@ -79,16 +79,10 @@ def _process_group_init_backend_handler(
                 )
             )
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        return ProcessGroupAgent(
-            self_name,
-            group,
-            num_send_recv_threads,
-            rpc_timeout,
-        )
+        return ProcessGroupAgent(self_name, group, num_send_recv_threads, rpc_timeout)
     except Exception as ex:
         dist.destroy_process_group()
         raise ex
-
 
 
 register_backend("PROCESS_GROUP", _process_group_init_backend_handler)
