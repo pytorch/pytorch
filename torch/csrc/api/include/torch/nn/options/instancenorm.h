@@ -2,6 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 
 namespace torch {
