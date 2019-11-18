@@ -732,6 +732,17 @@ class TestCuda(TestCase):
     def test_gather_dim(self):
         self._test_gather(1)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_memory_format_scatter_gather(self):
+        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
+        results = torch.cuda.comm.scatter(nhwc, (0, 1), None, 0)
+        for result in results:
+            self.assertFalse(result.is_contiguous())
+            self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+        gathered = torch.cuda.comm.gather(results)
+        self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
+
     def test_torch_manual_seed_seeds_cuda_devices(self):
         with freeze_rng_state():
             x = torch.zeros(4, 4).float().cuda()
