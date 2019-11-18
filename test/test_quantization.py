@@ -332,23 +332,24 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API - out of place version
-        base = SingleLayerLinearDynamicModel()
-        keys_before = set(list(base.state_dict().keys()))
-        model = quantize_dynamic(base, qconfig_dict)
-        checkQuantized(model)
-        keys_after = set(list(base.state_dict().keys()))
-        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+        for dtype in [torch.qint8, torch.float16]:
+            # test one line API - out of place version
+            base = SingleLayerLinearDynamicModel()
+            keys_before = set(list(base.state_dict().keys()))
+            model = quantize_dynamic(base, qconfig_dict, dtype=dtype)
+            checkQuantized(model)
+            keys_after = set(list(base.state_dict().keys()))
+            self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
-        # in-place version
-        model = SingleLayerLinearDynamicModel()
-        quantize_dynamic(model, qconfig_dict, inplace=True)
-        checkQuantized(model)
+            # in-place version
+            model = SingleLayerLinearDynamicModel()
+            quantize_dynamic(model, qconfig_dict, inplace=True, dtype=dtype)
+            checkQuantized(model)
 
-        # Test set qconfig
-        model = SingleLayerLinearDynamicModel()
-        quantize_dynamic(model, set([nn.Linear]), inplace=True)
-        checkQuantized(model)
+            # Test set qconfig
+            model = SingleLayerLinearDynamicModel()
+            quantize_dynamic(model, set([nn.Linear]), inplace=True, dtype=dtype)
+            checkQuantized(model)
 
     def test_two_layers(self):
         r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
@@ -369,13 +370,14 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
-        checkQuantized(model)
+        for dtype in [torch.qint8, torch.float16]:
+            # test one line API
+            model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict, dtype=dtype)
+            checkQuantized(model)
 
-        # Test set API
-        model = quantize_dynamic(TwoLayerLinearModel().eval(), {'fc2'})
-        checkQuantized(model)
+            # Test set API
+            model = quantize_dynamic(TwoLayerLinearModel().eval(), {'fc2'}, dtype=dtype)
+            checkQuantized(model)
 
     def test_nested1(self):
         r"""Test quantization for nested model, top level 'fc3' and
@@ -399,12 +401,13 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
-        checkQuantized(model)
+        for dtype in [torch.qint8, torch.float16]:
+            # test one line API
+            model = quantize_dynamic(NestedModel().eval(), qconfig_dict, dtype=dtype)
+            checkQuantized(model)
 
-        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2.fc1'})
-        checkQuantized(model)
+            model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2.fc1'}, dtype=dtype)
+            checkQuantized(model)
 
     def test_nested2(self):
         r"""Another test case for quantized, we will quantize all submodules
@@ -429,13 +432,14 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
-        checkQuantized(model)
+        for dtype in [torch.qint8, torch.float16]:
+            # test one line API
+            model = quantize_dynamic(NestedModel().eval(), qconfig_dict, dtype=dtype)
+            checkQuantized(model)
 
-        # Test set API
-        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2'})
-        checkQuantized(model)
+            # Test set API
+            model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2'}, dtype=dtype)
+            checkQuantized(model)
 
     def test_nested3(self):
         r"""More complicated nested test case with child qconfig overrides
@@ -464,13 +468,14 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
-        checkQuantized(model)
+        for dtype in [torch.qint8, torch.float16]:
+            # test one line API
+            model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict, dtype=dtype)
+            checkQuantized(model)
 
-        # Test set API
-        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2', 'sub2.fc1'})
-        checkQuantized(model)
+            # Test set API
+            model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2', 'sub2.fc1'}, dtype=dtype)
+            checkQuantized(model)
 
     def test_type_match_rule(self):
         r"""Test quantization for nested model, top level 'fc3' and
@@ -497,9 +502,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-        # test one line API
-        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
-        checkQuantized(model)
+        for dtype in [torch.qint8, torch.float16]:
+            # test one line API
+            model = quantize_dynamic(NestedModel().eval(), qconfig_dict, dtype=dtype)
+            checkQuantized(model)
 
     def test_quantized_rnn(self):
         d_in, d_hid = 2, 2
