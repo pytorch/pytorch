@@ -368,7 +368,6 @@ bool ProcessGroupGloo::SendWork::wait() {
 }
 
 void ProcessGroupGloo::SendWork::abort() {
-  std::unique_lock<std::mutex> lock(mutex_);
   buffer_->abortWaitSend();
 }
 
@@ -399,7 +398,6 @@ bool ProcessGroupGloo::RecvWork::wait() {
 }
 
 void ProcessGroupGloo::RecvWork::abort() {
-  std::unique_lock<std::mutex> lock(mutex_);
   buffer_->abortWaitRecv();
 }
 

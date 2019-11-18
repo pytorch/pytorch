@@ -300,4 +300,19 @@ static auto registry0 = torch::RegisterOperators().op(
   torch::RegisterOperators::options().catchAllKernel(
   []() {
   })
+).op(
+  "_prim::TupleConstruct",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_prim::TupleUnpack",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
+).op(
+  "_aten::format",
+  torch::RegisterOperators::options().catchAllKernel(
+  []() {
+  })
 );

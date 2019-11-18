@@ -1871,3 +1871,48 @@ TEST_F(FunctionalTest, MarginRankingLoss) {
     ));
   }
 }
+
+TEST_F(FunctionalTest, Dropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::dropout(input, F::DropoutFuncOptions().p(rate));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  }
+  auto output = F::dropout(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+}
+
+TEST_F(FunctionalTest, Dropout2d) {
+  auto input = torch::randn({50, 100});
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::dropout2d(input, F::Dropout2dFuncOptions().p(rate));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  }
+  auto output = F::dropout2d(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+}
+
+TEST_F(FunctionalTest, Dropout3d) {
+  auto input = torch::randn({50, 10, 10});
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::dropout3d(input, F::Dropout3dFuncOptions().p(rate));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  }
+  auto output = F::dropout3d(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
+  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+}
