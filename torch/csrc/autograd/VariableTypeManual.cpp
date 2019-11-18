@@ -15,7 +15,7 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   res.reserve(backends.size());
   for (auto p : backends) {
     for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
-      auto& type = getNonVariableDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
       res.emplace_back(&type);
     }
   }
@@ -38,18 +38,12 @@ const Variable & checked_cast_variable(const Tensor & t, const char * name, int 
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
-  }
   return as_variable_ref(t);
 }
 
 Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
-  }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -75,10 +69,6 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
     const auto &t = tl[i];
     if (!t.defined()) {
       continue;
-    }
-    if (!t.is_variable()) {
-      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t);
   }
@@ -171,7 +161,10 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   return self;
 }
 
-Tensor & resize_(Tensor & self, IntArrayRef size) {
+Tensor& resize_(
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
@@ -183,12 +176,15 @@ Tensor & resize_(Tensor & self, IntArrayRef size) {
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.resize_(size);
+    self_.resize_(size, std::move(optional_memory_format));
   }
   return self;
 }
 
-Tensor & resize_as_(Tensor & self, const Tensor & the_template) {
+Tensor& resize_as_(
+    Tensor& self,
+    const Tensor& the_template,
+    c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
@@ -200,7 +196,7 @@ Tensor & resize_as_(Tensor & self, const Tensor & the_template) {
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(self_, the_template_);
+    at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
   return self;
 }
