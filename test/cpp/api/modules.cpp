@@ -1421,6 +1421,156 @@ TEST_F(ModulesTest, BatchNorm3d) {
   ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4, 4})));
 }
 
+TEST_F(ModulesTest, InstanceNorm1dStateful) {
+  InstanceNorm1d instance_norm(5);
+
+  ASSERT_TRUE(instance_norm->options.track_running_stats());
+
+  ASSERT_TRUE(instance_norm->running_mean.defined());
+  ASSERT_EQ(instance_norm->running_mean.dim(), 1);
+  ASSERT_EQ(instance_norm->running_mean.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->running_var.defined());
+  ASSERT_EQ(instance_norm->running_var.dim(), 1);
+  ASSERT_EQ(instance_norm->running_var.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->num_batches_tracked.defined());
+  ASSERT_EQ(instance_norm->num_batches_tracked.dim(), 0);
+
+  ASSERT_TRUE(instance_norm->options.affine());
+
+  ASSERT_TRUE(instance_norm->weight.defined());
+  ASSERT_EQ(instance_norm->weight.dim(), 1);
+  ASSERT_EQ(instance_norm->weight.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->bias.defined());
+  ASSERT_EQ(instance_norm->bias.dim(), 1);
+  ASSERT_EQ(instance_norm->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, InstanceNorm1dStateless) {
+  InstanceNorm1d instance_norm(InstanceNorm1dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(instance_norm->running_mean.defined());
+  ASSERT_FALSE(instance_norm->running_var.defined());
+  ASSERT_FALSE(instance_norm->num_batches_tracked.defined());
+  ASSERT_FALSE(instance_norm->weight.defined());
+  ASSERT_FALSE(instance_norm->bias.defined());
+}
+
+TEST_F(ModulesTest, InstanceNorm1d) {
+  InstanceNorm1d instance_norm(5);
+  instance_norm->eval();
+
+  auto input = torch::randn({2, 5}, torch::requires_grad());
+  auto output = instance_norm->forward(input);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5})));
+}
+
+TEST_F(ModulesTest, InstanceNorm2dStateful) {
+  InstanceNorm2d instance_norm(5);
+
+  ASSERT_TRUE(instance_norm->options.track_running_stats());
+
+  ASSERT_TRUE(instance_norm->running_mean.defined());
+  ASSERT_EQ(instance_norm->running_mean.dim(), 1);
+  ASSERT_EQ(instance_norm->running_mean.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->running_var.defined());
+  ASSERT_EQ(instance_norm->running_var.dim(), 1);
+  ASSERT_EQ(instance_norm->running_var.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->num_batches_tracked.defined());
+  ASSERT_EQ(instance_norm->num_batches_tracked.dim(), 0);
+
+  ASSERT_TRUE(instance_norm->options.affine());
+
+  ASSERT_TRUE(instance_norm->weight.defined());
+  ASSERT_EQ(instance_norm->weight.dim(), 1);
+  ASSERT_EQ(instance_norm->weight.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->bias.defined());
+  ASSERT_EQ(instance_norm->bias.dim(), 1);
+  ASSERT_EQ(instance_norm->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, InstanceNorm2dStateless) {
+  InstanceNorm2d instance_norm(InstanceNorm2dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(instance_norm->running_mean.defined());
+  ASSERT_FALSE(instance_norm->running_var.defined());
+  ASSERT_FALSE(instance_norm->num_batches_tracked.defined());
+  ASSERT_FALSE(instance_norm->weight.defined());
+  ASSERT_FALSE(instance_norm->bias.defined());
+}
+
+TEST_F(ModulesTest, InstanceNorm2d) {
+  InstanceNorm2d instance_norm(5);
+  instance_norm->eval();
+
+  auto input = torch::randn({2, 5, 4, 4}, torch::requires_grad());
+  auto output = instance_norm->forward(input);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4})));
+}
+
+TEST_F(ModulesTest, InstanceNorm3dStateful) {
+  InstanceNorm3d instance_norm(5);
+
+  ASSERT_TRUE(instance_norm->options.track_running_stats());
+
+  ASSERT_TRUE(instance_norm->running_mean.defined());
+  ASSERT_EQ(instance_norm->running_mean.dim(), 1);
+  ASSERT_EQ(instance_norm->running_mean.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->running_var.defined());
+  ASSERT_EQ(instance_norm->running_var.dim(), 1);
+  ASSERT_EQ(instance_norm->running_var.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->num_batches_tracked.defined());
+  ASSERT_EQ(instance_norm->num_batches_tracked.dim(), 0);
+
+  ASSERT_TRUE(instance_norm->options.affine());
+
+  ASSERT_TRUE(instance_norm->weight.defined());
+  ASSERT_EQ(instance_norm->weight.dim(), 1);
+  ASSERT_EQ(instance_norm->weight.size(0), 5);
+
+  ASSERT_TRUE(instance_norm->bias.defined());
+  ASSERT_EQ(instance_norm->bias.dim(), 1);
+  ASSERT_EQ(instance_norm->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, InstanceNorm3dStateless) {
+  InstanceNorm3d instance_norm(InstanceNorm3dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(instance_norm->running_mean.defined());
+  ASSERT_FALSE(instance_norm->running_var.defined());
+  ASSERT_FALSE(instance_norm->num_batches_tracked.defined());
+  ASSERT_FALSE(instance_norm->weight.defined());
+  ASSERT_FALSE(instance_norm->bias.defined());
+}
+
+TEST_F(ModulesTest, InstanceNorm3d) {
+  InstanceNorm3d instance_norm(5);
+  instance_norm->eval();
+
+  auto input = torch::randn({2, 5, 4, 4, 4}, torch::requires_grad());
+  auto output = instance_norm->forward(input);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4, 4})));
+}
+
 TEST_F(ModulesTest, Linear_CUDA) {
   Linear model(5, 2);
   model->to(torch::kCUDA);
@@ -2955,6 +3105,30 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
           BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
       "torch::nn::BatchNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintInstanceNorm1d) {
+  ASSERT_EQ(
+      c10::str(InstanceNorm1d(
+          InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::InstanceNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintInstanceNorm2d) {
+  ASSERT_EQ(
+      c10::str(InstanceNorm2d(
+          InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::InstanceNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
+  ASSERT_EQ(
+      c10::str(InstanceNorm3d(
+          InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::InstanceNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
