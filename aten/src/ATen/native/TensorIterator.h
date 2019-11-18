@@ -264,6 +264,10 @@ struct CAFFE2_API TensorIterator {
   /// called *before* coalesce_dimensions() is called.
   DimVector invert_perm(IntArrayRef input) const;
 
+  /// Reapply same re-ordering as it is done by reorder_dimensions. This can
+  /// only be called *before* coalesce_dimensions() is called.
+  DimVector apply_perm_and_mul(IntArrayRef input, int mul) const;
+
   /// Helper functions for CPU iteration
   StrideVector get_dim_strides(int dim) const;
   StrideVector get_strides() const;
@@ -349,6 +353,7 @@ protected:
   void propagate_names_to_outputs();
 #endif
   void coalesce_dimensions();
+  void analyze_memory_format();
 
 protected:
   DimVector shape_;
@@ -370,6 +375,7 @@ protected:
   bool check_mem_overlap_ = false;
   bool have_differing_types_ = false;
   bool all_ops_same_shape_ = false;
+  bool requires_channels_last_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
