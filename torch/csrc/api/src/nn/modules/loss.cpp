@@ -282,6 +282,60 @@ Tensor MarginRankingLossImpl::forward(const Tensor& input1,
 
 // ============================================================================
 
+NLLLossImpl::NLLLossImpl(
+    const NLLLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+  reset();
+}
+
+void NLLLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+}
+
+void NLLLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::NLLLoss()";
+}
+
+Tensor NLLLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::detail::nll_loss(
+    input,
+    target,
+    weight,
+    options.ignore_index(),
+    options.reduction());
+}
+
+// ============================================================================
+
+CrossEntropyLossImpl::CrossEntropyLossImpl(
+    const CrossEntropyLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+  reset();
+}
+
+void CrossEntropyLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+}
+
+void CrossEntropyLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CrossEntropyLoss()";
+}
+
+Tensor CrossEntropyLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::detail::cross_entropy(
+    input,
+    target,
+    weight,
+    options.ignore_index(),
+    options.reduction());
+}
+
+// ============================================================================
+
 BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
   const BCEWithLogitsLossOptions& options_) : options(options_) {
   reset();

@@ -269,6 +269,43 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MarginRankingLoss, MarginRankingLossFuncO
 
 // ============================================================================
 
+/// Options for an nll-loss functional and module.
+struct TORCH_API NLLLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// A manual rescaling weight given to each
+  /// class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+  /// treated as if having all ones.
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies a target value that is ignored
+  /// and does not contribute to the input gradient.
+  TORCH_ARG(int64_t, ignore_index) = -100;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(NLLLoss, NLLLossFuncOptions)
+
+// ============================================================================
+
+/// Options for a cross-entropy-Loss functional and module.
+struct TORCH_API CrossEntropyLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// A manual rescaling weight given to each class. If given, has to be a Tensor
+  /// of size C
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies a target value that is ignored
+  /// and does not contribute to the input gradient.
+  TORCH_ARG(int64_t, ignore_index) = -100;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CrossEntropyLoss, CrossEntropyFuncOptions)
+
+// ============================================================================
+
 /// Options for BCEWithLogitsLoss functional and module.
 struct TORCH_API BCEWithLogitsLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
