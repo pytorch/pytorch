@@ -58,7 +58,7 @@ variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs) {
-  const auto get_edge = [](const Variable& v) { return v.gradient_edge(); };
+  const auto get_edge = [](const Variable& v) { return torch::autograd::impl::gradient_edge(v); };
   auto& engine = torch::autograd::Engine::get_default_engine();
   return engine.execute(
       fmap(outputs, get_edge),
