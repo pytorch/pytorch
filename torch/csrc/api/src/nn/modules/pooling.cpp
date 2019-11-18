@@ -301,13 +301,13 @@ void FractionalMaxPool2dImpl::reset() {
 Tensor FractionalMaxPool2dImpl::forward(const Tensor& input) {
   return F::detail::fractional_max_pool2d(
             input, options.kernel_size(), options.output_size(), options.output_ratio(),
-            _random_samples=_random_samples);
+            _random_samples);
 }
 
 std::tuple<Tensor, Tensor> FractionalMaxPool2dImpl::forward_with_indices(const Tensor& input) {
   return F::detail::fractional_max_pool2d_with_indices(
             input, options.kernel_size(), options.output_size(), options.output_ratio(),
-            _random_samples=_random_samples);
+            _random_samples);
 }
 
 void FractionalMaxPool2dImpl::pretty_print(std::ostream& stream) const {
@@ -343,13 +343,13 @@ void FractionalMaxPool3dImpl::reset() {
 Tensor FractionalMaxPool3dImpl::forward(const Tensor& input) {
   return F::detail::fractional_max_pool3d(
             input, options.kernel_size(), options.output_size(), options.output_ratio(),
-            _random_samples=_random_samples);
+            _random_samples);
 }
 
 std::tuple<Tensor, Tensor> FractionalMaxPool3dImpl::forward_with_indices(const Tensor& input) {
   return F::detail::fractional_max_pool3d_with_indices(
             input, options.kernel_size(), options.output_size(), options.output_ratio(),
-            _random_samples=_random_samples);
+            _random_samples);
 }
 
 void FractionalMaxPool3dImpl::pretty_print(std::ostream& stream) const {
