@@ -25,6 +25,20 @@ struct PatternsAndModules {
   script::Module packed_params_module;
 };
 
+static Value* getValue(
+    const std::string& name,
+    const std::unordered_map<const Value*, Value*>& match_vmap,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return match_vmap.at(vmap.at(name));
+}
+
+static c10::optional<IValue> getIValue(
+    const std::string& name,
+    const std::unordered_map<const Value*, Value*>& match_vmap,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return toIValue(getValue(name, match_vmap, vmap));
+}
+
 void fillQConfigMap(
     const script::Module& module,
     const QConfigDict& qconfig_dict,
@@ -37,7 +51,7 @@ void fillQConfigMap(
   } else {
     qconfig = parent_qconfig;
   }
-  map[module.module_object()] = qconfig;
+  map[module._ivalue()] = qconfig;
 
   for (const script::NameModule& s : module.named_children()) {
     std::string child_key;
@@ -46,8 +60,7 @@ void fillQConfigMap(
     } else {
       child_key = key + "." + s.name;
     }
-    fillQConfigMap(
-        s.value.module_object(), qconfig_dict, map, child_key, qconfig);
+    fillQConfigMap(s.value._ivalue(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
@@ -181,7 +194,8 @@ Node* InsertObserversHelper::insertObserverFor(
     return nullptr;
   }
 
-  script::Module observer_module;
+  script::Module observer_module(
+      "Module", std::make_shared<script::CompilationUnit>());
   if (isWeightOfConvOrLinear(v)) {
     TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
@@ -272,7 +286,7 @@ graph(%input, %weight, %bias, %4):
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
-  if (!module_qconfig_map_.count(module.module_object())) {
+  if (!module_qconfig_map_.count(module._ivalue())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -301,7 +315,7 @@ void InsertObserversHelper::insertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      auto qconfig = module_qconfig_map_.at(module.module_object());
+      auto qconfig = module_qconfig_map_.at(module._ivalue());
       if (qconfig) {
         auto observer_node =
             insertObserverFor(v, v->owningGraph(), module, qconfig.value());
@@ -336,7 +350,8 @@ void InsertObserversHelper::insertObservers(
         // the child module.
         auto module_instance = n->inputs()[0];
         auto module_method_name = n->s(attr::name);
-        script::Module callee_module;
+        script::Module callee_module(
+            "Module", std::make_shared<script::CompilationUnit>());
         if (module_instance->node()->kind() == prim::GetAttr) {
           auto child_module_name = module_instance->node()->s(attr::name);
           callee_module = module.attr(child_module_name).toModule();
@@ -362,7 +377,7 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    auto qconfig = module_qconfig_map_.at(module.module_object());
+    auto qconfig = module_qconfig_map_.at(module._ivalue());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
       insertObserverFor(v, v->owningGraph(), module, qconfig.value());
@@ -386,14 +401,14 @@ Node* insertQuantDeQuantCall(
   // Inserting before insert point
   WithInsertPoint ins(v->node()->next());
   if (is_per_channel) {
-    quantize_func ="quantize_per_channel";
+    quantize_func = "quantize_per_channel";
     inputs.push_back(g->insertConstant(scale));
     inputs.push_back(g->insertConstant(zero_point));
     inputs.push_back(g->insertConstant(tp->elements()[2].toInt()));
   } else {
     quantize_func = "quantize_per_tensor";
     inputs.push_back(g->insertConstant(scale.item<double>()));
-    inputs.push_back(g->insertConstant(zero_point.item<long>()));
+    inputs.push_back(g->insertConstant(zero_point.item<int64_t>()));
   }
   Value* scalar_type_val = g->insertConstant(IValue(scalar_type));
   inputs.push_back(scalar_type_val);
@@ -445,7 +460,7 @@ class QuantizeHelper {
     // O(N) where N is number of observer moduels with this optimization
     for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
       auto observer_name = observer_modules_to_remove_[i];
-      module_.module_object()->unsafeRemoveAttr(observer_name);
+      module_._ivalue()->unsafeRemoveAttr(observer_name);
       module_.type()->unsafeRemoveAttribute(observer_name);
     }
     // Destroy observer forward calls
@@ -825,7 +840,8 @@ graph(%self, %x):
 
     script::Method method = current.get_method("forward");
     GRAPH_DUMP(
-        current.name().name() + "::forward() before Conv2d-BatchNorm2d folding",
+        current.type()->name()->name() +
+            "::forward() before Conv2d-BatchNorm2d folding",
         method.graph());
     const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
@@ -955,17 +971,12 @@ void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     InsertPrepackUnpack(graph);
-    for (script::Module m : module.children()) {
-      InsertPrepackUnpack(m);
-    }
+  }
+  for (script::Module m : module.children()) {
+    InsertPrepackUnpack(m);
   }
 }
 
-static c10::optional<IValue> getIValue(const std::string& name,
-                                       const std::unordered_map<const Value*, Value*>& match_vmap,
-                                       const std::unordered_map<std::string, Value*>& vmap) {
-  return toIValue(match_vmap.at(vmap.at(name)));
-}
 void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const std::string& method_name,
@@ -973,6 +984,10 @@ void FoldPrepackedWeightIntoModule(
     const script::Module& conv_params_module) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
+  GRAPH_DUMP(
+      "Before FoldPrepackWeightIntoModule: ",
+      graph);
+
   std::string linear_prepack_per_tensor = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
@@ -1016,7 +1031,13 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %
       auto w_scale_opt = getIValue("w_scale", match_vmap, vmap);
       auto w_zero_point_opt = getIValue("w_zero_point", match_vmap, vmap);
       if (!w_dtype_opt || !w_scale_opt || !w_zero_point_opt) {
-        GRAPH_DEBUG("dtype, scale or zero_point for weight is not constant, skipping the match.");
+        GRAPH_DEBUG("dtype, scale or zero_point for weight(",
+                    getValue("w_dtype", match_vmap, vmap)->debugName(),
+                    ", ",
+                    getValue("w_scale", match_vmap, vmap)->debugName(),
+                    ", ",
+                    getValue("w_zero_point", match_vmap, vmap)->debugName(),
+                    ") is not constant, skipping the match.");
         continue;
       }
       auto w_dtype = w_dtype_opt.value().toScalarType();
@@ -1025,7 +1046,9 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %
       if (pm.is_per_channel) {
         auto w_axis_opt = getIValue("w_axis", match_vmap, vmap);
         if (!w_axis_opt) {
-          GRAPH_DEBUG("axis for weight is non-constant, skipping the match");
+          GRAPH_DEBUG("axis for weight ",
+                      getValue("w_axis", match_vmap, vmap)->debugName(),
+                      " is non-constant, skipping the match");
           continue;
         }
         auto w_scale = w_scale_opt.value().toTensor().to(at::kFloat);
@@ -1048,43 +1071,55 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %
       std::string module_name_prefix;
       if (pm.is_conv) {
         module_name_prefix = "_conv_packed_params_module_for_";
-        auto stride = toTwoElementIntList(match_vmap.at(vmap.at("stride")));
-        auto padding = toTwoElementIntList(match_vmap.at(vmap.at("padding")));
-        auto dilation = toTwoElementIntList(match_vmap.at(vmap.at("dilation")));
-        auto groups = toIValue(match_vmap.at(vmap.at("groups")));
+        auto stride_opt = toTwoElementIntList(getValue("stride", match_vmap, vmap));
+        auto padding_opt = toTwoElementIntList(getValue("padding", match_vmap, vmap));
+        auto dilation_opt = toTwoElementIntList(getValue("dilation", match_vmap, vmap));
+        auto groups_opt = getIValue("groups", match_vmap, vmap);
         auto set_conv_params = wrapper_module.get_method("set_conv_params");
-        if (!stride || !padding || !dilation) {
+        if (!stride_opt || !padding_opt || !dilation_opt) {
           GRAPH_DEBUG(
-              "Failed to extract two element IntList for stride/padding/dilation, skipping the match");
+              "Failed to extract two element IntList for stride/padding/dilation, (",
+              getValue("stride", match_vmap, vmap)->debugName(),
+              ", ",
+              getValue("padding", match_vmap, vmap)->debugName(),
+              ", ",
+              getValue("dilation", match_vmap, vmap)->debugName(),
+              ") skipping the match");
           continue;
         }
         set_conv_params(std::vector<IValue>{
-            stride.value(), padding.value(), dilation.value(), groups.value()});
+            stride_opt.value(), padding_opt.value(), dilation_opt.value(), groups_opt.value()});
       } else {
         module_name_prefix = "_linear_packed_params_module_for_";
       }
       set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
-      auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
+      auto w_quant_val = getValue("w_quant", match_vmap, vmap);
       // unique name for the module based on %w_quant
       int uid = 0;
       auto module_name = module_name_prefix + c10::to_string(uid++);
       while (module.hasattr(module_name)) {
         module_name_prefix + c10::to_string(uid++);
       }
+      GRAPH_UPDATE("Adding new module: ", module_name);
       module.register_module(module_name, wrapper_module);
 
       // Add GetAttr of the packed module
-      auto packed_params_val = match_vmap.at(vmap.at("packed_params"));
+      auto packed_params_val = getValue("packed_params", match_vmap, vmap);
       WithInsertPoint ins(packed_params_val->node());
       // wrapper_module =
       // self.{_conv,_linear}_packed_params_module_for_{unique_id}
       Value* packed_params_module =
           graph->insertGetAttr(graph->inputs()[0], module_name)
               ->setType(wrapper_module.type());
+      GRAPH_UPDATE(
+          "Adding GetAttr node for the wrapper module");
 
       // packed_params = wrapper_module._packed_params
       Value* packed_params_from_attr =
           graph->insertGetAttr(packed_params_module, "_packed_params");
+      GRAPH_UPDATE(
+          "Adding GetAttr node for _packed_params: ",
+          packed_params_from_attr->debugName());
       packed_params_val->replaceAllUsesWith(packed_params_from_attr);
 
       // Delete nodes
@@ -1094,6 +1129,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %
         n->removeAllInputs();
       }
       for (auto n : nodes_to_delete) {
+        GRAPH_UPDATE("Deleting node: ", n);
         n->destroy();
       }
     }
