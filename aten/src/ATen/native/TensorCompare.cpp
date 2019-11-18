@@ -93,7 +93,7 @@ Tensor isfinite(const Tensor& self) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
-    return (self == self) * (self.abs() != at::full(1, std::numeric_limits<scalar_t>::infinity(), self.options()));
+    return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
 }
 
