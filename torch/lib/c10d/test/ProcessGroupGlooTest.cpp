@@ -265,7 +265,7 @@ void testSend(const std::string& path) {
 
   constexpr uint64_t tag = 0x1337;
 
-  // Sender. Test helper.
+  // Create a sender thread and ensure that sendWork can be aborted.
   std::thread senderThread([&]() {
     auto selfRank = 0;
     auto destRank = 1;
@@ -275,29 +275,21 @@ void testSend(const std::string& path) {
     std::vector<at::Tensor> tensors = {
         at::ones({16, 16}),
     };
-    // #1 Wait SendWork. Got aborted.
-    auto work = pg.send(
-        tensors, /* tensors */
-        destRank, /* destRank */
-        tag /* tag */
-    );
+    // Ensure that we can abort SendWork
+    auto work = pg.send(tensors, destRank, tag);
     bool sendCompleted;
     std::thread waitSendWorkThread([&]() { sendCompleted = work->wait(); });
     work->abort();
     waitSendWorkThread.join();
     TORCH_CHECK(!sendCompleted);
 
-    // #2 Wait SendWork. Successful.
-    work = pg.send(
-        tensors, /* tensors */
-        destRank, /* destRank */
-        tag /* tag */
-    );
+    // Ensure that future waits can complete successfully.
+    work = pg.send(tensors, destRank, tag);
     sendCompleted = work->wait();
     TORCH_CHECK(sendCompleted);
   });
 
-  // Receiver. Test helper.
+  // Helper receiver thread to simulate a real send/recv pair.
   std::thread receiverThread([&]() {
     auto selfRank = 1;
     auto srcRank = 0;
@@ -308,20 +300,12 @@ void testSend(const std::string& path) {
         at::ones({16, 16}),
     };
 
-    // #1 Recv.
-    auto work = pg.recv(
-        tensors, /* tensors */
-        srcRank, /* destRank */
-        tag /* tag */
-    );
+    // Receive for first send.
+    auto work = pg.recv(tensors, srcRank, tag);
     work->wait();
 
-    // #2 Recv.
-    work = pg.recv(
-        tensors, /* tensors */
-        srcRank, /* destRank */
-        tag /* tag */
-    );
+    // Receive for 2nd send.
+    work = pg.recv(tensors, srcRank, tag);
     work->wait();
   });
 
@@ -335,7 +319,7 @@ void testRecv(const std::string& path) {
 
   constexpr uint64_t tag = 0x1337;
 
-  // Receiver. Test subject.
+  // Create a receiver thread and ensure that recvWork can be aborted.
   std::thread receiverThread([&]() {
     auto selfRank = 0;
     auto srcRank = 1;
@@ -346,29 +330,21 @@ void testRecv(const std::string& path) {
         at::ones({16, 16}),
     };
 
-    // #1 Wait RecvWork. Got aborted.
-    auto work = pg.recv(
-        tensors, /* tensors */
-        srcRank, /* destRank */
-        tag /* tag */
-    );
+    // Ensure that we can abort recvWork
+    auto work = pg.recv(tensors, srcRank, tag);
     bool recvCompleted;
     std::thread waitRecvWorkThread([&]() { recvCompleted = work->wait(); });
     work->abort();
     waitRecvWorkThread.join();
     TORCH_CHECK(!recvCompleted);
 
-    // #2 Wait RecvWork. Successful.
-    work = pg.recv(
-        tensors, /* tensors */
-        srcRank, /* destRank */
-        tag /* tag */
-    );
+    // Ensure that future recvWork can complete successfully.
+    work = pg.recv(tensors, srcRank, tag);
     recvCompleted = work->wait();
     TORCH_CHECK(recvCompleted);
   });
 
-  // Sender. Test helper.
+  // Helper sender thread to simluate a real recv/send pair.
   std::thread senderThread([&]() {
     auto selfRank = 1;
     auto destRank = 0;
@@ -378,20 +354,12 @@ void testRecv(const std::string& path) {
     std::vector<at::Tensor> tensors = {
         at::ones({16, 16}),
     };
-    // #1 Send.
-    auto work = pg.send(
-        tensors, /* tensors */
-        destRank, /* destRank */
-        tag /* tag */
-    );
+    // Send for first recv.
+    auto work = pg.send(tensors, destRank, tag);
     work->wait();
 
-    // #2 Send.
-    work = pg.send(
-        tensors, /* tensors */
-        destRank, /* destRank */
-        tag /* tag */
-    );
+    // Send for 2nd recv.
+    work = pg.send(tensors, destRank, tag);
     work->wait();
   });
 
