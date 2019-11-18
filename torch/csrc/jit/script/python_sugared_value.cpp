@@ -1,7 +1,8 @@
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/script/module_python.h>
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <memory>
 #include <sstream>
@@ -477,6 +478,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
+      return toSimple(g.insertConstant(v, loc));
+    } else if (THPMemoryFormat_Check(obj.ptr())) {
+      auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+      const auto v = static_cast<int64_t>(memory_format->memory_format);
       return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
