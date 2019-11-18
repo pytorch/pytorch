@@ -267,6 +267,20 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+GLUImpl::GLUImpl(const GLUOptions& options_) : options(options_) {}
+
+Tensor GLUImpl::forward(const Tensor& input) {
+  return F::detail::glu(input, options.dim());
+}
+
+void GLUImpl::reset() {}
+
+void GLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::GLU(dim=" << options.dim() << ")";
+}
+
+// ============================================================================
+
 Tensor GELUImpl::forward(const Tensor& input) {
   return F::gelu(input);
 }

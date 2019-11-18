@@ -56,6 +56,11 @@ void ConvImpl<D, Derived>::reset() {
     this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
   }
 
+  reset_parameters();
+}
+
+template <size_t D, typename Derived>
+void ConvImpl<D, Derived>::reset_parameters() {
   init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));  // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
   if (bias.defined()) {
