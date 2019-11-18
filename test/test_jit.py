@@ -15944,7 +15944,7 @@ a")
                 torch.rand(2, 3, dtype=torch.float),
                 scales=torch.tensor([0.1, 0.5, 0.01]),
                 zero_points=torch.tensor([10, 0, 20]),
-                axis=1, dtype=torch.quint8).to(device)
+                dim=1, dtype=torch.quint8).to(device)
             m = M()
             m(q, qc)
             with open(fname, "rb") as handle:

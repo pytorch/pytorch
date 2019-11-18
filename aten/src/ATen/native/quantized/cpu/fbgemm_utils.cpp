@@ -156,7 +156,7 @@ Tensor MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
       make_per_channel_affine_quantizer(
           scales,
           zero_points,
-          0, // axis
+          0, // dim
           typeMetaToScalarType(options.dtype())));
 }
 

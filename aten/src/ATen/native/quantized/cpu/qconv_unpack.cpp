@@ -104,7 +104,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
                 {output_channels, C_per_G, kernel_h, kernel_w},
                 scales.toType(kDouble),
                 zero_points.toType(kLong),
-                0, /* The output channel axis is 0 */
+                0, /* The output channel dim is 0 */
                 device(kCPU).dtype(kQInt8),
                 MemoryFormat::ChannelsLast)
           : fbgemm_utils::

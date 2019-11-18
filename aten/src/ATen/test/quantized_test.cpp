@@ -123,12 +123,12 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
   auto scales = rand({numel}).toType(kDouble);
   auto zero_points = randint(10, {10}).toType(kLong);
   int val = 100;
-  int ch_axis = 0;
+  int ch_dim = 0;
   Tensor q = at::_empty_per_channel_affine_quantized(
       {numel},
       scales,
       zero_points,
-      ch_axis,
+      ch_dim,
       at::device(at::kCPU).dtype(kQUInt8));
   // Assigning to QTensor
   auto* q_data = q.data_ptr<quint8>();

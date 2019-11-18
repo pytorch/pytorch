@@ -242,7 +242,7 @@ Tensor empty_like(
           self.sizes(),
           self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
-          self.q_per_channel_axis(),
+          self.q_per_channel_dim(),
           options,
           memory_format);
     } else {

@@ -1009,7 +1009,7 @@
 
 # it's a factory function receiving a tensor argument, thus overriding explicitly
 # other overrides are to provide a more helpful error message that dtype is required
-- func: _empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+- func: _empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int dim, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
   category_override: factory
   dispatch:
     CPU: empty_per_channel_affine_quantized_other_backends_stub
@@ -3402,7 +3402,7 @@
   dispatch:
     CPU: quantize_per_tensor_cpu
 
-- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
+- func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int dim, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
     CPU: quantize_per_channel_cpu
@@ -3435,10 +3435,10 @@
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
 
-- func: q_per_channel_axis(Tensor self) -> int
+- func: q_per_channel_dim(Tensor self) -> int
   variants: function, method
   dispatch:
-    QuantizedCPU: q_per_channel_axis_quant
+    QuantizedCPU: q_per_channel_dim_quant
 
 - func: int_repr(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3451,7 +3451,7 @@
   dispatch:
     CPU: make_per_tensor_quantized_tensor_cpu
 
-- func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
+- func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int dim) -> Tensor
   dispatch:
     CPU: make_per_channel_quantized_tensor_cpu
 
@@ -3474,13 +3474,13 @@
     CPU: fake_quantize_per_tensor_affine_backward_cpu
     CUDA: fake_quantize_per_tensor_affine_backward_cuda
 
-- func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+- func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int dim, int quant_min, int quant_max) -> Tensor
   variants: function
   dispatch:
     CPU: fake_quantize_per_channel_affine_cpu
     CUDA: fake_quantize_per_channel_affine_cuda
 
-- func: fake_quantize_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+- func: fake_quantize_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int dim, int quant_min, int quant_max) -> Tensor
   variants: function
   dispatch:
     CPU: fake_quantize_per_channel_affine_backward_cpu

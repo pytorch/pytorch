@@ -1175,18 +1175,18 @@ class ObserverTest(QuantizationTestCase):
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
-           ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
-    def test_per_channel_observers(self, qdtype, qscheme, ch_axis, reduce_range):
+           ch_dim=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
+    def test_per_channel_observers(self, qdtype, qscheme, ch_dim, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
             reduce_range = False
         ObserverList = [PerChannelMinMaxObserver(reduce_range=reduce_range,
-                                                 ch_axis=ch_axis,
+                                                 ch_dim=ch_dim,
                                                  dtype=qdtype,
                                                  qscheme=qscheme),
                         MovingAveragePerChannelMinMaxObserver(averaging_constant=0.5,
                                                               reduce_range=reduce_range,
-                                                              ch_axis=ch_axis,
+                                                              ch_dim=ch_dim,
                                                               dtype=qdtype,
                                                               qscheme=qscheme)]
 
@@ -1232,17 +1232,17 @@ class ObserverTest(QuantizationTestCase):
             ]
             per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
 
-            self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
-            self.assertEqual(myobs.max_vals, ref_max_vals[ch_axis])
+            self.assertEqual(myobs.min_vals, ref_min_vals[ch_dim])
+            self.assertEqual(myobs.max_vals, ref_max_vals[ch_dim])
             if qscheme == torch.per_channel_symmetric:
-                ref_scales = per_channel_symmetric_ref_scales[ch_axis]
+                ref_scales = per_channel_symmetric_ref_scales[ch_dim]
                 ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
             else:
-                ref_scales = per_channel_affine_ref_scales[ch_axis]
+                ref_scales = per_channel_affine_ref_scales[ch_dim]
                 ref_zero_points = (
-                    per_channel_affine_qint8_zp[ch_axis]
+                    per_channel_affine_qint8_zp[ch_dim]
                     if qdtype is torch.qint8
-                    else per_channel_affine_quint8_zp[ch_axis]
+                    else per_channel_affine_quint8_zp[ch_dim]
                 )
 
             if reduce_range:
@@ -1260,7 +1260,7 @@ class ObserverTest(QuantizationTestCase):
             loaded_dict = torch.load(b)
             for key in state_dict:
                 self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+            loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_dim=ch_dim, dtype=qdtype, qscheme=qscheme)
             loaded_obs.load_state_dict(loaded_dict)
             loaded_qparams = loaded_obs.calculate_qparams()
             self.assertEqual(myobs.min_vals, loaded_obs.min_vals)

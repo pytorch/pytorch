@@ -125,9 +125,9 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     if (qtype == kPerTensorAffine) {
       zero_points = {static_cast<int32_t>(weight.q_zero_point())};
     } else if (qtype == kPerChannelAffine) {
-      int64_t axis = weight.q_per_channel_axis();
+      int64_t dim = weight.q_per_channel_dim();
       TORCH_CHECK(
-          axis == 0,
+          dim == 0,
           "Only per output channel quantization is supported for the weights");
       zero_points.resize(output_channels);
       for (int i = 0; i < output_channels; ++i) {

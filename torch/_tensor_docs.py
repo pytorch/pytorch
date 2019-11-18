@@ -2026,7 +2026,7 @@ q_per_channel_scales() -> Tensor
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
 returns a Tensor of scales of the underlying quantizer. It has the number of
-elements that matches the corresponding dimensions (from q_per_channel_axis) of
+elements that matches the corresponding dimensions (from q_per_channel_dim) of
 the tensor.
 """)
 
@@ -2036,13 +2036,13 @@ q_per_channel_zero_points() -> Tensor
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
 returns a tensor of zero_points of the underlying quantizer. It has the number of
-elements that matches the corresponding dimensions (from q_per_channel_axis) of
+elements that matches the corresponding dimensions (from q_per_channel_dim) of
 the tensor.
 """)
 
-add_docstr_all('q_per_channel_axis',
+add_docstr_all('q_per_channel_dim',
                r"""
-q_per_channel_axis() -> int
+q_per_channel_dim() -> int
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
 returns the index of dimension on which per-channel quantization is applied.

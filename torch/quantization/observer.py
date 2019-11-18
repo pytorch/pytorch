@@ -408,7 +408,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
     parameters.
 
     Args:
-        ch_axis: Channel axis
+        ch_dim: Channel dim
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
@@ -422,12 +422,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
               and zero_points are set to 1.0 and 0.
     """
 
-    def __init__(self, ch_axis=0, dtype=torch.quint8,
+    def __init__(self, ch_dim=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False):
         super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range)
-        self.ch_axis = ch_axis
+        self.ch_dim = ch_dim
         self.register_buffer('min_vals', None)
         self.register_buffer('max_vals', None)
         if (
@@ -445,10 +445,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
         max_vals = self.max_vals
         x_dim = x.size()
 
-        new_axis_list = list(range(len(x_dim)))
-        new_axis_list[self.ch_axis] = 0
-        new_axis_list[0] = self.ch_axis
-        y = x.permute(tuple(new_axis_list))
+        new_dim_list = list(range(len(x_dim)))
+        new_dim_list[self.ch_dim] = 0
+        new_dim_list[0] = self.ch_dim
+        y = x.permute(tuple(new_dim_list))
         y = torch.flatten(y, start_dim=1)
         if min_vals is None or max_vals is None:
             min_vals = torch.min(y, 1)[0]
@@ -486,7 +486,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
 
     Args:
         averaging_constant: Averaging constant for min/max.
-        ch_axis: Channel axis
+        ch_dim: Channel dim
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
@@ -500,10 +500,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
               and zero_points are set to 1.0 and 0.
     """
 
-    def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
+    def __init__(self, averaging_constant=0.01, ch_dim=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False):
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
-            ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
+            ch_dim=ch_dim, dtype=dtype, qscheme=qscheme,
             reduce_range=reduce_range)
         self.averaging_constant = averaging_constant
 
@@ -513,10 +513,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         max_vals = self.max_vals
         x_dim = x.size()
 
-        new_axis_list = list(range(len(x_dim)))
-        new_axis_list[self.ch_axis] = 0
-        new_axis_list[0] = self.ch_axis
-        y = x.permute(tuple(new_axis_list))
+        new_dim_list = list(range(len(x_dim)))
+        new_dim_list[self.ch_dim] = 0
+        new_dim_list[0] = self.ch_dim
+        y = x.permute(tuple(new_dim_list))
         y = torch.flatten(y, start_dim=1)
         if min_vals is None or max_vals is None:
             min_vals = torch.min(y, 1)[0]

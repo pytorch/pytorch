@@ -382,7 +382,7 @@ class ModuleAPITest(QuantizationTestCase):
                 zero_point_tensor = torch.zeros(out_features, dtype=torch.long)
                 for i in range(len(scale_tensor)):
                     scale_tensor[i] = (i + 1.0) / 255.0
-                W_q = torch.quantize_per_channel(W, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
+                W_q = torch.quantize_per_channel(W, scales=scale_tensor, zero_points=zero_point_tensor, dim=0, dtype=torch.qint8)
             else:
                 W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
 

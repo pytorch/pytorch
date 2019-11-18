@@ -179,11 +179,11 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
       ScalarType scalar_type,
       const std::vector<double>& scales,
       const std::vector<int64_t>& zero_points,
-      int64_t axis)
+      int64_t dim)
       : AffineQuantizer(scalar_type),
         scales_(scales),
         zero_points_(zero_points),
-        axis_(axis) {}
+        dim_(dim) {}
 
   QScheme qscheme() const override {
     return kPerChannelAffine;
@@ -197,8 +197,8 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     return zero_points_;
   }
 
-  int64_t axis() const {
-    return axis_;
+  int64_t dim() const {
+    return dim_;
   }
 
   Tensor quantize(Tensor tensor) override;
@@ -213,13 +213,13 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     return scalar_type() == other_per_channel_affine->scalar_type() &&
         scales() == other_per_channel_affine->scales() &&
         zero_points() == other_per_channel_affine->zero_points() &&
-        axis() == other_per_channel_affine->axis();
+        dim() == other_per_channel_affine->dim();
   }
 
  private:
   const std::vector<double> scales_;
   const std::vector<int64_t> zero_points_;
-  const int64_t axis_;
+  const int64_t dim_;
 };
 
 // This is an internal utility function for getting at the QTensorImpl,
@@ -254,12 +254,12 @@ make_per_tensor_affine_quantizer(
 CAFFE2_API QuantizerPtr
 make_per_channel_affine_quantizer(
     const std::vector<double>& scales, const std::vector<int64_t>& zero_points,
-    int64_t axis, ScalarType scalar_type);
+    int64_t dim, ScalarType scalar_type);
 // variant that unpacks scales and zero points from tensors
 CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,
     const Tensor& zero_points,
-    int64_t axis,
+    int64_t dim,
     ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer

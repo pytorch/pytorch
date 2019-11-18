@@ -21,10 +21,10 @@ Tensor quantize_per_channel_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
-    int64_t axis,
+    int64_t dim,
     ScalarType dtype) {
   auto quantizer =
-      make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
+      make_per_channel_affine_quantizer(scales, zero_points, dim, dtype);
   return quantizer->quantize(self);
 }
 
@@ -60,10 +60,10 @@ Tensor q_per_channel_zero_points_quant(const Tensor& self) {
       self.options().dtype(at::kLong));
 }
 
-int64_t q_per_channel_axis_quant(const Tensor& self) {
+int64_t q_per_channel_dim_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerChannelAffine);
-  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
+  return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->dim();
 }
 
 // When input Tensor is non-dense, i.e. the allocated memory
@@ -112,12 +112,12 @@ Tensor make_per_channel_quantized_tensor_cpu(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
-    int64_t axis) {
+    int64_t dim) {
   Tensor dst = at::_empty_per_channel_affine_quantized(
       self.sizes(),
       scales,
       zero_points,
-      axis,
+      dim,
       self.options().dtype(toQIntType(self.scalar_type())));
   Tensor self_contig = self.contiguous();
   AT_DISPATCH_QINT_TYPES(

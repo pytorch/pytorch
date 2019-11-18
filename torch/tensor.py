@@ -54,7 +54,7 @@ class Tensor(torch._C._TensorBase):
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = self.qscheme(), self.q_scale(), self.q_zero_point()
                     elif self.qscheme() == torch.per_channel_affine:
-                        quantizer_params = self.qscheme(), self.q_per_channel_scales(), self.q_per_channel_zero_points(), self.q_per_channel_axis()
+                        quantizer_params = self.qscheme(), self.q_per_channel_scales(), self.q_per_channel_zero_points(), self.q_per_channel_dim()
                     else:
                         raise RuntimeError("Unsupported qscheme {} in deepcopy".format(self.qscheme()))
                     new_tensor = torch._utils._rebuild_qtensor(
@@ -104,7 +104,7 @@ class Tensor(torch._C._TensorBase):
                 quantizer_params = (torch.per_channel_affine,
                                     [e.item() for e in self.q_per_channel_scales().reshape(-1)],
                                     [e.item() for e in self.q_per_channel_zero_points().reshape(-1)],
-                                    self.q_per_channel_axis())
+                                    self.q_per_channel_dim())
             else:
                 raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
             args = (self.storage(),

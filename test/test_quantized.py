@@ -807,15 +807,15 @@ class TestQuantizedOps(TestCase):
         np.testing.assert_equal(cat_ref.numpy(), cat_q_out.numpy())
 
         # Test the cat on per-channel quantized tensor.
-        ch_axis = 1
-        scales = torch.from_numpy(np.array([1.0] * X.shape[ch_axis]))
+        ch_dim = 1
+        scales = torch.from_numpy(np.array([1.0] * X.shape[ch_dim]))
         scales = scales.to(torch.float64)
-        zero_points = torch.from_numpy(np.array([0] * X.shape[ch_axis]))
+        zero_points = torch.from_numpy(np.array([0] * X.shape[ch_dim]))
         zero_points = zero_points.to(torch.long)
         tensors_q[0] = torch.quantize_per_channel(
-            X, scales, zero_points, axis=ch_axis, dtype=torch_type)
+            X, scales, zero_points, dim=ch_dim, dtype=torch_type)
         with self.assertRaisesRegex(RuntimeError, "supported.*cat"):
-            cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
+            cat_q = q_cat_op(tensors_q, dim=ch_dim, scale=scale,
                              zero_point=zero_point)
 
     @no_deadline
@@ -944,7 +944,7 @@ class TestQuantizedOps(TestCase):
                 scales=torch.tensor([scale] * channels),
                 zero_points=torch.tensor([zero_point] * channels),
                 dtype=torch_type,
-                axis=X.ndim - 1)
+                dim=X.ndim - 1)
         else:
             X_scheme = 'per_tensor'
             qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
@@ -958,7 +958,7 @@ class TestQuantizedOps(TestCase):
                 scales=torch.tensor([scale2] * channels),
                 zero_points=torch.tensor([zero_point2] * channels),
                 dtype=torch_type2,
-                axis=X2.ndim - 1)
+                dim=X2.ndim - 1)
         else:
             X2_scheme = 'per_tensor'
             qX2 = torch.quantize_per_tensor(X2, scale=scale2, zero_point=zero_point2,
@@ -1076,7 +1076,7 @@ class TestDynamicQuantizedLinear(TestCase):
             W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
                 (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
             W_q = torch.quantize_per_channel(W_fp32, scales=torch.from_numpy(W_scales),
-                                             zero_points=torch.from_numpy(W_zps), axis=0, dtype=torch.qint8)
+                                             zero_points=torch.from_numpy(W_zps), dim=0, dtype=torch.qint8)
             b_fp32 = torch.from_numpy(
                 _dequantize(b_q0, X_scale * W_scales, 0)
             ).to(dtype=torch.float) if use_bias else None
@@ -1190,12 +1190,12 @@ class TestQuantizedLinear(unittest.TestCase):
                 W = torch.from_numpy(_dequantize(W_q0, W_scales.reshape(
                     (-1, 1)), W_zps.reshape((-1, 1)))).to(dtype=torch.float)
                 W_q = torch.quantize_per_channel(W, scales=torch.from_numpy(W_scales),
-                                                 zero_points=torch.from_numpy(W_zps), axis=0, dtype=torch.qint8)
+                                                 zero_points=torch.from_numpy(W_zps), dim=0, dtype=torch.qint8)
                 b = torch.from_numpy(_dequantize(
                     b_q0, X_scale * W_scales, 0)).to(dtype=torch.float) if use_bias else None
                 b_q = torch.quantize_per_channel(b, scales=torch.from_numpy(X_scale * W_scales),
                                                  zero_points=torch.zeros(output_channels, dtype=torch.long),
-                                                 axis=0, dtype=torch.qint32) if use_bias else None
+                                                 dim=0, dtype=torch.qint32) if use_bias else None
             else:
                 W = torch.from_numpy(_dequantize(
                     W_q0, W_scales[0], W_zps[0])).to(dtype=torch.float)
@@ -1309,7 +1309,7 @@ class TestQuantizedConv(unittest.TestCase):
         bias = torch.from_numpy(bias).float()
         if channelwise:
             W_q = torch.quantize_per_channel(
-                W, scales=W_scale, zero_points=W_zero_point, axis=0,
+                W, scales=W_scale, zero_points=W_zero_point, dim=0,
                 dtype=W_qtype)
         else:
             W_q = torch.quantize_per_tensor(

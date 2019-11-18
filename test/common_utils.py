@@ -774,7 +774,7 @@ class TestCase(expecttest.TestCase):
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
                                      prec=prec, message=message,
                                      allow_inf=allow_inf)
-                    self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
+                    self.assertEqual(x.q_per_channel_dim(), y.q_per_channel_dim(),
                                      prec=prec, message=message)
                 self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),

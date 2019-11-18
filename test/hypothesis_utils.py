@@ -205,14 +205,14 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
     enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
     if enforced_zp is not None:
         zp = enforced_zp
-    # Permute to model quantization along an axis
-    axis = int(np.random.randint(0, X.ndim, 1))
+    # Permute to model quantization along an dim
+    dim = int(np.random.randint(0, X.ndim, 1))
     permute_axes = np.arange(X.ndim)
-    permute_axes[0] = axis
-    permute_axes[axis] = 0
+    permute_axes[0] = dim
+    permute_axes[dim] = 0
     X = np.transpose(X, permute_axes)
 
-    return X, (scale, zp, axis, qparams[2])
+    return X, (scale, zp, dim, qparams[2])
 
 """Strategy for generating test cases for tensors used in Conv.
 The resulting tensors is in float32 format.

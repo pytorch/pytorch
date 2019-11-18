@@ -31,7 +31,7 @@ Tensor empty_per_channel_affine_quantized_cpu(
     IntArrayRef size,
     const Tensor& scales,
     const Tensor& zero_points,
-    int64_t axis,
+    int64_t dim,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
@@ -46,7 +46,7 @@ Tensor empty_per_channel_affine_quantized_cpu(
       make_per_channel_affine_quantizer(
           scales,
           zero_points,
-          axis,
+          dim,
           typeMetaToScalarType(options.dtype())),
       optional_memory_format.value_or(MemoryFormat::Contiguous));
 }
