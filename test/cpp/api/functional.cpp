@@ -1563,7 +1563,7 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
   double momentum = 0.1;
 
   auto input = torch::ones({2, 5});
-  auto mean = torch::ones(5);
+  auto mean = torch::ones({5});
   auto variance = torch::ones({num_features});
   auto weight = torch::ones({num_features});
   auto bias = torch::zeros({num_features});
@@ -1576,16 +1576,14 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
       .bias(bias)
       .momentum(momentum)
       .eps(eps));
-  auto expected = torch::ones({2, 5});
-  std::cout << output << std::endl;
-  std::cout << expected << std::endl;
+  auto expected = torch::zeros({2, 5});
   ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, InstanceNorm1dDefaultOptions) {
   auto input = torch::ones({2, 5});
   auto output = F::instance_norm(input);
-  auto expected = torch::ones({2, 5});
+  auto expected = torch::zeros({2, 5});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1608,7 +1606,7 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
       .bias(bias)
       .momentum(momentum)
       .eps(eps));
-  auto expected = torch::ones({2, num_features, 4, 4});
+  auto expected = torch::zeros({2, num_features, 4, 4});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1618,7 +1616,7 @@ TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
 
   auto input = torch::ones({2, num_features, 4, 4});
   auto output = F::instance_norm(input);
-  auto expected = torch::ones({2, num_features, 4, 4});
+  auto expected = torch::zeros({2, num_features, 4, 4});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1641,7 +1639,7 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
       .bias(bias)
       .momentum(momentum)
       .eps(eps));
-  auto expected = torch::ones({2, num_features, 2, 2, 2});
+  auto expected = torch::zeros({2, num_features, 2, 2, 2});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1651,7 +1649,7 @@ TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
 
   auto input = torch::ones({2, num_features, 2, 2, 2});
   auto output = F::instance_norm(input);
-  auto expected = torch::ones({2, num_features, 2, 2, 2});
+  auto expected = torch::zeros({2, num_features, 2, 2, 2});
   ASSERT_TRUE(output.allclose(expected));
 }
 
