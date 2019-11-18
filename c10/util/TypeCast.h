@@ -148,12 +148,12 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
 
 #define DEFINE_UNCASTABLE(T, scalartype_)                                         \
 template<>                                                                        \
-inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
+C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
   assert(ScalarType::scalartype_ == src_type);                                    \
   return *(const T *)ptr;                                                         \
 }                                                                                 \
 template<>                                                                        \
-inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
+C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
   assert(ScalarType::scalartype_ == dest_type);                                   \
   *(T *)ptr = value;                                                              \
 }
