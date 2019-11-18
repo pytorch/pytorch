@@ -30,7 +30,7 @@ void fillQConfigMap(
   } else {
     qconfig = parent_qconfig;
   }
-  map[module.module_object()] = qconfig;
+  map[module._ivalue()] = qconfig;
 
   for (const script::NameModule& s : module.named_children()) {
     std::string child_key;
@@ -39,8 +39,7 @@ void fillQConfigMap(
     } else {
       child_key = key + "." + s.name;
     }
-    fillQConfigMap(
-        s.value.module_object(), qconfig_dict, map, child_key, qconfig);
+    fillQConfigMap(s.value._ivalue(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
@@ -184,7 +183,8 @@ Node* InsertObserversHelper::insertObserverFor(
     return nullptr;
   }
 
-  script::Module observer_module;
+  script::Module observer_module(
+      "Module", std::make_shared<script::CompilationUnit>());
   if (isWeightOfConvOrLinear(v)) {
     TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
@@ -275,7 +275,7 @@ graph(%input, %weight, %bias, %4):
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
-  if (!module_qconfig_map_.count(module.module_object())) {
+  if (!module_qconfig_map_.count(module._ivalue())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -304,7 +304,7 @@ void InsertObserversHelper::insertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      auto qconfig = module_qconfig_map_.at(module.module_object());
+      auto qconfig = module_qconfig_map_.at(module._ivalue());
       if (qconfig) {
         auto observer_node =
             insertObserverFor(v, v->owningGraph(), module, qconfig.value());
@@ -339,7 +339,8 @@ void InsertObserversHelper::insertObservers(
         // the child module.
         auto module_instance = n->inputs()[0];
         auto module_method_name = n->s(attr::name);
-        script::Module callee_module;
+        script::Module callee_module(
+            "Module", std::make_shared<script::CompilationUnit>());
         if (module_instance->node()->kind() == prim::GetAttr) {
           auto child_module_name = module_instance->node()->s(attr::name);
           callee_module = module.attr(child_module_name).toModule();
@@ -365,7 +366,7 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    auto qconfig = module_qconfig_map_.at(module.module_object());
+    auto qconfig = module_qconfig_map_.at(module._ivalue());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
       insertObserverFor(v, v->owningGraph(), module, qconfig.value());
@@ -455,7 +456,7 @@ class QuantizeHelper {
     // O(N) where N is number of observer moduels with this optimization
     for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
       auto observer_name = observer_modules_to_remove_[i];
-      module_.module_object()->unsafeRemoveAttr(observer_name);
+      module_._ivalue()->unsafeRemoveAttr(observer_name);
       module_.type()->unsafeRemoveAttribute(observer_name);
     }
     // Destroy observer forward calls
@@ -826,7 +827,8 @@ graph(%self, %x):
 
     script::Method method = current.get_method("forward");
     GRAPH_DUMP(
-        current.name().name() + "::forward() before Conv2d-BatchNorm2d folding",
+        current.type()->name()->name() +
+            "::forward() before Conv2d-BatchNorm2d folding",
         method.graph());
     const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 

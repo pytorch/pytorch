@@ -22,11 +22,11 @@ backend, and must be initialized with `torch.distributed.init_process_group
 before using other functions. See the `documentation for
 torch.distributed <https://pytorch.org/docs/stable/distributed.html>`_ for
 additional details. Next, to initialize the RPC framework we need to use
-`init_model_parallel` which would initialize the RPC framework, RRef framework
+`init_rpc` which would initialize the RPC framework, RRef framework
 and distributed autograd.
 
 .. automodule:: torch.distributed.rpc
-.. autofunction:: init_model_parallel
+.. autofunction:: init_rpc
 
 .. _rref:
 
