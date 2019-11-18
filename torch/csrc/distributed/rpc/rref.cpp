@@ -199,20 +199,11 @@ template class UserRRef<py::object>;
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
-template <>
-const IValue& OwnerRRef<IValue>::getValue() const {
+template <typename T>
+const T& OwnerRRef<T>::getValue() const {
   // TODO: use callback to make this non-blocking
   std::unique_lock<std::mutex> lock(mutex_);
   valueCV_.wait(lock, [this] { return value_.has_value(); });
-  return value_.value();
-}
-
-template <>
-const py::object& OwnerRRef<py::object>::getValue() const {
-  // TODO: use callback to make this non-blocking
-  std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value(); });
-  PythonRpcHandler::getInstance().handleException(value_.value());
   return value_.value();
 }
 
