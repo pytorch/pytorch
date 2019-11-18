@@ -162,9 +162,10 @@ bool isWeightOfConvOrLinear(Value* v) {
     if (u.user->kind() == Symbol::aten("conv2d") &&
         v == u.user->inputs().at(1)) {
       return true;
-    } else if (u.user->kind() == prim::CallFunction &&
-               getFuncName(u.user->inputs()[0]) == "linear" &&
-               v == u.user->inputs().at(2)) {
+    } else if (
+        u.user->kind() == prim::CallFunction &&
+        getFuncName(u.user->inputs()[0]) == "linear" &&
+        v == u.user->inputs().at(2)) {
       return true;
     }
   }
@@ -186,7 +187,9 @@ Node* InsertObserversHelper::insertObserverFor(
   script::Module observer_module(
       "Module", std::make_shared<script::CompilationUnit>());
   if (isWeightOfConvOrLinear(v)) {
-    TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -740,19 +743,18 @@ class ModuleUseDeduper {
  public:
   ModuleUseDeduper(script::Module& module) : module_(module) {}
   void dedup() {
-    for (auto& method: module_.get_methods()) {
+    for (auto& method : module_.get_methods()) {
       findModuleUses(method.name());
     }
 
-    for (auto& method: module_.get_methods()) {
+    for (auto& method : module_.get_methods()) {
       dedupModuleUses(method.name());
     }
   }
 
   // Analyze the code to record necessary information
   // to dedup the module uses
-  void findModuleUses(
-      const std::string& method_name) {
+  void findModuleUses(const std::string& method_name) {
     script::Method method = module_.get_method(method_name);
     auto graph = method.graph();
 
@@ -788,8 +790,9 @@ class ModuleUseDeduper {
             use_to_rewrite_.push_back(instance);
           }
         } else {
-          GRAPH_DEBUG("Can't handle the case of calling GetAttr on input ",
-                      " of the graph in make submodule uses unique");
+          GRAPH_DEBUG(
+              "Can't handle the case of calling GetAttr on input ",
+              " of the graph in make submodule uses unique");
         }
 
         for (Block* subblock : n->blocks()) {
@@ -800,8 +803,7 @@ class ModuleUseDeduper {
   }
 
   // Deduplicate module uses given the information we recorded before
-  void dedupModuleUses(
-      const std::string& method_name) {
+  void dedupModuleUses(const std::string& method_name) {
     for (Value* v : use_to_rewrite_) {
       const auto& path = value_to_path_map_[v];
       const auto& m = findChildModule(module_, path);
@@ -811,17 +813,18 @@ class ModuleUseDeduper {
       // change the name in GetAttr call
       auto original_name = v->node()->s(attr::name);
       v->node()->s_(attr::name, child_name);
-      GRAPH_DEBUG("Module use dedup: changing original module ",
-                  original_name,
-                  " to ",
-                  child_name);
+      GRAPH_DEBUG(
+          "Module use dedup: changing original module ",
+          original_name,
+          " to ",
+          child_name);
     }
   }
 
  private:
   script::Module module_;
-  // Map from value of module instance to the list of names of submodules starting from
-  // the top level module, e.g. ["sub1", "sub2", "relu"]
+  // Map from value of module instance to the list of names of submodules
+  // starting from the top level module, e.g. ["sub1", "sub2", "relu"]
   std::unordered_map<Value*, std::vector<std::string>> value_to_path_map_;
   std::unordered_set<script::ModulePtr> module_set_;
   std::vector<Value*> use_to_rewrite_;
@@ -1219,8 +1222,7 @@ void FoldPrepackedWeightIntoModule(
   }
 }
 
-void DedupModuleUses(
-    script::Module& module) {
+void DedupModuleUses(script::Module& module) {
   ModuleUseDeduper d(module);
   d.dedup();
 }
