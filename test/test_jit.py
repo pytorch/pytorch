@@ -3364,6 +3364,20 @@ graph(%Ra, %Rb):
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    def test_mutable_default_values(self):
+        with self.assertRaisesRegex(Exception, "Mutable default parameters"):
+            @torch.jit.script
+            def foo(x=(1, [])):
+                # type: (Tuple[int, List[Tensor]])
+                return x
+
+        class Test(torch.nn.Module):
+            def forward(self, input=[]):
+                return input
+
+        with self.assertRaisesRegex(Exception, "Mutable default parameters"):
+            torch.jit.script(Test())
+
     def test_warnings(self):
         import warnings
 
@@ -4841,7 +4855,6 @@ a")
                     self.checkScript(func5, (x, y))
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't support backward")
     def test_pow_scalar_backward_cuda(self):
         # see that scalar exponent works with cuda base (#19253)
         with enable_profiling_mode():
@@ -5568,7 +5581,7 @@ a")
             m()
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "NYI: fuser support for Sandcastle")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't use requires_grad information")
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -10381,6 +10394,33 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs)
 
+    def test_trace_autograd_function(self):
+        class TestFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return torch.neg(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return torch.neg(grad_output)
+
+
+
+        class TracedModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(TestFunc.apply(x))
+
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.tm = TracedModule()
+
+            def forward(self, x):
+                return self.tm(x)
+
+        traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
+
     def test_interpolate_trace(self):
         class test(nn.Module):
             def __init__(self):
@@ -11112,8 +11152,6 @@ a")
         self.run_pass('erase_number_types', graph)
         FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
 
-
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't support gradients")
     def test_mm_batching(self):
 
         with enable_profiling_mode():
@@ -11132,8 +11170,8 @@ a")
                 slstm(*inputs, profile_and_replay=True).sum().backward()
 
             fw_graph = slstm.graph_for(*inputs)
-            bw_graph = backward_graph(slstm, diff_graph_idx=0)
             if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                bw_graph = backward_graph(slstm, diff_graph_idx=0)
                 self.assertTrue('prim::MMBatchSide' in str(fw_graph))
                 self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
 
@@ -15163,6 +15201,13 @@ a")
         self.assertEqual(seq_eager_out, seq_script_out)
         self.assertEqual(tensor_eager_out, tensor_script_out)
 
+    def test_torchscript_memoryformat(self):
+        @torch.jit.script
+        def fn(x):
+            return x.contiguous(memory_format=torch.channels_last)
+        x = torch.randn(4, 3, 6, 6)
+        y = fn(x)
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
 
     def test_torchscript_multi_head_attn(self):
         @torch.jit.script

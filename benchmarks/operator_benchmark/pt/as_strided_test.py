@@ -24,10 +24,10 @@ as_strided_configs_short = op_bench.config_list(
 )
 
 as_strided_configs_long = op_bench.cross_product_configs(
-    M=[128, 1024],
-    N=[128, 1024],
+    M=[512],
+    N=[1024],
     size=[(16, 16), (128, 128)],
-    stride=[(1, 1), (2, 2)],
+    stride=[(1, 1)],
     storage_offset=[0, 1],
     device=['cpu', 'cuda'],
     tags=['long']
