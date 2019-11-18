@@ -199,8 +199,8 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    def __call__(self, input):
-        raise RuntimeError('ModuleList should not be called directly.')
+    def forward(self):
+        raise NotImplementedError()
 
 
 class ModuleDict(Module):
