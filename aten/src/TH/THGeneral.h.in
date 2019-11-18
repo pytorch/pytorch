@@ -30,7 +30,7 @@
 
 # define TH_EXTERNC extern "C"
 
-#define TH_API TORCH_API
+#define TH_API CAFFE2_API
 
 #ifdef _WIN32
 # define TH_NO_RETURN __declspec(noreturn)
