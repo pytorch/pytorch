@@ -823,6 +823,26 @@ Example::
     torch.Size([10, 3, 5])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_xor,
+           r"""
+bitwise_xor(input, other, out=None) -> Tensor
+
+Computes the bitwise XOR of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical XOR.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_xor(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-2, -2,  0], dtype=torch.int8)
+    >>> torch.bitwise_xor(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ True, False, False])
+""".format(**common_args))
+
 add_docstr(torch.stack,
            r"""
 stack(tensors, dim=0, out=None) -> Tensor
