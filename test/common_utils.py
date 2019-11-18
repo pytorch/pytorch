@@ -160,6 +160,9 @@ IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
 TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
 
+PY3 = sys.version_info > (3, 0)
+PY34 = sys.version_info >= (3, 4)
+
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
@@ -195,14 +198,14 @@ def run_tests(argv=UNITTEST_ARGS):
                 test_source = 'python-unittest'
 
             test_report_path = os.path.join('test-reports', test_source)
-            os.makedirs(test_report_path, exists_ok=True)
+            if PY3:
+                os.makedirs(test_report_path, exists_ok=True)
+            else:
+                os.makedirs(test_report_path)
 
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
         else:
             unittest.main(argv=argv)
-
-PY3 = sys.version_info > (3, 0)
-PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
