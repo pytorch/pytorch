@@ -27,6 +27,10 @@ from itertools import product
 from copy import deepcopy
 from numbers import Number
 import tempfile
+import json
+from subprocess import check_call
+from uuid import uuid4
+import shutil
 
 import __main__
 import errno
@@ -561,6 +565,39 @@ except ImportError:
 
 disabled_test_from_issues = None
 disabled_query = 'is%3Aissue+is%3Aopen+label%3A%22topic%3A+flaky-tests%22+repo:pytorch/pytorch+in%3Atitle+DISABLED'
+def check_disabled(test_name):
+    global disabled_test_from_issues
+    if disabled_test_from_issues is None:
+        disabled_test_from_issues = set()
+
+        def read_and_process():
+            with open('disabled_tests.json', 'r') as opened:
+                contents = opened.read()
+            the_response = json.loads(contents)
+            for item in the_response['items']:
+                title = item['title']
+                key = 'DISABLED '
+                if title.startswith(key):
+                    test_name = title[len(key):].strip()
+                    disabled_test_from_issues.add(test_name)
+
+        if not IS_SANDCASTLE:
+            try:
+                try:
+                    read_and_process()
+                except FileNotFoundError:
+                    repo_dir = tempfile.mkdtemp()
+                    check_call(['git', 'clone', 'https://github.com/zdevito/pytorch_disabled_tests.git', repo_dir])
+                    tmp_name = 'disabled_tests_{}.json'.format(uuid4())
+                    shutil.copyfile(os.path.join(repo_dir, 'result.json'), tmp_name)
+                    os.rename(tmp_name, 'disabled_tests.json')
+                    read_and_process()
+            except Exception:
+                print("Couldn't download test skip set, leaving all tests enabled...")
+
+    if test_name in disabled_test_from_issues:
+        raise unittest.SkipTest(
+            "Test is disabled because an issue exists disabling it: https://github.com/search?q={}".format(disabled_query))
 
 class TestCase(expecttest.TestCase):
     precision = 1e-5
@@ -616,33 +653,14 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
-    def setUp(self):
-        global disabled_test_from_issues
-        if disabled_test_from_issues is None:
-            disabled_test_from_issues = set()
-            if not IS_SANDCASTLE:
-                try:
-                    import urllib.request
-                    import json
-                    url = 'https://api.github.com/search/issues?q={}'.format(disabled_query)
-                    contents = urllib.request.urlopen(url, timeout=1).read()
-                    the_response = json.loads(contents)
-                    for item in the_response['items']:
-                        title = item['title']
-                        key = 'DISABLED '
-                        if title.startswith(key):
-                            test_name = title[len(key):].strip()
-                            disabled_test_from_issues.add(test_name)
 
-                except Exception:
-                    print("Couldn't download test skip set, leaving all tests enabled...")
+    def setUp(self):
+
 
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
-        if str(self) in disabled_test_from_issues:
-            raise unittest.SkipTest(
-                "Test is disabled because an issue exists disabling it: https://github.com/search?q={}".format(disabled_query))
+        check_disabled(str(self))
 
         set_rng_seed(SEED)
 
