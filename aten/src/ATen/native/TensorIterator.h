@@ -76,12 +76,13 @@ struct CAFFE2_API OperandInfo {
   explicit OperandInfo(const Tensor& t) : tensor(t) {
     if (t.defined()) {
       device = t.device();
-      dtype = t.scalar_type();
+      target_dtype = t.scalar_type();
+      tensor_dtype = target_dtype;
     }
     validate();
   }
   OperandInfo(const Tensor& t, Device device, ScalarType dtype)
-    : tensor(t), device(device), dtype(dtype) {
+    : tensor(t), device(device), target_dtype(dtype), tensor_dtype(t.scalar_type()) {
     validate();
   }
 
@@ -102,11 +103,13 @@ struct CAFFE2_API OperandInfo {
   /// specifies which type to allocate. Note that there is very limited support
   /// for type conversions currently: they are only allowed for zero-dim tensors.
   Device device = kCPU;
-  ScalarType dtype = ScalarType::Undefined;
+  ScalarType target_dtype = ScalarType::Undefined;
+  // Caching dtype of the tensor, because scalar_type is an expensive operation
+  ScalarType tensor_dtype = ScalarType::Undefined;
 
-  bool is_type_defined() const { return dtype != ScalarType::Undefined; }
+  bool is_type_defined() const { return target_dtype != ScalarType::Undefined; }
   TensorOptions options() const {
-    return TensorOptions(dtype).device(device);
+    return TensorOptions(target_dtype).device(device);
   }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
@@ -190,9 +193,9 @@ struct CAFFE2_API TensorIterator {
   /// Accessors for each operand
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
-  ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
+  ScalarType dtype(int arg=0) const { return operands_[arg].tensor_dtype; }
   ScalarType common_dtype() const { return common_dtype_; }
-  ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].dtype; }
+  ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].tensor_dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
