@@ -14,7 +14,7 @@ namespace autograd {
 // autograd context. Finally, the RPC message is updated with appropriate
 // autograd information for the recipient.
 TORCH_API void addSendRpcBackward(
-    ContextPtr autogradContext,
+    const ContextPtr& autogradContext,
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     const rpc::worker_id_t dst);

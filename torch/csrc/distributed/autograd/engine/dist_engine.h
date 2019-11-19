@@ -39,7 +39,7 @@ class TORCH_API DistEngine {
   // receives gradients from the corresponding 'recv' method on another node.
   // The gradients are accumulated in the provided autograd context.
   void executeSendFunction(
-      ContextPtr autogradContext,
+      const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& sendFunction);
 
  private:

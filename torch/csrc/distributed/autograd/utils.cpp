@@ -19,7 +19,7 @@ using torch::distributed::rpc::RpcCommandBase;
 using torch::distributed::rpc::WorkerInfo;
 
 void addSendRpcBackward(
-    ContextPtr autogradContext,
+    const ContextPtr& autogradContext,
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     const rpc::worker_id_t dst) {

@@ -200,7 +200,7 @@ void DistEngine::runEngineAndAccumulateGradients(
 }
 
 void DistEngine::executeSendFunction(
-    ContextPtr autogradContext,
+    const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& sendFunction) {
   std::unique_lock<std::mutex> lock(initializedContextIdsLock_);
   if (initializedContextIds_.find(autogradContext->contextId()) ==

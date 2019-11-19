@@ -15,7 +15,7 @@ RecvRpcBackward::RecvRpcBackward(
     ContextPtr autogradContext,
     rpc::worker_id_t fromWorkerId)
     : autogradMetadata_(autogradMetadata),
-      autogradContext_(autogradContext),
+      autogradContext_(std::move(autogradContext)),
       fromWorkerId_(fromWorkerId) {}
 
 variable_list RecvRpcBackward::apply(variable_list&& grads) {
