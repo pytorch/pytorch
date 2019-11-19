@@ -1091,8 +1091,6 @@ class RpcTest(object):
             worker_name_to_id=self.worker_name_to_id,
             init_method=self.init_method,
         )
-        import time ; time.sleep(3)
-        print('done with code')
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
