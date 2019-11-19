@@ -311,7 +311,7 @@ TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
     torch::tensor({{{ 0,  2},
                     {10, 12}},
                    {{ 0,  2},
-                    {10, 12}}});
+                    {10, 12}}})));
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
@@ -347,7 +347,7 @@ TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
                    {{{ 0,  2},
                      {10, 12}},
                     {{50, 52},
-                     {60, 62}}}});
+                     {60, 62}}}})));
   ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
