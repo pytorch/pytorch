@@ -67,8 +67,7 @@ void testLiteInterpreterConv() {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.run_method("forward", inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
@@ -93,6 +92,40 @@ void testLiteInterpreterInline() {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.run_method("foo3", inputs);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
+}
+
+void testLiteInterpreterTuple() {
+  script::Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return (1, 2, x + 3)
+
+  def forward(self, x):
+      tuple = self.foo(x)
+      return tuple
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.run_method("forward", inputs);
+  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+}
+
+void testLiteInterpreterPrimOverload() {
+  script::Module m("m");
+  m.define(R"JIT(
+  def forward(self, x):
+      result = [1, 2]
+      result.append(3)
+      return result
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.run_method("forward", inputs);
+  AT_ASSERT(output.toIntList()[2] == 3);
 }
 } // namespace torch
 } // namespace jit
