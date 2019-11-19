@@ -1,6 +1,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+// TODO:  Remove this dependency once callBoxed is possible for all ops
+#include <torch/csrc/jit/operator.h>
 
 namespace at {
 namespace autocast {
@@ -36,8 +38,6 @@ enum class CastPolicy : uint8_t {
   fp32,
   promote
 };
-
-// feels good to be writing C++ again
 
 // Overload to catch Tensor args.
 // If nextArg is floating-point, compare its scalar_type with our
@@ -84,16 +84,12 @@ at::ScalarType promote_type(at::ScalarType current, Arg0 arg0, Args... args) {
 Tensor caching_caster(at::ScalarType to_type, const Tensor & arg) {
   if (arg.is_floating_point() && arg.scalar_type() != to_type) {
     // Heuristic:  Do what Apex does, and cache FP16 casts of FP32 model weights (leaves).
-    bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat);
-    // If arg is a variable, explicitly check is_leaf().  Non-variable Tensors do not permit an is_leaf() call,
-    // so if arg is not a variable, assume it is a frozen leaf.
-    if (arg.is_variable()) {
-      can_try_cache = (can_try_cache || arg.is_leaf());
-    }
+    // See cached_casts declaration above for detailed strategy.
+    bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf());
     if (can_try_cache) {
-      auto it = cached_casts.find(arg.unsafeGetTensorImpl()); // See cached_casts declaration for detailed strategy.
+      auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
-        return std::get<1>(it->second); // Return the cached cast.
+        return std::get<1>(it->second);
       } else {
         auto casted_arg = arg.to(to_type);
         cached_casts.emplace(arg.unsafeGetTensorImpl(), std::tuple<Tensor, Tensor>{arg, casted_arg});
@@ -119,6 +115,8 @@ T caching_caster(at::ScalarType to_type, T arg) {
 }
 
 // https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer
+// I could also use c10::guts::function_traits for this as in ATen/core/boxing/kernel_function.h, but
+// that seems no less verbose.
 template <CastPolicy policy, typename F, F* func> struct Patch {};
 
 template <CastPolicy policy, typename Ret, typename... Args, auto (*F)(Args...) -> Ret>
@@ -143,18 +141,63 @@ struct Patch<policy, Ret (Args...), F> {
   }
 };
 
+// void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+//   auto s = Symbol::fromQualString(op.schema().name());
+//   auto operators = torch::jit::getAllOperatorsFor(s);
+//   // Find the exact match
+//   std::shared_ptr<torch::jit::Operator> jit_op;
+//   for (const auto& candidate_op : operators) {
+//     auto candidate_schema = candidate_op->schema();
+//     // NB: this is a VERY slow equality test
+//     if (candidate_schema == op.schema()) {
+//       jit_op = candidate_op;
+//       break;
+//     }
+//   }
+//   TORCH_INTERNAL_ASSERT(jit_op);
+//
+//   auto offset = jit_op->getOperation()(*stack);
+//   TORCH_INTERNAL_ASSERT(offset == 0);
+// }
+//
+// // The fallback for greylist ops disables autocasting and redispatches.
+// void autocast_fallback(c10::OperatorKernel*, const c10::OperatorHandle& op, c10::Stack* stack) {
+//   c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+//   // Temporary workaround.
+//   // TODO:  Replace callBoxedWorkaround with op.callBoxed(stack) once callBoxed is possible for all ops.
+//   callBoxedWorkaround(op, stack);
+// }
+// // TODO:  Once fallthrough is implemented (https://github.com/pytorch/pytorch/issues/29548),
+// // autocast_fallback can be deleted entirely.
+
 #ifndef USE_STATIC_DISPATCH
 namespace {
 // Static registration for kernels that require autocast.
 
-// Debatable at which level the convolutions should be patched.
-// I'll patch at the top (Python-exposed) level, because then I'm 100% sure
-// autograd history recording can't sneak in ahead of me.
+// It's debatable at which level the convolutions should be patched.
+//
+// Option 1:  Patch at the Python-exposed level, to make 100% sure autograd history
+// recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
+//
+// Option 2:  Patch only at the level of explicit calls into cudnn (cudnn_convolution, etc),
+// because those are the code paths that are guaranteed to use Tensor Cores, therefore they're the only ones
+// that should be whitelisted.  One difficulty with this approach is that convolutions (and other ops) are wrapped
+// in several layers of at::* calls.  Several non-explicitly-registered layers (e.g. at::convolution) could be called
+// before we reach cudnn_convolution.  Because they are not explicitly registered, these layers would invoke the
+// boxed fallback, which would exclude AutocastTensorId, so by the time at::cudnn_convolution is actually
+// called, it wouldn't route back through the autocasting logic at all.
+//
+// I think Option 1 is the right answer for all ops, not just convolutions.
 
-// Or maybe we only want to patch cudnn_convolution, because those are the only ones that will use
-// Tensor Cores, and therefore they're the only ones that should be whitelisted?  I think that's
-// actually the right answer.  I can include checks for all outputs that their grad_fns saved inputs
-// in the expected/desired types.
+// Boxed fallback registration
+
+// auto register_fallback = c10::Dispatcher::singleton()
+//   .registerBackendFallbackKernel(TensorTypeId::AutocastTensorId,
+//                                  KernelFunction::makeFromBoxedFunction(&autocast_fallback));
+//                     // change to KernelFunction::makeFromBoxedFunction<&autocast_fallback>()
+//                     // once https://github.com/pytorch/pytorch/pull/29337/files goes in
+
+// Explicit registration for fp32/fp16/promote ops
 
 #define PATCH(FUNC, POLICY) &Patch<CastPolicy::POLICY, decltype( FUNC ), FUNC>::call
 // example:
@@ -163,7 +206,7 @@ namespace {
 // &Patch<CastPolicy::fp16, decltype( at::cudnn_convolution ), at::cudnn_convolution>::call
 // I guess I could have used a complex set of macros instead of templates above.
 
-auto registerer = torch::RegisterOperators()
+auto register_explicit = torch::RegisterOperators()
   /* FP16 OPS */
   .op(torch::RegisterOperators::options()
     .schema("aten::cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
