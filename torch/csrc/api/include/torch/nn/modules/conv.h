@@ -185,7 +185,32 @@ class ConvTransposeImpl : public ConvImpl<D, Derived> {
   using torch::nn::ConvImpl<D, Derived>::ConvImpl;
 
   /// Pretty prints the `ConvTranspose{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+  void pretty_print(std::ostream& stream) const override {
+    stream << "torch::nn::ConvTranspose" << D << "d"
+           << "(" << this->options.in_channels()
+           << ", " << this->options.out_channels()
+           << ", kernel_size=" << this->options.kernel_size()
+           << ", stride=" << this->options.stride();
+    if (*this->options.padding() != *ExpandingArray<D>(0)) {
+      stream << ", padding=" << this->options.padding();
+    }
+    if (*this->options.dilation() != *ExpandingArray<D>(1)) {
+      stream << ", dilation=" << this->options.dilation();
+    }
+    if (*this->options.output_padding() != *ExpandingArray<D>(0)) {
+      stream << ", output_padding=" << this->options.output_padding();
+    }
+    if (this->options.groups() != 1) {
+      stream << ", groups=" << this->options.groups();
+    }
+    if (!this->options.bias()) {
+      stream << ", bias=" << std::boolalpha << false;
+    }
+    if (!c10::get_if<enumtype::kZeros>(&this->options.padding_mode())) {
+      stream << ", padding_mode=" << enumtype::get_enum_name(this->options.padding_mode());
+    }
+    stream << ")";
+  }
 
  protected:
   std::vector<int64_t> _output_padding(
