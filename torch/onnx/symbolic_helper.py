@@ -301,8 +301,6 @@ def _get_interpolate_attributes(g, mode, args):
     return scales, align_corners
 
 def _interpolate_get_scales(g, scale_factor, dim):
-    from torch.onnx.symbolic_opset9 import unsqueeze
-
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
     if _is_packed_list(scale_factor):
         scale_factor = _unpack_list(scale_factor)
@@ -320,7 +318,6 @@ def _interpolate_get_scales(g, scale_factor, dim):
 
 
 def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_corners):
-    from torch.onnx.symbolic_opset9 import unsqueeze
     mode = _maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
