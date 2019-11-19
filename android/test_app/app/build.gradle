@@ -46,6 +46,13 @@ android {
             addManifestPlaceholders([APP_NAME: "PyResNet18"])
             buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
         }
+        interpolate {
+            dimension "model"
+            applicationIdSuffix ".interpolate"
+            buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME_INTERPOLATE'))
+            addManifestPlaceholders([APP_NAME: "PyInterpolate"])
+            buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-interpolate\"")
+        }
     }
     packagingOptions {
         pickFirst '**/libfbjni.so'

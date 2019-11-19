@@ -93,8 +93,8 @@ public class MainActivity extends AppCompatActivity {
       final String moduleFileAbsoluteFilePath = new File(
           assetFilePath(this, BuildConfig.MODULE_ASSET_NAME)).getAbsolutePath();
       mModule = Module.load(moduleFileAbsoluteFilePath);
-      mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * 224 * 224);
-      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 3, 224, 224});
+      mInputTensorBuffer = Tensor.allocateFloatBuffer(1 * 28 * 28);
+      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 1, 28, 28});
     }
 
     final long startTime = SystemClock.elapsedRealtime();
