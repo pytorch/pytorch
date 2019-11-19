@@ -1176,7 +1176,7 @@ def foo(x):
       switch (v) {
         case 3: {
           // Const 3 comes from function 'bar', which gets inlined to 'foo'.
-          // The callstack for the correponding node should contain only the
+          // The callstack for the corresponding node should contain only the
           // function 'bar'.
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
@@ -1186,7 +1186,7 @@ def foo(x):
         }
         case 7: {
           // Const 7 comes from function 'ham', which gets inlined to 'baz',
-          // which is then inlined to 'foo'. The callstack for the correponding
+          // which is then inlined to 'foo'. The callstack for the corresponding
           // node should contain these two functions.
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
