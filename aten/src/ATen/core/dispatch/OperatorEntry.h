@@ -27,26 +27,9 @@ public:
     return schema_;
   }
 
-  template<class Return, class... Args>
-  Return callUnboxed(Args... args) const {
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
-        return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
-    });
-  }
-
-  template<class Return, class... Args>
-  Return callUnboxedOnly(Args... args) const {
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
-        return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
-    });
-  }
-
-  void callBoxed(Stack* stack) const {
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
-        dispatchTable.lookupBoxed(stack).callBoxed(stack);
-    });
+  template<class Functor>
+  typename guts::infer_function_traits_t<Functor>::return_type readDispatchTable(Functor&& functor) const {
+    return dispatchTable_.read(std::forward<Functor>(functor));
   }
 
   void prepareForDeregistration();

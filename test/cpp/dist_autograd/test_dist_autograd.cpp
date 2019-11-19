@@ -3,8 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
@@ -61,7 +61,8 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   // Attach appropriate grad fn.
   auto options = at::TensorOptions().requires_grad(true);
   auto t = torch::autograd::make_variable(torch::ones({1}, options), true);
-  t.set_gradient_edge(t.gradient_edge());
+  const auto& e = torch::autograd::impl::gradient_edge(t);
+  torch::autograd::impl::set_gradient_edge(t, e);
   ASSERT_NE(nullptr, t.grad_fn());
 
   // Execute engine.
