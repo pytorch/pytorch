@@ -34,10 +34,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(rpc_module).cast<py::module>();
 
-  auto rpcAgentOptions =
-      shared_ptr_class_<RpcAgentOptions>(module, "RpcAgentOptions")
-          .def_readwrite("rpc_timeout", &RpcAgentOptions::rpcTimeout);
-
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
           .def_readonly("name", &WorkerInfo::name_)
@@ -101,13 +97,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "wait",
               [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
               py::call_guard<py::gil_scoped_release>());
-
-  shared_ptr_class_<ProcessGroupRpcAgentOptions>(
-      module, "ProcessGroupRpcAgentOptions", rpcAgentOptions)
-      .def(py::init<>())
-      .def_readwrite(
-          "num_send_recv_threads",
-          &ProcessGroupRpcAgentOptions::numSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
@@ -198,6 +187,16 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
           Returns:
             `datetime.timedelta` instance indicating the RPC timeout.
+      )");
+
+  module.def(
+      "_set_rpc_timeout",
+      [](const std::chrono::milliseconds& rpcTimeout) {
+        RpcAgent::getDefaultRpcAgent()->setRpcTimeout(rpcTimeout);
+      },
+      R"(
+          Set the timeout for all RPCs. If an RPC is not completed within this
+          time, an exception indicating it has timed out will be raised.
       )");
 
   Py_RETURN_TRUE;
