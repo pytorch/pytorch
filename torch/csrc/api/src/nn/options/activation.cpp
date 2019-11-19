@@ -5,6 +5,8 @@ namespace nn {
 
 SELUOptions::SELUOptions(bool inplace) : inplace_(inplace) {}
 
+GLUOptions::GLUOptions(int64_t dim) : dim_(dim) {}
+
 HardshrinkOptions::HardshrinkOptions(double lambda) : lambda_(lambda) {}
 
 SoftmaxOptions::SoftmaxOptions(int64_t dim) : dim_(dim) {}
