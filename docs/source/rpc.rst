@@ -17,10 +17,10 @@ RPC and RRef Framework
 Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
 `init_rpc` which would initialize the RPC framework, RRef framework
-and distributed autograd. As part of this, it will also initialize a default
-`ProcessGroup` `backend
-<https://pytorch.org/docs/stable/distributed.html#torch.distributed.Backend>`_
-that uses gloo for collective communication.
+and distributed autograd. By default, this will also initialize the
+`ProcessGroup` (:func:`torch.distributed.Backend`) backend for RPC
+communication. The `ProcessGroup` backend internally uses gloo for communication.
+
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
@@ -59,7 +59,13 @@ used for applications such as model parallel training. In short, applications
 may send and receive gradient recording tensors over RPC. In the forward pass,
 we record when gradient recording tensors are sent over RPC and during the
 backward pass we use this information to perform a distributed backward pass
-using RPC. For more details see the design doc for distributed autograd: :doc:`/notes/distributed_autograd`.
+using RPC. For more details see :ref:`distributed-autograd-design`.
 
 .. automodule:: torch.distributed.autograd
-    :members:
+    :members: context, backward, get_gradients
+
+Distributed Optimizer
+---------------------
+
+.. automodule:: torch.distributed.optim
+    :members: DistributedOptimizer
