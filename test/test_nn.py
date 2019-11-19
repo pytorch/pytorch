@@ -8821,6 +8821,16 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
 
+    def _test_module_empty_input(self, module, inp):
+        inp.requires_grad_(True)
+        out = module(inp)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        self.assertEqual(out.size(), inp.size())
+        for p in module.parameters():
+            if p.requires_grad and p.grad is not None:
+                self.assertEqual(p.grad, torch.zeros_like(p.grad))
+
     def test_Dropout(self, device):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, device, input)
@@ -8850,7 +8860,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, d)
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, device)
 
-        if device == 'cuda':
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm1d, input, device)
 
     def test_InstanceNorm2d_general(self, device):
@@ -8862,7 +8872,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, h, w)
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm2d, input, device)
 
     def test_InstanceNorm3d_general(self, device):
@@ -8875,20 +8885,28 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, h, w, d)
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+    def test_BatchNorm_empty(self, device):
+        mod = torch.nn.BatchNorm2d(3).to(device)
+        inp = torch.randn(0, 3, 2, 2, device=device)
+        self._test_module_empty_input(mod, inp)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_module_empty_input(mod, inp)
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
