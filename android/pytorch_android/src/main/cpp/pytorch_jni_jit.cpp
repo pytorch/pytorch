@@ -101,7 +101,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   }
 #endif
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+  void preModuleLoadSetup() {
     auto qengines = at::globalContext().supportedQEngines();
     if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
         qengines.end()) {
@@ -114,23 +114,16 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
         /* need_inputs */ false,
         /* sampled */ false);
 #endif
+  }
+
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+    preModuleLoadSetup();
     module_ = torch::jit::load(std::move(modelPath->toStdString()));
     module_.eval();
   }
 
   PytorchJni(facebook::jni::alias_ref<JReadAdapter::javaobject> jReadAdapter) {
-    auto qengines = at::globalContext().supportedQEngines();
-    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-        qengines.end()) {
-      at::globalContext().setQEngine(at::QEngine::QNNPACK);
-    }
-#ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
-        &onFunctionEnter,
-        &onFunctionExit,
-        /* need_inputs */ false,
-        /* sampled */ false);
-#endif
+    preModuleLoadSetup();
     module_ = torch::jit::load(torch::make_unique<ReadAdapter>(jReadAdapter));
     module_.eval();
   }
