@@ -892,7 +892,8 @@
   supports_named_tensor: True
   variants: function, method
 
-- func: cummax.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: cummax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   supports_named_tensor: True

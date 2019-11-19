@@ -58,9 +58,9 @@ _(aten, _cufft_clear_plan_cache) \
 _(aten, _cufft_get_plan_cache_max_size) \
 _(aten, _cufft_get_plan_cache_size) \
 _(aten, _cufft_set_plan_cache_max_size) \
+_(aten, _cummax) \
 _(aten, _cumprod) \
 _(aten, _cumsum) \
-_(aten, _cummax) \
 _(aten, _denseDims) \
 _(aten, _dimI) \
 _(aten, _dimV) \
@@ -280,9 +280,9 @@ _(aten, cudnn_convolution_transpose_backward_weight) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
+_(aten, cummax) \
 _(aten, cumprod) \
 _(aten, cumsum) \
-_(aten, cummax) \
 _(aten, data_ptr) \
 _(aten, det) \
 _(aten, detach) \
