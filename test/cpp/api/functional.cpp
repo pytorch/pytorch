@@ -1590,9 +1590,18 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
 }
 
 TEST_F(FunctionalTest, InstanceNorm1dDefaultOptions) {
-  auto input = torch::arange(10.).view({2, 5});
+  auto input = torch::arange(40.).view({2, 5, 4});
   auto output = F::instance_norm(input);
-  auto expected = torch::zeros({2, 5});
+  auto expected = torch::tensor({{{-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416}},
+                                 {{-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416},
+                                  {-1.3416, -0.4472,  0.4472,  1.3416}}});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1601,7 +1610,7 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
   double eps = 1e-05;
   double momentum = 0.1;
 
-  auto input = torch::arange(2. * num_features * 1 * 1).view({2, num_features, 1, 1});
+  auto input = torch::arange(2. * num_features * 2 * 2).view({2, num_features, 2, 2});
   auto mean = torch::arange((double)num_features);
   auto variance = torch::arange((double)num_features);
   auto weight = torch::arange((double)num_features);
@@ -1615,16 +1624,26 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
       .bias(bias)
       .momentum(momentum)
       .eps(eps));
-  auto expected = torch::tensor({{{{0.}},
-                                  {{1.}},
-                                  {{2.}},
-                                  {{3.}},
-                                  {{4.}}},
-                                 {{{0.}},
-                                  {{1.}},
-                                  {{2.}},
-                                  {{3.}},
-                                  {{4.}}}});
+  auto expected = torch::tensor({{{{ 0.0000,  0.0000},
+                                   { 0.0000,  0.0000}},
+                                  {{-0.3416,  0.5528},
+                                   { 1.4472,  2.3416}},
+                                  {{-0.6833,  1.1056},
+                                   { 2.8944,  4.6833}},
+                                  {{-1.0249,  1.6584},
+                                   { 4.3416,  7.0249}},
+                                  {{-1.3665,  2.2112},
+                                   { 5.7888,  9.3665}}},
+                                 {{{ 0.0000,  0.0000},
+                                   { 0.0000,  0.0000}},
+                                  {{-0.3416,  0.5528},
+                                   { 1.4472,  2.3416}},
+                                  {{-0.6833,  1.1056},
+                                   { 2.8944,  4.6833}},
+                                  {{-1.0249,  1.6584},
+                                   { 4.3416,  7.0249}},
+                                  {{-1.3665,  2.2112},
+                                   { 5.7888,  9.3665}}}});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1632,9 +1651,28 @@ TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
 
-  auto input = torch::arange(2. * num_features * 1 * 1).view({2, num_features, 1, 1});
+  auto input = torch::arange(2. * num_features * 2 * 2).view({2, num_features, 2, 2});
   auto output = F::instance_norm(input);
-  auto expected = torch::zeros({2, num_features, 1, 1});
+  auto expected = torch::tensor({{{{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}}},
+                                 {{{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}}}});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1643,7 +1681,7 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
   double eps = 1e-05;
   double momentum = 0.1;
 
-  auto input = torch::arange(2. * num_features * 1 * 1 * 1).view({2, num_features, 1, 1, 1});
+  auto input = torch::arange(2. * num_features * 2 * 2 * 2).view({2, num_features, 2, 2, 2});
   auto mean = torch::arange((double)num_features);
   auto variance = torch::arange((double)num_features);
   auto weight = torch::arange((double)num_features);
@@ -1657,16 +1695,46 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
       .bias(bias)
       .momentum(momentum)
       .eps(eps));
-  auto expected = torch::tensor({{{{{0.}}},
-                                  {{{1.}}},
-                                  {{{2.}}},
-                                  {{{3.}}},
-                                  {{{4.}}}},
-                                 {{{{0.}}},
-                                  {{{1.}}},
-                                  {{{2.}}},
-                                  {{{3.}}},
-                                  {{{4.}}}}});
+  auto expected = torch::tensor({{{{{ 0.0000,  0.0000},
+                                    { 0.0000,  0.0000}},
+                                   {{ 0.0000,  0.0000},
+                                    { 0.0000,  0.0000}}},
+                                  {{{-0.5275, -0.0911},
+                                    { 0.3453,  0.7818}},
+                                   {{ 1.2182,  1.6547},
+                                    { 2.0911,  2.5275}}},
+                                  {{{-1.0550, -0.1822},
+                                    { 0.6907,  1.5636}},
+                                   {{ 2.4364,  3.3093},
+                                    { 4.1822,  5.0550}}},
+                                  {{{-1.5826, -0.2733},
+                                    { 1.0360,  2.3453}},
+                                   {{ 3.6547,  4.9640},
+                                    { 6.2733,  7.5826}}},
+                                  {{{-2.1101, -0.3644},
+                                    { 1.3814,  3.1271}},
+                                   {{ 4.8729,  6.6186},
+                                    { 8.3644, 10.1101}}}},
+                                 {{{{ 0.0000,  0.0000},
+                                    { 0.0000,  0.0000}},
+                                   {{ 0.0000,  0.0000},
+                                    { 0.0000,  0.0000}}},
+                                  {{{-0.5275, -0.0911},
+                                    { 0.3453,  0.7818}},
+                                   {{ 1.2182,  1.6547},
+                                    { 2.0911,  2.5275}}},
+                                  {{{-1.0550, -0.1822},
+                                    { 0.6907,  1.5636}},
+                                   {{ 2.4364,  3.3093},
+                                    { 4.1822,  5.0550}}},
+                                  {{{-1.5826, -0.2733},
+                                    { 1.0360,  2.3453}},
+                                   {{ 3.6547,  4.9640},
+                                    { 6.2733,  7.5826}}},
+                                  {{{-2.1101, -0.3644},
+                                    { 1.3814,  3.1271}},
+                                   {{ 4.8729,  6.6186},
+                                    { 8.3644, 10.1101}}}}});
   ASSERT_TRUE(output.allclose(expected));
 }
 
@@ -1674,9 +1742,48 @@ TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
   int num_features = 5;
   double eps = 1e-05;
 
-  auto input = torch::arange(2. * num_features * 1 * 1 * 1).view({2, num_features, 1, 1, 1});
+  auto input = torch::arange(2. * num_features * 2 * 2 * 2).view({2, num_features, 2, 2, 2});
   auto output = F::instance_norm(input);
-  auto expected = torch::zeros({2, num_features, 1, 1, 1});
+  auto expected = torch::tensor({{{{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}}},
+                                 {{{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}}}});
   ASSERT_TRUE(output.allclose(expected));
 }
 
