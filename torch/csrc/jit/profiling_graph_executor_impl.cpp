@@ -19,16 +19,12 @@
 namespace torch {
 namespace jit {
 
-#ifdef FBCODE_CAFFE2
+#if defined (FBCODE_CAFFE2) || defined (C10_MOBILE)
 static std::atomic<bool> executor_mode{false};
 static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
-#ifdef C10_MOBILE
-static std::atomic<bool> profiling_mode{false};
-#else
 static std::atomic<bool> profiling_mode{true};
-#endif
 #endif
 
 
