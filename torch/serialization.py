@@ -197,7 +197,9 @@ class _open_file(_opener):
 
 
 class _open_buffer_reader(_opener):
-    pass
+    def __init__(self, buffer):
+        super(_open_buffer_reader, self).__init__(buffer)
+        _check_seekable(buffer)
 
 
 class _open_buffer_writer(_opener):
@@ -215,7 +217,6 @@ def _open_file_like(name_or_buffer, mode):
             return _open_buffer_reader(name_or_buffer)
         else:
             raise RuntimeError("Expected 'r' or 'w' in mode but got {}".format(mode))
-
 
 
 class _open_zipfile_reader(_opener):
@@ -291,7 +292,7 @@ def _check_seekable(f):
         raise_err_msg(["seek", "tell"], e)
 
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -318,11 +319,16 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
+    if _use_new_zipfile_serialization:
+        with _open_zipfile_writer(f) as opened_file:
+            _save(obj, opened_file, pickle_module, pickle_protocol)
+            return
+
     with _open_file_like(f, 'wb') as opened_file:
-        _save(obj, opened_file, pickle_module, pickle_protocol)
+        _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
-def _save(obj, f, pickle_module, pickle_protocol):
+def _legacy_save(obj, f, pickle_module, pickle_protocol):
     if sys.version_info[0] == 2:
         import StringIO
         if isinstance(f, StringIO.StringIO):
@@ -399,6 +405,44 @@ def _save(obj, f, pickle_module, pickle_protocol):
     f.flush()
     for key in serialized_storage_keys:
         serialized_storages[key]._write_file(f, _should_read_directly(f))
+
+
+def _save(obj, zip_file, pickle_module, pickle_protocol):
+    serialized_storages = {}
+
+    def persistent_id(obj):
+        # FIXME: the docs say that persistent_id should only return a string
+        # but torch store returns tuples. This works only in the binary protocol
+        # see
+        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
+        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
+        if torch.is_storage(obj):
+            storage_type = normalize_storage_type(type(obj))
+            obj_key = str(obj._cdata)
+            location = location_tag(obj)
+            serialized_storages[obj_key] = obj
+
+            return ('storage',
+                    storage_type,
+                    obj_key,
+                    location,
+                    obj.size())
+        return None
+
+    # Write the pickle data for `obj`
+    data_buf = io.BytesIO()
+    pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
+    pickler.persistent_id = persistent_id
+    pickler.dump(obj)
+    data_value = data_buf.getvalue()
+    zip_file.write_record('data.pkl', data_value, len(data_value))
+
+    # Write each tensor to a file named tensor/the_tensor_key in the zip archive
+    for key in sorted(serialized_storages.keys()):
+        name = 'tensors/{}'.format(key)
+        storage = serialized_storages[key]
+        num_bytes = storage.size() * storage.element_size()
+        zip_file.write_record(name, storage.data_ptr(), num_bytes)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
@@ -479,7 +523,10 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         pickle_load_args['encoding'] = 'utf-8'
 
     with _open_file_like(f, 'rb') as opened_file:
-        return _load(opened_file, map_location, pickle_module, **pickle_load_args)
+        if _is_zipfile(opened_file):
+            with _open_zipfile_reader(f) as opened_zipfile:
+                return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+        return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 
 # Register pickling support for layout instances such as
@@ -499,27 +546,10 @@ _get_layout.cache = {}
 copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
 
 
-def _load(f, map_location, pickle_module, **pickle_load_args):
+def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     deserialized_objects = {}
 
-    if map_location is None:
-        restore_location = default_restore_location
-    elif isinstance(map_location, dict):
-        def restore_location(storage, location):
-            location = map_location.get(location, location)
-            return default_restore_location(storage, location)
-    elif isinstance(map_location, _string_classes):
-        def restore_location(storage, location):
-            return default_restore_location(storage, map_location)
-    elif isinstance(map_location, torch.device):
-        def restore_location(storage, location):
-            return default_restore_location(storage, str(map_location))
-    else:
-        def restore_location(storage, location):
-            result = map_location(storage, location)
-            if result is None:
-                result = default_restore_location(storage, location)
-            return result
+    restore_location = _get_restore_location(map_location)
 
     def _check_container_source(container_type, source_file, original_source):
         try:
@@ -616,20 +646,9 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_objects = {}
 
-    def maybe_decode_ascii(bytes_str):
-        # When using encoding='bytes' in Py3, some **internal** keys stored as
-        # strings in Py2 are loaded as bytes. This function decodes them with
-        # ascii encoding, one that Py3 uses by default.
-        #
-        # NOTE: This should only be used on internal keys (e.g., `typename` and
-        #       `location` in `persistent_load` below!
-        if isinstance(bytes_str, bytes):
-            return bytes_str.decode('ascii')
-        return bytes_str
-
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
-        typename = maybe_decode_ascii(saved_id[0])
+        typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
         if typename == 'module':
@@ -639,7 +658,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             return data[0]
         elif typename == 'storage':
             data_type, root_key, location, size, view_metadata = data
-            location = maybe_decode_ascii(location)
+            location = _maybe_decode_ascii(location)
             if root_key not in deserialized_objects:
                 obj = data_type(size)
                 obj._torch_load_uninitialized = True
@@ -690,5 +709,76 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
         deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
         if offset is not None:
             offset = f.tell()
+
+    return result
+
+
+def _maybe_decode_ascii(bytes_str):
+    # When using encoding='bytes' in Py3, some **internal** keys stored as
+    # strings in Py2 are loaded as bytes. This function decodes them with
+    # ascii encoding, one that Py3 uses by default.
+    #
+    # NOTE: This should only be used on internal keys (e.g., `typename` and
+    #       `location` in `persistent_load` below!
+    if isinstance(bytes_str, bytes):
+        return bytes_str.decode('ascii')
+    return bytes_str
+
+
+def _get_restore_location(map_location):
+    if map_location is None:
+        restore_location = default_restore_location
+    elif isinstance(map_location, dict):
+        def restore_location(storage, location):
+            location = map_location.get(location, location)
+            return default_restore_location(storage, location)
+    elif isinstance(map_location, _string_classes):
+        def restore_location(storage, location):
+            return default_restore_location(storage, map_location)
+    elif isinstance(map_location, torch.device):
+        def restore_location(storage, location):
+            return default_restore_location(storage, str(map_location))
+    else:
+        def restore_location(storage, location):
+            result = map_location(storage, location)
+            if result is None:
+                result = default_restore_location(storage, location)
+            return result
+    return restore_location
+
+
+def _load(zip_file, map_location, pickle_module, **pickle_load_args):
+    restore_location = _get_restore_location(map_location)
+
+    loaded_storages = {}
+
+    def load_tensor(obj, size, key, location):
+        loaded_storages[key] = restore_location(obj, location)
+        name = 'tensors/{}'.format(key)
+        size_long = struct.pack("<Q", size)
+        tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
+        offset = None
+        is_real_file = False
+        loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+
+    def persistent_load(saved_id):
+        assert isinstance(saved_id, tuple)
+        typename = _maybe_decode_ascii(saved_id[0])
+        data = saved_id[1:]
+
+        assert typename == 'storage', \
+            "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
+
+        data_type, key, location, size = data
+        if key not in loaded_storages:
+            load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
+        storage = loaded_storages[key]
+        return storage
+
+    # Load the data (which may in turn use `persistent_load` to load tensors)
+    data_file = io.BytesIO(zip_file.get_record('data.pkl'))
+    unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
+    unpickler.persistent_load = persistent_load
+    result = unpickler.load()
 
     return result

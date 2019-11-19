@@ -1071,6 +1071,43 @@ TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
   ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
 }
 
+TEST_F(ModulesTest, AlphaDropout) {
+  AlphaDropout alpha_dropout(0.5);
+  torch::Tensor x = torch::ones(100, torch::requires_grad());
+  torch::Tensor y = alpha_dropout(x);
+
+  y.backward(torch::ones_like(y));
+
+  ASSERT_EQ(y.ndimension(), 1);
+  ASSERT_EQ(y.size(0), 100);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 40); // Probably
+
+  alpha_dropout->eval();
+  y = alpha_dropout(x);
+
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
+TEST_F(ModulesTest, FeatureAlphaDropout) {
+  FeatureAlphaDropout feature_alpha_dropout(0.5);
+  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
+  torch::Tensor y = feature_alpha_dropout(x);
+
+  y.backward(torch::ones_like(y));
+
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 10);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 40); // Probably
+
+  feature_alpha_dropout->eval();
+  y = feature_alpha_dropout(x);
+
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
 TEST_F(ModulesTest, Dropout) {
   Dropout dropout(0.5);
   torch::Tensor x = torch::ones(100, torch::requires_grad());
@@ -3376,4 +3413,22 @@ TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
     "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
   ASSERT_EQ(c10::str(CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10))),
     "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
+}
+
+TEST_F(ModulesTest, PrettyPrintAlphaDropout) {
+  ASSERT_EQ(c10::str(AlphaDropout()),
+    "torch::nn::AlphaDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(AlphaDropout(AlphaDropoutOptions(0.2))),
+    "torch::nn::AlphaDropout(p=0.2, inplace=false)");
+  ASSERT_EQ(c10::str(AlphaDropout(AlphaDropoutOptions(0.2).inplace(true))),
+    "torch::nn::AlphaDropout(p=0.2, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
+  ASSERT_EQ(c10::str(FeatureAlphaDropout()),
+    "torch::nn::FeatureAlphaDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2))),
+    "torch::nn::FeatureAlphaDropout(p=0.2, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2).inplace(true))),
+    "torch::nn::FeatureAlphaDropout(p=0.2, inplace=true)");
 }
