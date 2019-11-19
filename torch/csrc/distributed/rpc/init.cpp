@@ -35,9 +35,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto module = py::handle(rpc_module).cast<py::module>();
 
   auto workerInfo =
-      shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
-          .def_readonly("name", &WorkerInfo::name_)
-          .def_readonly("id", &WorkerInfo::id_)
+      shared_ptr_class_<WorkerInfo>(
+          module,
+          "WorkerInfo",
+          R"(
+  Encapsulates information of a worker in the system.
+)")
+          .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker)")
+          .def_readonly(
+              "id", &WorkerInfo::id_, R"(Globally unique id of the worker)");
           .def("__eq__", &WorkerInfo::operator==, py::is_operator())
           // pybind11 suggests the syntax  .def(hash(py::self)), with the
           // unqualified "hash" function call. However the
@@ -65,19 +71,34 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
-              &PyRRef::isOwner)
+              &PyRRef::isOwner,
+              R"(
+Returns whether or not the current node is the owner of this ``RRef``.
+              )")
           .def(
               // not releasing GIL here to avoid context switch on getters
               "owner",
-              &PyRRef::owner)
+              &PyRRef::owner,
+              R"(
+Returns worker information of the node that owns this ``RRef``.
+              )")
           .def(
               "to_here",
               &PyRRef::toHere,
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Blocking call that copies the value of the RRef from the owner to the local node
+and returns it. If the current node is the owner, returns a reference to the
+local value.
+              )")
           .def(
               "local_value",
               &PyRRef::localValue,
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+If the current node is the owner, returns a reference to the local value.
+Otherwise, throws an exception.
+              )")
           .def(py::pickle(
               [](const PyRRef& self) {
                 // __getstate__
