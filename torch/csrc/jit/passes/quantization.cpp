@@ -958,9 +958,9 @@ void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     InsertPrepackUnpack(graph);
-    for (script::Module m : module.children()) {
-      InsertPrepackUnpack(m);
-    }
+  }
+  for (script::Module m : module.children()) {
+    InsertPrepackUnpack(m);
   }
 }
 
@@ -1077,10 +1077,10 @@ void FoldPrepackedWeightIntoModule(
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
         module, method.name(), linear_params_module, conv_params_module);
-    for (script::Module m : module.children()) {
-      FoldPrepackedWeightIntoModule(
-          m, linear_params_module, conv_params_module);
-    }
+  }
+  for (script::Module m : module.children()) {
+    FoldPrepackedWeightIntoModule(
+        m, linear_params_module, conv_params_module);
   }
 }
 } // namespace jit
