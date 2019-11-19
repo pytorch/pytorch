@@ -787,8 +787,8 @@ class ModuleUseDeduper {
         if (iter == self) {
           value_to_path_map_[instance] = path;
           auto m = findChildModule(module_, path);
-          if (module_set_.find(m.module_object()) == module_set_.end()) {
-            module_set_.insert(m.module_object());
+          if (module_set_.find(m._ivalue()) == module_set_.end()) {
+            module_set_.insert(m._ivalue());
           } else {
             use_to_rewrite_.push_back(instance);
           }

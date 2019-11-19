@@ -1499,18 +1499,18 @@ graph(%input, %weight):
                 x -= 0.5
                 return self.relu(x)
 
-        x = torch.randn((2, 2))
+        data = torch.randn((2, 2))
         m = torch.jit.script(M())
-        ref_res = m(x)
+        ref_res = m(data)
         assert len([x for x, _ in m._modules._c.items()
                     if x.startswith('relu')]) == 1, \
-                "Expected to have 1 relu modules after dedup module uses"
+            "Expected to have 1 relu modules after dedup module uses"
         torch._C._jit_pass_dedup_module_uses(m._c)
         m = torch.jit._recursive.wrap_cpp_module(m._c)
-        res = m(x)
+        res = m(data)
         assert len([x for x, _ in m._modules._c.items()
                     if x.startswith('relu')]) == 2, \
-                "Expected to have 2 relu modules after dedup module uses"
+            "Expected to have 2 relu modules after dedup module uses"
         self.assertEqual(res, ref_res)
 
     def test_pattern_based_rewrite(self):
