@@ -724,6 +724,7 @@ TEST_F(FunctionalTest, ELU) {
       }
     }
   }
+  ASSERT_TRUE(F::elu(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, SELU) {
@@ -750,6 +751,7 @@ TEST_F(FunctionalTest, SELU) {
     auto expected = F::selu(input, false);
     ASSERT_TRUE(output.allclose(expected));
   }
+  ASSERT_TRUE(F::selu(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, GLU) {
@@ -856,6 +858,7 @@ TEST_F(FunctionalTest, Hardtanh) {
       }
     }
   }
+  ASSERT_TRUE(F::hardtanh(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, LeakyReLU) {
@@ -876,6 +879,7 @@ TEST_F(FunctionalTest, LeakyReLU) {
       }
     }
   }
+  ASSERT_TRUE(F::leaky_relu(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, LogSigmoid) {
@@ -1204,6 +1208,7 @@ TEST_F(FunctionalTest, ReLU) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
   }
+  ASSERT_TRUE(F::relu(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, ReLUDefaultOptions) {
@@ -1242,6 +1247,7 @@ TEST_F(FunctionalTest, ReLU6) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
   }
+  ASSERT_TRUE(F::relu6(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, ReLU6DefaultOptions) {
@@ -1278,6 +1284,7 @@ TEST_F(FunctionalTest, RReLU) {
       }
     }
   }
+  ASSERT_TRUE(F::rrelu(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, RReLUDefaultOptions) {
@@ -1314,6 +1321,7 @@ TEST_F(FunctionalTest, CELU) {
       }
     }
   }
+  ASSERT_TRUE(F::celu(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, CELUDefaultOptions) {
@@ -1484,6 +1492,7 @@ TEST_F(FunctionalTest, Threshold) {
       }
     }
   }
+  ASSERT_TRUE(F::threshold(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, BatchNorm1d) {
@@ -1929,6 +1938,7 @@ TEST_F(FunctionalTest, Dropout) {
   auto output = F::dropout(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
   ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  ASSERT_TRUE(F::dropout(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, Dropout2d) {
@@ -1944,6 +1954,7 @@ TEST_F(FunctionalTest, Dropout2d) {
   auto output = F::dropout2d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
   ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  ASSERT_TRUE(F::dropout2d(torch::tensor(1)).defined());
 }
 
 TEST_F(FunctionalTest, Dropout3d) {
@@ -1959,4 +1970,5 @@ TEST_F(FunctionalTest, Dropout3d) {
   auto output = F::dropout3d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
   ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  ASSERT_TRUE(F::dropout3d(torch::tensor(1)).defined());
 }
