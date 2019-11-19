@@ -12,6 +12,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+struct RpcAgentOptions {
+  RpcAgentOptions() noexcept = default;
+  std::chrono::milliseconds rpcTimeout;
+};
+
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)
@@ -38,6 +43,10 @@ struct TORCH_API WorkerInfo {
         " chars, "
         "but got ",
         name_);
+  }
+
+  bool operator==(const WorkerInfo& rhs) {
+    return (id_ == rhs.id_) && (name_ == rhs.name_);
   }
 
   static constexpr size_t MAX_NAME_LEN = 128;
@@ -131,3 +140,13 @@ class TORCH_API RpcAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+namespace std {
+template <>
+struct hash<torch::distributed::rpc::WorkerInfo> {
+  std::size_t operator()(
+      const torch::distributed::rpc::WorkerInfo& worker_info) const noexcept {
+    return worker_info.id_;
+  }
+};
+} // namespace std
