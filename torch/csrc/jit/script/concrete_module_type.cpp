@@ -3,11 +3,10 @@
 namespace torch {
 namespace jit {
 namespace script {
-namespace {
-ClassTypePtr createTypeFromData(const ConcreteModuleTypeData& data) {
+ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
   py::object pyQualName = py::module::import("torch._jit_internal")
-                              .attr("_qualified_name")(data.pyClass_);
+                              .attr("_qualified_name")(pyClass_);
 
   auto className = c10::QualifiedName(py::cast<std::string>(pyQualName));
   if (className.prefix().empty()) {
@@ -20,7 +19,7 @@ ClassTypePtr createTypeFromData(const ConcreteModuleTypeData& data) {
   cu->register_type(cls);
 
   // populate type with info from the concrete type information
-  for (const auto& pr : data.attributes_) {
+  for (const auto& pr : attributes_) {
     const auto& name = pr.first;
     const auto& type = pr.second.type_;
     const auto& isParameter = pr.second.isParam_;
@@ -28,27 +27,26 @@ ClassTypePtr createTypeFromData(const ConcreteModuleTypeData& data) {
     cls->addAttribute(name, type, isParameter);
   }
 
-  for (const auto& moduleInfo : data.modules_) {
+  for (const auto& moduleInfo : modules_) {
     cls->addAttribute(
         moduleInfo.name_, moduleInfo.getJitType(), /*is_parameter=*/false);
   }
 
   return cls;
 }
-} // namespace
 
-ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeData data)
+ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
     : data_(std::move(data)) {
-  jitType_ = createTypeFromData(data_);
+  jitType_ = data_.createTypeFromThis();
 }
 
-TypePtr ConcreteModuleTypeData::ModuleInfo::getJitType() const {
+TypePtr ConcreteModuleTypeBuilder::ModuleInfo::getJitType() const {
   return meta_ == nullptr ? type_ : meta_->getJitType();
 }
 
 bool operator==(
-    const ConcreteModuleTypeData::ModuleInfo& lhs,
-    const ConcreteModuleTypeData::ModuleInfo& rhs) {
+    const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
+    const ConcreteModuleTypeBuilder::ModuleInfo& rhs) {
   if (lhs.meta_ != nullptr && rhs.meta_ != nullptr) {
     return lhs.meta_->equals(*rhs.meta_);
   } else if (lhs.type_ != nullptr && rhs.type_ != nullptr) {
@@ -58,14 +56,47 @@ bool operator==(
   }
 }
 
-bool RawConcreteModuleType::equals(
-    const RawConcreteModuleType& other) const {
-  return data_ == other.data_;
-}
+bool ConcreteModuleTypeBuilder::equals(
+    const ConcreteModuleTypeBuilder& other) const {
+  if (isPoisoned_ || other.isPoisoned_) {
+    return false;
+  }
 
-bool RawConcreteModuleType::equals(
-    const ConcreteModuleType& other) const {
-  return data_ == other.data_;
+  // clang-format off
+    // These are vaguely ordered so that cheap, discriminating checks happen first.
+    bool equal =
+      pyClass_.is(other.pyClass_) &&
+      iterableModuleKind_ == other.iterableModuleKind_ &&
+      constants_ == other.constants_ &&
+      attributes_ == other.attributes_ &&
+      overloads_ == other.overloads_ &&
+      functionAttributes_ == other.functionAttributes_;
+  // clang-format on
+  if (!equal) {
+    return false;
+  }
+
+  // We store modules in order of insertion (to make compilation
+  // deterministic). However, for the purposes of equality, insertion order
+  // should not matter, so sort them by name.
+  // We put this check last because it involves the most work.
+  auto thisSorted = modules_;
+  std::sort(
+      thisSorted.begin(),
+      thisSorted.end(),
+      [](const ModuleInfo& a, const ModuleInfo& b) {
+        return a.name_ < b.name_;
+      });
+
+  auto otherSorted = other.modules_;
+  std::sort(
+      otherSorted.begin(),
+      otherSorted.end(),
+      [](const ModuleInfo& a, const ModuleInfo& b) {
+        return a.name_ < b.name_;
+      });
+
+  return thisSorted == otherSorted;
 }
 
 ClassTypePtr ConcreteModuleType::getJitType() const {
@@ -108,7 +139,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   const auto it = std::find_if(
       data_.modules_.cbegin(),
       data_.modules_.cend(),
-      [&](const ConcreteModuleTypeData::ModuleInfo& info) {
+      [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
   if (it == data_.modules_.end()) {
@@ -117,70 +148,70 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   return it->meta_;
 }
 
-void RawConcreteModuleType::setIterableModuleKind(IterableModuleKind kind) {
-  data_.iterableModuleKind_ = kind;
+void ConcreteModuleTypeBuilder::setIterableModuleKind(IterableModuleKind kind) {
+  iterableModuleKind_ = kind;
 }
 
 IterableModuleKind ConcreteModuleType::getIterableModuleKind() const {
   return data_.iterableModuleKind_;
 }
 
-void RawConcreteModuleType::setPoisoned() {
-  data_.isPoisoned_ = true;
+void ConcreteModuleTypeBuilder::setPoisoned() {
+  isPoisoned_ = true;
 }
 
-void RawConcreteModuleType::addConstant(std::string name, py::object value) {
-  data_.constants_.emplace(std::move(name), std::move(value));
+void ConcreteModuleTypeBuilder::addConstant(std::string name, py::object value) {
+  constants_.emplace(std::move(name), std::move(value));
 }
 
-void RawConcreteModuleType::addAttribute(
+void ConcreteModuleTypeBuilder::addAttribute(
     std::string name,
     TypePtr type,
     bool isParameter) {
   TORCH_INTERNAL_ASSERT(type);
   // Function attributes should be handled separately
   TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
-  data_.attributes_.emplace(
+  attributes_.emplace(
       std::move(name),
-      ConcreteModuleTypeData::Attribute(unshapedType(type), isParameter));
+      ConcreteModuleTypeBuilder::Attribute(unshapedType(type), isParameter));
 }
 
-void RawConcreteModuleType::addFunctionAttribute(
+void ConcreteModuleTypeBuilder::addFunctionAttribute(
     std::string name,
     const TypePtr& type,
     py::object pyFunction) {
   TORCH_INTERNAL_ASSERT(type);
-  data_.functionAttributes_.emplace(
+  functionAttributes_.emplace(
       std::move(name),
-      ConcreteModuleTypeData::FunctionAttribute{type->expect<FunctionType>(),
+      ConcreteModuleTypeBuilder::FunctionAttribute{type->expect<FunctionType>(),
                                                 std::move(pyFunction)});
 }
 
-void RawConcreteModuleType::addModule(
+void ConcreteModuleTypeBuilder::addModule(
     std::string name,
     std::shared_ptr<ConcreteModuleType> meta) {
-  data_.modules_.emplace_back(
-      ConcreteModuleTypeData::ModuleInfo{std::move(name), std::move(meta)});
+  modules_.emplace_back(
+      ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
 }
 
-void RawConcreteModuleType::addModuleInterface(
+void ConcreteModuleTypeBuilder::addModuleInterface(
     std::string name,
     const TypePtr& type) {
   TORCH_INTERNAL_ASSERT(type->cast<InterfaceType>() && type->is_module());
-  data_.modules_.emplace_back(
-      ConcreteModuleTypeData::ModuleInfo{std::move(name), type});
+  modules_.emplace_back(
+      ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), type});
 }
 
-void RawConcreteModuleType::addOverload(
+void ConcreteModuleTypeBuilder::addOverload(
     std::string methodName,
     std::vector<std::string> overloadedMethodNames) {
-  data_.overloads_.emplace(std::move(methodName), std::move(overloadedMethodNames));
+  overloads_.emplace(std::move(methodName), std::move(overloadedMethodNames));
 }
 
-void RawConcreteModuleType::addFailedAttribute(
+void ConcreteModuleTypeBuilder::addFailedAttribute(
     std::string name,
     std::string failureReason) {
-  data_.failedAttributes_.emplace(std::move(name), std::move(failureReason));
+  failedAttributes_.emplace(std::move(name), std::move(failureReason));
 }
 
 c10::optional<py::object> ConcreteModuleType::findConstant(
