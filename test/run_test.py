@@ -64,14 +64,13 @@ TESTS = [
     'function_schema',
 ]
 
-# skip < 3.3 because mock is added in 3.3 and is used in rpc_fork and rpc_spawn
+# skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
 # skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
-        'rpc_fork',
         'rpc_spawn',
-        'dist_autograd_fork',
         'dist_autograd_spawn',
+        'dist_optimizer_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -82,20 +81,18 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
-    'rpc_fork',
     'rpc_spawn',
-    'dist_autograd_fork',
     'dist_autograd_spawn',
+    'dist_optimizer_spawn',
 ]
 
 ROCM_BLACKLIST = [
     'cpp_extensions',
     'distributed',
     'multiprocessing',
-    'rpc_fork',
     'rpc_spawn',
-    'dist_autograd_fork',
     'dist_autograd_spawn',
+    'dist_optimizer_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
