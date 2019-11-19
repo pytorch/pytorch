@@ -12,11 +12,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct RpcAgentOptions {
-  RpcAgentOptions() noexcept = default;
-  std::chrono::milliseconds rpcTimeout;
-};
-
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)
