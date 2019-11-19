@@ -809,6 +809,42 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.run_test(model, x)
 
+    def test_batchnorm1d(self):
+        x = torch.randn(10, 10)
+        model = torch.nn.BatchNorm1d(10, affine=True)
+        self.run_test(model, x)
+
+        x = torch.randn(10, 10, 128)
+        self.run_test(model, x)
+
+    def test_batchnorm1d_noaffine(self):
+        x = torch.randn(10, 10)
+        model = torch.nn.BatchNorm1d(10, affine=False)
+        self.run_test(model, x)
+
+        x = torch.randn(10, 10, 128)
+        self.run_test(model, x)
+
+    def test_batchnorm2d(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.BatchNorm2d(3, affine=True)
+        self.run_test(model, x)
+
+    def test_batchnorm2d_noaffine(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.BatchNorm2d(3, affine=False)
+        self.run_test(model, x)
+
+    def test_batchnorm3d(self):
+        x = torch.randn(10, 3, 128, 128, 128)
+        model = torch.nn.BatchNorm3d(3, affine=True)
+        self.run_test(model, x)
+
+    def test_batchnorm3d_noaffine(self):
+        x = torch.randn(10, 3, 128, 128, 128)
+        model = torch.nn.BatchNorm3d(3, affine=False)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
@@ -1618,6 +1654,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
+
+    @skipIfNoLapack
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_logdet(self):
+        class LogDet(torch.nn.Module):
+            def forward(self, x):
+                return torch.logdet(x)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(LogDet(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

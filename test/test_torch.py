@@ -2102,28 +2102,32 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2)
 
     def test_randint(self):
-        torch.manual_seed(123456)
-        res1 = torch.randint(0, 6, (SIZE, SIZE))
-        res2 = torch.Tensor()
-        torch.manual_seed(123456)
-        torch.randint(0, 6, (SIZE, SIZE), out=res2)
-        torch.manual_seed(123456)
-        res3 = torch.randint(6, (SIZE, SIZE))
-        res4 = torch.Tensor()
-        torch.manual_seed(123456)
-        torch.randint(6, (SIZE, SIZE), out=res4)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
-        self.assertEqual(res1, res4)
-        self.assertEqual(res2, res3)
-        self.assertEqual(res2, res4)
-        self.assertEqual(res3, res4)
-        res1 = res1.view(-1)
-        high = (res1 < 6).type(torch.LongTensor)
-        low = (res1 >= 0).type(torch.LongTensor)
-        tensorSize = res1.size()[0]
-        assert(tensorSize == high.sum())
-        assert(tensorSize == low.sum())
+        def seed(generator):
+            if generator is None:
+                torch.manual_seed(123456)
+            else:
+                generator.manual_seed(123456)
+            return generator
+
+        for generator in (None, torch.Generator()):
+            generator = seed(generator)
+            res1 = torch.randint(0, 6, (SIZE, SIZE), generator=generator)
+            res2 = torch.empty(())
+            generator = seed(generator)
+            torch.randint(0, 6, (SIZE, SIZE), generator=generator, out=res2)
+            generator = seed(generator)
+            res3 = torch.randint(6, (SIZE, SIZE), generator=generator)
+            res4 = torch.empty(())
+            generator = seed(generator)
+            torch.randint(6, (SIZE, SIZE), out=res4, generator=generator)
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res3)
+            self.assertEqual(res1, res4)
+            self.assertEqual(res2, res3)
+            self.assertEqual(res2, res4)
+            self.assertEqual(res3, res4)
+            self.assertTrue((res1 < 6).all().item())
+            self.assertTrue((res1 >= 0).all().item())
 
     def test_randn(self):
         torch.manual_seed(123456)
@@ -2428,6 +2432,14 @@ class _TestTorchMixin(object):
         x = torch.Tensor([1, nan, 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
+    def test_dtype_is_signed(self):
+        for dtype in torch.testing.get_all_dtypes():
+            self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
+
+        self.assertFalse(torch.quint8.is_signed)
+        self.assertTrue(torch.qint8.is_signed)
+        self.assertTrue(torch.qint32.is_signed)
+
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
@@ -2620,6 +2632,24 @@ class _TestTorchMixin(object):
         for i in range(idx.size(0)):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
+
+    # add coverage for issue with atomic add that appeared only for 
+    # specific dtypes on cuda:
+    # https://github.com/pytorch/pytorch/issues/29153
+    def test_index_add_all_dtypes(self):
+        for device in torch.testing.get_all_device_types():
+            for dtype in torch.testing.get_all_math_dtypes(device):
+                size = [5, 5]
+                if dtype.is_floating_point:
+                    tensor = torch.rand(size, dtype=dtype, device=device)
+                elif dtype.is_signed:
+                    tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
+                else:
+                    tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
+                # index_add calls atomicAdd on cuda.
+                zeros = torch.zeros(size, dtype=dtype, device=device)
+                added = zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
+                self.assertEqual(added, tensor)
 
     def test_t(self):
         # Test 0D tensors
@@ -3910,6 +3940,37 @@ class _TestTorchMixin(object):
 
         rootview = c[8]
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_zipfile(self):
+        data = {
+            'a': b'12039810948234589',
+            'b': b'1239081209484958',
+            'c/d': b'94589480984058'
+        }
+
+        def test(name_or_buffer):
+            with torch.serialization._open_zipfile_writer(name_or_buffer) as zip_file:
+                for key in data:
+                    zip_file.write_record(key, data[key], len(data[key]))
+
+            if hasattr(name_or_buffer, 'seek'):
+                name_or_buffer.seek(0)
+
+            with torch.serialization._open_zipfile_reader(name_or_buffer) as zip_file:
+                for key in data:
+                    actual = zip_file.get_record(key)
+                    expected = data[key]
+                    self.assertEqual(expected, actual)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f.name)
+
+        test(io.BytesIO())
+
 
     def test_serialization(self):
         # Test serialization with a real file
@@ -5985,6 +6046,56 @@ class TestTorchDeviceType(TestCase):
             if len(dims_small) < smaller_ndims:
                 dims_small = [ds] + dims_small
         return (dims_small, dims_large, dims_full)
+
+    # collected tests of ops that used scalar_check in Declarations.cwrap for
+    # correctness
+    def test_scalar_check(self, device):
+        zero_d = torch.randn((), device=device)
+        one_d = torch.randn((1,), device=device)
+
+        # _multinomial_alias_setup
+        self.assertRaises(RuntimeError, lambda: torch._multinomial_alias_setup(zero_d))
+
+        # remainder
+        self.assertEqual((), torch.remainder(zero_d, zero_d).shape)
+        self.assertEqual((), torch.remainder(zero_d, 2).shape)
+        self.assertEqual((1,), torch.remainder(zero_d, one_d).shape)
+        self.assertEqual((1,), torch.remainder(one_d, zero_d).shape)
+
+        # fmod
+        self.assertEqual((), torch.fmod(zero_d, zero_d).shape)
+        self.assertEqual((), torch.fmod(zero_d, 2).shape)
+        self.assertEqual((1,), torch.fmod(zero_d, one_d).shape)
+        self.assertEqual((1,), torch.fmod(one_d, zero_d).shape)
+
+        # cumsum / cumprod
+        self.assertEqual((), torch.cumsum(zero_d, 0).shape)
+        self.assertEqual((), torch.cumprod(zero_d, 0).shape)
+
+        # renorm
+        self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
+
+        # sort
+        self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
+        self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
+
+        # lstsq (gels)
+        self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
+
+        # eig
+        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
+        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
+
+        # max, min
+        self.assertEqual((), torch.max(zero_d, zero_d).shape)
+        self.assertEqual((1,), torch.max(one_d, zero_d).shape)
+        self.assertEqual((1,), torch.max(zero_d, one_d).shape)
+        self.assertEqual((), torch.min(zero_d, zero_d).shape)
+        self.assertEqual((1,), torch.min(one_d, zero_d).shape)
+        self.assertEqual((1,), torch.min(zero_d, one_d).shape)
+
+        # diag
+        self.assertRaises(RuntimeError, lambda: torch.diag(zero_d))
 
     @onlyCPU
     @dtypes(torch.float)
@@ -13549,7 +13660,6 @@ class TestTorchDeviceType(TestCase):
         concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8, device=device))
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
-
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
