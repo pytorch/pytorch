@@ -1073,13 +1073,14 @@ TEST_F(ModulesTest, AlphaDropout) {
 
 TEST_F(ModulesTest, FeatureAlphaDropout) {
   FeatureAlphaDropout feature_alpha_dropout(0.5);
-  torch::Tensor x = torch::ones(100, torch::requires_grad());
+  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
   torch::Tensor y = feature_alpha_dropout(x);
 
   y.backward(torch::ones_like(y));
 
   ASSERT_EQ(y.ndimension(), 1);
-  ASSERT_EQ(y.size(0), 100);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 10);
   ASSERT_LT(y.sum().item<float>(), 130); // Probably
   ASSERT_GT(y.sum().item<float>(), 40); // Probably
 
