@@ -126,7 +126,7 @@ Reducer::Reducer(
         // The gradient accumulator function is lazily initialized once.
         // Therefore we can use its presence in the autograd graph as
         // evidence that the parameter has participated in an iteration.
-        auto grad_accumulator = variable.grad_accumulator();
+        auto grad_accumulator = torch::autograd::impl::grad_accumulator(variable);
 
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(

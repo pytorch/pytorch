@@ -249,17 +249,18 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
+        cuda_sync = True if 'cuda' in test_case.test_config.test_name else False 
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(functools.partial(func, iters, print_per_iter), number=1)
+        forward_time = timeit.timeit(functools.partial(func, iters, print_per_iter, cuda_sync), number=1)
         return forward_time
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """ This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1, print_per_iter=False)
+        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
         if test_case.framework == "PyTorch":
             test_case._output_mean()
         backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters,
