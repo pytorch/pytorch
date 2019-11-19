@@ -83,7 +83,9 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
     'dist_autograd_spawn',
     'dist_optimizer_spawn',
 ]
@@ -92,7 +94,9 @@ ROCM_BLACKLIST = [
     'cpp_extensions',
     'distributed',
     'multiprocessing',
+    'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
     'dist_autograd_spawn',
     'dist_optimizer_spawn',
 ]
