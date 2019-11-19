@@ -1492,7 +1492,7 @@ TEST_F(ModulesTest, BatchNorm3d) {
 }
 
 TEST_F(ModulesTest, InstanceNorm1dStateful) {
-  InstanceNorm1d instance_norm(5);
+  InstanceNorm1d instance_norm(InstanceNorm1dOptions(5).track_running_stats(true).affine(true));
 
   ASSERT_TRUE(instance_norm->options.track_running_stats());
 
@@ -1544,8 +1544,7 @@ TEST_F(ModulesTest, InstanceNorm1d) {
                                   {-1.0000, 1.0000},
                                   {-1.0000, 1.0000},
                                   {-1.0000, 1.0000}}});
-  std::cout << output << std::endl;
-  ASSERT_TRUE(output.allclose(expected, 1e-3));
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
 
@@ -1553,7 +1552,7 @@ TEST_F(ModulesTest, InstanceNorm1d) {
 }
 
 TEST_F(ModulesTest, InstanceNorm2dStateful) {
-  InstanceNorm2d instance_norm(5);
+  InstanceNorm2d instance_norm(InstanceNorm2dOptions(5).track_running_stats(true).affine(true));
 
   ASSERT_TRUE(instance_norm->options.track_running_stats());
 
@@ -1615,8 +1614,7 @@ TEST_F(ModulesTest, InstanceNorm2d) {
                                    { 0.4472,  1.3416}},
                                   {{-1.3416, -0.4472},
                                    { 0.4472,  1.3416}}}});
-  std::cout << output << std::endl;
-  ASSERT_TRUE(output.allclose(expected, 1e-3));
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
 
@@ -1624,7 +1622,7 @@ TEST_F(ModulesTest, InstanceNorm2d) {
 }
 
 TEST_F(ModulesTest, InstanceNorm3dStateful) {
-  InstanceNorm3d instance_norm(5);
+  InstanceNorm3d instance_norm(InstanceNorm3dOptions(5).track_running_stats(true).affine(true));
 
   ASSERT_TRUE(instance_norm->options.track_running_stats());
 
@@ -1706,8 +1704,7 @@ TEST_F(ModulesTest, InstanceNorm3d) {
                                     {-0.6547, -0.2182}},
                                    {{ 0.2182,  0.6547},
                                     { 1.0911,  1.5275}}}}});
-  std::cout << output << std::endl;
-  ASSERT_TRUE(output.allclose(expected, 1e-3));
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
 
