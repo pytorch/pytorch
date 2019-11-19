@@ -112,8 +112,9 @@ class TORCH_API RpcAgent {
   // start accepting requests
   virtual void start() {}
 
-  // stop accepting requests
-  virtual void localShutdown() {}
+  // Stop accepting requests and shutdown the RPC framework as soon as possible
+  // by terminating all RPC threads.
+  virtual void shutdown() {}
 
   // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);

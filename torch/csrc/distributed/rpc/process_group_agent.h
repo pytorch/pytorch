@@ -41,7 +41,7 @@ class ProcessGroupAgent : public RpcAgent {
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout);
 
-  virtual ~ProcessGroupAgent() override;
+  ~ProcessGroupAgent() override;
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
@@ -53,7 +53,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   void start() override;
 
-  void localShutdown() override;
+  void shutdown() override;
 
  protected:
   // This method wraps the destination information and the message into a
@@ -123,7 +123,7 @@ class ProcessGroupAgent : public RpcAgent {
   std::atomic<int64_t> nextId_;
   // tracks if the listenerThread_ that processes
   // incoming messages should be running.
-  std::atomic<bool> start_{false};
+  std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;

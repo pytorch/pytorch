@@ -1065,9 +1065,11 @@ class RpcTest(object):
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_agent_destructor(self):
+        # This test ensures that the rpc agent destructor safely shuts down the
+        # local RPC framework even if rpc.shutdown is not called
         rpc.init_rpc(
             self_name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
             self_rank=self.rank,
             worker_name_to_id=self.worker_name_to_id,
             init_method=self.init_method,
@@ -1075,15 +1077,29 @@ class RpcTest(object):
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_local_shutdown_rpc(self):
+    def test_rpc_local_shutdown(self):
         rpc.init_rpc(
             self_name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
             self_rank=self.rank,
             worker_name_to_id=self.worker_name_to_id,
             init_method=self.init_method,
         )
-        rpc.local_shutdown_rpc()
+        rpc.shutdown()
+
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_rpc_join_and_shutdown(self):
+        # This tests ensures that both rpc.join_rpc() and rpc.shutdown() can be called without errors being raised due to attempting to shut down multiple times.
+        rpc.init_rpc(
+            self_name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
+            init_method=self.init_method,
+        )
+        rpc.join_rpc()
+        rpc.shutdown()
 
     @dist_init
     def test_get_default_rpc_timeout(self):

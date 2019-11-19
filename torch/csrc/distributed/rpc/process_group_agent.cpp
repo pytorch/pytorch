@@ -3,6 +3,7 @@
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
 
 #include <Python.h>
 
@@ -163,7 +164,11 @@ ProcessGroupAgent::ProcessGroupAgent(
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
-  localShutdown();
+  try {
+    shutdown();
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Error while shutting down local RPC agent: " << e.what();
+  }
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
@@ -187,6 +192,7 @@ void ProcessGroupAgent::join() {
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
   sync();
+  rpcRunning_.store(false);
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
@@ -263,31 +269,32 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
-  start_.store(true);
+  rpcRunning_.store(true);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
-void ProcessGroupAgent::localShutdown() {
-  if (!start_.load()) {
+void ProcessGroupAgent::shutdown() {
+  if (!rpcRunning_.load()) {
     return;
   }
   LOG(INFO) << "Stopping ProcessGroupAgent.";
-  // CV to make sure we don't abort it in an invalid state.
+  // CV to make sure we don't abort recvWork in an invalid state.
   {
     std::unique_lock<std::mutex> lock(recvWorkMutex_);
     recvWorkCV_.wait(lock, [this]() { return recvWork_; });
     recvWork_->abort();
-    start_.store(false);
+    rpcRunning_.store(false);
   }
   threadPool_.waitWorkComplete();
   listenerThread_.join();
   PythonRpcHandler::getInstance().cleanup();
+  RRefContext::getInstance().destroyInstance();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
-  TORCH_CHECK(start_.load(), "ProcessGroupAgent hasn't started.")
+  TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
       "Destination rank is out of bound, got ",
@@ -446,7 +453,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  while (start_.load()) {
+  while (rpcRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
     {
@@ -456,7 +463,7 @@ void ProcessGroupAgent::listenLoop() {
 
     recvWorkCV_.notify_one();
 
-    if (!start_.load()) {
+    if (!rpcRunning_.load()) {
       return;
     }
     bool aborted = !recvWork_->wait();
