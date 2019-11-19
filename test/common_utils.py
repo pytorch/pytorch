@@ -39,17 +39,65 @@ from torch._utils_internal import get_writable_path
 from torch._six import string_classes, inf
 import torch.backends.cudnn
 import torch.backends.mkl
-
+from enum import Enum
 
 torch.backends.disable_global_flags()
 
+IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+
+class ProfilingMode(Enum):
+    LEGACY = 1
+    SIMPLE = 2
+    PROFILING = 3
+
+@contextmanager
+def enable_profiling_mode():
+    if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+        old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
+        old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    try:
+        yield
+    finally:
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+            torch._C._jit_set_profiling_executor(old_prof_exec_state)
+            torch._C._jit_set_profiling_mode(old_prof_mode_state)
+
+func_call = torch._C.ScriptFunction.__call__
+meth_call = torch._C.ScriptMethod.__call__
+
+def prof_callable(callable, *args, **kwargs):
+    if 'profile_and_replay' in kwargs:
+        del kwargs['profile_and_replay']
+        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+            with enable_profiling_mode():
+                callable(*args, **kwargs)
+                return callable(*args, **kwargs)
+
+    return callable(*args, **kwargs)
+
+def prof_func_call(*args, **kwargs):
+    return prof_callable(func_call, *args, **kwargs)
+
+def prof_meth_call(*args, **kwargs):
+    return prof_callable(meth_call, *args, **kwargs)
+
+torch._C.ScriptFunction.__call__ = prof_func_call
+torch._C.ScriptMethod.__call__ = prof_meth_call
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
+parser.add_argument('--ge_config', type=str)
+
+GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
+if args.ge_config == 'legacy':
+    GRAPH_EXECUTOR = ProfilingMode.LEGACY
+elif args.ge_config == 'simple':
+    GRAPH_EXECUTOR = ProfilingMode.SIMPLE
+
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
@@ -107,6 +155,13 @@ def repeat_test_for_types(dtypes):
         return call_helper
     return repeat_helper
 
+# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
+IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
+TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
+
+PY3 = sys.version_info > (3, 0)
+PY34 = sys.version_info >= (3, 4)
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
@@ -131,17 +186,31 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
-        unittest.main(argv=argv)
+        if IN_CIRCLECI:
+            # import here so that non-CI doesn't need xmlrunner installed
+            import xmlrunner
+            # allow users to override the test file location. We need this
+            # because the distributed tests run the same test file multiple
+            # times with different configurations.
+            if TEST_REPORT_SOURCE_OVERRIDE is not None:
+                test_source = TEST_REPORT_SOURCE_OVERRIDE
+            else:
+                test_source = 'python-unittest'
 
-PY3 = sys.version_info > (3, 0)
-PY34 = sys.version_info >= (3, 4)
+            test_report_path = os.path.join('test-reports', test_source)
+            if PY3:
+                os.makedirs(test_report_path, exist_ok=True)
+            else:
+                if not os.path.exists(test_report_path):
+                    os.makedirs(test_report_path)
+
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
+        else:
+            unittest.main(argv=argv)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
-
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
 
 if IS_WINDOWS:
     @contextmanager
@@ -1229,7 +1298,7 @@ def do_test_empty_full(self, dtypes, layout, device):
                             int64_dtype, layout, device, fv + 5, False)
 
 
-IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',

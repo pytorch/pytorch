@@ -153,9 +153,12 @@ void testTHNNConv() {
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
-  at::Tensor grad_output = torch::randn_like(output);
-  at::Tensor grad_finput = torch::zeros_like(finput);
-  at::Tensor grad_fgradinput = torch::zeros_like(fgradinput);
+  at::Tensor grad_output =
+      torch::randn_like(output, at::MemoryFormat::Preserve);
+  at::Tensor grad_finput =
+      torch::zeros_like(finput, at::MemoryFormat::Preserve);
+  at::Tensor grad_fgradinput =
+      torch::zeros_like(fgradinput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
@@ -261,9 +264,12 @@ void testATenNativeBatchNorm() {
       eps);
 
   // make grad_outputs
-  at::Tensor grad_output = torch::randn_like(output);
-  at::Tensor grad_savemean = torch::zeros_like(savemean);
-  at::Tensor grad_saveinvstd = torch::zeros_like(saveinvstd);
+  at::Tensor grad_output =
+      torch::randn_like(output, at::MemoryFormat::Preserve);
+  at::Tensor grad_savemean =
+      torch::zeros_like(savemean, at::MemoryFormat::Preserve);
+  at::Tensor grad_saveinvstd =
+      torch::zeros_like(saveinvstd, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
@@ -462,7 +468,7 @@ void testControlFlow() {
   };
 
   auto L = [](int64_t l) {
-    return IValue(autograd::make_variable(scalar_to_tensor(at::Scalar(l))));
+    return IValue(scalar_to_tensor(at::Scalar(l)));
   };
   auto V = [](IValue t) { return std::move(t).toTensor().item<int64_t>(); };
   auto run_binary = [&](const std::string& name, int64_t a, int64_t b) {
@@ -741,14 +747,14 @@ void testRecordFunction() {
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   auto t2 = invokeTestRecordFunction(t);
-  t2.backward(torch::ones_like(t2));
+  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   auto eager_inputs = traced_inputs;
   traced_inputs.clear();
 
   t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   t2 = invokeTestRecordFunctionJIT(t);
-  t2.backward(torch::ones_like(t2));
+  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   auto jit_inputs = traced_inputs;
   traced_inputs.clear();
 
@@ -864,7 +870,7 @@ void testThreadLocalDebugInfo() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = t.pow(2);
-    t2.backward(torch::ones_like(t2));
+    t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   }
   autograd::profiler::popCallback();
 
@@ -1001,7 +1007,10 @@ graph(%a):
     return stack;
   };
   run(graph, stack);
-  AT_ASSERT(testPassValue);
+  // we will not run fusion in simple mode
+  if (!getExecutorMode()) {
+    AT_ASSERT(testPassValue);
+  }
 }
 
 static void checkShape(
@@ -1030,8 +1039,7 @@ void testInsertAndEliminateRedundantGuards() {
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-  auto stack = createStack({v(x), v(y)});
+  auto stack = createStack({x, y});
   // introduce some profiling information
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
@@ -1081,8 +1089,7 @@ void testInsertBailOuts() {
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-  auto stack = createStack({v(x), v(y)});
+  auto stack = createStack({x, y});
   // introduce some profiling information
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
@@ -1112,8 +1119,6 @@ void testProfiler() {
 
   int hidden_size = 2 * input_size;
 
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-
   auto input = at::randn({batch_size, input_size}, at::kCPU);
   auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
   auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
@@ -1121,7 +1126,7 @@ void testProfiler() {
   auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
 
   auto g = build_lstm();
-  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
 
   auto& opt_graph = *g.get();
   ArgumentSpecCreator arg_spec_creator(opt_graph);

@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
+import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_helper import _black_list_in_opset
@@ -85,17 +86,29 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
     if 'cubic' in mode:
         mode = 'cubic'
     align_corners = sym_help._maybe_get_const(align_corners, 'b')
-    align_corners = False if sym_help._is_none(align_corners) else align_corners
+    align_corners = False if not isinstance(align_corners, bool) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
     # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
-        input_size = input.type().sizes()
-        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
-        is_scalar = ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        input_size = g.op("Shape", input)
+        input_size = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+        # in some cases size is not a packed list but size is a scalar
+        # We need to also verify that (sym_help._maybe_get_const(size, 't').dim() == 0)
+        # but this information is not always available. Try to get the dim,
+        # and if not assume that it is not a scalar.
+        try:
+            is_scalar = not sym_help._is_packed_list(size) and ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        except AttributeError:
+            is_scalar = not sym_help._is_packed_list(size)
+            if not is_scalar:
+                warnings.warn("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
+
         if is_scalar:
+            if not input.type().dim():
+                return sym_help._unimplemented("interpolate (with a scalar output_size)", "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)
@@ -111,6 +124,8 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
                     mode_s=mode,  # nearest, linear, or cubic
                     nearest_mode_s="floor")
     else:  # if not sym_help._is_none(scales)
+        if not input.type().dim():
+            return sym_help._unimplemented("interpolate (with scales)", "missing input shape")
         scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
         return g.op("Resize",
                     input,
@@ -278,6 +293,11 @@ def det(g, self):
     return g.op("Det", self)
 
 
+def logdet(g, input):
+    from torch.onnx.symbolic_opset9 import log
+    return log(g, det(g, input))
+
+
 def arange(g, *args):
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')
@@ -356,3 +376,41 @@ def index_copy(g, self, dim, index, source):
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
+
+
+def __rshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    if self.type().scalarType() == 'Byte':
+        return g.op('BitShift', self, other, direction_s="RIGHT")
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    rshift = g.op('Div', self, two_pow)
+    return rshift
+
+
+def __lshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    if self.type().scalarType() == 'Byte':
+        return g.op('BitShift', self, other, direction_s="LEFT")
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    lshift = g.op('Mul', self, two_pow)
+    return lshift

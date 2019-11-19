@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/autograd_metadata.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 

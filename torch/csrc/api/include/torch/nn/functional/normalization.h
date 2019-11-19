@@ -28,9 +28,8 @@ inline Tensor normalize(
 
 inline Tensor normalize(
     const Tensor& input,
-    const NormalizeOptions& options = {},
-    c10::optional<Tensor> out = c10::nullopt) {
-  return detail::normalize(input, options.p(), options.dim(), options.eps(), out);
+    NormalizeFuncOptions options = {}) {
+  return detail::normalize(input, options.p(), options.dim(), options.eps(), options.out());
 }
 
 // ============================================================================
@@ -46,10 +45,8 @@ inline Tensor layer_norm(const Tensor& input,
 } // namespace detail
 
 inline Tensor layer_norm(const Tensor& input,
-    const LayerNormOptions& options,
-    const Tensor& weight = Tensor(),
-    const Tensor& bias = Tensor()) {
-  return detail::layer_norm(input, options.normalized_shape(), weight, bias, options.eps());
+    const LayerNormFuncOptions& options) {
+  return detail::layer_norm(input, options.normalized_shape(), options.weight(), options.bias(), options.eps());
 }
 
 // ============================================================================
@@ -95,8 +92,33 @@ inline Tensor local_response_norm(
 
 inline Tensor local_response_norm(
     const Tensor& input,
-    const LocalResponseNormOptions& options) {
+    const LocalResponseNormFuncOptions& options) {
   return detail::local_response_norm(input, options.size(), options.alpha(), options.beta(), options.k());
+}
+
+// ============================================================================
+
+namespace detail {
+inline Tensor group_norm(
+    const Tensor& input,
+    int64_t num_groups,
+    const Tensor& weight,
+    const Tensor& bias,
+    double eps) {
+  return torch::group_norm(input, num_groups, weight, bias, eps,
+                           at::globalContext().userEnabledCuDNN());
+}
+} // namespace detail
+
+inline Tensor group_norm(
+    const Tensor& input,
+    const GroupNormFuncOptions& options) {
+  return detail::group_norm(
+    input,
+    options.num_groups(),
+    options.weight(),
+    options.bias(),
+    options.eps());
 }
 
 } // namespace functional
