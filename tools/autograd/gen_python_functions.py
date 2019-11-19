@@ -104,6 +104,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 # a pair of overloads that whose signatures only differ in output params
 PY_VARIABLE_CASE = CodeTemplate("""\
 ${cond} (_r.idx == ${i}) {
+  // ${signature}
   ${call_dispatch}
 """)
 
@@ -355,6 +356,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'ScalarType': 'scalartypeWithDefault',
     }
 
+    def is_output(arg):
+        return arg.get('output', False)
+
     def emit_single_dispatch(declaration, out_idx, base_env):
         """
         Emit dispatch code for a single declared overload.
@@ -379,9 +383,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         inits = []
         actuals = []
         arg_idx = 0
-
-        def is_output(arg):
-            return arg.get('output', False)
 
         inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]
         outputs = [arg for arg in declaration['arguments'] if is_output(arg)]
@@ -589,24 +590,27 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         - base_env:     dictionary containing stuff that applies to all overloads
         """
+        base_decl = dictionary['base']
         if 'out' in dictionary:
-            out_idx = len([arg for arg in dictionary['out']['arguments']
-                           if not arg.get('output', False)])
-            env = {}
-            env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
-            env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
+            out_decl = dictionary['out']
+            out_idx = len([arg for arg in out_decl['arguments'] if not is_output(arg)])
 
-            has_dtype_bind = 'dtype' in (d['name'] for d in dictionary['out'].get('python_binding_arguments', []))
+            env = {}
+            env['call_dispatch_out'] = emit_single_dispatch(out_decl, out_idx, base_env)
+            env['call_dispatch'] = emit_single_dispatch(base_decl, out_idx, base_env)
+
+            has_dtype_bind = 'dtype' in (d['name'] for d in out_decl.get('python_binding_arguments', []))
             if has_dtype_bind:
                 body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
                                                              layout_idx=out_idx + 2, device_idx=out_idx + 3).split('\n')
             else:
                 body = PY_VARIABLE_OUT.substitute(env, out_idx=out_idx).split('\n')
         else:
-            body = emit_single_dispatch(dictionary['base'], None, base_env)
+            body = emit_single_dispatch(base_decl, None, base_env)
 
         cond = 'if' if i == 0 else '} else if'
-        return PY_VARIABLE_CASE.substitute(i=i, cond=cond, call_dispatch=body)
+        signature = base_env['signature']
+        return PY_VARIABLE_CASE.substitute(i=i, cond=cond, call_dispatch=body, signature=signature)
 
     def get_python_binding_arguments(declaration):
         python_binding_arguments = []
@@ -778,6 +782,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     signature = signature.replace('Tensor self', 'Tensor input')
                 if dictionary['base'].get('deprecated', False):
                     signature += '|deprecated'
+                env['signature'] = signature
                 env['signatures'].append('"{}",'.format(signature))
                 env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
