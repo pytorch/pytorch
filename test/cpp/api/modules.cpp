@@ -1329,7 +1329,6 @@ TEST_F(ModulesTest, BatchNorm1d) {
   s.backward();
 
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5})));
 }
 
 TEST_F(ModulesTest, BatchNorm2dStateful) {
@@ -1400,7 +1399,6 @@ TEST_F(ModulesTest, BatchNorm2d) {
   s.backward();
   
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 2, 2})));
 }
 
 TEST_F(ModulesTest, BatchNorm3dStateful) {
@@ -1491,7 +1489,6 @@ TEST_F(ModulesTest, BatchNorm3d) {
   s.backward();
   
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 2, 2, 2})));
 }
 
 TEST_F(ModulesTest, InstanceNorm1dStateful) {
