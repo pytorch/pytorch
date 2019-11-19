@@ -85,7 +85,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
             # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
             rpc.init_rpc(
                 self_name="worker%d" % self.rank,
-                backend=self.rpc_backend,
+                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,

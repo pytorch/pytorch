@@ -32,7 +32,24 @@ def wait_all_workers():
     r"""
     Block until all local and remote RPC processes reach this method, process
     (send and receive) all pending messages, and then destroy local RPC agent.
-    Every RPC process must call this method before exit.
+    Every RPC process must call this method before exit. This should be used to
+    terminate the RPC framework, and there is no guarantee that the RPC
+    framework will work after this method returns.
+
+    Example::
+
+        On worker 0:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> # do some work...
+        >>> # ready to shutdown
+        >>> rpc.wait_all_workers()
+
+        On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", self_rank=1, world_size=2)
+        >>> # wait for worker 0 to finish work, and then shutdown.
+        >>> rpc.wait_all_workers()
     """
     global _agent
 
@@ -45,20 +62,6 @@ def wait_all_workers():
         # cleanup() function has python dependency, it assumes python
         # interpreter exists
         _cleanup_python_rpc_handler()
-
-
-@_require_initialized
-def sync_rpc():
-    r"""
-    Block until all local and remote RPC processes reach this method and finish
-    sending all pending RPCs. As this method synchronizes at the process
-    level, if multiple threads are spawned, only one of them should call this
-    method at a time.
-    """
-
-    _agent.sync()
-
-
 
 # TODO: add a context manager to wrap _init_rpc_backend and wait_all_workers
 def _init_rpc_backend(
