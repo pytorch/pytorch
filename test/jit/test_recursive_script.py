@@ -643,7 +643,7 @@ class TestRecursiveScript(JitTestCase):
 
         class ContainsLoaded(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(ContainsLoaded, self).__init__()
                 self.encoder = dummy
 
             def forward(self, input):
