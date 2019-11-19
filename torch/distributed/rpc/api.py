@@ -47,19 +47,6 @@ def join_rpc():
         _cleanup_python_rpc_handler()
 
 
-@_require_initialized
-def sync_rpc():
-    r"""
-    Block until all local and remote RPC processes reach this method and finish
-    sending all pending RPCs. As this method synchronizes at the process
-    level, if multiple threads are spawned, only one of them should call this
-    method at a time.
-    """
-
-    _agent.sync()
-
-
-
 # TODO: add a context manager to wrap _init_rpc_backend and join_rpc
 def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,

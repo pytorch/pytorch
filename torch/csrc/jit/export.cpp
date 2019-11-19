@@ -197,6 +197,12 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT64;
     case at::kBool:
       return onnx::TensorProto_DataType_BOOL;
+    case at::kQInt8:
+      return onnx::TensorProto_DataType_INT8;
+    case at::kQUInt8:
+      return onnx::TensorProto_DataType_UINT8;
+    case at::kQInt32:
+      return onnx::TensorProto_DataType_INT32;
     default:
       AT_ERROR("unexpected tensor scalar type");
   }
@@ -511,8 +517,16 @@ void GraphEncoder::EncodeTensor(
     tensor_proto->add_dims(d);
   }
   tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
+  at::Tensor t;
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  auto t = tensor.contiguous().cpu();
+  // TODO We don't call .cpu() on quantized tensors as it fails when calling
+  // aten::empty() on quantized tensors beyond certain size. Issue #29435.
+  if (tensor.is_quantized()) {
+    t = tensor.contiguous();
+  }
+  else {
+    t = tensor.contiguous().cpu();
+  }
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
   // the contiguous data into the protobuf itself
