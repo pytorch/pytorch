@@ -1562,7 +1562,7 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
   double eps = 1e-05;
   double momentum = 0.1;
 
-  auto input = torch::arange(10.).view({2, 5});
+  auto input = torch::arange(40.).view({2, 5, 4});
   auto mean = torch::arange(5.);
   auto variance = torch::arange(5.);
   auto weight = torch::arange((double)num_features);
@@ -1576,8 +1576,16 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
       .bias(bias)
       .momentum(momentum)
       .eps(eps));
-  auto expected = torch::tensor({{0., 1., 2., 3., 4.},
-                                 {0., 1., 2., 3., 4.}});
+  auto expected = torch::tensor({{{ 0.0000,  0.0000,  0.0000,  0.0000},
+                                  {-0.3416,  0.5528,  1.4472,  2.3416},
+                                  {-0.6833,  1.1056,  2.8944,  4.6833},
+                                  {-1.0249,  1.6584,  4.3416,  7.0249},
+                                  {-1.3665,  2.2112,  5.7888,  9.3665}},
+                                 {{ 0.0000,  0.0000,  0.0000,  0.0000},
+                                  {-0.3416,  0.5528,  1.4472,  2.3416},
+                                  {-0.6833,  1.1056,  2.8944,  4.6833},
+                                  {-1.0249,  1.6584,  4.3416,  7.0249},
+                                  {-1.3665,  2.2112,  5.7888,  9.3665}}});
   ASSERT_TRUE(output.allclose(expected));
 }
 
