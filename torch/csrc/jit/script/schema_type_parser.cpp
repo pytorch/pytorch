@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/schema_type_parser.h>
+#include <torch/custom_class.h>
 #include <string>
 
 using c10::AliasInfo;
