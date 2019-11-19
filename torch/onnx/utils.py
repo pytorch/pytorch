@@ -355,7 +355,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
-                             do_constant_folding=False, keep_initializers_as_inputs=None, fixed_batch_size=False):
+                             do_constant_folding=False, keep_initializers_as_inputs=None,
+                             fixed_batch_size=False, add_node_names=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -373,7 +374,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 
     return graph._pretty_print_onnx(params_dict, opset_version, False,
                                     operator_export_type, google_printer,
-                                    val_keep_init_as_ip)
+                                    val_keep_init_as_ip, add_node_names)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -384,7 +385,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
-            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None, fixed_batch_size=False):
+            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
+            fixed_batch_size=False, add_node_names=True):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -425,11 +427,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         if export_params:
             proto, export_map = graph._export_onnx(
                 params_dict, opset_version, dynamic_axes, defer_weight_export,
-                operator_export_type, strip_doc_string, val_keep_init_as_ip)
+                operator_export_type, strip_doc_string, val_keep_init_as_ip,
+                add_node_names)
         else:
             proto, export_map = graph._export_onnx(
                 {}, opset_version, dynamic_axes, False, operator_export_type,
-                strip_doc_string, val_keep_init_as_ip)
+                strip_doc_string, val_keep_init_as_ip, add_node_names)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)

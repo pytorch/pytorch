@@ -138,7 +138,8 @@ class EncoderBase {
         std::map<std::string, at::Tensor>(),
       const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>(),
-      bool keep_initializers_as_inputs = true);
+      bool keep_initializers_as_inputs = true,
+      bool add_node_names = true);
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
@@ -147,7 +148,8 @@ class EncoderBase {
         std::map<std::string, at::Tensor>(),
       const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>(),
-      bool keep_initializers_as_inputs = true);
+      bool keep_initializers_as_inputs = true,
+      bool add_node_names = true);
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -265,8 +267,10 @@ void EncoderBase::EncodeGraph(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
-    bool keep_initializers_as_inputs) {
-  EncodeBlock(graph_proto, graph->block(), initializers, dynamic_axes, keep_initializers_as_inputs);
+    bool keep_initializers_as_inputs,
+    bool add_node_names) {
+  EncodeBlock(graph_proto, graph->block(), initializers, dynamic_axes,
+              keep_initializers_as_inputs, add_node_names);
 }
 
 void EncoderBase::EncodeBlock(
@@ -274,7 +278,8 @@ void EncoderBase::EncodeBlock(
     const Block* block,
     const std::map<std::string, at::Tensor>& initializers,
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
-    bool keep_initializers_as_inputs) {
+    bool keep_initializers_as_inputs,
+    bool add_node_names) {
   AT_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch-jit-export";
   if (num_blocks_) {
@@ -348,8 +353,10 @@ void EncoderBase::EncodeBlock(
           !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
-    p_n->set_name(p_n->op_type() + "_" + std::to_string(num_op_nodes_));
-    num_op_nodes_++;
+    if (add_node_names) {
+      p_n->set_name(p_n->op_type() + "_" + std::to_string(num_op_nodes_));
+      num_op_nodes_++;
+    }
     for (auto attr_name : node->attributeNames()) {
       AddAttribute(p_n, node, attr_name);
     }
@@ -469,7 +476,8 @@ class GraphEncoder : public EncoderBase {
       const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
       bool defer_weight_export,
       bool strip_doc,
-      bool keep_initializers_as_inputs);
+      bool keep_initializers_as_inputs,
+      bool add_node_names);
 
   RawDataExportMap get_raw_data_export_map() {
     return raw_data_export_map_;
@@ -493,7 +501,8 @@ GraphEncoder::GraphEncoder(
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export,
     bool strip_doc,
-    bool keep_initializers_as_inputs)
+    bool keep_initializers_as_inputs,
+    bool add_node_names)
     : EncoderBase(operator_export_type, strip_doc),
       defer_weight_export_(defer_weight_export) {
   if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
@@ -504,7 +513,8 @@ GraphEncoder::GraphEncoder(
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
 
-  EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes, keep_initializers_as_inputs);
+  EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes, 
+              keep_initializers_as_inputs, add_node_names);
 
   for (const std::string& domain : domains_) {
     auto* opset = model_proto_.add_opset_import();
@@ -961,7 +971,8 @@ std::string pretty_print_onnx(
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool google_printer,
-    bool keep_initializers_as_inputs) {
+    bool keep_initializers_as_inputs,
+    bool add_node_names) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
@@ -970,7 +981,8 @@ std::string pretty_print_onnx(
       std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>{},
       defer_weight_export,
       true,
-      keep_initializers_as_inputs);
+      keep_initializers_as_inputs,
+      add_node_names);
   if (google_printer) {
     return graph_encoder.get_model_proto().DebugString();
   }
@@ -990,7 +1002,8 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool strip_doc_string,
-    bool keep_initializers_as_inputs) {
+    bool keep_initializers_as_inputs,
+    bool add_node_names) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
@@ -999,7 +1012,8 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       dynamic_axes,
       defer_weight_export,
       strip_doc_string,
-      keep_initializers_as_inputs);
+      keep_initializers_as_inputs,
+      add_node_names);
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());

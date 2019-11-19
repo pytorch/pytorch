@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Slice_0"
     op_type: "Slice"
     attribute {
       name: "axes"
@@ -25,6 +26,7 @@ graph {
   node {
     input: "0"
     output: "2"
+    name: "Slice_1"
     op_type: "Slice"
     attribute {
       name: "axes"
@@ -45,6 +47,7 @@ graph {
   node {
     input: "1"
     output: "3"
+    name: "Unsqueeze_2"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -55,6 +58,7 @@ graph {
   node {
     input: "2"
     output: "4"
+    name: "Unsqueeze_3"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -66,6 +70,7 @@ graph {
     input: "3"
     input: "4"
     output: "5"
+    name: "Concat_4"
     op_type: "Concat"
     attribute {
       name: "axis"

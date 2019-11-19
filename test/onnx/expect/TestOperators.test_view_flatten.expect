@@ -3,8 +3,14 @@ producer_name: "pytorch"
 producer_version: "1.3"
 graph {
   node {
+    input: "0"
     output: "1"
-    name: "Constant_0"
+    name: "Shape_0"
+    op_type: "Shape"
+  }
+  node {
+    output: "2"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -16,14 +22,8 @@ graph {
     }
   }
   node {
-    input: "0"
-    output: "2"
-    name: "Shape_1"
-    op_type: "Shape"
-  }
-  node {
-    input: "2"
     input: "1"
+    input: "2"
     output: "3"
     name: "Gather_2"
     op_type: "Gather"
@@ -34,8 +34,14 @@ graph {
     }
   }
   node {
+    input: "0"
     output: "4"
-    name: "Constant_3"
+    name: "Shape_3"
+    op_type: "Shape"
+  }
+  node {
+    output: "5"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -47,14 +53,8 @@ graph {
     }
   }
   node {
-    input: "0"
-    output: "5"
-    name: "Shape_4"
-    op_type: "Shape"
-  }
-  node {
-    input: "5"
     input: "4"
+    input: "5"
     output: "6"
     name: "Gather_5"
     op_type: "Gather"
