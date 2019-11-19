@@ -1144,6 +1144,72 @@ TEST_F(ModulesTest, Dropout) {
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
+TEST_F(ModulesTest, Dropout2d) {
+  Dropout2d dropout(0.5);
+  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
+  torch::Tensor y = dropout(x);
+
+  y.backward(torch::ones_like(y));
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 10);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 70); // Probably
+
+  dropout->eval();
+  y = dropout(x);
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
+TEST_F(ModulesTest, Dropout3d) {
+  Dropout3d dropout(0.5);
+  torch::Tensor x = torch::ones({4, 5, 5}, torch::requires_grad());
+  torch::Tensor y = dropout(x);
+
+  y.backward(torch::ones_like(y));
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.size(0), 4);
+  ASSERT_EQ(y.size(1), 5);
+  ASSERT_EQ(y.size(1), 5);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 70); // Probably
+
+  dropout->eval();
+  y = dropout(x);
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
+TEST_F(ModulesTest, FeatureDropout) {
+  FeatureDropout dropout(0.5);
+  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
+  torch::Tensor y = dropout(x);
+
+  y.backward(torch::ones_like(y));
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 10);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 70); // Probably
+
+  dropout->eval();
+  y = dropout(x);
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
+TEST_F(ModulesTest, FeatureDropoutLegacyWarning) {
+  std::stringstream buffer;
+  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
+
+  FeatureDropout bn(0.5);
+
+  ASSERT_EQ(
+    count_substr_occurrences(
+      buffer.str(),
+      "torch::nn::FeatureDropout module is deprecated"
+    ),
+  1);
+}
+
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->named_parameters();
@@ -1600,6 +1666,40 @@ TEST_F(ModulesTest, TripletMarginLoss) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+}
+
+TEST_F(ModulesTest, NLLLoss) {
+  NLLLoss loss;
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315}, 
+                              {-3.7038, -0.1038, -2.6038},
+                              {-2.3422, -1.3422, -0.4422}},
+                             torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor(2.4258, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_TRUE(
+    NLLLoss(NLLLossOptions().ignore_index(-100).reduction(torch::kMean))
+      ->forward(input, target).allclose(expected, 1e-04));
+}
+
+TEST_F(ModulesTest, CrossEntropyLoss) {
+  CrossEntropyLoss loss;
+  auto input = torch::tensor({{3., 3.}, {2., 2.}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0, 1}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor(0.6931, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(
+    CrossEntropyLoss(CrossEntropyLossOptions().ignore_index(-100).reduction(torch::kMean))
+      ->forward(input, target).allclose(expected, 1e-04));
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {
@@ -2883,9 +2983,27 @@ TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
 }
 
 TEST_F(ModulesTest, PrettyPrintDropout) {
-  ASSERT_EQ(c10::str(Dropout(0.5)), "torch::nn::Dropout(rate=0.5)");
-  ASSERT_EQ(
-      c10::str(FeatureDropout(0.5)), "torch::nn::FeatureDropout(rate=0.5)");
+  ASSERT_EQ(c10::str(Dropout()), "torch::nn::Dropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(Dropout(0.42)), "torch::nn::Dropout(p=0.42, inplace=false)");
+  ASSERT_EQ(c10::str(Dropout(DropoutOptions().p(0.42).inplace(true))), "torch::nn::Dropout(p=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintDropout2d) {
+  ASSERT_EQ(c10::str(Dropout2d()), "torch::nn::Dropout2d(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(Dropout2d(0.42)), "torch::nn::Dropout2d(p=0.42, inplace=false)");
+  ASSERT_EQ(c10::str(Dropout2d(Dropout2dOptions().p(0.42).inplace(true))), "torch::nn::Dropout2d(p=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintDropout3d) {
+  ASSERT_EQ(c10::str(Dropout3d()), "torch::nn::Dropout3d(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(Dropout3d(0.42)), "torch::nn::Dropout3d(p=0.42, inplace=false)");
+  ASSERT_EQ(c10::str(Dropout3d(Dropout3dOptions().p(0.42).inplace(true))), "torch::nn::Dropout3d(p=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFeatureDropout) {
+  ASSERT_EQ(c10::str(FeatureDropout()), "torch::nn::FeatureDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureDropout(0.42)), "torch::nn::FeatureDropout(p=0.42, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureDropout(FeatureDropoutOptions().p(0.42).inplace(true))), "torch::nn::FeatureDropout(p=0.42, inplace=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintFunctional) {
@@ -3014,6 +3132,16 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintNLLLoss) {
+  ASSERT_EQ(
+      c10::str(NLLLoss()), "torch::nn::NLLLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrinCrossEntropyLoss) {
+  ASSERT_EQ(
+      c10::str(CrossEntropyLoss()), "torch::nn::CrossEntropyLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintMultiLabelMarginLoss) {
