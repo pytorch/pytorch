@@ -3942,7 +3942,7 @@ class _TestTorchMixin(object):
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_zipfile(self):
+    def test_serialization_zipfile_utils(self):
         data = {
             'a': b'12039810948234589',
             'b': b'1239081209484958',
@@ -3971,6 +3971,25 @@ class _TestTorchMixin(object):
 
         test(io.BytesIO())
 
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_zipfile(self):
+        data = self._test_serialization_data()
+
+        def test(name_or_buffer):
+            torch.save(data, name_or_buffer, _use_new_zipfile_serialization=True)
+
+            if hasattr(name_or_buffer, 'seek'):
+                name_or_buffer.seek(0)
+
+            result = torch.load(name_or_buffer)
+            self.assertEqual(result, data)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f)
+        with tempfile.NamedTemporaryFile() as f:
+            test(f.name)
+
+        test(io.BytesIO())
 
     def test_serialization(self):
         # Test serialization with a real file
@@ -4433,7 +4452,8 @@ class _TestTorchMixin(object):
         resource = FilelikeMock(data=b"data")
         delattr(resource, "tell")
         delattr(resource, "seek")
-        self.assertRaisesRegex(AttributeError, expected_err_msg, lambda: torch.load(resource))
+        with self.assertRaisesRegex(AttributeError, expected_err_msg):
+            torch.load(resource)
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

@@ -87,13 +87,13 @@ conv_2d_configs_short = op_bench.config_list(
 )
 
 conv_2d_configs_long = op_bench.cross_product_configs(
-    in_c=[128, 512],
-    out_c=[128, 512],
+    in_c=[128, 256],
+    out_c=[128, 256],
     kernel=[3],
     stride=[1, 2],
-    N=[8],
-    H=[64],
-    W=[64],
+    N=[4],
+    H=[32],
+    W=[32],
     device=['cpu', 'cuda'],
     tags=["long"]
 )
