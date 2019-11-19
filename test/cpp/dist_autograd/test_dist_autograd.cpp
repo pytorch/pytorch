@@ -74,7 +74,7 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   autogradContainer_->newContext();
-  auto& context = autogradContainer_->currentContext();
+  auto context = autogradContainer_->currentContext();
   auto& engine = DistEngine::getInstance();
   ASSERT_EQ(0, engine.numBackwardPasses());
 
@@ -83,9 +83,9 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   auto t = torch::ones({1}, options);
   auto tensors = std::vector<torch::Tensor>{t};
   addSendRpcBackward(
-      context, AutogradMetadata(context.contextId(), 0), tensors, 0);
+      context, AutogradMetadata(context->contextId(), 0), tensors, 0);
 
-  auto sendFunction = context.retrieveSendFunction(0);
+  auto sendFunction = context->retrieveSendFunction(0);
   sendFunction->setGrads({t});
 
   // Execute engine.
