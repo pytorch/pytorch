@@ -1,5 +1,4 @@
-.. role:: hidden
-    :class: hidden-section
+.. _distributed-rpc-framework:
 
 Distributed RPC Framework
 =========================
@@ -8,6 +7,9 @@ The distributed RPC framework provides mechanisms for multi-machine model
 training through a set of primitives to allow for remote communication, and a
 higher-level API to automatically differentiate models split across several
 machines.
+
+.. warning::
+  The RPC API is experimental and subject to change.
 
 RPC and RRef Framework
 ----------------------
@@ -20,11 +22,13 @@ backend, and must be initialized with `torch.distributed.init_process_group
 before using other functions. See the `documentation for
 torch.distributed <https://pytorch.org/docs/stable/distributed.html>`_ for
 additional details. Next, to initialize the RPC framework we need to use
-`init_model_parallel` which would initialize the RPC framework, RRef framework
+`init_rpc` which would initialize the RPC framework, RRef framework
 and distributed autograd.
 
 .. automodule:: torch.distributed.rpc
-.. autofunction:: init_model_parallel
+.. autofunction:: init_rpc
+
+.. _rref:
 
 RRef
 ----
@@ -58,8 +62,7 @@ used for applications such as model parallel training. In short, applications
 may send and receive gradient recording tensors over RPC. In the forward pass,
 we record when gradient recording tensors are sent over RPC and during the
 backward pass we use this information to perform a distributed backward pass
-using RPC. For more details see the design doc
-`here <https://github.com/pytorch/pytorch/pull/29175>`_.
+using RPC. For more details see the design doc for distributed autograd: :doc:`/notes/distributed_autograd`.
 
 .. automodule:: torch.distributed.autograd
     :members:

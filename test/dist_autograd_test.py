@@ -1305,7 +1305,8 @@ class DistAutogradTest(object):
         def backward(ctx, input):
             assert(DistAutogradTest._test_clean_context_backward_context_id is not None)
 
-            # Release the context to simulate error (use barrier before releasing context to ensure all nodes execute the backward function).
+            # Release the context to simulate error (use barrier before releasing
+            # context to ensure all nodes execute the backward function).
             dist.barrier()
             dist_autograd._release_context(DistAutogradTest._test_clean_context_backward_context_id)
 
@@ -1335,7 +1336,8 @@ class DistAutogradTest(object):
         # Send the context id to all nodes.
         for i in range(0, self.world_size):
             if i != self.rank:
-                rpc.rpc_sync("worker{}".format(i), _set_rpc_done, args=(context_id, 1))
+                rank_distance = (i - self.rank + self.world_size) % self.world_size
+                rpc.rpc_sync("worker{}".format(i), _set_rpc_done, args=(context_id, rank_distance))
 
         dist.barrier()
 
@@ -1346,10 +1348,10 @@ class DistAutogradTest(object):
         for i in range(0, 100):
             dst = self._next_rank()
             t1 = rpc.rpc_sync("worker{}".format(dst), torch.add, args=(t1, t1))
-            if i == 99:
-                # Call MyBackwardFunc as the first op of the backward pass to
-                # ensure we release the context early in the backward pass.
-                t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
+
+        # Call MyBackwardFunc as the first op of the backward pass to
+        # ensure we release the context early in the backward pass.
+        t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
         self.assertEqual(100, len(context._send_functions()))
 
         with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id"):
@@ -1359,6 +1361,9 @@ class DistAutogradTest(object):
         # other nodes. The proper fix would be addressing:
         # https://github.com/pytorch/pytorch/issues/27643, which would inform
         # other nodes about the failure.
+        # The autograd engine gets stuck on other nodes since they're waiting to
+        # receive gradients from the node that received an error (and as a
+        # result it didn't execute the rest of the graph).
         dist.barrier()
         rpc.join_rpc()
         sys.exit(0)

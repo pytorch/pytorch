@@ -377,12 +377,12 @@ TEST_F(SequentialTest, IsCloneable) {
 }
 
 TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
-  Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), FeatureDropout(0.5));
+  Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 
   auto modules = sequential->children();
   ASSERT_TRUE(modules[0]->as<Linear>());
   ASSERT_TRUE(modules[1]->as<Conv2d>());
-  ASSERT_TRUE(modules[2]->as<FeatureDropout>());
+  ASSERT_TRUE(modules[2]->as<Dropout2d>());
 }
 
 TEST_F(SequentialTest, CloneToDevice_CUDA) {
@@ -411,7 +411,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "torch::nn::Sequential(\n"
       "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (1): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
-      "  (2): torch::nn::Dropout(rate=0.5)\n"
+      "  (2): torch::nn::Dropout(p=0.5, inplace=false)\n"
       "  (3): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (4): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
@@ -430,7 +430,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "torch::nn::Sequential(\n"
       "  (linear): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (conv2d): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
-      "  (dropout): torch::nn::Dropout(rate=0.5)\n"
+      "  (dropout): torch::nn::Dropout(p=0.5, inplace=false)\n"
       "  (batchnorm): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (embedding): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
       "  (lstm): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
