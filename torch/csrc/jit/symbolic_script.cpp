@@ -1231,19 +1231,19 @@ const std::vector<std::string> functions = {
             input_size = input.size()
             input_dim = len(input_size)
             if input_dim == 3 and mode == 'nearest':
-                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size, -1.)
+                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size, -1.0)
             elif input_dim == 4 and mode == 'nearest':
-                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size, -1., -1.)
+                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size, -1.0, -1.0)
             elif input_dim == 5 and mode == 'nearest':
-                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size, -1., -1., -1.)
+                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size, -1.0, -1.0, -1.0)
             elif input_dim == 3 and mode == 'linear':
-                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners, -1.)
+                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners, -1.0)
             elif input_dim == 4 and mode == 'bilinear':
-                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners, -1., -1.)
+                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners, -1.0, -1.0)
             elif input_dim == 5 and mode == 'trilinear':
-                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners, -1., -1., -1.)
+                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners, -1.0, -1.0, -1.0)
             elif input_dim == 4 and mode == 'bicubic':
-                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners, -1., -1.)
+                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners, -1.0, -1.0)
             elif input_dim == 3 and mode == 'area':
                 grad_input = AD_adaptive_avg_pool1d_backward(grad, input, output_size)
             elif input_dim == 4 and mode == 'area':

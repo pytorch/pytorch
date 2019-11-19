@@ -117,7 +117,7 @@ static inline scalar_t compute_scales_value(
     int64_t input_size,
     int64_t output_size) {
       return (scale > 0.)
-          ? static_cast<scalar_t>(1. / static_cast<scalar_t>(scale))
+          ? static_cast<scalar_t>(1.0 / scale)
           : (static_cast<scalar_t>(input_size) / output_size);
 }
 
@@ -126,7 +126,7 @@ static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners,
-    const double scale=-1.) {
+    const double scale=-1.0) {
   /* We view each pixel as an area, idx + 0.5 as its center index.
    * Here is an example formula in 1D case.
    * if align_corners: center of two corner pixel areas are preserved,

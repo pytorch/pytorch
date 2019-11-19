@@ -34,8 +34,8 @@ __global__ void upsample_nearest2d_out_frame(
     return;
   }
 
-  const float height_scale = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)height1 / height2;
-  const float width_scale = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)width1 / width2;
+  const float height_scale = (scales_1 > 0.0) ? (float)(1.0 / scales_1) : (float)height1 / height2;
+  const float width_scale = (scales_2 > 0.0) ? (float)(1.0 / scales_2) : (float)width1 / width2;
   int nc_stride = blockDim.z * gridDim.z;
 
   const size_t h1 = height1 == height2
@@ -81,14 +81,14 @@ __global__ void upsample_nearest2d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (scales_1 > 0.) ? (float)scales_1 : (float)src_dim_h / dst_dim_h;
+  float scale_factor = (scales_1 > 0.0) ? (float)scales_1 : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y =
       nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
   int src_y_up = nearest_neighbor_compute_source_index(
       scale_factor, dst_y + 1, src_dim_h + 1);
 
-  scale_factor = (scales_2 > 0.) ? (float)scales_2 : (float)src_dim_w / dst_dim_w;
+  scale_factor = (scales_2 > 0.0) ? (float)scales_2 : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x =
       nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);

@@ -3400,22 +3400,22 @@ at::Tensor interpolate(
     }
   }
 
-  float scale_factors_1 = -1;
-  float scale_factors_2 = -1;
-  float scale_factors_3 = -1;
+  float scale_factors_1 = -1.0f;
+  float scale_factors_2 = -1.0f;
+  float scale_factors_3 = -1.0f;
   if (scale_factors.isDouble()) {
-    scale_factors_1 = (float) scale_factors.toDouble();
-    scale_factors_2 = (float) scale_factors.toDouble();
-    scale_factors_3 = (float) scale_factors.toDouble();
+    scale_factors_1 = static_cast<float>(scale_factors.toDouble());
+    scale_factors_2 = static_cast<float>(scale_factors.toDouble());
+    scale_factors_3 = static_cast<float>(scale_factors.toDouble());
   } else if (scale_factors.isDoubleList()) {
     auto scale_factors_list_ref = scale_factors.toDoubleListRef();
     std::vector<double> scale_factors_vec(scale_factors_list_ref.begin(), scale_factors_list_ref.end());
     auto scale_factors_list = c10::impl::toList(scale_factors_vec);
-    scale_factors_1 = (float) scale_factors_list[0];
+    scale_factors_1 = static_cast<float>(scale_factors_list[0]);
     if (scale_factors_list.size() >= 2){
-      scale_factors_2 = (float) scale_factors_list[1];
+      scale_factors_2 = static_cast<float>(scale_factors_list[1]);
       if (scale_factors_list.size() >= 3){
-        scale_factors_3 = (float) scale_factors_list[2];
+        scale_factors_3 = static_cast<float>(scale_factors_list[2]);
         }
     }
   }
