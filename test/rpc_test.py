@@ -1060,7 +1060,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
         rpc.init_rpc(
