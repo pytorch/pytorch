@@ -1586,7 +1586,7 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
                                   {-0.6833,  1.1056,  2.8944,  4.6833},
                                   {-1.0249,  1.6584,  4.3416,  7.0249},
                                   {-1.3665,  2.2112,  5.7888,  9.3665}}});
-  ASSERT_TRUE(output.allclose(expected, 1e-03));
+  ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
 TEST_F(FunctionalTest, InstanceNorm1dDefaultOptions) {
