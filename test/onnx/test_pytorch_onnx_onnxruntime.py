@@ -15,10 +15,11 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
+import torchvision
 
 
 def ort_test_with_input(ort_sess, input, output, rtol, atol):
@@ -115,6 +116,74 @@ class TestONNXRuntime(unittest.TestCase):
                               dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                               input_names=input_names, output_names=output_names,
                               fixed_batch_size=fixed_batch_size)
+
+    # Export Torchvision models
+
+    def test_alexnet(self):
+        model = torchvision.models.alexnet(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_densenets(self):
+        model = torchvision.models.densenet121(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_googlenet(self):
+        model = torchvision.models.googlenet(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_inception(self):
+        model = torchvision.models.inception_v3(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mnasnet(self):
+        model = torchvision.models.mnasnet1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    # TODO: enable test for opset 11 when hardtanh is removed from the opset 11 blacklist
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_mobilenet(self):
+        model = torchvision.models.mobilenet_v2(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_resnet(self):
+        model = torchvision.models.resnet50(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_shufflenet(self):
+        model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_squeezenet(self):
+        model = torchvision.models.squeezenet1_1(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_vgg(self):
+        model = torchvision.models.vgg19(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+        model = torchvision.models.vgg19_bn(pretrained=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_fcn(self):
+        model = torchvision.models.segmentation.segmentation.fcn_resnet101(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_deeplab(self):
+        model = torchvision.models.segmentation.segmentation.deeplabv3_resnet101(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
