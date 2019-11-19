@@ -711,6 +711,8 @@ std::string addChildModule(
     const script::Module& child_module,
     const std::vector<std::string>& path) {
   script::Module cur = module;
+  TORCH_INTERNAL_ASSERT(
+      path.size() > 0, "path must have at least one element.");
   for (size_t i = 0; i < path.size() - 1; ++i) {
     cur = module.attr(path[i]).toModule();
   }
@@ -725,17 +727,25 @@ std::string addChildModule(
   return child_name;
 }
 
-// Check if v is the input of the graph
+// Check if value is the input of the graph
 bool hitGraphInput(Value* value) {
-  bool hit_graph_input = false;
   Graph* graph = value->owningGraph();
-  for (size_t i = 0; i < graph->inputs().size(); ++i) {
-    // calling GetAttr on an input of the graph
-    // which means the module instance we call GetAttr on is
-    // passed in as input
-    hit_graph_input |= value == graph->inputs()[i];
+  const auto& inputs = graph->inputs();
+  return std::find(inputs.begin(), inputs.end(), value) != inputs.end();
+}
+
+Value* getModuleAccessPath(Value* instance, std::vector<std::string>& path) {
+  // Iterator to traverse back the GetAttr calls
+  Value* iter = instance;
+  // trace back the instance to recover the path of the submodule
+  while (!hitGraphInput(iter) && iter->node()->kind() == prim::GetAttr) {
+    Node* get_attr = iter->node();
+    // record the name of GetAttr
+    path.push_back(get_attr->s(attr::name));
+    // trace back the chain of GetAttr
+    iter = get_attr->inputs()[0];
   }
-  return hit_graph_input;
+  return iter;
 }
 
 // A helper class to make uses of module unique
@@ -746,17 +756,16 @@ class ModuleUseDeduper {
     for (auto& method : module_.get_methods()) {
       findModuleUses(method.name());
     }
-
-    for (auto& method : module_.get_methods()) {
-      dedupModuleUses(method.name());
-    }
+    dedupModuleUses();
   }
 
+ private:
   // Analyze the code to record necessary information
   // to dedup the module uses
   void findModuleUses(const std::string& method_name) {
     script::Method method = module_.get_method(method_name);
     auto graph = method.graph();
+    GRAPH_DUMP("Finding module uses for ", graph);
 
     std::stack<Block*> blocks_to_visit;
     blocks_to_visit.push(graph->block());
@@ -773,38 +782,39 @@ class ModuleUseDeduper {
         }
         std::vector<std::string> path;
         Value* instance = n->inputs()[0];
-        // Iterator to traverse back the GetAttr calls
-        Value* iter = instance;
-        // trace back the instance to recover the path of the submodule
-        while (!hitGraphInput(iter)) {
-          Node* get_attr = iter->node();
-          // record the name of GetAttr
-          path.push_back(get_attr->s(attr::name));
-          // trace back the chain of GetAttr
-          iter = get_attr->inputs()[0];
-        }
+        // boundary_val is the value we get when we trace back
+        // the GetAttr access chain until we hit the input of graph
+        // or a node that is not prim::GetAttr
+        Value* boundary_val = getModuleAccessPath(instance, path);
 
-        if (iter == self) {
+        if (boundary_val == self) {
+          // path.size() == 0 means we're calling a method
+          // on self, we don't need to dedup uses of self
+          if (path.size() == 0) {
+            continue;
+          }
           value_to_path_map_[instance] = path;
           auto m = findChildModule(module_, path);
-          if (module_set_.find(m._ivalue()) == module_set_.end()) {
-            module_set_.insert(m._ivalue());
-          } else {
-            use_to_rewrite_.push_back(instance);
+          if (module_set_.insert(m._ivalue()).second) {
+            uses_to_rewrite_.push_back(instance);
+            GRAPH_DEBUG("Found use to rewrite: ", instance);
           }
         } else {
           GRAPH_DEBUG(
-              "Can't handle the case of calling GetAttr on input ",
-              " of the graph in make submodule uses unique");
+              "Can't handle the access pattern of GetAttr ",
+              "in make submodule uses unique, traced back to ",
+              boundary_val->debugName(),
+              " which is not self: ",
+              self->debugName());
         }
       }
     }
   }
 
   // Deduplicate module uses given the information we recorded before
-  void dedupModuleUses(const std::string& method_name) {
-    for (Value* v : use_to_rewrite_) {
-      const auto& path = value_to_path_map_[v];
+  void dedupModuleUses() {
+    for (Value* v : uses_to_rewrite_) {
+      const auto& path = value_to_path_map_.at(v);
       const auto& m = findChildModule(module_, path);
       // add a clone of the child module to the parent of the duplicated module
       const auto& child_name = addChildModule(module_, m, path);
@@ -820,13 +830,12 @@ class ModuleUseDeduper {
     }
   }
 
- private:
   script::Module module_;
   // Map from value of module instance to the list of names of submodules
   // starting from the top level module, e.g. ["sub1", "sub2", "relu"]
   std::unordered_map<Value*, std::vector<std::string>> value_to_path_map_;
   std::unordered_set<script::ModulePtr> module_set_;
-  std::vector<Value*> use_to_rewrite_;
+  std::vector<Value*> uses_to_rewrite_;
 };
 
 } // namespace
@@ -1216,8 +1225,7 @@ void FoldPrepackedWeightIntoModule(
         module, method.name(), linear_params_module, conv_params_module);
   }
   for (script::Module m : module.children()) {
-    FoldPrepackedWeightIntoModule(
-        m, linear_params_module, conv_params_module);
+    FoldPrepackedWeightIntoModule(m, linear_params_module, conv_params_module);
   }
 }
 
