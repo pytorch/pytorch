@@ -1594,10 +1594,10 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
   double momentum = 0.1;
 
   auto input = torch::arange(2. * num_features * 1 * 1).view({2, num_features, 1, 1});
-  auto mean = torch::arange(num_features);
-  auto variance = torch::arange(num_features);
-  auto weight = torch::arange(num_features);
-  auto bias = torch::arange(num_features);
+  auto mean = torch::arange((double)num_features);
+  auto variance = torch::arange((double)num_features);
+  auto weight = torch::arange((double)num_features);
+  auto bias = torch::arange((double)num_features);
   auto output = F::instance_norm(
     input,
     F::InstanceNormFuncOptions()
@@ -1636,10 +1636,10 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
   double momentum = 0.1;
 
   auto input = torch::arange(2. * num_features * 1 * 1 * 1).view({2, num_features, 1, 1, 1});
-  auto mean = torch::arange(num_features);
-  auto variance = torch::arange(num_features);
-  auto weight = torch::arange(num_features);
-  auto bias = torch::arange(num_features);
+  auto mean = torch::arange((double)num_features);
+  auto variance = torch::arange((double)num_features);
+  auto weight = torch::arange((double)num_features);
+  auto bias = torch::arange((double)num_features);
   auto output = F::instance_norm(
     input,
     F::InstanceNormFuncOptions()
