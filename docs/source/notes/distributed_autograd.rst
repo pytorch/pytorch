@@ -1,3 +1,6 @@
+.. warning::
+  The :ref:`distributed-rpc-framework` is experimental and subject to change.
+
 .. _distributed-autograd-design:
 
 .. warning::
@@ -295,6 +298,84 @@ you can refer to **Distributed Autograd Algorithm Smart mode** section in the
 
 Distributed Optimizer
 ^^^^^^^^^^^^^^^^^^^^^
-Coming soon...
+
+The :class:`~torch.distributed.optim.DistributedOptimizer` operates as follows:
+
+1. Takes a list of remote parameters (:class:`~torch.distributed.rpc.RRef`) to
+   optimize. These could also be local parameters wrapped within a local
+   ``RRef``.
+2. Takes a :class:`~torch.optim.Optimizer` class as the local
+   optimizer to run on all nodes.
+3. The distributed optimizer creates an instance of the local ``Optimizer`` on
+   each of the worker nodes and holds an ``RRef`` to them.
+4. When :meth:`torch.distributed.optim.DistributedOptimizer.step` is invoked,
+   the distributed optimizer uses RPC to remotely execute all the local
+   optimizers on the appropriate remote workers.
+
+Simple end to end example
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Putting it all together, a very simple end to end example using distributed
+autograd and distributed optimizer is as follows:
+
+.. code::
+
+  import torch
+  from torch.distributed import rpc
+  import torch.distributed.autograd as dist_autograd
+  from torch import optim
+  from torch.distributed.optim import DistributedOptimizer
+  from tempfile import NamedTemporaryFile
+  import multiprocessing as mp
+
+  def random_tensor():
+      return torch.rand((3, 3), requires_grad=True)
+
+  def _run_process(self_rank, dst_rank, file_name):
+      self_name = "worker{}".format(self_rank)
+      dst_name = "worker{}".format(dst_rank)
+
+      # Initialize RPC.
+      rpc.init_rpc(
+          self_name=self_name,
+          self_rank=self_rank,
+          worker_name_to_id={"worker0": 0, "worker1": 1},
+          init_method="file://{}".format(file_name),
+      )
+
+      # Use a distributed autograd context.
+      with dist_autograd.context() as context_id:
+         # Forward pass (create references on remote nodes).
+         rref1 = rpc.remote(dst_name, random_tensor)
+         rref2 = rpc.remote(dst_name, random_tensor)
+         loss = rref1.to_here() + rref2.to_here()
+
+         # Backward pass (run distributed autograd).
+         dist_autograd.backward([loss.sum()])
+
+         # Build DistributedOptimizer.
+         dist_optim = DistributedOptimizer(
+           optim.SGD,
+           [rref1, rref2],
+           lr=0.05,
+         )
+
+         # Run the distributed optimizer step.
+         dist_optim.step()
+
+  def run_process(self_rank, dst_rank, file_name):
+      _run_process(self_rank, dst_rank, file_name)
+      rpc.join_rpc()
+
+  file_name = NamedTemporaryFile().name
+  processes = []
+
+  # Run two workers.
+  for i in range(2):
+      p = mp.Process(target=run_process, args=(i, (i + 1) % 2, file_name))
+      p.start()
+
+  for p in processes:
+      p.join()
 
 .. _RFC: https://github.com/pytorch/pytorch/issues/23110
