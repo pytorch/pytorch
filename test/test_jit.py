@@ -955,20 +955,20 @@ graph(%x : Tensor,
         assert len([x for x, _ in m._modules._c.items()
                     if x.startswith('_observer_')]) == 0, \
             'Expected to have 0 observer submodules'
-        FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
-                   .check('ClassType<Conv2d> = prim::GetAttr[name="conv"](%self)') \
+        FileCheck().check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('Conv2d = prim::GetAttr[name="conv"](%self)') \
                    .check_next('Tensor = prim::CallMethod[name="forward"]') \
-                   .check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .run(str(get_forward_graph(m._c)))
         assert len([x for x, _ in m.conv._modules._c.items()
                     if x.startswith('_observer_')]) == 3, \
             'Expected to have 3 observer submodules'
-        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                   .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
                    .check('Tensor = aten::conv2d') \
-                   .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
                    .run(str(m._c.getattr("conv")._get_method('conv2d_forward').graph))
 
@@ -992,16 +992,16 @@ graph(%x : Tensor,
                 return self.sub(self.conv(x))
 
         def check_observed(s):
-            FileCheck().check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+            FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
                        .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                       .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check('Observer = prim::GetAttr[name="_observer_') \
                        .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                       .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check('Observer = prim::GetAttr[name="_observer_') \
                        .check_next('prim::CallMethod[name="forward"](%_observer_') \
                        .run(str(s))
 
         def check_not_observed(s):
-            FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+            FileCheck().check_not('Observer = prim::GetAttr[name="_observer_') \
                        .check_not('prim::CallMethod[name="forward"](%_observer_') \
                        .run(str(s))
 
@@ -1068,12 +1068,12 @@ graph(%x : Tensor,
             assert len([x for x, _ in m._modules._c.items()
                         if x.startswith('_observer_')]) == num_observers, \
                 'Expected to have ' + str(num_observers) + ' observer submodules'
-            c = FileCheck().check('ClassType<Conv2d> = prim::GetAttr[name="conv"]') \
+            c = FileCheck().check('Conv2d = prim::GetAttr[name="conv"]') \
                            .check_next('prim::CallMethod[name="forward"]') \
-                           .check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                           .check_not('Observer = prim::GetAttr[name="_observer_') \
                            .check(relu_call)
             if num_observers == 1:
-                c = c.check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                c = c.check('Observer = prim::GetAttr[name="_observer_') \
                      .check_next('prim::CallMethod[name="forward"](%_observer_')
             c.run(str(get_forward_graph(m._c)))
             # TODO: add checks for conv and relu later, graph looks correct but this pr
@@ -12857,7 +12857,7 @@ a")
 
         sm = SM()
 
-        self.assertExpected(str(sm.forward.schema))
+        self.assertExpectedStripMangled(str(sm.forward.schema))
 
     def test_annotated_script_fn_return_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "but is actually of type"):
@@ -12971,7 +12971,7 @@ a")
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script function
     def test_annot_string_mypy_fn(self):
@@ -12984,7 +12984,7 @@ a")
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
             test_str.append(str(cu.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script method
     def test_annot_string_mypy_method(self):
@@ -13005,7 +13005,7 @@ a")
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     # Helper function to eval Python3 code without causing a syntax error for
     # this file under py2
@@ -13037,7 +13037,7 @@ a")
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_multiline_annot_ast_py3_fn(self):
@@ -13114,7 +13114,7 @@ a")
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script function
     @unittest.skipIf(not PY35, "Python 3.5 needed")
@@ -13150,7 +13150,7 @@ a")
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     def test_method_casts_script(self):
         cast_types = [

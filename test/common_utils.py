@@ -1012,6 +1012,10 @@ class TestCase(expecttest.TestCase):
             else:
                 self.assertEqual(s, expected)
 
+    def assertExpectedStripMangled(self, s, subname=None):
+        s = re.sub(r'__torch__[^ ]+', '', s)
+        self.assertExpected(s, subname)
+
     # returns captured stderr
     @staticmethod
     def runWithPytorchAPIUsageStderr(code):

@@ -215,23 +215,6 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       parseTensorDType(L.cur().text())) {
     value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
-    L.next();
-    L.expect('.');
-    auto classes_tok = L.expect(TK_IDENT);
-    if (classes_tok.text() != "classes") {
-      throw ErrorReport(classes_tok.range)
-          << "Expected classes namespace but got " << classes_tok.text();
-    }
-    L.expect('.');
-    auto class_tok = L.expect(TK_IDENT);
-    value = classCU()->get_type(
-        std::string("__torch__.classes.") + class_tok.text());
-    if (!value) {
-      throw ErrorReport(class_tok.range)
-          << "Unknown custom class type " << class_tok.text()
-          << ". Please ensure it is registered.";
-    }
   } else {
     auto value_alias = parseBaseType();
     value = value_alias.first;
