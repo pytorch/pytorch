@@ -22,6 +22,11 @@ class _LocalOptimizer:
             self.optim.step()
 
 
+def _new_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
+    return rpc.RRef(
+        _LocalOptimizer(optim_cls, local_params_rref, *args, **kwargs))
+
+
 def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
     local_optim = local_optim_rref.local_value()
     local_optim.step(autograd_ctx_id)
@@ -30,13 +35,16 @@ def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
 def _wait_for_all(rpc_futs):
     # TODO: improve error propagation
     exception = None
+    results = []
     for fut in rpc_futs:
         try:
-            fut.wait()
+            results.append(fut.wait())
         except Exception as e:
+            results.append(e)
             exception = e
     if exception is not None:
         raise exception
+    return results
 
 
 class DistributedOptimizer:
@@ -68,16 +76,17 @@ class DistributedOptimizer:
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
 
-        self.remote_optimizers = []
+        remote_optim_futs = []
         for worker, param_rrefs in per_worker_params_rref.items():
-            remote_optim_rref = rpc.remote(
+            remote_optim_rref = rpc.rpc_async(
                 worker,
-                _LocalOptimizer,
-                args=[optimizer_class, param_rrefs] + list(args),
+                _new_local_optimizer,
+                args=(optimizer_class, param_rrefs, *args),
                 kwargs=kwargs,
             )
-            self.remote_optimizers.append(remote_optim_rref)
+            remote_optim_futs.append(remote_optim_rref)
 
+        self.remote_optimizers = _wait_for_all(remote_optim_futs)
 
     def step(self):
         """

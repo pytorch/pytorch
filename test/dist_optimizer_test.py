@@ -36,6 +36,15 @@ class FailingOptimizer(optim.Optimizer):
         raise ValueError('Error running optimizer.')
 
 
+class OptimizerFailingOnConstructor(optim.Optimizer):
+    def __init__(self, params):
+        super(OptimizerFailingOnConstructor, self).__init__(params, {})
+        raise ValueError('Error creating optimizer.')
+
+    def step(self, closure=None):
+        raise NotImplementedError
+
+
 def _call_method(method, obj_rref, *args, **kwargs):
     return method(obj_rref.local_value(), *args, **kwargs)
 
@@ -123,6 +132,23 @@ class DistOptimizerTest(object):
             dist_autograd.backward([loss])
             with self.assertRaisesRegex(Exception, "Error running optimizer"):
                 dist_optim.step()
+
+    @dist_init()
+    def test_dist_optim_exception_on_constructor(self):
+        # distributed version
+        owner1 = 'worker%d' % ((self.rank + 1) % self.world_size)
+        owner2 = 'worker%d' % ((self.rank + 2) % self.world_size)
+
+        remote_module1 = rpc.remote(owner1, MyModule)
+        remote_module2 = rpc.remote(owner2, MyModule)
+        remote_param1 = remote_method(MyModule.get_w, remote_module1)
+        remote_param2 = remote_method(MyModule.get_w, remote_module2)
+
+        with self.assertRaisesRegex(Exception, "Error creating optimizer."):
+            dist_optim = DistributedOptimizer(
+                OptimizerFailingOnConstructor,
+                [remote_param1, remote_param2],
+            )
 
     @dist_init()
     def test_dist_optim(self):
