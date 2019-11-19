@@ -536,7 +536,7 @@ class HistogramObserver(_ObserverBase):
     Args:
         bins: Number of bins to use for the histogram
         upsample_rate: Factor by which the histograms are upsampled, this is
-                       used to interpolate histgrams with varying ranges across observations
+                       used to interpolate histograms with varying ranges across observations
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
