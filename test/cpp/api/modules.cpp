@@ -1078,7 +1078,7 @@ TEST_F(ModulesTest, FeatureAlphaDropout) {
 
   y.backward(torch::ones_like(y));
 
-  ASSERT_EQ(y.ndimension(), 1);
+  ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 10);
   ASSERT_LT(y.sum().item<float>(), 130); // Probably
