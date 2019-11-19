@@ -475,6 +475,7 @@
         - THTensor* self
     - cname: cmin
       return: argument 0
+      scalar_check: false
       arguments:
       - arg: THTensor* result
         output: True
@@ -514,6 +515,7 @@
         - THTensor* self
     - cname: cmax
       return: argument 0
+      scalar_check: false
       arguments:
       - arg: THTensor* result
         output: True
@@ -562,6 +564,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* values
       output: True
@@ -767,6 +770,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -855,6 +859,7 @@
   cuda_bool: True
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -869,6 +874,7 @@
   cuda_bool: True
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -888,6 +894,7 @@
 [[
   name: _th_fmod
   return: argument 0
+  scalar_check: false
   variants:
     - function
   options:
@@ -925,6 +932,7 @@
 [[
   name: _th_remainder
   return: argument 0
+  scalar_check: false
   variants:
     - function
   options:
@@ -1041,7 +1049,6 @@
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
     ${THTensor}_diag(${state,}result_, self_, diagonal);
-    result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
   name: _th_addmm
@@ -1274,6 +1281,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* res1
       output: True
@@ -1414,6 +1422,7 @@
     - CPU
     - CUDA
   return: argument 1,2
+  scalar_check: false
   arguments:
     - arg: THTensor* probs
     - arg: THIndexTensor* J

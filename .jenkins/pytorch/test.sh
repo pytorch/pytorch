@@ -12,6 +12,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
+  # TODO move this to docker
+  pip_install unittest-xml-reporting
+
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
