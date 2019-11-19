@@ -12,10 +12,16 @@ class NativePeer implements INativePeer {
 
   private final HybridData mHybridData;
 
-  private static native HybridData initHybrid(String moduleAbsolutePath);
+  private static native HybridData initHybridFilePath(String moduleAbsolutePath);
+
+  private static native HybridData initHybridReadAdapter(ReadAdapter readAdapter);
 
   NativePeer(String moduleAbsolutePath) {
-    mHybridData = initHybrid(moduleAbsolutePath);
+    mHybridData = initHybridFilePath(moduleAbsolutePath);
+  }
+
+  NativePeer(ReadAdapter readAdapter) {
+    mHybridData = initHybridReadAdapter(readAdapter);
   }
 
   public void resetNative() {

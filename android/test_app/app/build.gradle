@@ -51,6 +51,9 @@ android {
         pickFirst '**/libfbjni.so'
         doNotStrip '**.so'
     }
+    aaptOptions {
+        noCompress 'pt'
+    }
 }
 
 dependencies {

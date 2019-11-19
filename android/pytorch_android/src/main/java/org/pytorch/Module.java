@@ -23,6 +23,13 @@ public class Module {
     return new Module(new NativePeer(modelPath));
   }
 
+  public static Module load(final ReadAdapter readAdapter) {
+    if (!NativeLoader.isInitialized()) {
+      NativeLoader.init(new SystemDelegate());
+    }
+    return new Module(new NativePeer(readAdapter));
+  }
+
   Module(INativePeer nativePeer) {
     this.mNativePeer = nativePeer;
   }

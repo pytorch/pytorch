@@ -1,6 +1,5 @@
 package org.pytorch.testapp;
 
-import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -11,12 +10,9 @@ import android.widget.TextView;
 import org.pytorch.IValue;
 import org.pytorch.Module;
 import org.pytorch.Tensor;
+import org.pytorch.android.AssetReadAdapter;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.FloatBuffer;
 
 import androidx.annotation.Nullable;
@@ -90,9 +86,11 @@ public class MainActivity extends AppCompatActivity {
   @Nullable
   protected Result doModuleForward() {
     if (mModule == null) {
-      final String moduleFileAbsoluteFilePath = new File(
-          assetFilePath(this, BuildConfig.MODULE_ASSET_NAME)).getAbsolutePath();
-      mModule = Module.load(moduleFileAbsoluteFilePath);
+      try {
+        mModule = Module.load(new AssetReadAdapter(getAssets(), BuildConfig.MODULE_ASSET_NAME));
+      } catch (IOException e) {
+        Log.e(TAG, "Error loading module from asset InputStream", e);
+      }
       mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * 224 * 224);
       mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 3, 224, 224});
     }
@@ -105,28 +103,6 @@ public class MainActivity extends AppCompatActivity {
     final long analysisDuration = SystemClock.elapsedRealtime() - startTime;
 
     return new Result(scores, moduleForwardDuration, analysisDuration);
-  }
-
-  public static String assetFilePath(Context context, String assetName) {
-    File file = new File(context.getFilesDir(), assetName);
-    if (file.exists() && file.length() > 0) {
-      return file.getAbsolutePath();
-    }
-
-    try (InputStream is = context.getAssets().open(assetName)) {
-      try (OutputStream os = new FileOutputStream(file)) {
-        byte[] buffer = new byte[4 * 1024];
-        int read;
-        while ((read = is.read(buffer)) != -1) {
-          os.write(buffer, 0, read);
-        }
-        os.flush();
-      }
-      return file.getAbsolutePath();
-    } catch (IOException e) {
-      Log.e(TAG, "Error process asset " + assetName + " to file path");
-    }
-    return null;
   }
 
   static class Result {
