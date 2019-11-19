@@ -5,7 +5,7 @@ Remote Reference Protocol
   The :ref:`rref` is experimental and subject to change.
 
 This note describes design details of Remote Reference protocol and walk through
-message flows in different scenarios. Make sure you're familiar withthe
+message flows in different scenarios. Make sure you're familiar with the
 :ref:`distributed-rpc-framework` before proceeding.
 
 Background
@@ -186,8 +186,9 @@ G1 and G2. G1 is obvious. For G2, the ``OwnerRRef`` is a child of the
 ``UserRRef``, and the ``UserRRef`` is not deleted until it receives the ACK from
 the owner.
 
-.. image:: ../_static/img/rpc/user_to_owner_ret.png
-  :scale: 50%
+.. image:: https://user-images\.githubusercontent\.com/16999635/69164772-98181300-0abe-11ea-93a7-9ad9f757cd94.png
+    :alt: user_to_owner_ret.png
+    :width: 500 px
 
 The diagram above shows the message flow, where solid arrow contains user
 function and dashed arrow are builtin messages. Note that the first two messages
@@ -226,8 +227,9 @@ deleted before usage as we do not guarantee message delivery order. This is done
 by creating a child ``ForkId`` of RRef, holding them in a map until receives the
 owner confirms the child ``ForkId``. The figure below shows the message flow.
 
-.. image:: ../_static/img/rpc/user_to_owner_arg.png
-  :scale: 50%
+.. image:: https://user-images.githubusercontent.com/16999635/69164845-b67e0e80-0abe-11ea-93fa-d24674e75a2b.png
+    :alt: user_to_owner_arg.png
+    :width: 500 px
 
 
 Note that the ``UserRRef`` could be deleted on B before func finishes or even
@@ -259,8 +261,9 @@ owner immediately, as the parent is the owner.
   dist.rpc_async('C', func, args=(rref, ))
 
 
-.. image:: ../_static/img/rpc/owner_to_user.png
-  :scale: 50%
+.. image:: https://user-images.githubusercontent.com/16999635/69164921-c990de80-0abe-11ea-9250-d32ad00cf4ae.png
+    :alt: owner_to_user.png
+    :width: 500 px
 
 The figure above shows the message flow. Note that when the OwnerRRef exits
 scope after the rpc_async call, it will not be deleted, because internally
@@ -288,8 +291,9 @@ user (child ``UserRRef``), and the owner all need to get involved.
   # say the rref has RRefId 100 and ForkId 1
   rpc.rpc_async('C', func, args=(rref, ))
 
-.. image:: ../_static/img/rpc/user_to_user.png
-  :scale: 50%
+.. image:: https://user-images.githubusercontent.com/16999635/69164971-d6adcd80-0abe-11ea-971d-6b7af131f0fd.png
+    :alt: user_to_user.png
+    :width: 500 px
 
 When C receives the child ``UserRRef`` from A, it sends out a fork request to
 the owner B. Later, when the B confirms the ``UserRRef`` on C, C will perform
