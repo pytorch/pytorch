@@ -1020,6 +1020,24 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, GroupNorm) {
+  GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = model(x);
+  auto y_exp = torch::group_norm(x, 2, model->weight, model->bias, 2e-5);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (auto i = 0; i < 2; i++) {
+    ASSERT_EQ(y.size(i), 2);
+  }
+
+  ASSERT_EQ(model->weight.grad().numel(), 2);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, Bilinear) {
   Bilinear model(5, 3, 2);
   auto x1 = torch::randn({10, 5}, torch::requires_grad());
@@ -1169,6 +1187,43 @@ TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
   auto input = torch::zeros({{1, 2}}, torch::kLong);
   input[0] = torch::tensor({1, 0});
   ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
+}
+
+TEST_F(ModulesTest, AlphaDropout) {
+  AlphaDropout alpha_dropout(0.5);
+  torch::Tensor x = torch::ones(100, torch::requires_grad());
+  torch::Tensor y = alpha_dropout(x);
+
+  y.backward(torch::ones_like(y));
+
+  ASSERT_EQ(y.ndimension(), 1);
+  ASSERT_EQ(y.size(0), 100);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 40); // Probably
+
+  alpha_dropout->eval();
+  y = alpha_dropout(x);
+
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
+TEST_F(ModulesTest, FeatureAlphaDropout) {
+  FeatureAlphaDropout feature_alpha_dropout(0.5);
+  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
+  torch::Tensor y = feature_alpha_dropout(x);
+
+  y.backward(torch::ones_like(y));
+
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 10);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 40); // Probably
+
+  feature_alpha_dropout->eval();
+  y = feature_alpha_dropout(x);
+
+  ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
 TEST_F(ModulesTest, Dropout) {
@@ -2104,6 +2159,25 @@ TEST_F(ModulesTest, CELU) {
         torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
+}
+
+TEST_F(ModulesTest, GLU) {
+  int64_t dim = 1;
+  GLU model(dim);
+  auto input = torch::randn({4, 2}, torch::requires_grad());
+  auto output = model->forward(input);
+  auto input_size = input.sizes()[dim] / 2;
+  auto first_half = input.narrow(dim, 0, input_size);
+  auto second_half = input.narrow(dim, input_size, input_size);
+  auto expected = first_half * torch::sigmoid(second_half);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(output.allclose(expected));
+
+  GLU model_default_options;
+  ASSERT_TRUE(model_default_options->forward(input).allclose(expected));
 }
 
 TEST_F(ModulesTest, GELU) {
@@ -3113,6 +3187,15 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
+TEST_F(ModulesTest, PrettyPrintGroupNorm) {
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2))),
+    "torch::nn::GroupNorm(2, 2, eps=1e-05, affine=true)");
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2).eps(2e-5).affine(false))),
+    "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
+}
+
 TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
   ASSERT_EQ(
     c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
@@ -3341,6 +3424,11 @@ TEST_F(ModulesTest, PrettyPrintSELU) {
             "torch::nn::SELU(inplace=true)");
 }
 
+TEST_F(ModulesTest, PrettyPrintGLU) {
+  ASSERT_EQ(c10::str(GLU()), "torch::nn::GLU(dim=-1)");
+  ASSERT_EQ(c10::str(GLU(1)), "torch::nn::GLU(dim=1)");
+}
+
 TEST_F(ModulesTest, PrettyPrintHardshrink) {
   ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(0.5)");
   ASSERT_EQ(c10::str(Hardshrink(HardshrinkOptions().lambda(42.42))),
@@ -3490,4 +3578,22 @@ TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
     "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
   ASSERT_EQ(c10::str(CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10))),
     "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
+}
+
+TEST_F(ModulesTest, PrettyPrintAlphaDropout) {
+  ASSERT_EQ(c10::str(AlphaDropout()),
+    "torch::nn::AlphaDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(AlphaDropout(AlphaDropoutOptions(0.2))),
+    "torch::nn::AlphaDropout(p=0.2, inplace=false)");
+  ASSERT_EQ(c10::str(AlphaDropout(AlphaDropoutOptions(0.2).inplace(true))),
+    "torch::nn::AlphaDropout(p=0.2, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
+  ASSERT_EQ(c10::str(FeatureAlphaDropout()),
+    "torch::nn::FeatureAlphaDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2))),
+    "torch::nn::FeatureAlphaDropout(p=0.2, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2).inplace(true))),
+    "torch::nn::FeatureAlphaDropout(p=0.2, inplace=true)");
 }
