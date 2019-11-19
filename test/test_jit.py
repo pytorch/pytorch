@@ -2004,6 +2004,32 @@ graph(%Ra, %Rb):
         with self.assertRaisesRegex(RuntimeError, "Only Tensors and "):
             traced_fn = torch.jit.trace(trace_named_tuple, (my_tuple,))
 
+    def test_trace_named_tuple_with_script(self):
+        global MyTuple
+        MyTuple = namedtuple('MyTuple', ['x', 'y'])
+        MyTuple.__annotations__ = {"x": Tuple[torch.Tensor, torch.Tensor], "y": torch.Tensor}
+
+        class TestTraceModule(nn.Module):
+            def __init__(self):
+                super(TestTraceModule, self).__init__()
+
+            def forward(self, my_tuple):
+                return my_tuple.x[0] + my_tuple.x[1] + my_tuple.y
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, my_tuple):
+                # type: (MyTuple) -> Tensor
+                return my_tuple.y
+
+        # first create a script module that creates MyTuple in python_cu
+        scripted_mod = torch.jit.script(TestModule())
+        # then test if it could be used in tracing
+        my_tuple_input = MyTuple((torch.randn(2, 3), torch.randn(2, 3)), torch.randn(2, 3))
+        self.checkTrace(TestTraceModule(), (my_tuple_input,))
+
     def test_trace_random(self):
         def f(mean, std):
             return torch.normal(mean, std)

@@ -186,12 +186,11 @@ struct TORCH_API CompilationUnit {
   }
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
-    for (const auto& cls : classes_) {
-      if (cls->name()->qualifiedName() == name.qualifiedName()) {
-        return cls->expect<TupleType>();
-      }
+    auto type = get_type(name);
+    if (!type) {
+      return nullptr;
     }
-    return nullptr;
+    return type->expect<TupleType>();
   }
 
   c10::NamedTypePtr get_type(const c10::QualifiedName& name) const {

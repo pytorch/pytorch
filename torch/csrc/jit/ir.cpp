@@ -1445,9 +1445,6 @@ Node* Graph::createWithSubgraph(Symbol kind) {
 }
 
 Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
-  TORCH_INTERNAL_ASSERT(
-      !tuple_type || tuple_type->schema(),
-      "only pass tuple_type when creating a named tuple");
   if (!tuple_type) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
     tuple_type = TupleType::create(std::move(types));

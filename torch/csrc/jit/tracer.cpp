@@ -204,19 +204,8 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
   } else if (iv.isTuple()) {
     auto tuple = iv.toTuple()->elements();
     TupleTypePtr tuple_type = iv.type()->cast<TupleType>();
-    Node* tuple_node = nullptr;
-    if (tuple_type->name() && tuple_type->schema()) {
-      // if tuple have name and schema, then it's a named tuple
-      // pass the type to tuple node creation
-      tuple_node = graph->createTuple(
-          fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }),
-          tuple_type);
-    } else {
-      // else this is a normal tuple
-      tuple_node = graph->createTuple(
-          fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
-    }
-
+    Node* tuple_node = graph->createTuple(
+        fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }), tuple_type);
     graph->insertNode(tuple_node);
     return tuple_node->output();
   } else {
