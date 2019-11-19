@@ -1372,7 +1372,7 @@ TEST_F(ModulesTest, BatchNorm2d) {
   BatchNorm2d bn(5);
   bn->eval();
 
-  auto input = torch::randn({2, 5, 2, 2}, torch::requires_grad());
+  auto input = torch::arange(2. * 5 * 2 * 2).view({2, 5, 2, 2}).requires_grad_();
   auto output = bn->forward(input);
   auto expected = torch::tensor({{{{ 0.0000,  1.0000},
                                    { 2.0000,  3.0000}},
@@ -1394,7 +1394,6 @@ TEST_F(ModulesTest, BatchNorm2d) {
                                    {33.9998, 34.9998}},
                                   {{35.9998, 36.9998},
                                    {37.9998, 38.9998}}}});
-  std::cout << output << std::endl;
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
@@ -1443,7 +1442,7 @@ TEST_F(ModulesTest, BatchNorm3d) {
   BatchNorm3d bn(5);
   bn->eval();
 
-  auto input = torch::randn({2, 5, 2, 2, 2}, torch::requires_grad());
+  auto input = torch::arange(2. * 5 * 2 * 2 * 2).view({2, 5, 2, 2, 2}).requires_grad_();
   auto output = bn->forward(input);
   auto expected = torch::tensor({{{{{ 0.0000,  1.0000},
                                     { 2.0000,  3.0000}},
@@ -1485,7 +1484,6 @@ TEST_F(ModulesTest, BatchNorm3d) {
                                     {73.9996, 74.9996}},
                                    {{75.9996, 76.9996},
                                     {77.9996, 78.9996}}}}});
-  std::cout << output << std::endl;
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
