@@ -11,9 +11,9 @@ from torch.quantization import \
     QConfigDynamic, get_observer_dict, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver,\
-    RecordingObserver, MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver, \
-    QuantWrapper, default_eval_fn
+    default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
+    PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
+    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
@@ -497,6 +497,30 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
+    def test_per_channel_quantize(self):
+        r"""Test quantization for per_channel dynamic quantization
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            torch.nn.Linear: per_channel_dynamic_qconfig
+        }
+
+        prepare_dynamic(model, qconfig_dict)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
+
+        checkQuantized(model)
         # test one line API
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
