@@ -488,25 +488,6 @@ class RpcTest(RpcAgentTestFixture):
             )
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
-    @dist_init
-    def test_sync_rpc(self):
-        dst_rank = (self.rank + 1) % self.world_size
-        for i in range(20):
-            rpc.sync_rpc()
-            n = i + self.rank + 1
-            ret1 = rpc.rpc_sync(
-                "worker{}".format(dst_rank),
-                torch.add,
-                args=(torch.ones(n, n), torch.ones(n, n)),
-            )
-            rpc.sync_rpc()
-            ret2 = rpc.rpc_sync(
-                "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
-            )
-            rpc.sync_rpc()
-            self.assertEqual(ret1, torch.ones(n, n) * 2)
-            self.assertEqual(ret2, torch.ones(n, n) * 3)
-
     @dist_init(setup_rpc=False)
     def test_join_rpc(self):
         # Initialize RPC.
