@@ -500,8 +500,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     }
 
     if (sleepTime == INFINITE_TIMEOUT) {
-      futureTimeoutCV_.wait_until(
-          lock, std::chrono::time_point<std::chrono::system_clock>::max());
+      futureTimeoutCV_.wait(lock);
     } else {
       futureTimeoutCV_.wait_for(lock, sleepTime);
     }
@@ -545,11 +544,11 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
     } else {
       const std::vector<int64_t>& futureIDs = it->second;
       for (const auto& futureID : futureIDs) {
-        auto it = futures_.find(futureID);
+        auto futureIt = futures_.find(futureID);
         TORCH_INTERNAL_ASSERT(
-            it != futures_.end(),
+            futureIt != futures_.end(),
             "Race Condition - Expected future does not exist in map");
-        const auto futInfo = it->second;
+        const auto futInfo = futureIt->second;
         timedOutFutures.push_back(futInfo);
         futures_.erase(futureID);
       }

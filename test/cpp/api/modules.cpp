@@ -902,6 +902,24 @@ TEST_F(ModulesTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, GroupNorm) {
+  GroupNorm model(GroupNormOptions(2, 2).eps(2e-5));
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = model(x);
+  auto y_exp = torch::group_norm(x, 2, model->weight, model->bias, 2e-5);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (auto i = 0; i < 2; i++) {
+    ASSERT_EQ(y.size(i), 2);
+  }
+
+  ASSERT_EQ(model->weight.grad().numel(), 2);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, Bilinear) {
   Bilinear model(5, 3, 2);
   auto x1 = torch::randn({10, 5}, torch::requires_grad());
@@ -1988,6 +2006,25 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
+TEST_F(ModulesTest, GLU) {
+  int64_t dim = 1;
+  GLU model(dim);
+  auto input = torch::randn({4, 2}, torch::requires_grad());
+  auto output = model->forward(input);
+  auto input_size = input.sizes()[dim] / 2;
+  auto first_half = input.narrow(dim, 0, input_size);
+  auto second_half = input.narrow(dim, input_size, input_size);
+  auto expected = first_half * torch::sigmoid(second_half);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(output.allclose(expected));
+
+  GLU model_default_options;
+  ASSERT_TRUE(model_default_options->forward(input).allclose(expected));
+}
+
 TEST_F(ModulesTest, GELU) {
   GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
@@ -2948,6 +2985,15 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
+TEST_F(ModulesTest, PrettyPrintGroupNorm) {
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2))),
+    "torch::nn::GroupNorm(2, 2, eps=1e-05, affine=true)");
+  ASSERT_EQ(
+    c10::str(GroupNorm(GroupNormOptions(2, 2).eps(2e-5).affine(false))),
+    "torch::nn::GroupNorm(2, 2, eps=2e-05, affine=false)");
+}
+
 TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
   ASSERT_EQ(
     c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
@@ -3174,6 +3220,11 @@ TEST_F(ModulesTest, PrettyPrintSELU) {
   ASSERT_EQ(c10::str(SELU()), "torch::nn::SELU()");
   ASSERT_EQ(c10::str(SELU(SELUOptions().inplace(true))),
             "torch::nn::SELU(inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintGLU) {
+  ASSERT_EQ(c10::str(GLU()), "torch::nn::GLU(dim=-1)");
+  ASSERT_EQ(c10::str(GLU(1)), "torch::nn::GLU(dim=1)");
 }
 
 TEST_F(ModulesTest, PrettyPrintHardshrink) {

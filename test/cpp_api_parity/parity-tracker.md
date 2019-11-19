@@ -64,7 +64,7 @@ torch.nn.Softsign|Yes|No
 torch.nn.Tanh|Yes|No
 torch.nn.Tanhshrink|Yes|No
 torch.nn.Threshold|Yes|No
-torch.nn.GLU|No|No
+torch.nn.GLU|Yes|No
 torch.nn.Softmin|Yes|No
 torch.nn.Softmax|Yes|No
 torch.nn.Softmax2d|Yes|No
@@ -73,7 +73,7 @@ torch.nn.AdaptiveLogSoftmaxWithLoss|No|No
 torch.nn.BatchNorm1d|Yes|No
 torch.nn.BatchNorm2d|Yes|No
 torch.nn.BatchNorm3d|Yes|No
-torch.nn.GroupNorm|No|No
+torch.nn.GroupNorm|Yes|No
 torch.nn.SyncBatchNorm|No|No
 torch.nn.InstanceNorm1d|No|No
 torch.nn.InstanceNorm2d|No|No

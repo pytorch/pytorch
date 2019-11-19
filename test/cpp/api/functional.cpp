@@ -752,6 +752,19 @@ TEST_F(FunctionalTest, SELU) {
   }
 }
 
+TEST_F(FunctionalTest, GLU) {
+  int64_t dim = 1;
+  auto input = torch::randn({4, 2}, torch::requires_grad());
+  auto output = F::glu(input, dim);
+  auto input_size = input.sizes()[dim] / 2;
+  auto first_half = input.narrow(dim, 0, input_size);
+  auto second_half = input.narrow(dim, input_size, input_size);
+  auto expected = first_half * torch::sigmoid(second_half);
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(F::glu(input).allclose(expected));
+}
+
 TEST_F(FunctionalTest, GELU) {
   GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
@@ -1011,6 +1024,13 @@ TEST_F(FunctionalTest, LayerNorm) {
   const auto input = torch::randn({2, 2});
   auto y = F::layer_norm(input, F::LayerNormFuncOptions({2, 2}).eps(2e-5));
   auto y_exp = torch::layer_norm(input, {2, 2}, torch::Tensor(), torch::Tensor(), 2e-5);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, GroupNorm) {
+  const auto input = torch::randn({2, 2});
+  auto y = F::group_norm(input, F::GroupNormFuncOptions(2).eps(2e-5));
+  auto y_exp = torch::group_norm(input, 2, torch::Tensor(), torch::Tensor(), 2e-5);
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 

@@ -12,14 +12,16 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import RRef
 from common_utils import load_tests
-from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
+import dist_utils
+from dist_utils import dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
+from rpc_agent_test_fixture import RpcAgentTestFixture
 
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
+            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
 
     return decorator
@@ -210,15 +212,7 @@ load_tests = load_tests
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-class RpcTest(object):
-    @property
-    def world_size(self):
-        return 4
-
-    @property
-    def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
-
+class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):
         n = self.rank + 1
@@ -281,7 +275,7 @@ class RpcTest(object):
 
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_register_rpc_backend_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
@@ -298,7 +292,7 @@ class RpcTest(object):
                 backend_name, stub_start_rpc_backend_handler
             )
 
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker1",
             backend=backend,
             init_method=self.init_method,
@@ -307,14 +301,14 @@ class RpcTest(object):
         )
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            rpc._init_rpc_backend(
+                backend=self.rpc_backend,
                 store=store,
                 self_name="duplicate_name",
                 self_rank=self.rank,
@@ -322,11 +316,11 @@ class RpcTest(object):
             )
         rpc.join_rpc()
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker{}".format(self.rank),
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            backend=self.rpc_backend,
             init_method=self.init_method,
             self_rank=self.rank,
             worker_name_to_id=self.worker_name_to_id,
@@ -346,23 +340,23 @@ class RpcTest(object):
         dist.barrier()
 
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
-            rpc.init_model_parallel(
+            rpc.init_rpc(
                 self_name="worker{}".format(self.rank),
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                backend=self.rpc_backend,
                 init_method=self.init_method,
                 self_rank=self.rank,
                 worker_name_to_id=self.worker_name_to_id,
             )
         rpc.join_rpc()
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_invalid_names(self):
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            rpc._init_rpc_backend(
+                backend=self.rpc_backend,
                 store=store,
                 self_name="abc*",
                 self_rank=self.rank,
@@ -378,8 +372,8 @@ class RpcTest(object):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            rpc._init_rpc_backend(
+                backend=self.rpc_backend,
                 store=store,
                 self_name=" ",
                 self_rank=self.rank,
@@ -393,8 +387,8 @@ class RpcTest(object):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            rpc._init_rpc_backend(
+                backend=self.rpc_backend,
                 store=store,
                 self_name="",
                 self_rank=self.rank,
@@ -410,8 +404,8 @@ class RpcTest(object):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            rpc._init_rpc_backend(
+                backend=self.rpc_backend,
                 store=store,
                 self_name="".join(["a" for i in range(500)]),
                 self_rank=self.rank,
@@ -517,12 +511,12 @@ class RpcTest(object):
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_join_rpc(self):
         # Initialize RPC.
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            backend=self.rpc_backend,
             init_method=self.init_method,
             self_rank=self.rank,
             worker_name_to_id=self.worker_name_to_id,
@@ -1039,7 +1033,7 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @unittest.skip("Test is flaky on ASAN, see https://github.com/pytorch/pytorch/issues/29117")
-    @dist_init(setup_model_parallel=True)
+    @dist_init(setup_rpc=True)
     def test_call_method_on_rref(self):
         """
         Tests that it is possible to call an instance method on a remote objet
@@ -1066,13 +1060,12 @@ class RpcTest(object):
 
         self.assertEqual(result, sum(vals))
 
-
     @dist_init(setup_model_parallel=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker{}".format(self.rank),
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            backend=self.rpc_backend,
             init_method=self.init_method,
             self_rank=self.rank,
             worker_name_to_id=self.worker_name_to_id,
@@ -1117,11 +1110,11 @@ class RpcTest(object):
         def test_func():
             return "expected result"
 
-        if TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
+        if dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):
-        @dist_init(setup_model_parallel=False)
+        @dist_init(setup_rpc=False)
         def test_func(self):
             return "expected result"
 
