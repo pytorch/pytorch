@@ -1394,6 +1394,7 @@ TEST_F(ModulesTest, BatchNorm2d) {
                                    {33.9998, 34.9998}},
                                   {{35.9998, 36.9998},
                                    {37.9998, 38.9998}}}});
+  std::cout << output << std::endl;
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
@@ -1484,6 +1485,7 @@ TEST_F(ModulesTest, BatchNorm3d) {
                                     {73.9996, 74.9996}},
                                    {{75.9996, 76.9996},
                                     {77.9996, 78.9996}}}}});
+  std::cout << output << std::endl;
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
