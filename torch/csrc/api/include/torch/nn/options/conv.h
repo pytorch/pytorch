@@ -174,13 +174,13 @@ struct ConvTransposeFuncOptions {
   TORCH_ARG(ExpandingArray<D>, dilation) = 1;
 };
 
-/// `ConvTransposeFuncOptions` specialized for 1-D convolution.
+/// `ConvTransposeFuncOptions` specialized for 1-D convolution transpose.
 using ConvTranspose1dFuncOptions = ConvTransposeFuncOptions<1>;
 
-/// `ConvTransposeFuncOptions` specialized for 2-D convolution.
+/// `ConvTransposeFuncOptions` specialized for 2-D convolution transpose.
 using ConvTranspose2dFuncOptions = ConvTransposeFuncOptions<2>;
 
-/// `ConvTransposeFuncOptions` specialized for 3-D convolution.
+/// `ConvTransposeFuncOptions` specialized for 3-D convolution transpose.
 using ConvTranspose3dFuncOptions = ConvTransposeFuncOptions<3>;
 
 } // namespace functional
