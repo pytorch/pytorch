@@ -214,7 +214,7 @@ Tensor empty_like(
   if (self.is_quantized()) {
 
     auto memory_format =
-        optional_memory_format.value_or(MemoryFormat::Contiguous);
+        optional_memory_format.value_or(MemoryFormat::Preserve);
 
     // TODO: To support all features of MemoryFormat::Preserve we need to add
     // _empty_affine_quantized_strided function and use it similarly to
@@ -253,7 +253,7 @@ Tensor empty_like(
   Tensor result;
 
   auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
+      optional_memory_format.value_or(MemoryFormat::Preserve);
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options);
