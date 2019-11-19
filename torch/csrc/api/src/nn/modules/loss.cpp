@@ -352,7 +352,8 @@ void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
 
 Tensor BCEWithLogitsLossImpl::forward(
   const Tensor& input, const Tensor& target) {
-  return F::binary_cross_entropy_with_logits(input, target, options);
+  return F::detail::binary_cross_entropy_with_logits(input, target,
+    options.weight(), options.pos_weight(), options.reduction());
 }
 
 } // namespace nn

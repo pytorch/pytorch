@@ -470,6 +470,8 @@ inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
   return detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
 }
 
+// ============================================================================
+
 namespace detail {
 inline Tensor nll_loss(
     const Tensor& input,
@@ -548,6 +550,8 @@ inline Tensor nll_loss(
     options.reduction());
 }
 
+// ============================================================================
+
 namespace detail {
 inline Tensor cross_entropy(
     const Tensor& input,
@@ -589,9 +593,13 @@ inline Tensor cross_entropy(
       options.reduction());
 }
 
+// ============================================================================
+
+namespace detail {
 inline Tensor binary_cross_entropy_with_logits(
   const Tensor& input, const Tensor& target,
-  const BCEWithLogitsLossOptions& options = {}) {
+  const Tensor& weight, const Tensor& pos_weight,
+  BCEWithLogitsLossOptions::reduction_t reduction) {
 
   TORCH_CHECK(target.sizes() == input.sizes(),
     "Target size (", target.sizes(),
@@ -600,8 +608,15 @@ inline Tensor binary_cross_entropy_with_logits(
   );
 
   return torch::binary_cross_entropy_with_logits(input, target,
-    options.weight(), options.pos_weight(),
-    enumtype::reduction_get_enum(options.reduction()));
+    weight, pos_weight, enumtype::reduction_get_enum(reduction));
+}
+} // namespace detail
+
+inline Tensor binary_cross_entropy_with_logits(
+  const Tensor& input, const Tensor& target,
+  const BCEWithLogitsLossFuncOptions& options = {}) {
+  return detail::binary_cross_entropy_with_logits(input, target,
+    options.weight(), options.pos_weight(), options.reduction());
 }
 
 } // namespace functional
