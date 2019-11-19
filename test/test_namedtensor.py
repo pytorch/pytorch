@@ -923,12 +923,12 @@ class TestNamedTensor(TestCase):
             method('narrow', 0, 0, 1),
 
             # creation functions
-            fn('empty_like'),
-            fn('zeros_like'),
-            fn('ones_like'),
-            fn('full_like', 3.14),
-            fn('rand_like'),
-            fn('randn_like'),
+            fn('empty_like', memory_format=torch.preserve_format),
+            fn('zeros_like', memory_format=torch.preserve_format),
+            fn('ones_like', memory_format=torch.preserve_format),
+            fn('full_like', 3.14, memory_format=torch.preserve_format),
+            fn('rand_like', memory_format=torch.preserve_format),
+            fn('randn_like', memory_format=torch.preserve_format),
 
             # bernoulli variants
             method('bernoulli_', 0.5),

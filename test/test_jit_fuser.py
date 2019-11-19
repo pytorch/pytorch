@@ -781,7 +781,7 @@ class TestFuser(JitTestCase):
 
             @torch.jit.script_method
             def create(self, x):
-                return x * x + x + torch.rand_like(x)
+                return x * x + x + torch.rand_like(x, memory_format=torch.contiguous_format)
 
         x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
         m = M()
@@ -822,7 +822,7 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_rand_broadcast_cuda(self):
         def fn_test_rand(x, y):
-            r = torch.rand_like(y)
+            r = torch.rand_like(y, memory_format=torch.contiguous_format)
             return r * x + x
 
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
