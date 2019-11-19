@@ -1160,6 +1160,10 @@ def softsign(input):
 
 softplus = _add_docstr(torch._C._nn.softplus, r"""
 softplus(input, beta=1, threshold=20) -> Tensor
+
+Applies element-wise, the function :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+
+See :class:`~torch.nn.Softmax` for more details.
 """)
 
 
