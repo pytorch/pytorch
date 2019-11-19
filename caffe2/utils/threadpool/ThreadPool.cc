@@ -84,7 +84,6 @@ ThreadPool::ThreadPool(int numThreads)
 ThreadPool::~ThreadPool() {}
 
 int ThreadPool::getNumThreads() const {
-  std::lock_guard<std::mutex> guard(executionMutex_);
   return numThreads_;
 }
 
