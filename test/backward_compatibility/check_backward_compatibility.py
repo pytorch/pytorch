@@ -8,25 +8,25 @@ import torch
 from torch._C import parse_schema
 
 
+# The date specifies how long the whitelist exclusion should apply to.
+#
+#   - If we NEVER give BC guarantee for an operator, you can put the
+#     date arbitrarily far in the future.
+#   - Otherwise, pick a date that is far enough in the future that you
+#     believe you can land your diff before then.
+#
+# Whitelist entries can be removed after the date listed on them passes.
 white_list = [
-    ('quantize', datetime.date(2019, 10, 1)),
-    ('q_per_channel_axis', datetime.date(2019, 10, 1)),
-    ('fbgemm_is_cpu_supported', datetime.date(2019, 10, 1)),
     ('c10_experimental', datetime.date(2020, 1, 1)),
-    ('index_fill', datetime.date(2019, 10, 30)),
-    ('align_to', datetime.date(2019, 10, 30)),
-    ('unflatten', datetime.date(2019, 10, 30)),
-    ('softmax', datetime.date(2019, 10, 30)),
-    ('slow_conv_transpose2d_backward', datetime.date(2019, 10, 30)),
-    ('slow_conv_transpose3d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv2d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv_depthwise2d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv3d_backward', datetime.date(2019, 10, 30)),
-    ('empty_like', datetime.date(2019, 10, 30)),
-    ('rand_like', datetime.date(2019, 11, 11)),
-    ('ones_like', datetime.date(2019, 11, 11)),
-    ('full_like', datetime.date(2019, 11, 11)),
-    ('AutogradAnyNonZero', datetime.date(2019, 11, 11)),
+    ('_batch_norm_impl_index', datetime.date(2019, 11, 15)),
+    ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
+    ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
+    ('append', datetime.date(2019, 11, 22)),
+    ('_prim::ListConstruct', datetime.date(2019, 11, 22)),
+    ('thnn_conv3d', datetime.date(9999, 1, 1)),
+    ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
 ]
 
 

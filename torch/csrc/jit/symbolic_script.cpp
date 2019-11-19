@@ -473,7 +473,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None, None
 
-            return torch.full_like(self, fill_value), backward
+            return torch.full_like(self, fill_value, memory_format=1), backward
 
         def lerp_0(self,
                    end,
@@ -562,7 +562,7 @@ const std::vector<std::string> functions = {
         def index(self,
                   indices: List[Tensor]):
             def backward(grad_output):
-                grad_self = torch.zeros_like(self).index_put_(indices, grad_output, True)
+                grad_self = torch.zeros_like(self, memory_format=1).index_put_(indices, grad_output, True)
                 return grad_self, None
 
             return torch.index(self, indices), backward
@@ -608,7 +608,7 @@ const std::vector<std::string> functions = {
                   exponent: number):
             def backward(grad_output):
                 if float(exponent) == 0.0:
-                    grad_self = torch.zeros_like(self)
+                    grad_self = torch.zeros_like(self, memory_format=1)
                 else:
                     grad_self = grad_output * exponent * torch.pow(self, float(exponent) - 1)
                 return grad_self, None
@@ -621,7 +621,7 @@ const std::vector<std::string> functions = {
             exponent_size = torch._size_if_not_equal(exponent.size(), result.size())
 
             def backward(grad_output):
-                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
+                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self, memory_format=1), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
                 grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent_size)
                 return grad_self, grad_exponent
 
@@ -864,7 +864,7 @@ const std::vector<std::string> functions = {
 
         def ceil(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.ceil(self), backward
 
@@ -889,7 +889,7 @@ const std::vector<std::string> functions = {
 
         def floor(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.floor(self), backward
 
@@ -938,7 +938,7 @@ const std::vector<std::string> functions = {
 
         def round(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.round(self), backward
 
@@ -970,7 +970,7 @@ const std::vector<std::string> functions = {
 
         def trunc(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.trunc(self), backward
 
@@ -1078,7 +1078,7 @@ const std::vector<std::string> functions = {
                        eps : float,
                        cudnn_enabled : bool):
 
-            output, save1, save2, impl_idx = torch._batch_norm_impl_index(
+            output, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
                 input, weight, bias, running_mean, running_var, training,
                 momentum, eps, cudnn_enabled)
             has_weight = weight is not None
@@ -1087,7 +1087,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 dinput, dweight, dbias = torch._batch_norm_impl_index_backward(
                     impl_idx, input, grad_output, weight, running_mean, running_var,
-                    save1, save2, training, eps, [True, has_weight, has_bias])
+                    save1, save2, training, eps, [True, has_weight, has_bias], reserve)
                 return dinput, dweight, dbias, None, None, None, None, None, None
 
             return output, backward
@@ -1108,7 +1108,7 @@ const std::vector<std::string> functions = {
 
             input_reshape = input.contiguous().view(1, n, -1)
 
-            bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
+            bn_out, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
                 input_reshape, None, None, None, None, True,
                 0.0, eps, cudnn_enable)
 
@@ -1145,7 +1145,7 @@ const std::vector<std::string> functions = {
 
                 grad_input, _, _ = torch._batch_norm_impl_index_backward(
                     impl_idx, input_reshape, grad_bn_out, None, None, None,
-                    save1, save2, True, eps, [True, False, False])
+                    save1, save2, True, eps, [True, False, False], reserve)
 
                 grad_input = grad_input.view(input.size())
                 return grad_input, None, grad_weight, grad_bias, None, None
@@ -1167,18 +1167,18 @@ const std::vector<std::string> functions = {
             # for cpu backend, where fusions are disabled, a different lowering that is more efficient
             # in the absence of fusion is used
             p1m = 1. - p
-            if use_cuda:
-                mask = torch.rand_like(input) < p1m
-                res = mask.type_as(input) * input * (1./p1m)
+            if train:
+                if use_cuda:
+                    mask = torch.rand_like(input) < p1m
+                    res = mask.type_as(input) * input * (1./p1m)
+                else:
+                    mask = torch.empty_like(input)
+                    mask.bernoulli_(p1m)
+                    res = mask * input / p1m
             else:
-                mask = torch.empty_like(input)
-                mask.bernoulli_(p1m)
-                res = mask * input / p1m
-
-            if not train:
                 p1m = 1.
                 res = input
-                mask = torch.ones_like(input)
+                mask = torch.empty_like(input, memory_format=1)
 
             def backward(grad_output):
                 use_cuda = grad_output.is_cuda
@@ -1252,7 +1252,7 @@ const std::vector<std::string> functions = {
                 grad_input = torch.adaptive_avg_pool3d_backward(grad, input)
             else:
                 # NEVER REACH HERE
-                grad_input = torch.zeros_like(input)
+                grad_input = torch.zeros_like(input, memory_format=1)
                 raise RuntimeError('Input Error: Only 3D, 4D and 5D input Tensors supported')
 
             return grad_input

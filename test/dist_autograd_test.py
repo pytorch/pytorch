@@ -7,7 +7,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+import dist_utils
+from dist_utils import dist_init
+from rpc_agent_test_fixture import RpcAgentTestFixture
 
 import threading
 
@@ -21,6 +23,8 @@ rpc_done = [False, False, False, False]
 ctx_ids = [-1, -1, -1, -1]
 
 known_context_ids = []
+
+requires_grad_tensor = torch.ones(3, 3, requires_grad=True)
 
 # Send rpc done info and context_id to
 # dst_rank = (self.rank + rank_distance) % self.world_size
@@ -59,7 +63,7 @@ def _create_ones_rref_on(dst, sizes):
 # rref tensor equals to the given grad.
 def _compare_owner_value(context_id, rref, grad):
     grads = dist_autograd.get_gradients(context_id)
-    return torch.equal(grads[rref.local_value().wait()], grad)
+    return torch.equal(grads[rref.local_value()], grad)
 
 
 def my_py_add(t1, t2):
@@ -67,12 +71,16 @@ def my_py_add(t1, t2):
 
 
 def my_rref_add(rref_t1, t2):
-    ret = torch.add(rref_t1.local_value().wait(), t2)
+    ret = torch.add(rref_t1.local_value(), t2)
     return ret
 
 
 def my_nested_rref_add(dst, rref_t1, t2):
     return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
+
+
+def ret_requires_grad():
+    return requires_grad_tensor
 
 
 def my_py_nested_call(t1, t2, dst, world_size, hops):
@@ -153,7 +161,7 @@ class ExecMode(Enum):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
-class DistAutogradTest(object):
+class DistAutogradTest(RpcAgentTestFixture):
 
     def _initialize_pg(self):
         # This is for tests using `dist.barrier`.
@@ -177,9 +185,8 @@ class DistAutogradTest(object):
             return rpc.rpc_sync('worker{}'.format(self._next_rank()), method,
                                 args=(args))
         elif ExecMode.REMOTE == exec_mode:
-            rref = rpc.remote('worker{}'.format(self._next_rank()), method,
-                              args=(args))
-            return rref.to_here().wait()
+            return rpc.remote('worker{}'.format(self._next_rank()), method,
+                              args=(args)).to_here()
         else:
             raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
@@ -194,14 +201,6 @@ class DistAutogradTest(object):
 
     def _check_rpc_done(self, rank_distance):
         _check_rpc_done(rank_distance)
-
-    @property
-    def world_size(self):
-        return 4
-
-    @property
-    def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
     @dist_init
     def test_autograd_context(self):
@@ -348,7 +347,7 @@ class DistAutogradTest(object):
             elif ExecMode.REMOTE == exec_mode:
                 ret = rpc.remote(
                     "worker{}".format(dst_rank), fn, args=(t1, t2)
-                ).to_here().wait()
+                ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
@@ -393,12 +392,10 @@ class DistAutogradTest(object):
     def test_graph_for_python_call(self):
         self._test_graph(my_py_add, ExecMode.RPC_SYNC)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_graph_for_builtin_remote_call(self):
         self._test_graph(torch.add, ExecMode.REMOTE)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_graph_for_python_remote_call(self):
         self._test_graph(my_py_add, ExecMode.REMOTE)
@@ -424,7 +421,7 @@ class DistAutogradTest(object):
                     "worker{}".format(dst_rank),
                     my_py_nested_call,
                     args=(t1, t2, dst_rank, self.world_size, 1)
-                ).to_here().wait()
+                ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
@@ -476,7 +473,6 @@ class DistAutogradTest(object):
     def test_graph_for_py_nested_call(self):
         self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_graph_for_py_nested_remote_call(self):
         self._test_graph_for_py_nested_call(ExecMode.REMOTE)
@@ -513,7 +509,7 @@ class DistAutogradTest(object):
                         self.world_size,
                         0
                     )
-                ).to_here().wait()
+                ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
@@ -549,7 +545,6 @@ class DistAutogradTest(object):
     def test_graph_for_py_nested_call_itself(self):
         self._test_graph_for_py_nested_call_itself(ExecMode.RPC_SYNC)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_graph_for_py_nested_remote_call_itself(self):
         self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE)
@@ -570,7 +565,7 @@ class DistAutogradTest(object):
                     "worker{}".format(dst_rank),
                     torch.add,
                     args=(t1, t2)
-                ).to_here().wait()
+                ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
@@ -585,25 +580,57 @@ class DistAutogradTest(object):
 
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
-            if ExecMode.RPC_SYNC == exec_mode:
-                # prev context id is not passed over as tensors do not require
-                # grads
-                with self.assertRaises(RuntimeError):
-                    ctx = dist_autograd._retrieve_context(ctx_ids[1])
-            elif ExecMode.REMOTE == exec_mode:
-                # NB: RRef.to_here() always passes the autograd context to the
-                # the callee, as the caller does not know whether the return
-                # value would contain a requires_grad tensor or not.
-                pass
+            # NB: RRef.to_here() always passes the autograd context to the
+            # the callee, as the caller does not know whether the return
+            # value would contain a requires_grad tensor or not.
+            #
+            # rpc/remote with udf (_set_rpc_done here) also always passes the
+            # autograd context to the callee due to the same reason.
+            self.assertNotEqual(-1, dist_autograd._retrieve_context(ctx_ids[1]))
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad(self):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.RPC_SYNC)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_no_graph_with_tensors_not_require_grad_remote(self):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
+
+    def _test_grad_only_on_return_value(self, exec_mode):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(dst_rank),
+                    ret_requires_grad
+                )
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(dst_rank),
+                    ret_requires_grad
+                ).to_here()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
+            dist_autograd.backward([ret.sum()])
+
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done, args=(context_id, 1))
+
+            # Wait for the prev rank to be done with rpc.
+            self._check_rpc_done(1)
+            grads = dist_autograd.get_gradients(ctx_ids[1])
+            self.assertEqual(1, len(grads))
+            self.assertIn(requires_grad_tensor, grads)
+            self.assertEqual(torch.ones_like(ret), grads[requires_grad_tensor])
+
+    @dist_init
+    def test_grad_only_on_return_value(self):
+        self._test_grad_only_on_return_value(ExecMode.RPC_SYNC)
+
+    @dist_init
+    def test_grad_only_on_return_value_remote(self):
+        self._test_grad_only_on_return_value(ExecMode.REMOTE)
 
     def _test_rpc_complex_args(self, exec_mode):
         with dist_autograd.context() as context_id:
@@ -623,7 +650,7 @@ class DistAutogradTest(object):
                     "worker{}".format(self._next_rank()),
                     torch.stack,
                     args=(tensors,)
-                ).to_here().wait()
+                ).to_here()
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
@@ -654,7 +681,6 @@ class DistAutogradTest(object):
     def test_rpc_complex_args(self):
         self._test_rpc_complex_args(ExecMode.RPC_SYNC)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_remote_complex_args(self):
         self._test_rpc_complex_args(ExecMode.REMOTE)
@@ -803,7 +829,7 @@ class DistAutogradTest(object):
                     my_nested_rref_add,
                     args=(rref_owner, rref_t1, t2)
                 )
-            ret = rref.to_here().wait()
+            ret = rref.to_here()
             dist_autograd.backward([ret.sum()])
 
             # verify grads on caller
@@ -820,14 +846,12 @@ class DistAutogradTest(object):
                 )
             )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_backward_rref(self):
         callee = "worker{}".format(self._next_rank())
         rref_owner = callee
         self._test_backward_rref(callee, rref_owner)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_backward_rref_multi(self):
         if self.rank > 0:
@@ -835,7 +859,6 @@ class DistAutogradTest(object):
             rref_owner = callee
             self._test_backward_rref(callee, rref_owner)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_backward_rref_nested(self):
         callee = "worker{}".format((self.rank + 1) % self.world_size)
@@ -891,7 +914,7 @@ class DistAutogradTest(object):
             # are all correct
             ctx_id = ctx_ids[rank_diff]
             grads = dist_autograd.get_gradients(ctx_id)
-            local_t1 = rref_t1.local_value().wait()
+            local_t1 = rref_t1.local_value()
             self.assertIn(local_t1, grads)
             self.assertEqual(grads[local_t1], t1.grad)
 
@@ -1026,7 +1049,7 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
@@ -1197,7 +1220,7 @@ class DistAutogradTest(object):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent " +
                      "does not report errors on node failures")
     @dist_init(clean_shutdown=False)

@@ -166,6 +166,10 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   _(c10::quint8, QUInt8)         \
   _(c10::qint32, QInt32)
 
+#define AT_FORALL_COMPLEX_TYPES(_)             \
+  _(std::complex<float>, ComplexFloat)         \
+  _(std::complex<double>, ComplexDouble)
+
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \
   case ScalarType::name:         \
@@ -312,11 +316,11 @@ static inline bool isSignedType(ScalarType t) {
     case ScalarType::name:                       \
       return std::numeric_limits<ctype>::is_signed;
 
-    switch (t) {
-      AT_FORALL_SCALAR_TYPES_AND(Half, CASE_SIGNED)
-      default:
-        AT_ERROR("Unknown ScalarType");
-    }
+  switch (toUnderlying(t)) {
+    AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
   #undef CASE_SIGNED
 }
 

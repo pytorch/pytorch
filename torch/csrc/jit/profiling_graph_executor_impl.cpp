@@ -19,8 +19,14 @@
 namespace torch {
 namespace jit {
 
-static std::atomic<bool> profiling_mode{false};
+#ifdef FBCODE_CAFFE2
 static std::atomic<bool> executor_mode{false};
+static std::atomic<bool> profiling_mode{false};
+#else
+static std::atomic<bool> executor_mode{true};
+static std::atomic<bool> profiling_mode{true};
+#endif
+
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
@@ -56,9 +62,10 @@ std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph)
-    : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
+    : GraphExecutorImplBase(graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
+  std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
   if (optimized_plan_) {
     return *optimized_plan_;
@@ -112,22 +119,26 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   // TODO: insert grad propagation
   bool needs_gradient = getProfilingMode()
       ? needsGradientInProfilingMode(copy->block())
-      : needsGradient(copy);
+      : true;
   if (needs_gradient) {
-    auto diff_nodes = CreateAutodiffSubgraphs(
+    // for Simple Executor skip creating autodiff graphs
+    // and let autograd handle backward for us
+    if (getProfilingMode()) {
+      auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    for (Node *dnode : diff_nodes) {
-      auto diff_graph = std::move(dnode->g(attr::Subgraph));
-      Gradient gradient = differentiate(diff_graph);
-      runOptimization(gradient.f);
-      // run non diff optimization on the forward graph
-      runNondiffOptimization(gradient.f);
-      packGradient(gradient, dnode);
+      for (Node *dnode : diff_nodes) {
+        auto diff_graph = std::move(dnode->g(attr::Subgraph));
+        Gradient gradient = differentiate(diff_graph);
+        runOptimization(gradient.f);
+        // run non diff optimization on the forward graph
+        runNondiffOptimization(gradient.f);
+        packGradient(gradient, dnode);
+      }
+      InlineAutodiffSubgraphs(copy, getAutodiffSubgraphInlining()
+                                        ? autodiffSubgraphInlineThreshold
+                                        : 1);
     }
-    InlineAutodiffSubgraphs(copy, getAutodiffSubgraphInlining()
-                                      ? autodiffSubgraphInlineThreshold
-                                      : 1);
   } else {
     runNondiffOptimization(copy);
   }

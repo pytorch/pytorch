@@ -25,13 +25,18 @@ def main():
 
     parser.add_argument(
         '--tag_filter',
-        help='tag_filter can be used to run the benchmarks which matches the tag',
+        help='tag_filter can be used to run the shapes which matches the tag. (all is used to run all the shapes)',
         default='short')
 
     # This option is used to filter test cases to run.
     parser.add_argument(
         '--operators',
         help='Filter tests based on comma-delimited list of operators to test',
+        default=None)
+
+    parser.add_argument(
+        '--operator_range',
+        help='Filter tests based on operator_range(e.g. a-c)',
         default=None)
 
     parser.add_argument(
@@ -121,6 +126,11 @@ def main():
         '--framework',
         help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
         default="Caffe2,PyTorch")
+
+    parser.add_argument(
+        '--device',
+        help='Run tests on the provided architecture (cpu, cuda)',
+        default='None')
 
     parser.add_argument(
         '--wipe_cache',
