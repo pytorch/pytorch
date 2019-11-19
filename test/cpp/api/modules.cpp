@@ -1312,8 +1312,19 @@ TEST_F(ModulesTest, BatchNorm1d) {
   BatchNorm1d bn(5);
   bn->eval();
 
-  auto input = torch::randn({2, 5}, torch::requires_grad());
+  auto input = torch::arange(2. * 5 * 2).view({2, 5, 2}).requires_grad_();
   auto output = bn->forward(input);
+  auto expected = torch::tensor({{{ 0.0000,  1.0000},
+                                  { 2.0000,  3.0000},
+                                  { 4.0000,  5.0000},
+                                  { 6.0000,  7.0000},
+                                  { 8.0000,  9.0000}},
+                                 {{10.0000, 10.9999},
+                                  {11.9999, 12.9999},
+                                  {13.9999, 14.9999},
+                                  {15.9999, 16.9999},
+                                  {17.9999, 18.9999}}});
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
 
@@ -1362,13 +1373,34 @@ TEST_F(ModulesTest, BatchNorm2d) {
   BatchNorm2d bn(5);
   bn->eval();
 
-  auto input = torch::randn({2, 5, 4, 4}, torch::requires_grad());
+  auto input = torch::randn({2, 5, 2, 2}, torch::requires_grad());
   auto output = bn->forward(input);
+  auto expected = torch::tensor({{{{ 0.0000,  1.0000},
+                                   { 2.0000,  3.0000}},
+                                  {{ 4.0000,  5.0000},
+                                   { 6.0000,  7.0000}},
+                                  {{ 8.0000,  9.0000},
+                                   {10.0000, 10.9999}},
+                                  {{11.9999, 12.9999},
+                                   {13.9999, 14.9999}},
+                                  {{15.9999, 16.9999},
+                                   {17.9999, 18.9999}}},
+                                 {{{19.9999, 20.9999},
+                                   {21.9999, 22.9999}},
+                                  {{23.9999, 24.9999},
+                                   {25.9999, 26.9999}},
+                                  {{27.9999, 28.9999},
+                                   {29.9998, 30.9998}},
+                                  {{31.9998, 32.9998},
+                                   {33.9998, 34.9998}},
+                                  {{35.9998, 36.9998},
+                                   {37.9998, 38.9998}}}});
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
   
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4})));
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 2, 2})));
 }
 
 TEST_F(ModulesTest, BatchNorm3dStateful) {
@@ -1412,13 +1444,54 @@ TEST_F(ModulesTest, BatchNorm3d) {
   BatchNorm3d bn(5);
   bn->eval();
 
-  auto input = torch::randn({2, 5, 4, 4, 4}, torch::requires_grad());
+  auto input = torch::randn({2, 5, 2, 2, 2}, torch::requires_grad());
   auto output = bn->forward(input);
+  auto expected = torch::tensor({{{{{ 0.0000,  1.0000},
+                                    { 2.0000,  3.0000}},
+                                   {{ 4.0000,  5.0000},
+                                    { 6.0000,  7.0000}}},
+                                  {{{ 8.0000,  9.0000},
+                                    {10.0000, 10.9999}},
+                                   {{11.9999, 12.9999},
+                                    {13.9999, 14.9999}}},
+                                  {{{15.9999, 16.9999},
+                                    {17.9999, 18.9999}},
+                                   {{19.9999, 20.9999},
+                                    {21.9999, 22.9999}}},
+                                  {{{23.9999, 24.9999},
+                                    {25.9999, 26.9999}},
+                                   {{27.9999, 28.9999},
+                                    {29.9998, 30.9998}}},
+                                  {{{31.9998, 32.9998},
+                                    {33.9998, 34.9998}},
+                                   {{35.9998, 36.9998},
+                                    {37.9998, 38.9998}}}},
+                                 {{{{39.9998, 40.9998},
+                                    {41.9998, 42.9998}},
+                                   {{43.9998, 44.9998},
+                                    {45.9998, 46.9998}}},
+                                  {{{47.9998, 48.9998},
+                                    {49.9997, 50.9997}},
+                                   {{51.9997, 52.9997},
+                                    {53.9997, 54.9997}}},
+                                  {{{55.9997, 56.9997},
+                                    {57.9997, 58.9997}},
+                                   {{59.9997, 60.9997},
+                                    {61.9997, 62.9997}}},
+                                  {{{63.9997, 64.9997},
+                                    {65.9997, 66.9997}},
+                                   {{67.9997, 68.9997},
+                                    {69.9996, 70.9996}}},
+                                  {{{71.9996, 72.9996},
+                                    {73.9996, 74.9996}},
+                                   {{75.9996, 76.9996},
+                                    {77.9996, 78.9996}}}}});
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
   
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4, 4})));
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 2, 2, 2})));
 }
 
 TEST_F(ModulesTest, InstanceNorm1dStateful) {
