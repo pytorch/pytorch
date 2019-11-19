@@ -1474,7 +1474,7 @@ TEST_F(ModulesTest, InstanceNorm1d) {
                                   {-1.0000, 1.0000},
                                   {-1.0000, 1.0000},
                                   {-1.0000, 1.0000}}});
-  ASSERT_TRUE(output.allclose(expected, 1e-4));
+  ASSERT_TRUE(output.allclose(expected, 1e-3));
   auto s = output.sum();
   s.backward();
 
@@ -1544,7 +1544,7 @@ TEST_F(ModulesTest, InstanceNorm2d) {
                                    { 0.4472,  1.3416}},
                                   {{-1.3416, -0.4472},
                                    { 0.4472,  1.3416}}}});
-  ASSERT_TRUE(output.allclose(expected, 1e-4));
+  ASSERT_TRUE(output.allclose(expected, 1e-3));
   auto s = output.sum();
   s.backward();
 
@@ -1634,7 +1634,7 @@ TEST_F(ModulesTest, InstanceNorm3d) {
                                     {-0.6547, -0.2182}},
                                    {{ 0.2182,  0.6547},
                                     { 1.0911,  1.5275}}}}});
-  ASSERT_TRUE(output.allclose(expected, 1e-4));
+  ASSERT_TRUE(output.allclose(expected, 1e-3));
   auto s = output.sum();
   s.backward();
 
