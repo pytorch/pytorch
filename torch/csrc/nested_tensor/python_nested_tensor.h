@@ -1,17 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/TensorTypeId.h>
-#include <exception>
-#include <torch/csrc/Device.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
-#include <torch/csrc/python_headers.h>
-#include <torch/csrc/tensor/python_tensor.h>
-#include <torch/include/torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <typeinfo>
+#include <torch/include/torch/csrc/Exceptions.h>
+#include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 // TODO:
 // - HANDLE_TH_ERRORS

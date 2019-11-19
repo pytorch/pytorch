@@ -1,34 +1,9 @@
-#include <torch/csrc/autograd/utils/python_arg_parsing.h>
-#include <torch/csrc/jit/script/python_sugared_value.h>
-#include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
-#include <torch/csrc/tensor/python_tensor.h>
-
-#include <structmember.h>
-
-#include <torch/csrc/Dtype.h>
-#include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/Layout.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/utils/cuda_enabled.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
-#include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/utils/tensor_types.h>
-
+#include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <pybind11/pybind11.h>
-
-#include <ATen/ATen.h>
-
-#include <sstream>
-#include <string>
-#include <type_traits>
-#include <vector>
+#include <torch/csrc/jit/script/python_sugared_value.h>
+#include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/utils/cuda_lazy_init.h>
 
 namespace torch {
 namespace nested_tensor {
