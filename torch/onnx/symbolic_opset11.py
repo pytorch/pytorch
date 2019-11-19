@@ -15,13 +15,17 @@ from torch.nn.modules.utils import _single, _pair, _triple
 
 # This file exports ONNX ops for opset 11
 
-black_listed_operators = [
-    "hardtanh"
-]
 
-
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+@parse_args('v', 'f', 'f')
+def hardtanh(g, self, min_val, max_val):
+    dtype = self.type().scalarType()
+    if dtype is not None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    max_val = g.op("Constant", value_t=torch.tensor(max_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    return g.op("Clip", self, min_val, max_val)
 
 
 def clamp(g, self, min, max):

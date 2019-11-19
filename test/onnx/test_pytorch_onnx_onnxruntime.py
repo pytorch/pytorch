@@ -198,6 +198,20 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1, 2]})
 
+    def test_hardtanh(self):
+        model = torch.nn.Hardtanh(-1.5, 2.5)
+        x = torch.arange(-5, 5).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+    def test_hardtanh_script_with_default_values(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.nn.functional.hardtanh(x)
+
+        x = torch.arange(-5, 5).to(dtype=torch.float32)
+        self.run_test(MyModel(), x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
