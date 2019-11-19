@@ -97,5 +97,44 @@ struct TORCH_API NormalizeFuncOptions {
 
 } // namespace functional
 
+// ============================================================================
+
+/// Options for the `GroupNorm` module.
+struct TORCH_API GroupNormOptions {
+  /* implicit */ GroupNormOptions(int64_t num_groups, int64_t num_channels);
+
+  /// number of groups to separate the channels into
+  TORCH_ARG(int64_t, num_groups);
+  /// number of channels expected in input
+  TORCH_ARG(int64_t, num_channels);
+  /// a value added to the denominator for numerical stability. Default: 1e-5
+  TORCH_ARG(double, eps) = 1e-5;
+  /// a boolean value that when set to ``true``, this module
+  /// has learnable per-channel affine parameters initialized to ones (for weights)
+  /// and zeros (for biases). Default: ``true``.
+  TORCH_ARG(bool, affine) = true;
+};
+
+// ============================================================================
+
+namespace functional {
+
+/// Options for the `GroupNorm` functional.
+struct TORCH_API GroupNormFuncOptions {
+  /* implicit */ GroupNormFuncOptions(int64_t num_groups);
+
+  /// number of groups to separate the channels into
+  TORCH_ARG(int64_t, num_groups);
+
+  TORCH_ARG(Tensor, weight) = {};
+
+  TORCH_ARG(Tensor, bias) = {};
+
+  /// a value added to the denominator for numerical stability. Default: 1e-5
+  TORCH_ARG(double, eps) = 1e-5;
+};
+
+} // namespace functional
+
 } // namespace nn
 } // namespace torch

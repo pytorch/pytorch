@@ -17,11 +17,11 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from .api import _init_rpc
+    from .api import _init_rpc_backend
     from .api import *  # noqa: F401
     import torch.distributed.autograd
 
-    def init_model_parallel(
+    def init_rpc(
         self_name,
         backend=backend_registry.BackendType.PROCESS_GROUP,
         init_method=None,
@@ -31,7 +31,7 @@ if is_available():
         rpc_timeout=DEFAULT_RPC_TIMEOUT,
     ):
         r"""
-        Initializes model parallel primitives such as the local rpc agent
+        Initializes RPC primitives such as the local RPC agent
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current
@@ -63,7 +63,7 @@ if is_available():
         )
         store, _, _ = next(rendezvous_iterator)
 
-        # Initialize autograd before RPC since _init_rpc guarantees all
+        # Initialize autograd before RPC since _init_rpc_backend guarantees all
         # processes sync via the store. If we initialize autograd after RPC,
         # there could be a race where some nodes might have initialized autograd
         # and others might not have. As a result, a node calling
@@ -72,7 +72,7 @@ if is_available():
         torch.distributed.autograd._init(worker_name_to_id[self_name])
 
         # Initialize RPC.
-        _init_rpc(
+        _init_rpc_backend(
             backend,
             store,
             self_name,

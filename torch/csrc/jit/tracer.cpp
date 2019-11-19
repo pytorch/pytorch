@@ -98,10 +98,11 @@ Value* TracingState::getValue(const IValue& var) {
                 [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isTuple()) {
+    TupleTypePtr tuple_type = var.type()->cast<TupleType>();
     return graph
         ->insertNode(graph->createTuple(fmap(
             var.toTuple()->elements(),
-            [&](const IValue& val) { return getValue(val); })))
+            [&](const IValue& val) { return getValue(val); }), tuple_type))
         ->output();
   } if (var.isTensor()) {
     auto ten = var.toTensor();
@@ -291,7 +292,7 @@ static void gatherParametersAndBuffers(
     const std::string& prefix) {
   Graph& g = *self_value->owningGraph();
 
-  state->setValue(self.module_object(), self_value);
+  state->setValue(self._ivalue(), self_value);
 
   auto self_ty = self.type();
   for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
@@ -329,8 +330,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     // if we are a module, then make sure the modules parameters are in the map
     // and mapped to accesses to the self object
     if (self) {
-      Value* self_value =
-          state->graph->insertInput(0, "self")->setType(self->module_object()->type());
+      Value* self_value = state->graph->insertInput(0, "self")->setType(
+          self->_ivalue()->type());
       gatherParametersAndBuffers(state, self_value, *self, {"__module"});
     }
 

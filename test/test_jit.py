@@ -2014,7 +2014,7 @@ graph(%Ra, %Rb):
                 super(TestTraceModule, self).__init__()
 
             def forward(self, my_tuple):
-                return my_tuple.x[0] + my_tuple.x[1] + my_tuple.y
+                return my_tuple
 
         class TestModule(nn.Module):
             def __init__(self):
@@ -2022,13 +2022,14 @@ graph(%Ra, %Rb):
 
             def forward(self, my_tuple):
                 # type: (MyTuple) -> Tensor
-                return my_tuple.y
+                return my_tuple.x[0] + my_tuple.x[1] + my_tuple.y
 
         # first create a script module that creates MyTuple in python_cu
         scripted_mod = torch.jit.script(TestModule())
-        # then test if it could be used in tracing
-        my_tuple_input = MyTuple((torch.randn(2, 3), torch.randn(2, 3)), torch.randn(2, 3))
-        self.checkTrace(TestTraceModule(), (my_tuple_input,))
+        # then test if the same type could be shared with tracing
+        my_inp = MyTuple((torch.randn(2, 3), torch.randn(2, 3)), torch.randn(2, 3))
+        traced_mod = torch.jit.trace(TestTraceModule(), (my_inp,))
+        self.assertEqual(scripted_mod(traced_mod(my_inp)), my_inp.x[0] + my_inp.x[1] + my_inp.y)
 
     def test_trace_random(self):
         def f(mean, std):
@@ -3523,7 +3524,8 @@ graph(%Ra, %Rb):
         out = torch.jit.trace(fn, (torch.ones(2, 2),))
         check(out)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    @unittest.skipIf(IS_WINDOWS or True, "TODO: need to fix this test case for "
+                                         "Windows, re-enable with https://github.com/pytorch/pytorch/pull/29339")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
@@ -15298,6 +15300,13 @@ a")
         self.assertEqual(seq_eager_out, seq_script_out)
         self.assertEqual(tensor_eager_out, tensor_script_out)
 
+    def test_torchscript_memoryformat(self):
+        @torch.jit.script
+        def fn(x):
+            return x.contiguous(memory_format=torch.channels_last)
+        x = torch.randn(4, 3, 6, 6)
+        y = fn(x)
+        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
 
     def test_torchscript_multi_head_attn(self):
         @torch.jit.script
