@@ -1948,16 +1948,15 @@ graph(%Ra, %Rb):
 
     def test_trace_named_tuple_construction(self):
         MyTuple = namedtuple('MyTuple', ['x', 'y'])
+        MyNestTuple = namedtuple('MyNestTuple', ['a', 'b'])
+        MyTuple.__annotations__ = {"x": MyNestTuple, "y": torch.Tensor}
 
         def trace_named_tuple_construct(a, b):
-            return MyTuple(a, b)
+            return MyNestTuple(a, b)
 
         a = torch.randn(2, 3)
         b = torch.randn(2, 3)
         self.checkTrace(trace_named_tuple_construct, (a, b))
-
-        MyNestTuple = namedtuple('MyNestTuple', ['a', 'b'])
-        MyTuple.__annotations__ = {"x": MyNestTuple, "y": torch.Tensor}
 
         def trace_nested_named_tuple_construct(a, b, c):
             return MyTuple(MyNestTuple(a, b), c)

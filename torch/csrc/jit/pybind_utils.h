@@ -184,6 +184,8 @@ inline InferredType tryToInferContainerType(py::handle input) {
         std::vector<std::string> fields
           = py::cast<std::vector<std::string>>(input.get_type().attr("_fields"));
         c10::NamedTypePtr named_tuple = TupleType::createNamed(qualifiedName, fields, element_types);
+        // register the named tuple type to the python cu to share with scripting
+        PyCu->register_type(named_tuple);
         return InferredType(named_tuple);
       }
     }
