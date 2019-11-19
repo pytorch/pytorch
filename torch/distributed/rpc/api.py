@@ -22,7 +22,7 @@ def _require_initialized(func):
         if _agent is None:
             raise RuntimeError(
                 "RPC has not been initialized. Call "
-                "torch.distributed.rpc.init_model_parallel first."
+                "torch.distributed.rpc.init_rpc first."
             )
         return func(*args, **kwargs)
     return wrapper
@@ -47,21 +47,8 @@ def join_rpc():
         _cleanup_python_rpc_handler()
 
 
-@_require_initialized
-def sync_rpc():
-    r"""
-    Block until all local and remote RPC processes reach this method and finish
-    sending all pending RPCs. As this method synchronizes at the process
-    level, if multiple threads are spawned, only one of them should call this
-    method at a time.
-    """
-
-    _agent.sync()
-
-
-
-# TODO: add a context manager to wrap _init_rpc and join_rpc
-def _init_rpc(
+# TODO: add a context manager to wrap _init_rpc_backend and join_rpc
+def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,
     store=None,
     self_name=None,
@@ -152,7 +139,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
+        >>> rpc.init_rpc("worker0")
         >>> worker1 = rpc.get_worker_info("worker1")
         >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
@@ -162,7 +149,7 @@ def remote(to, func, args=None, kwargs=None):
         On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
+        >>> dist.init_rpc("worker1")
         >>> rpc.join_rpc()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -227,7 +214,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
+        >>> rpc.init_rpc("worker0")
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rpc.join_rpc()
 
@@ -235,7 +222,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.init_rpc("worker1")
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -269,7 +256,7 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
+        >>> rpc.init_rpc("worker0")
         >>> worker1 = rpc.get_worker_id("worker1")
         >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
         >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
@@ -280,7 +267,7 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.init_rpc("worker1")
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)

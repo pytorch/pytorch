@@ -19,7 +19,7 @@ def register_backend(backend_name, init_backend_handler):
     Arguments:
         backend (str): backend string to identify the handler.
         handler (function): Handler that is invoked when the
-            `_init_rpc()` function is called with a backend.
+            `_init_rpc_backend()` function is called with a backend.
              This returns the agent.
     """
     global BackendType
@@ -54,7 +54,7 @@ def _process_group_init_backend_handler(
     # Initialize ProcessGroup.
     if dist.is_initialized():
         raise RuntimeError(
-            "Default process group must not be initialized before `init_model_parallel`."
+            "Default process group must not be initialized before init_rpc."
         )
 
     world_size = len(worker_name_to_id)

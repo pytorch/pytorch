@@ -29,6 +29,7 @@ def merge_dicts(*dicts):
 
 common_args = parse_kwargs("""
     input (Tensor): the input tensor.
+    generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     out (Tensor, optional): the output tensor.
 """)
 
@@ -705,6 +706,7 @@ point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
+    {generator}
     {out}
 
 Example::
@@ -3554,7 +3556,7 @@ Example::
 
 add_docstr(torch.multinomial,
            r"""
-multinomial(input, num_samples, replacement=False, out=None) -> LongTensor
+multinomial(input, num_samples, replacement=False, *, generator=None, out=None) -> LongTensor
 
 Returns a tensor where each row contains :attr:`num_samples` indices sampled
 from the multinomial probability distribution located in the corresponding row
@@ -3587,6 +3589,7 @@ Args:
     input (Tensor): the input tensor containing probabilities
     num_samples (int): number of samples to draw
     replacement (bool, optional): whether to draw with replacement or not
+    {generator}
     {out}
 
 Example::
@@ -3794,7 +3797,7 @@ Example::
 
 add_docstr(torch.normal,
            r"""
-.. function:: normal(mean, std, out=None) -> Tensor
+.. function:: normal(mean, std, *, generator=None, out=None) -> Tensor
 
 Returns a tensor of random numbers drawn from separate normal distributions
 whose mean and standard deviation are given.
@@ -3814,6 +3817,7 @@ total number of elements in each tensor need to be the same.
 Args:
     mean (Tensor): the tensor of per-element means
     std (Tensor): the tensor of per-element standard deviations
+    {generator}
     {out}
 
 Example::
@@ -4244,7 +4248,7 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint(low=0, high, size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -4259,6 +4263,7 @@ Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
+    {generator}
     {out}
     {dtype}
     {layout}
