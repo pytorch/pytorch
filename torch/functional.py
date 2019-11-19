@@ -10,7 +10,6 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
-    'isfinite',
     'isinf',
     'lu',
     'lu_unpack',
@@ -240,32 +239,6 @@ Examples::
         # the old interface of passing the operands as one list argument
         operands = operands[0]
     return torch._C._VariableFunctions.einsum(equation, operands)
-
-
-def isfinite(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
-
-    Arguments:
-        tensor (Tensor): A tensor to check
-
-    Returns:
-        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
-
-    Example::
-
-        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([True,  False,  True,  False,  False])
-    """
-    if not isinstance(tensor, torch.Tensor):
-        raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
-
-    # Support int input, nan and inf are concepts in floating point numbers.
-    # Numpy uses type 'Object' when the int overflows long, but we don't
-    # have a similar concept. It's safe to assume any created LongTensor doesn't
-    # overflow and it's finite.
-    if not tensor.is_floating_point():
-        return torch.ones_like(tensor, dtype=torch.bool, memory_format=torch.legacy_contiguous_format)
-    return (tensor == tensor) & (tensor.abs() != inf)
 
 
 def isinf(tensor):
