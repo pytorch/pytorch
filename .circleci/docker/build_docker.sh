@@ -10,10 +10,11 @@ retry () {
 # use it to tag this build with the same ID used to tag all other
 # base image builds. Also, we can try and pull the previous
 # image first, to avoid rebuilding layers that haven't changed.
-last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
-tag="${CIRCLE_BUILD_NUM}"
 
-tag="mingbo_test"
+#until we find a way to reliably reuse previous build, this last_tag is not in use
+# last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
+tag="${CIRCLE_WORKFLOW_ID}"
+
 
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
 image="${registry}/pytorch/${IMAGE_NAME}"
@@ -35,9 +36,9 @@ trap "docker logout ${registry}" EXIT
 # export JENKINS=1
 
 # Try to pull the previous image (perhaps we can reuse some layers)
-if [ -n "${last_tag}" ]; then
-  docker pull "${image}:${last_tag}" || true
-fi
+# if [ -n "${last_tag}" ]; then
+#   docker pull "${image}:${last_tag}" || true
+# fi
 
 # Build new image
 ./build.sh ${IMAGE_NAME} -t "${image}:${tag}"
