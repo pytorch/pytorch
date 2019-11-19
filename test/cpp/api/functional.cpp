@@ -1602,7 +1602,7 @@ TEST_F(FunctionalTest, InstanceNorm1dDefaultOptions) {
                                   {-1.3416, -0.4472,  0.4472,  1.3416},
                                   {-1.3416, -0.4472,  0.4472,  1.3416},
                                   {-1.3416, -0.4472,  0.4472,  1.3416}}});
-  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
 TEST_F(FunctionalTest, InstanceNorm2d) {
@@ -1644,7 +1644,7 @@ TEST_F(FunctionalTest, InstanceNorm2d) {
                                    { 4.3416,  7.0249}},
                                   {{-1.3665,  2.2112},
                                    { 5.7888,  9.3665}}}});
-  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
 TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
@@ -1673,7 +1673,7 @@ TEST_F(FunctionalTest, InstanceNorm2dDefaultOptions) {
                                    { 0.4472,  1.3416}},
                                   {{-1.3416, -0.4472},
                                    { 0.4472,  1.3416}}}});
-  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
 TEST_F(FunctionalTest, InstanceNorm3d) {
@@ -1735,7 +1735,7 @@ TEST_F(FunctionalTest, InstanceNorm3d) {
                                     { 1.3814,  3.1271}},
                                    {{ 4.8729,  6.6186},
                                     { 8.3644, 10.1101}}}}});
-  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
 TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
@@ -1784,7 +1784,7 @@ TEST_F(FunctionalTest, InstanceNorm3dDefaultOptions) {
                                     {-0.6547, -0.2182}},
                                    {{ 0.2182,  0.6547},
                                     { 1.0911,  1.5275}}}}});
-  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(output.allclose(expected, 2e-04));
 }
 
 TEST_F(FunctionalTest, Interpolate) {
