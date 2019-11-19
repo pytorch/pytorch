@@ -42,8 +42,6 @@ class ProcessGroupAgent : public RpcAgent {
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout);
 
-  ~ProcessGroupAgent() override;
-
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
   const WorkerInfo& getWorkerInfo(worker_id_t id) const override;

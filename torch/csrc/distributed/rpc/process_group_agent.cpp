@@ -167,14 +167,6 @@ ProcessGroupAgent::ProcessGroupAgent(
   }
 }
 
-ProcessGroupAgent::~ProcessGroupAgent() {
-  try {
-    shutdown();
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Error while shutting down local RPC agent: " << e.what();
-  }
-}
-
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
     const std::string& workerName) const {
   const auto idIter = nameMap_.find(workerName);
