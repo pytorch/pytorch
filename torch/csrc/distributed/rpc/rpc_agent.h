@@ -40,6 +40,10 @@ struct TORCH_API WorkerInfo {
         name_);
   }
 
+  bool operator==(const WorkerInfo& rhs) {
+    return (id_ == rhs.id_) && (name_ == rhs.name_);
+  }
+
   static constexpr size_t MAX_NAME_LEN = 128;
 
   const std::string name_;
@@ -131,3 +135,13 @@ class TORCH_API RpcAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+namespace std {
+template <>
+struct hash<torch::distributed::rpc::WorkerInfo> {
+  std::size_t operator()(
+      const torch::distributed::rpc::WorkerInfo& worker_info) const noexcept {
+    return worker_info.id_;
+  }
+};
+} // namespace std
