@@ -117,6 +117,10 @@ def my_function(a, b, c):
 def my_tensor_function(a, b):
     return a + b
 
+def my_sleep_func(seconds=1):
+    import time
+    time.sleep(seconds)
+
 
 def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
@@ -237,9 +241,47 @@ class RpcTest(object):
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
+    @dist_init
+    def test_self_py_udf_remote(self):
+        self_worker_info = rpc.get_worker_info()
+        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
+        self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1 + 3)
+
+    def _test_self_remote_rref_as_rpc_arg(self, dst):
+        self_worker_info = rpc.get_worker_info()
+        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
+        fut = rpc.rpc_async(dst, add_rref_to_value, args=(rref, torch.ones(2, 2)))
+        ret = rpc.rpc_sync(dst, add_rref_to_value, args=(rref, torch.ones(2, 2) + 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2) + 1)
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2))
+
+    @dist_init
+    def test_self_remote_rref_as_rpc_arg(self):
+        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        self._test_self_remote_rref_as_rpc_arg(dst)
+
+    @dist_init
+    def test_self_remote_rref_as_self_rpc_arg(self):
+        self._test_self_remote_rref_as_rpc_arg(rpc.get_worker_info())
+
+    def _test_self_remote_rref_as_remote_arg(self, dst):
+        self_worker_info = rpc.get_worker_info()
+        rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
+        ret_rref = rpc.remote(dst, add_rref_to_value, args=(rref, torch.ones(2, 2)))
+        self.assertEqual(ret_rref.to_here(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2))
+
+    @dist_init
+    def test_self_remote_rref_as_remote_arg(self):
+        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        self._test_self_remote_rref_as_remote_arg(dst)
+
+    @dist_init
+    def test_self_remote_rref_as_self_remote_arg(self):
+        self._test_self_remote_rref_as_remote_arg(rpc.get_worker_info())
+
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_register_rpc_backend_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
@@ -256,7 +298,7 @@ class RpcTest(object):
                 backend_name, stub_start_rpc_backend_handler
             )
 
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker1",
             backend=backend,
             init_method=self.init_method,
@@ -265,13 +307,13 @@ class RpcTest(object):
         )
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
+            rpc._init_rpc_backend(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 store=store,
                 self_name="duplicate_name",
@@ -280,9 +322,9 @@ class RpcTest(object):
             )
         rpc.join_rpc()
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker{}".format(self.rank),
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
@@ -304,7 +346,7 @@ class RpcTest(object):
         dist.barrier()
 
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
-            rpc.init_model_parallel(
+            rpc.init_rpc(
                 self_name="worker{}".format(self.rank),
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
@@ -313,13 +355,13 @@ class RpcTest(object):
             )
         rpc.join_rpc()
 
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_invalid_names(self):
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
+            rpc._init_rpc_backend(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 store=store,
                 self_name="abc*",
@@ -336,7 +378,7 @@ class RpcTest(object):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
+            rpc._init_rpc_backend(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 store=store,
                 self_name=" ",
@@ -351,7 +393,7 @@ class RpcTest(object):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
+            rpc._init_rpc_backend(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 store=store,
                 self_name="",
@@ -368,7 +410,7 @@ class RpcTest(object):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc(
+            rpc._init_rpc_backend(
                 backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 store=store,
                 self_name="".join(["a" for i in range(500)]),
@@ -456,29 +498,10 @@ class RpcTest(object):
             )
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
-    @dist_init
-    def test_sync_rpc(self):
-        dst_rank = (self.rank + 1) % self.world_size
-        for i in range(20):
-            rpc.sync_rpc()
-            n = i + self.rank + 1
-            ret1 = rpc.rpc_sync(
-                "worker{}".format(dst_rank),
-                torch.add,
-                args=(torch.ones(n, n), torch.ones(n, n)),
-            )
-            rpc.sync_rpc()
-            ret2 = rpc.rpc_sync(
-                "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
-            )
-            rpc.sync_rpc()
-            self.assertEqual(ret1, torch.ones(n, n) * 2)
-            self.assertEqual(ret2, torch.ones(n, n) * 3)
-
-    @dist_init(setup_model_parallel=False)
+    @dist_init(setup_rpc=False)
     def test_join_rpc(self):
         # Initialize RPC.
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
@@ -656,7 +679,6 @@ class RpcTest(object):
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29381")
     @dist_init
     def test_nested_rpc(self):
         n = self.rank + 1
@@ -834,7 +856,6 @@ class RpcTest(object):
 
         self.assertEqual(c, torch.ones(n, n) + 4)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_remote(self):
         n = self.rank + 1
@@ -848,7 +869,6 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_rref(self):
         n = self.rank + 1
@@ -963,6 +983,38 @@ class RpcTest(object):
         self.assertEqual(rets, [11, 12, 13])
 
     @dist_init
+    def test_owner_equality(self):
+        a = RRef(40)
+        b = RRef(50)
+
+        other_rank = (self.rank + 1) % self.world_size
+        other_a = rpc.remote(
+            "worker{}".format(other_rank), torch.add, args=(torch.ones(1), 1)
+        )
+        other_b = rpc.remote(
+            "worker{}".format(other_rank), torch.add, args=(torch.ones(1), 1)
+        )
+        other_a.to_here()  # to ensure clean termination
+        other_b.to_here()
+
+        self.assertNotEqual(a.owner(), 23)
+        self.assertEqual(other_a.owner(), other_b.owner())
+        self.assertNotEqual(a.owner(), other_a.owner())
+        self.assertEqual(other_a.owner(), other_a.owner())
+        self.assertEqual(other_a.owner(), other_b.owner())
+        self.assertEqual(a.owner(), a.owner())
+        self.assertEqual(a.owner(), b.owner())
+        self.assertEqual(a.owner(), rpc.get_worker_info())
+        x = dict()
+        x[a.owner()] = a
+        x[other_a.owner()] = other_a
+        self.assertEqual(x[a.owner()], a)
+        self.assertEqual(x[b.owner()], a)
+        self.assertEqual(x[other_a.owner()], other_a)
+        self.assertEqual(x[other_b.owner()], other_a)
+        self.assertEqual(len(x), 2)
+
+    @dist_init
     def test_pass_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -997,7 +1049,7 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @unittest.skip("Test is flaky on ASAN, see https://github.com/pytorch/pytorch/issues/29117")
-    @dist_init(setup_model_parallel=True)
+    @dist_init(setup_rpc=True)
     def test_call_method_on_rref(self):
         """
         Tests that it is possible to call an instance method on a remote objet
@@ -1024,15 +1076,10 @@ class RpcTest(object):
 
         self.assertEqual(result, sum(vals))
 
-    @dist_init
-    def test_get_default_rpc_timeout(self):
-        timeout = rpc.get_rpc_timeout()
-        self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
-
-    @dist_init(setup_model_parallel=False)
-    def test_set_rpc_timeout(self):
+    @dist_init(setup_rpc=False)
+    def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
-        rpc.init_model_parallel(
+        rpc.init_rpc(
             self_name="worker{}".format(self.rank),
             backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
@@ -1044,6 +1091,35 @@ class RpcTest(object):
         self.assertEqual(timeout, set_timeout)
         rpc.join_rpc()
 
+    @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_rpc_timeouts(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        # futures should time out and be marked with an exception indicating it as such.
+        futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(10)]
+        for fut in futs:
+            with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
+                fut.wait()
+
+        # ensure that if a new timeout is set old futures don't time out but new ones do.
+        rpc._set_rpc_timeout(timedelta(seconds=200))
+        # create a longstanding RPC.
+        fut1 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        # now, set a short timeout.
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        # f2 should time out, f should not.
+        fut2 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        with self.assertRaises(RuntimeError):
+            fut2.wait()
+        fut1.wait()
+
+        # future should run to completion if the timeout is zero.
+        rpc._set_rpc_timeout(timedelta(seconds=0))
+        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
+
+        # reset to default timeout so shutdown messages can process cleanly.
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
 
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")
@@ -1054,7 +1130,7 @@ class RpcTest(object):
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):
-        @dist_init(setup_model_parallel=False)
+        @dist_init(setup_rpc=False)
         def test_func(self):
             return "expected result"
 

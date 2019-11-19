@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
 namespace torch {
@@ -48,7 +48,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
         " does not have a valid gradient function.");
 
     // Compute the root edges and generate the appropriate gradients.
-    rootEdges.push_back(root.gradient_edge());
+    rootEdges.push_back(torch::autograd::impl::gradient_edge(root));
     grads.push_back(at::ones_like(root, at::MemoryFormat::Contiguous));
   }
 
@@ -213,6 +213,7 @@ void DistEngine::executeSendFunction(
     // Mark the autograd context id as initialized and unlock.
     initializedContextIds_.insert(autogradContext.contextId());
     lock.unlock();
+    ClearContextIdGuard guard(autogradContext.contextId());
 
     // Enqueue the current send function.
     auto graphTask = autogradContext.retrieveGraphTask();
@@ -262,10 +263,22 @@ void DistEngine::execute(const variable_list& roots) {
     initializedContextIds_.insert(autogradContext.contextId());
   }
 
+  ClearContextIdGuard guard(autogradContext.contextId());
+
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
   autogradContext.clearAndWaitForOutstandingRpcs();
+}
+
+void DistEngine::clearInitializedContextId(int64_t contextId) {
+  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
+  initializedContextIds_.erase(contextId);
+}
+
+size_t DistEngine::numBackwardPasses() const {
+  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
+  return initializedContextIds_.size();
 }
 
 } // namespace autograd
