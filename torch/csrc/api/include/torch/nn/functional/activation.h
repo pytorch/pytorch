@@ -600,7 +600,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
     return {attn_output, attn_output_weights.sum(/*dim=*/1) / num_heads};
   } else {
-    return {attn_output, {}};
+    return {attn_output, Tensor()};
   }
 }
 
