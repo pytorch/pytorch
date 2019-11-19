@@ -2,10 +2,10 @@ Remote Reference Protocol
 =========================
 
 .. warning::
-  The :ref:`rref` is experimental and subject to change.
+  The :ref:`rref` API is experimental and subject to change.
 
-This note describes design details of Remote Reference protocol and walk through
-message flows in different scenarios. Make sure you're familiar with the
+This note describes the design details of Remote Reference protocol and walks
+through message flows in different scenarios. Make sure you're familiar with the
 :ref:`distributed-rpc-framework` before proceeding.
 
 Background
@@ -13,7 +13,7 @@ Background
 
 RRef stands for Remote REFerence. It is a reference of an object which locates
 on the local or a remote worker, and transparently handles reference counting
-under the hood. Conceptually, it can be considered as distributed shared
+under the hood. Conceptually, it can be considered as a distributed shared
 pointer. Applications can create an RRef by calling
 `torch.distributed.rpc.remote`. Each RRef is owned by the callee worker of the
 `torch.distributed.rpc.remote` call (i.e., owner) and can be used by multiple
@@ -29,7 +29,7 @@ retrieve the unique ``OwnerRRef`` instance using the globally unique ``RRefId``.
 A ``UserRRef`` will be created when it is used as an argument or return value in
 ``rpc`` or ``remote`` invocation, and the owner will be notified according to
 update the reference count. An ``OwnerRRef`` and its data will be deleted when
-there is no ``UserRRef`` instances globally and there is no reference to the
+there is no ``UserRRef`` instances globally and there are no reference to the
 ``OwnerRRef`` on the owner as well.
 
 
@@ -71,7 +71,7 @@ A user can get a ``UserRRef`` in three situations:
 
 
 Case 1 is the simplest where the owner initiates the fork, and hence it can
-easily increment local reference count. The only requirement is that any
+easily increment the local reference count. The only requirement is that any
 ``UserRRef`` must notify the owner upon destruction. Hence, we need the first
 guarantee:
 
@@ -100,17 +100,17 @@ The owner's view on any ``UserRRef`` in the tree has three stages:
 
   1) unknown -> 2) known -> 3) deleted.
 
-The owner's view on the entire tree keeps changing. The owner deletes its
+The owner's view of the entire tree keeps changing. The owner deletes its
 ``OwnerRRef`` instance when it thinks there are no living ``UserRRef``
 instances, i.e.,
 when ``OwnerRRef`` is deleted, all ``UserRRef`` instances could be either indeed
 deleted or unknown. The dangerous case is when some forks are unknown and others
 are deleted.
 
-G2 trivially guarantees that no parent ``UserRRef`` can be deleted before the
-owner knows all of its children ``UserRRef`` instances. However, it is possible
-that the child ``UserRRef`` may be deleted before the owner knows its parent
-``UserRRef``.
+**G2** trivially guarantees that no parent ``UserRRef`` can be deleted before
+the owner knows all of its children ``UserRRef`` instances. However, it is
+possible that the child ``UserRRef`` may be deleted before the owner knows its
+parent ``UserRRef``.
 
 Consider the following example, where the ``OwnerRRef`` forks to A, then A forks
 to Y, and Y forks to Z.:
@@ -122,9 +122,9 @@ to Y, and Y forks to Z.:
 If all of Z's messages, including the delete message, are processed by the
 owner before all messages from Y, the owner will learn Z's deletion before
 knowing Y. Nevertheless, this does not cause any problem. Because, at least
-one of Y's ancestor will be alive, in this case A, and it will
+one of Y's ancestors will be alive (in this case, A) and it will
 prevent the owner from deleting the ``OwnerRRef``. More specifically, if the
-owner does not know Y, A cannot be deleted due to G2, and the owner knows A
+owner does not know Y, A cannot be deleted due to **G2**, and the owner knows A
 as the owner is A's parent.
 
 Things get a little trickier if the RRef is created on a user:
@@ -138,8 +138,8 @@ Things get a little trickier if the RRef is created on a user:
       A -> Y -> Z
 
 
-If Z calls to_here on the UserRRef, the owner at least knows A when Z is
-deleted, because otherwise ``to_here`` wouldn't finish. If Z does not call
+If Z calls to_here on the ``UserRRef``, the owner at least knows A when Z is
+deleted, because otherwise, ``to_here`` wouldn't finish. If Z does not call
 to_here, it is possible that the owner receives all messages from Z before
 any message from A and Y. In this case, as the real data of the ``OwnerRRef``
 has not been created yet, there is nothing to be deleted either. It is the same
@@ -158,7 +158,8 @@ child will only send out the ACK when it is confirmed by the owner.
 Protocol Scenarios
 ^^^^^^^^^^^^^^^^^^
 
-Let's now discuss how above designs translate to the protocol in four scenarios.
+Let's now discuss how the above designs translate to the protocol in four
+scenarios.
 
 User Share RRef with Owner as Return Value
 ------------------------------------------
@@ -174,17 +175,18 @@ User Share RRef with Owner as Return Value
   rref.to_here()
 
 
-In this case, the UserRRef is created on the user worker A, then it is passed to
-the owner worker B together with the remote message, and then B creates the
-OwnerRRef. The method ``rpc.remote`` returns immediately, meaning that the
-UserRRef can be forked/used before the owner knows about it.
+In this case, the ``UserRRef`` is created on the user worker A, then it is
+passed to the owner worker B together with the remote message, and then B
+creates the ``OwnerRRef``. The method ``rpc.remote`` returns immediately,
+meaning that the ``UserRRef`` can be forked/used before the owner knows about
+it.
 
 On the owner, when receiving the ``rpc.remote`` call, it will create the
 ``OwnerRRef``, and returns an ACK to acknowledge ``{100, 1}``. Only
 after receiving this ACK, can A delete it's ``UserRRef``. This involves both
-G1 and G2. G1 is obvious. For G2, the ``OwnerRRef`` is a child of the
-``UserRRef``, and the ``UserRRef`` is not deleted until it receives the ACK from
-the owner.
+**G1** and **G2**. **G1** is obvious. For **G2**, the ``OwnerRRef`` is a child
+of the ``UserRRef``, and the ``UserRRef`` is not deleted until it receives the
+ACK from the owner.
 
 .. image:: https://user-images\.githubusercontent\.com/16999635/69164772-98181300-0abe-11ea-93a7-9ad9f757cd94.png
     :alt: user_to_owner_ret.png
@@ -218,9 +220,9 @@ User Share RRef with Owner as Argument
   rpc.rpc_async('B', func, args=(rref, ))
 
 
-In this case, after creating the ``UserRRef`` on A, A uses it as an argument in a
-followup RPC call to B. A will keep ``UserRRef {100, 1}`` alive until it receives
-the acknowledge from B (G2, not the return value of the RPC call).
+In this case, after creating the ``UserRRef`` on A, A uses it as an argument in
+a followup RPC call to B. A will keep ``UserRRef {100, 1}`` alive until it
+receives the acknowledge from B (**G2**, not the return value of the RPC call).
 This is necessary because A should not send out the delete message until all
 previous messages are received, otherwise, the ``OwnerRRef`` could be
 deleted before usage as we do not guarantee message delivery order. This is done
@@ -234,8 +236,8 @@ owner confirms the child ``ForkId``. The figure below shows the message flow.
 
 Note that the ``UserRRef`` could be deleted on B before func finishes or even
 starts. However this is OK, as at the time B sends out ACK for the child
-``ForkId``, it already acquired the ``OwnerRRef`` instance, which would prevent it
-been deleted too soon.
+``ForkId``, it already acquired the ``OwnerRRef`` instance, which would prevent
+it been deleted too soon.
 
 
 Owner Share RRef with User
@@ -243,7 +245,7 @@ Owner Share RRef with User
 
 Owner to user is the simplest case, where the owner can update reference
 counting locally, and does not need any additional control message to notify
-others. Regarding G2, it is same as the parent receives the ACK from the
+others. Regarding **G2**, it is same as the parent receives the ACK from the
 owner immediately, as the parent is the owner.
 
 .. code::
@@ -265,17 +267,17 @@ owner immediately, as the parent is the owner.
     :alt: owner_to_user.png
     :width: 500 px
 
-The figure above shows the message flow. Note that when the OwnerRRef exits
+The figure above shows the message flow. Note that when the ``OwnerRRef`` exits
 scope after the rpc_async call, it will not be deleted, because internally
 there is a map to hold it alive if there is any known forks, in which case is
-``UserRRef {100, 2}``. (G2)
+``UserRRef {100, 2}``. (**G2**)
 
 
 User Share RRef with User
 -------------------------
 
-This is the most complicated case where caller user (parent ``UserRRef``), callee
-user (child ``UserRRef``), and the owner all need to get involved.
+This is the most complicated case where caller user (parent ``UserRRef``),
+callee user (child ``UserRRef``), and the owner all need to get involved.
 
 .. code::
 
