@@ -604,11 +604,13 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   }
 }
 
-inline std::tuple<Tensor, Tensor> multi_head_attention_forward(const MultiheadAttentionForwardOptions& options) {
+inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
+  const Tensor& query, const Tensor& key, const Tensor& value,
+  const MultiheadAttentionForwardOptions& options) {
   return multi_head_attention_forward(
-    options.query(),
-    options.key(),
-    options.value(),
+    query,
+    key,
+    value,
     options.embed_dim_to_check(),
     options.num_heads(),
     options.in_proj_weight(),

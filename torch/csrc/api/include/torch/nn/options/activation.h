@@ -360,29 +360,12 @@ struct TORCH_API MultiheadAttentionOptions {
 struct TORCH_API MultiheadAttentionForwardOptions {
 
   MultiheadAttentionForwardOptions(
-    Tensor query, Tensor key, Tensor value,
     int64_t embed_dim_to_check, int64_t num_heads,
     Tensor in_proj_weight, Tensor in_proj_bias,
     Tensor bias_k, Tensor bias_v,
     bool add_zero_attn, double dropout_p,
-    Tensor out_proj_weight, Tensor out_proj_bias,
-    bool training = true,
-    Tensor key_padding_mask = {},
-    bool need_weights = true,
-    Tensor attn_mask = {},
-    bool use_separate_proj_weight = false,
-    Tensor q_proj_weight = {},
-    Tensor k_proj_weight = {},
-    Tensor v_proj_weight = {},
-    Tensor static_k = {},
-    Tensor static_v = {}
+    Tensor out_proj_weight, Tensor out_proj_bias
   );
-
-  TORCH_ARG(Tensor, query);
-
-  TORCH_ARG(Tensor, key);
-
-  TORCH_ARG(Tensor, value);
 
   TORCH_ARG(int64_t, embed_dim_to_check);
 
@@ -404,25 +387,25 @@ struct TORCH_API MultiheadAttentionForwardOptions {
 
   TORCH_ARG(Tensor, out_proj_bias);
 
-  TORCH_ARG(bool, training);
+  TORCH_ARG(bool, training) = true;
 
-  TORCH_ARG(Tensor, key_padding_mask);
+  TORCH_ARG(Tensor, key_padding_mask) = {};
 
-  TORCH_ARG(bool, need_weights);
+  TORCH_ARG(bool, need_weights) = true;
 
-  TORCH_ARG(Tensor, attn_mask);
+  TORCH_ARG(Tensor, attn_mask) = {};
 
-  TORCH_ARG(bool, use_separate_proj_weight);
+  TORCH_ARG(bool, use_separate_proj_weight) = false;
 
-  TORCH_ARG(Tensor, q_proj_weight);
+  TORCH_ARG(Tensor, q_proj_weight) = {};
 
-  TORCH_ARG(Tensor, k_proj_weight);
+  TORCH_ARG(Tensor, k_proj_weight) = {};
 
-  TORCH_ARG(Tensor, v_proj_weight);
+  TORCH_ARG(Tensor, v_proj_weight) = {};
 
-  TORCH_ARG(Tensor, static_k);
+  TORCH_ARG(Tensor, static_k) = {};
 
-  TORCH_ARG(Tensor, static_v);
+  TORCH_ARG(Tensor, static_v) = {};
 };
 
 } // namespace nn

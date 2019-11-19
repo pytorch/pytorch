@@ -526,6 +526,8 @@ class TORCH_API MultiheadAttentionImpl
 
   void reset() override;
 
+  void _reset_parameters();
+
   /// Pretty prints the `MultiheadAttention` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
