@@ -38,12 +38,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<WorkerInfo>(
           module,
           "WorkerInfo",
-          R"(
-  Encapsulates information of a worker in the system.
-)")
-          .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker)")
+          R"(Encapsulates information of a worker in the system.)")
+          .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker.)")
           .def_readonly(
-              "id", &WorkerInfo::id_, R"(Globally unique id of the worker)");
+              "id", &WorkerInfo::id_, R"(Globally unique id of the worker.)")
           .def("__eq__", &WorkerInfo::operator==, py::is_operator())
           // pybind11 suggests the syntax  .def(hash(py::self)), with the
           // unqualified "hash" function call. However the
