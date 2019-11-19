@@ -127,7 +127,7 @@ def remote(to, func, args=None, kwargs=None):
     are no living references to it.
 
     Arguments:
-        to (int or str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo): id or name of the destination worker.
         func (callable): builtin functions (like :meth:`torch.add`).
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
@@ -142,7 +142,7 @@ def remote(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> worker1 = rpc.get_worker_info("worker1")
         >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
@@ -151,7 +151,7 @@ def remote(to, func, args=None, kwargs=None):
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
         >>> rpc.join_rpc()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -200,7 +200,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
     method is thread-safe.
 
     Arguments:
-        to (int or str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo): id or name of the destination worker.
         func (callable): any callable function. builtin functions (like
                          :meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -214,13 +214,13 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rpc.join_rpc()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -236,7 +236,7 @@ def rpc_async(to, func, args=None, kwargs=None):
     ``torch.distributed.FutureMessage`` that can be awaited on.
 
     Arguments:
-        to (int or str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo): id or name of the destination worker.
         func (callable): any callable function. builtin functions (like
                          :meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -252,7 +252,7 @@ def rpc_async(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> worker1 = rpc.get_worker_id("worker1")
         >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
         >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
@@ -261,7 +261,7 @@ def rpc_async(to, func, args=None, kwargs=None):
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
