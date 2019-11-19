@@ -91,12 +91,6 @@ if(NOT USE_CUDA)
   INSTALL(FILES src/THCUNN/generic/THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN/generic")
 endif()
 
-if(NOT USE_NNPACK)
-  set(AT_NNPACK_ENABLED 0)
-else()
-  set(AT_NNPACK_ENABLED 1)
-endif()
-
 list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include)

@@ -130,11 +130,6 @@ std::string show_config() {
   ss << "  - LAPACK is enabled (usually provided by MKL)\n";
 #endif
 
-#if AT_NNPACK_ENABLED()
-  // TODO: No version; c.f. https://github.com/Maratyszcza/NNPACK/issues/165
-  ss << "  - NNPACK is enabled\n";
-#endif
-
   if (hasCUDA()) {
     ss << detail::getCUDAHooks().showConfig();
   }

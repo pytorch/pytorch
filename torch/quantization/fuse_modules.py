@@ -87,6 +87,7 @@ def fuse_known_modules(mod_list):
     OP_LIST_TO_FUSER_METHOD = {
         (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
         (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
+        (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU6): fuse_conv_bn_relu,
         (torch.nn.Conv2d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU2d,
         (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU
     }

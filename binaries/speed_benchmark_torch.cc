@@ -96,7 +96,9 @@ int main(int argc, char** argv) {
       input_dims.push_back(c10::stoi(s));
     }
     if (input_type_list[i] == "float") {
-      inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));
+      // Replace with torch::ones(input_dims, at::ScalarType::Float, at::MemoryFormat::ChannelsLast)
+      // if and when that function becomes available.
+      inputs.push_back(torch::empty(input_dims, at::ScalarType::Float, at::MemoryFormat::ChannelsLast).fill_(1));
     } else if (input_type_list[i] == "uint8_t") {
       inputs.push_back(torch::ones(input_dims, at::ScalarType::Byte));
     } else if (input_type_list[i] == "int64") {

@@ -1,12 +1,12 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
-from torch.nn import Conv2d, Conv3d, ReLU, Linear, BatchNorm2d
+from torch.nn import Conv2d, Conv3d, ReLU, ReLU6, Linear, BatchNorm2d
 
 class ConvReLU2d(torch.nn.Sequential):
     r"""This is a sequential container which calls the Conv 2d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, relu):
-        assert type(conv) == Conv2d and type(relu) == ReLU, \
+        assert type(conv) == Conv2d and (type(relu) == ReLU or type(relu) == ReLU6), \
             'Incorrect types for input modules{}{}'.format(
                 type(conv), type(relu))
         super(ConvReLU2d, self).__init__(conv, relu)
@@ -43,6 +43,6 @@ class ConvBnReLU2d(torch.nn.Sequential):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, bn, relu):
         assert type(conv) == Conv2d and type(bn) == BatchNorm2d and \
-            type(relu) == ReLU, 'Incorrect types for input modules{}{}{}' \
+            (type(relu) == ReLU or type(relu) == ReLU6), 'Incorrect types for input modules{}{}{}' \
             .format(type(conv), type(bn), type(relu))
         super(ConvBnReLU2d, self).__init__(conv, bn, relu)

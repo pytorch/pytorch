@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/mobile/cpu/Engine.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 
@@ -122,6 +123,10 @@ Tensor max_pool2d(
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
+  // if (mobile::cpu::use_max_pool(self, kernel_size, padding, stride, dilation, ceil_mode)) {
+  //   return mobile::cpu::max_pool(
+  //       self, kernel_size, padding, stride, dilation, ceil_mode);
+  // }
   auto output_and_indices = at::max_pool2d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
   return std::get<0>(output_and_indices);

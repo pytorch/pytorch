@@ -7,7 +7,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <ATen/native/mobile/internal/ThreadPool.h>
 
 #include <algorithm>
 
@@ -71,10 +71,8 @@ Tensor qnnpack_relu(Tensor input) {
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Relu operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
-
   const pytorch_qnnp_status runStatus =
-      pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
+      pytorch_qnnp_run_operator(qnnpack_operator, mobile::internal::threadpool().handle());
 
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,

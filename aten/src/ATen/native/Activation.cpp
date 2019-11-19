@@ -4,6 +4,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/mobile/cpu/Engine.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 
@@ -24,14 +25,26 @@ DEFINE_DISPATCH(leaky_relu_stub);
 DEFINE_DISPATCH(leaky_relu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
+  // if (mobile::cpu::use_clamp(self, min, max)) {
+  //   return mobile::cpu::clamp(self, min, max);
+  // }
+
   return at::clamp(self, min, max);
 }
 
 Tensor& hardtanh_out(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
+  // if (mobile::cpu::use_clamp(self, min, max)) {
+  //   return mobile::cpu::clamp(result, self, min, max);
+  // }
+
   return at::clamp_out(result, self, min, max);
 }
 
 Tensor& hardtanh_(Tensor& self, Scalar min, Scalar max) {
+  // if (mobile::cpu::use_clamp(self, min, max)) {
+  //   return mobile::cpu::clamp(self, self, min, max);
+  // }
+
   return at::clamp_(self, min, max);
 }
 
@@ -104,10 +117,18 @@ Tensor elu_backward(
 }
 
 Tensor relu(const Tensor & self) {
+  // if (mobile::cpu::use_relu(self)) {
+  //   return mobile::cpu::relu(self);
+  // }
+
   return at::threshold(self, 0, 0);
 }
 
 Tensor & relu_(Tensor & self) {
+  // if (mobile::cpu::use_relu(self)) {
+  //   return mobile::cpu::relu(self, self);
+  // }
+
   return at::threshold_(self, 0, 0);
 }
 

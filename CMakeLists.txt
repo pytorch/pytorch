@@ -165,6 +165,7 @@ cmake_dependent_option(
     "USE_NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
+option(USE_XNNPACK "Use XNNPACK" ON)
 cmake_dependent_option(
     USE_NUMA "Use NUMA. Only available on Linux." ON
     "LINUX" OFF)
@@ -329,6 +330,7 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
   set(USE_PYTORCH_QNNPACK ON)
+  set(USE_NNPACK OFF)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
@@ -501,14 +503,6 @@ endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
-endif()
-
-if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s")
-  else()
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
-  endif()
 endif()
 
 if(NOT APPLE AND UNIX)

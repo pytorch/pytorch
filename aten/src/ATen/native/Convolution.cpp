@@ -1,20 +1,14 @@
 #include <limits>
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/cpu/DepthwiseConvKernel.h>
+#include <ATen/native/mobile/cpu/Engine.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/ConvUtils.h>
-
-#include <ATen/Config.h>
-#if AT_NNPACK_ENABLED()
-#include "nnpack.h"
-#endif
 
 static const int MIOPEN_DIM_MAX = 4;
 
 namespace at { namespace native {
-
-DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
 struct ConvParams {
   std::vector<int64_t> stride;
@@ -35,14 +29,13 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool cudnn_use_channels_last(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
-  bool use_nnpack(const at::Tensor& input) const;
+  bool use_mobile(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -126,30 +119,6 @@ auto ConvParams::view1d_as_2d() -> void {
   }
 }
 
-auto ConvParams::use_cpu_depthwise3x3_winograd(
-    const at::Tensor& input, const at::Tensor& weight) const -> bool {
-#ifdef __ARM_NEON__
-  // Currently only 3x3 depthwise convolutions on tensors of float are supported.
-  return (input.ndimension() == 4) &&
-         (input.size(1) == groups) &&
-         (weight.ndimension() == 4 ) &&
-         (weight.size(0) % input.size(1) == 0) &&
-         (weight.size(2) == 3) &&
-         (weight.size(3) == 3) &&
-         (input.device().type() == c10::DeviceType::CPU) &&
-         (input.scalar_type() == at::kFloat) &&
-         input.is_contiguous() &&
-         (weight.device().type() == c10::DeviceType::CPU) &&
-         (weight.scalar_type() == at::kFloat) &&
-         weight.is_contiguous() &&
-         !is_strided() &&
-         !is_dilated() &&
-         !transposed;
-#else
-  return false;
-#endif
-}
-
 auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const -> bool {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   int64_t numel_input = input.numel();
@@ -222,20 +191,20 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #endif
   return false;
 }
-auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
-#if AT_NNPACK_ENABLED()
-  return at::_nnpack_available() &&
-         input.options().backend() == at::Backend::CPU &&
-         input.scalar_type() == kFloat && // only on CPU Float Tensors
-         !is_dilated() && // or dilation
-         !transposed &&   // or transposed tensors
-         input.ndimension() == 4 // must be in NCHW format
-#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-         && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
-#endif
-     ;
-#endif
-  return false;
+
+auto ConvParams::use_mobile(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias) const -> bool {
+  return mobile::cpu::use_convolution(
+      input,
+      weight,
+      bias,
+      padding,
+      stride,
+      dilation,
+      groups,
+      transposed);
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -692,11 +661,13 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
+  // } else if (params.use_mobile(input, weight, bias)) {
+  //   output = mobile::cpu::convolution(
+  //       input, weight, bias,
+  //       params.padding, params.stride, params.dilation, params.groups, params.transposed);
+
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
-    if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
-      output = convolution_depthwise3x3_winograd_stub(
-        input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
-    } else if (params.groups == 1) {
+    if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {
@@ -762,18 +733,11 @@ at::Tensor _convolution_nogroup(
             input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
-        if (params.use_nnpack(input)) {
-#if AT_NNPACK_ENABLED()
-          return at::_nnpack_spatial_convolution(
-              input, weight, bias, padding, stride);
-#endif
-        } else {
-          /* CPU implementation has specialized MM kernels
-             for non-dilated case here */
-          return at::thnn_conv2d(
-              input, weight, kernel_size, bias,
-              stride, padding);
-        }
+        /* CPU implementation has specialized MM kernels
+           for non-dilated case here */
+        return at::thnn_conv2d(
+            input, weight, kernel_size, bias,
+            stride, padding);
       }
     } else if (dim == 5 && (input.is_cuda() || dilated)) {
       return at::slow_conv_dilated3d(

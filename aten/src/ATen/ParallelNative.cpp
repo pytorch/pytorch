@@ -5,8 +5,7 @@
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
 #else
-#include <caffe2/utils/threadpool/ThreadPool.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <ATen/native/mobile/internal/ThreadPool.h>
 #endif // C10_MOBILE
 
 #include <atomic>
@@ -87,15 +86,7 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
   // Run the first task on the current thread directly.
   fn(0, 0);
 #else
-  caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
-  if (pool) {
-    // caffe2::ThreadPool can utilize the current thread.
-    pool->run(fn, range);
-  } else {
-    for (size_t i = 0; i < range; ++i) {
-      fn(0, i);
-    }
-  }
+  native::mobile::internal::threadpool().run(fn, range);
 #endif // C10_MOBILE
 }
 
@@ -170,7 +161,7 @@ void init_num_threads() {
 #endif
 
 #ifdef C10_MOBILE
-  caffe2::mobile_threadpool();
+  native::mobile::internal::threadpool();
 #endif
 }
 
@@ -212,9 +203,7 @@ int get_num_threads() {
     return _get_intraop_pool().size() + 1;
   }
 #else
-  caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
-  // caffe2::ThreadPool::getNumThreads() counts the current thread.
-  return !pool || in_parallel_region() ? 1 /* current thread */ : pool->getNumThreads();
+  return native::mobile::internal::threadpool().get_thread_count();
 #endif // C10_MOBILE
 }
 
@@ -243,7 +232,7 @@ void intraop_launch(std::function<void()> func) {
     func();
   }
 #else
-  // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
+  // TODO: Mobile ThreadPool doesn't support submitting tasks separately and
   // running in parallel. Should fix it when this API becomes popular.
   func();
 #endif // C10_MOBILE
@@ -266,7 +255,7 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
   }
   return future;
 #else
-  // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
+  // TODO: Mobile ThreadPool doesn't support submitting tasks separately and
   // running in parallel. Should fix it when this API becomes popular.
   auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
   func();

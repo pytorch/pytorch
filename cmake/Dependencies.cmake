@@ -180,7 +180,7 @@ if (NOT INTERN_BUILD_MOBILE)
   endif()
 endif()
 
-# Directory where NNPACK and cpuinfo will download and build all dependencies
+# Directory where cpuinfo will download and build all dependencies
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
   CACHE PATH "Confu-style dependencies source directory")
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
@@ -191,28 +191,6 @@ if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
   set(USE_BLAS 1)
   include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
   list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
-endif()
-
-# ---[ pthreadpool
-# QNNPACK and NNPACK both depend on pthreadpool, but when building with libtorch
-# they should use the pthreadpool implementation under caffe2/utils/threadpool
-# instead of the default implementation. To avoid confusion, add pthreadpool
-# subdirectory explicitly with EXCLUDE_FROM_ALL property prior to QNNPACK/NNPACK
-# does so, which will prevent it from installing the default pthreadpool library.
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPACK))
-  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-  endif()
-
-  IF(NOT TARGET pthreadpool)
-    SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
-    SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    ADD_SUBDIRECTORY(
-      "${PTHREADPOOL_SOURCE_DIR}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
-      EXCLUDE_FROM_ALL)
-  ENDIF()
 endif()
 
 # ---[ QNNPACK
@@ -376,6 +354,84 @@ if(USE_NNPACK)
   else()
     message(WARNING "Not compiling with NNPACK. Suppress this warning with -DUSE_NNPACK=OFF")
     caffe2_update_option(USE_NNPACK OFF)
+  endif()
+endif()
+
+# ---[ XNNPACK
+if(USE_XNNPACK)
+  if (IOS)
+    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
+    if (IOS_ARCH_COUNT GREATER 1)
+      message(WARNING
+        "Multi-architecture (${IOS_ARCH}) builds are not supported in XNNPACK. "
+        "Specify a single architecture in IOS_ARCH and re-configure, or "
+        "turn this warning off by USE_XNNPACK=OFF.")
+      set(USE_XNNPACK OFF)
+    endif()
+    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
+      message(WARNING
+        "Target architecture \"${IOS_ARCH}\" is not supported in XNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_XNNPACK=OFF.")
+      set(USE_XNNPACK OFF)
+    endif()
+  else()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+      message(WARNING
+        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in XNNPACK. "
+        "Supported platforms are Android, iOS, Linux, and macOS. "
+        "Turn this warning off by USE_XNNPACK=OFF.")
+      set(USE_XNNPACK OFF)
+    endif()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+      message(WARNING
+        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in XNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_XNNPACK=OFF.")
+      set(USE_XNNPACK OFF)
+    endif()
+  endif()
+
+  if (USE_XNNPACK)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+
+    if (NOT DEFINED CPUINFO_SOURCE_DIR)
+      set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+    endif()
+    if (NOT DEFINED FP16_SOURCE_DIR)
+      set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
+    endif()
+    if (NOT DEFINED FXDIV_SOURCE_DIR)
+      set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
+    endif()
+    if (NOT DEFINED PSIMD_SOURCE_DIR)
+      set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+    endif()
+    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    endif()
+    if (NOT DEFINED XNNPACK_SOURCE_DIR)
+      set(XNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/XNNPACK" CACHE STRING "XNNPACK source directory")
+    endif()
+    # TODO: What's the cannonical way to do this in CMAKE?  Isn't the library CMAKE supposed to define a variable?
+    if (NOT DEFINED XNNPACK_INCLUDE_DIR)
+      set(XNNPACK_INCLUDE_DIR "${XNNPACK_SOURCE_DIR}/include" CACHE STRING "XNNPACK include directory")
+    endif()
+
+    if(NOT TARGET XNNPACK)
+      set(XNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+      set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+
+      add_subdirectory(
+        "${XNNPACK_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
+
+      set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
+
+    include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
   endif()
 endif()
 

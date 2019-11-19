@@ -9,7 +9,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <ATen/native/mobile/internal/ThreadPool.h>
 
 namespace at {
 namespace native {
@@ -625,7 +625,7 @@ class QConvInt8 final : public c10::OperatorKernel {
         output.q_scale(),
         output.q_zero_point(),
         reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-        caffe2::mobile_pthreadpool());
+        mobile::internal::threadpool().handle());
 
     TORCH_INTERNAL_ASSERT(
         run_status == pytorch_qnnp_status_success,
