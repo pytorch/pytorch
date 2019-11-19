@@ -410,8 +410,8 @@ class SyncBatchNorm(_BatchNorm):
         self.ddp_gpu_size = None
 
     def _check_input_dim(self, input):
-        if input.dim() <= 2:
-            raise ValueError('expected at least 3D input (got {}D input)'
+        if input.dim() < 2:
+            raise ValueError('expected at least 2D input (got {}D input)'
                              .format(input.dim()))
 
     def _specify_ddp_gpu_num(self, gpu_size):

@@ -513,3 +513,6 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["ComplexDouble"],
     cast_pytorch_to_onnx["Bool"],
 ]
+# Global set to store the list of quantized operators in the network.
+# This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.
+_quantized_ops = set()
