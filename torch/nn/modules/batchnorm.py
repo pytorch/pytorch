@@ -410,8 +410,8 @@ class SyncBatchNorm(_BatchNorm):
         self.ddp_gpu_size = None
 
     def _check_input_dim(self, input):
-        if input.dim() <= 2:
-            raise ValueError('expected at least 3D input (got {}D input)'
+        if input.dim() < 2:
+            raise ValueError('expected at least 2D input (got {}D input)'
                              .format(input.dim()))
 
     def _specify_ddp_gpu_num(self, gpu_size):
@@ -497,8 +497,8 @@ class SyncBatchNorm(_BatchNorm):
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
-                module_output.weight.data = module.weight.data.clone().detach()
-                module_output.bias.data = module.bias.data.clone().detach()
+                module_output.weight.data = module.weight.data.clone(memory_format=torch.preserve_format).detach()
+                module_output.bias.data = module.bias.data.clone(memory_format=torch.preserve_format).detach()
                 # keep reuqires_grad unchanged
                 module_output.weight.requires_grad = module.weight.requires_grad
                 module_output.bias.requires_grad = module.bias.requires_grad

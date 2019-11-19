@@ -142,7 +142,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
     auto& variable = ((THPVariable*)_tensor)->cdata;
-    auto gradient_edge = variable.gradient_edge();
+    auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);
     roots.push_back(std::move(gradient_edge));
@@ -180,7 +180,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
-          grad_fn = input_var->cdata.try_get_grad_accumulator();
+          grad_fn = torch::autograd::impl::try_get_grad_accumulator(input_var->cdata);
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
@@ -255,11 +255,11 @@ static struct PyMethodDef THPEngine_methods[] = {
 
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._EngineBase",                /* tp_name */
-  sizeof(THPEngine),                     /* tp_basicsize */
-  0,                                     /* tp_itemsize */
+  "torch._C._EngineBase",                      /* tp_name */
+  sizeof(THPEngine),                           /* tp_basicsize */
+  0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -273,25 +273,25 @@ PyTypeObject THPEngineType = {
   nullptr,                                     /* tp_getattro */
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  nullptr,                               /* tp_doc */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
-  THPEngine_methods,                     /* tp_methods */
+  THPEngine_methods,                           /* tp_methods */
   nullptr,                                     /* tp_members */
   nullptr,                                     /* tp_getset */
   nullptr,                                     /* tp_base */
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPEngine_new                          /* tp_new */
+  THPEngine_new                                /* tp_new */
 };
 
 static void child_atfork() {
