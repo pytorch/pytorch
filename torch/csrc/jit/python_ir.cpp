@@ -725,7 +725,8 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
-      }));
+      }))
+      .def("name", [](ClassType& self) { return self.name()->name(); });
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
