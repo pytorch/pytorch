@@ -70,7 +70,6 @@ if PY33:
     TESTS.extend([
         'rpc_spawn',
         'dist_autograd_spawn',
-        'dist_optimizer_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -81,18 +80,20 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
     'dist_autograd_spawn',
-    'dist_optimizer_spawn',
 ]
 
 ROCM_BLACKLIST = [
     'cpp_extensions',
     'distributed',
     'multiprocessing',
+    'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
     'dist_autograd_spawn',
-    'dist_optimizer_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
