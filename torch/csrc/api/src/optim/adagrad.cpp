@@ -14,58 +14,6 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-/*
-def step(self, closure=None):
-    """Performs a single optimization step.
-
-    Arguments:
-        closure (callable, optional): A closure that reevaluates the model
-            and returns the loss.
-    """
-    loss = None
-    if closure is not None:
-        loss = closure()
-
-    for group in self.param_groups:
-        for p in group['params']:
-            if p.grad is None:
-                continue
-
-            grad = p.grad.data
-            state = self.state[p]
-
-            state['step'] += 1
-
-            if group['weight_decay'] != 0:
-                if p.grad.data.is_sparse:
-                    raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                grad = grad.add(group['weight_decay'], p.data)
-
-            clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
-
-            if grad.is_sparse:
-                grad = grad.coalesce()  # the update is non-linear so indices must be unique
-                grad_indices = grad._indices()
-                grad_values = grad._values()
-                size = grad.size()
-
-                def make_sparse(values):
-                    constructor = grad.new
-                    if grad_indices.dim() == 0 or values.dim() == 0:
-                        return constructor().resize_as_(grad)
-                    return constructor(grad_indices, values, size)
-                state['sum'].add_(make_sparse(grad_values.pow(2)))
-                std = state['sum'].sparse_mask(grad)
-                std_values = std._values().sqrt_().add_(group['eps'])
-                p.data.add_(-clr, make_sparse(grad_values / std_values))
-            else:
-                state['sum'].addcmul_(1, grad, grad)
-                std = state['sum'].sqrt().add_(group['eps'])
-                p.data.addcdiv_(-clr, grad, std)
-
-    return loss
-*/
-
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
@@ -76,6 +24,7 @@ void Adagrad::step() {
       }
       auto grad = p.grad().data();
       // TODO: assert that `state_[p.unsafeGetTensorImpl()]` exists and is not a null pointer, before dereferencing it
+      TORCH_CHECK(state_[p.unsafeGetTensorImpl()] != NULL, "state found NULL for the Tensor ", p);
       auto& state = static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
       auto& options = static_cast<AdagradOptions&>(group.options());
 

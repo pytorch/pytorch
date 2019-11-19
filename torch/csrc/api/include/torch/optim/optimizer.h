@@ -150,6 +150,15 @@ class TORCH_API OptimizerBase {
   /// Returns the number of parameters referenced by the optimizer.
   virtual size_t size() const noexcept;
 
+  //todo-description
+  OptimizerOptions& defaults() noexcept;
+
+  //todo-description
+  std::vector<OptimizerParamGroup>& param_groups() noexcept;
+
+  //todo-description
+  //ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state() noexcept;
+
   /// Serializes the optimizer state into the given `archive`.
   virtual void save(serialize::OutputArchive& archive) const;
 
@@ -178,6 +187,7 @@ class TORCH_API OptimizerBase {
 
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
+
   //to do-description
   std::unique_ptr<OptimizerOptions> defaults_;
   std::vector<OptimizerParamGroup> param_groups_;

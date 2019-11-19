@@ -64,6 +64,18 @@ size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
 }
 
+OptimizerOptions& OptimizerBase::defaults() noexcept {
+  return *defaults_.get();
+}
+
+std::vector<OptimizerParamGroup>& OptimizerBase::param_groups() noexcept {
+  return param_groups_;
+}
+
+// ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state() noexcept {
+//   return state_;
+// }
+
 Tensor& OptimizerBase::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   if (buffers.size() <= index) {
     buffers.reserve(index);
