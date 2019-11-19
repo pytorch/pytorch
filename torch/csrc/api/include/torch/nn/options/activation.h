@@ -33,6 +33,18 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SELU, SELUFuncOptions)
 
 // ============================================================================
 
+/// Options for GLU functional and module.
+struct TORCH_API GLUOptions {
+  /* implicit */ GLUOptions(int64_t dim = -1);
+
+  /// the dimension on which to split the input. Default: -1
+  TORCH_ARG(int64_t, dim);
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(GLU, GLUFuncOptions)
+
+// ============================================================================
+
 /// Options for Hardshrink functional and module.
 struct TORCH_API HardshrinkOptions {
   /* implicit */ HardshrinkOptions(double lambda = 0.5);

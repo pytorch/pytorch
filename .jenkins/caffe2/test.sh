@@ -82,7 +82,7 @@ fi
 EXTRA_TESTS=()
 
 # CUDA builds always include NCCL support
-if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *-rocm* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 
@@ -141,7 +141,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
     sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev1022
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.0.0.dev1104
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

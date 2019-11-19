@@ -1,0 +1,125 @@
+from torch.onnx.symbolic_helper import parse_args
+import torch.onnx.symbolic_helper as sym_help
+import torch.onnx.symbolic_registry as sym_registry
+import importlib
+from inspect import getmembers, isfunction
+
+def register_quantized_ops(domain, version):
+    # Register all the non-quantized ops
+    sym_registry.register_version('', version)
+    # Register all quantized ops
+    module = importlib.import_module('torch.onnx.symbolic_caffe2')
+    sym_registry._symbolic_versions['caffe2'] = module
+    quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
+    for op in quant_version_ops:
+        if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
+            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor']
+            if op[0] in aten_q_ops:
+                sym_registry.register_op(op[0], op[1], '', version)
+            sym_registry.register_op(op[0], op[1], domain, version)
+
+def linear_prepack(g, weight, bias):
+    # Mapping to a dummy caffe2 prepack node.
+    # During the onnx -> c2 conversion we can look up original weight and bias
+    # from this node
+    output = g.op("_caffe2::WeightPrepack", weight, bias)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v', 'v', 'v', 'f', 'i')
+def linear(g, input, weight, bias, scale, zero_point):
+    kwargs = {
+        "Y_scale_f": scale,
+        "Y_zero_point_i": zero_point,
+    }
+    output = g.op("_caffe2::Int8FC", input, weight, bias, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+def conv_prepack(g, input, weight, bias, stride, padding, dilation, groups):
+    # Mapping to a dummy caffe2 prepack node.
+    # During the onnx -> c2 conversion we can look up original weight and bias
+    # from this node
+    output = g.op("_caffe2::WeightPrepack", input, weight, bias)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'f', 'i')
+def conv2d(g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point):
+    kernel_size = weight.node()["shape"][1:3]
+    kwargs = {
+        "strides_i": stride,
+        "pads_i": padding + padding,
+        "dilations_i": dilation,
+        "group_i": groups,
+        "kernels_i": kernel_size,
+        "order_s": "NHWC",
+        "Y_scale_f": scale,
+        "Y_zero_point_i": zero_point,
+    }
+    output = g.op("_caffe2::Int8Conv", input, weight, bias, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'f', 'i')
+def conv2d_relu(g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point):
+    kernel_size = weight.node()["shape"][1:3]
+    kwargs = {
+        "strides_i": stride,
+        "pads_i": padding + padding,
+        "dilations_i": dilation,
+        "group_i": groups,
+        "kernels_i": kernel_size,
+        "order_s": "NHWC",
+        "Y_scale_f": scale,
+        "Y_zero_point_i": zero_point,
+    }
+    output = g.op("_caffe2::Int8ConvRelu", input, weight, bias, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v', 'v', 'f', 'i')
+def add(g, input_a, input_b, scale, zero_point):
+    kwargs = {
+        "Y_scale_f": scale,
+        "Y_zero_point_i": zero_point,
+    }
+    output = g.op("_caffe2::Int8Add", input_a, input_b, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+def upsample_nearest_2d(g, input, size, scale_factor, mode, align_corners):
+    output = g.op("_caffe2::Int8ResizeNearest", input, scale_factor, scale_factor)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v')
+def relu(g, input):
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import relu
+        return relu(g, input)
+    kwargs = {
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+    output = g.op("_caffe2::Int8Relu", input, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v', 'f', 'i', 't')
+def quantize_per_tensor(g, input, scale, zero_point, dtype):
+    kwargs = {
+        "Y_scale_f": scale,
+        "Y_zero_point_i": zero_point,
+    }
+    output = g.op("_caffe2::Int8Quantize", input, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v')
+def dequantize(g, input):
+    return g.op("_caffe2::Int8Dequantize", input)
+
+@parse_args('v', 't', 't', 't', 't', 't', 't', 't')
+def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
+    return input
