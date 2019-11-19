@@ -66,7 +66,7 @@ class class_ {
   ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
-  const std::string topModule = "__torch__";
+  const std::string topModule = "__torch__.torch";
 
  public:
   class_(std::string className_) : className(std::move(className_)) {
