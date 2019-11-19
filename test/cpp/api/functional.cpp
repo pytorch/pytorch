@@ -2009,16 +2009,26 @@ void test_isfinite(const at::Device& device) {
 }
 
 TEST_F(FunctionalTest, isfinite) {
-  for (const auto device : {at::Device("cpu"), at::Device("cuda")}) {
-    test_isfinite<torch::kUInt8, unsigned char>(device);
-    test_isfinite<torch::kInt8, char>(device);
-    test_isfinite<torch::kInt16, short>(device);
-    test_isfinite<torch::kInt32, int>(device);
-    test_isfinite<torch::kInt64, long>(device);
-    test_isfinite<torch::kFloat32, float>(device);
-    test_isfinite<torch::kFloat64, double>(device);
-  }
-  test_isfinite<torch::kFloat16, c10::Half>(at::Device("cuda"));
+  const at::Device device("cpu");
+  test_isfinite<torch::kUInt8, uint8_t>(device);
+  test_isfinite<torch::kInt8, int8_t>(device);
+  test_isfinite<torch::kInt16, int16_t>(device);
+  test_isfinite<torch::kInt32, int32_t>(device);
+  test_isfinite<torch::kInt64, int64_t>(device);
+  test_isfinite<torch::kFloat32, float>(device);
+  test_isfinite<torch::kFloat64, double>(device);
+}
+
+TEST_F(FunctionalTest, isfinite_CUDA) {
+  const at::Device device("cuda");
+  test_isfinite<torch::kUInt8, uint8_t>(device);
+  test_isfinite<torch::kInt8, int8_t>(device);
+  test_isfinite<torch::kInt16, int16_t>(device);
+  test_isfinite<torch::kInt32, int32_t>(device);
+  test_isfinite<torch::kInt64, int64_t>(device);
+  test_isfinite<torch::kFloat32, float>(device);
+  test_isfinite<torch::kFloat64, double>(device);
+  test_isfinite<torch::kFloat16, c10::Half>(device);
 }
 
 TEST_F(FunctionalTest, BCEWithLogitsLoss) {
