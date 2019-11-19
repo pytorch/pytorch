@@ -199,9 +199,10 @@ def run_tests(argv=UNITTEST_ARGS):
 
             test_report_path = os.path.join('test-reports', test_source)
             if PY3:
-                os.makedirs(test_report_path, exists_ok=True)
+                os.makedirs(test_report_path, exist_ok=True)
             else:
-                os.makedirs(test_report_path)
+                if not os.path.exists(test_report_path):
+                    os.makedirs(test_report_path)
 
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
         else:
