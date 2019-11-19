@@ -50,7 +50,7 @@ void RemoveInplaceOps(Block* block) {
 
       int additionalInputCount = 0;
       if (expectedInputCount.find(node->kind()) != expectedInputCount.end()) {
-        additionalInputCount = static_cast<int>(expectedInputCount.at(node->kind())) - newNode->inputs().size();
+        additionalInputCount = expectedInputCount.at(node->kind()) - static_cast<int>(newNode->inputs().size());
       }
 
       for (int i = 0; i < additionalInputCount; ++i) {
