@@ -625,7 +625,7 @@ TEST_F(FunctionalTest, NLLLoss) {
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::kFloat);
-  auto target = torch::tensor({1, 0, 2}, torch::kLong);
+  auto target = torch::tensor({1, 0, 2}, torch::kLong); 
   auto output = F::nll_loss(
       input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
   auto expected = torch::tensor(2.4258, torch::kFloat);
