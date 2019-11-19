@@ -125,6 +125,10 @@ def my_function(a, b, c):
 def my_tensor_function(a, b):
     return a + b
 
+def my_sleep_func(seconds=1):
+    import time
+    time.sleep(seconds)
+
 
 def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
@@ -1084,13 +1088,8 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    @dist_init
-    def test_get_default_rpc_timeout(self):
-        timeout = rpc.get_rpc_timeout()
-        self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
-
     @dist_init(setup_rpc=False)
-    def test_set_rpc_timeout(self):
+    def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
 
         # A new `RpcAgentOptions` is constructed
@@ -1110,6 +1109,35 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(timeout, set_timeout)
         rpc.join_rpc()
 
+    @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_rpc_timeouts(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        # futures should time out and be marked with an exception indicating it as such.
+        futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(10)]
+        for fut in futs:
+            with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
+                fut.wait()
+
+        # ensure that if a new timeout is set old futures don't time out but new ones do.
+        rpc._set_rpc_timeout(timedelta(seconds=200))
+        # create a longstanding RPC.
+        fut1 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        # now, set a short timeout.
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        # f2 should time out, f should not.
+        fut2 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        with self.assertRaises(RuntimeError):
+            fut2.wait()
+        fut1.wait()
+
+        # future should run to completion if the timeout is zero.
+        rpc._set_rpc_timeout(timedelta(seconds=0))
+        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
+
+        # reset to default timeout so shutdown messages can process cleanly.
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
 
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")

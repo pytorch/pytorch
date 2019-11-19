@@ -200,6 +200,16 @@ PyObject* rpc_init(PyObject* /* unused */) {
             `datetime.timedelta` instance indicating the RPC timeout.
       )");
 
+  module.def(
+      "_set_rpc_timeout",
+      [](const std::chrono::milliseconds& rpcTimeout) {
+        RpcAgent::getDefaultRpcAgent()->setRpcTimeout(rpcTimeout);
+      },
+      R"(
+          Set the timeout for all RPCs. If an RPC is not completed within this
+          time, an exception indicating it has timed out will be raised.
+      )");
+
   Py_RETURN_TRUE;
 }
 
