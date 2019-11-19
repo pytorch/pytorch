@@ -434,8 +434,6 @@ TORCH_MODULE(FractionalMaxPool2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FractionalMaxPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies fractional maxpool over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.FractionalMaxPool3d to learn
-/// about the exact behavior of this module.
 class TORCH_API FractionalMaxPool3dImpl : public torch::nn::Cloneable<FractionalMaxPool3dImpl> {
  public:
   FractionalMaxPool3dImpl(ExpandingArray<3> kernel_size)
