@@ -1462,8 +1462,19 @@ TEST_F(ModulesTest, InstanceNorm1d) {
   InstanceNorm1d instance_norm(5);
   instance_norm->eval();
 
-  auto input = torch::randn({2, 5, 4}, torch::requires_grad());
+  auto input = torch::arange(2. * 5 * 2).view({2, 5, 2}).requires_grad_();
   auto output = instance_norm->forward(input);
+  auto expected = torch::tensor({{{-1.0000, 1.0000},
+                                  {-1.0000, 1.0000},
+                                  {-1.0000, 1.0000},
+                                  {-1.0000, 1.0000},
+                                  {-1.0000, 1.0000}},
+                                 {{-1.0000, 1.0000},
+                                  {-1.0000, 1.0000},
+                                  {-1.0000, 1.0000},
+                                  {-1.0000, 1.0000},
+                                  {-1.0000, 1.0000}}});
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
 
@@ -1511,8 +1522,29 @@ TEST_F(ModulesTest, InstanceNorm2d) {
   InstanceNorm2d instance_norm(5);
   instance_norm->eval();
 
-  auto input = torch::randn({2, 5, 4, 4}, torch::requires_grad());
+  auto input = torch::arange(2. * 5 * 2 * 2).view({2, 5, 2, 2}).requires_grad_();
   auto output = instance_norm->forward(input);
+  auto expected = torch::tensor({{{{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}}},
+                                 {{{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}},
+                                  {{-1.3416, -0.4472},
+                                   { 0.4472,  1.3416}}}});
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
 
@@ -1560,8 +1592,49 @@ TEST_F(ModulesTest, InstanceNorm3d) {
   InstanceNorm3d instance_norm(5);
   instance_norm->eval();
 
-  auto input = torch::randn({2, 5, 4, 4, 4}, torch::requires_grad());
+  auto input = torch::arange(2. * 5 * 2 * 2 * 2).view({2, 5, 2, 2, 2}).requires_grad_();
   auto output = instance_norm->forward(input);
+  auto expected = torch::tensor({{{{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}}},
+                                 {{{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}},
+                                  {{{-1.5275, -1.0911},
+                                    {-0.6547, -0.2182}},
+                                   {{ 0.2182,  0.6547},
+                                    { 1.0911,  1.5275}}}}});
+  ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
 
