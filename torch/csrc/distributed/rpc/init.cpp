@@ -13,6 +13,9 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
 
+#include <pybind11/chrono.h>
+#include <pybind11/operators.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -23,16 +26,26 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* rpc_init(PyObject* /* unused */) {
-  auto dist_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!dist_module) {
+  auto rpc_module =
+      THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
+  if (!rpc_module) {
     throw python_error();
   }
 
-  auto module = py::handle(dist_module).cast<py::module>();
+  auto module = py::handle(rpc_module).cast<py::module>();
 
-  auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
-                        .def_readonly("name", &WorkerInfo::name_)
-                        .def_readonly("id", &WorkerInfo::id_);
+  auto workerInfo =
+      shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
+          .def_readonly("name", &WorkerInfo::name_)
+          .def_readonly("id", &WorkerInfo::id_)
+          .def("__eq__", &WorkerInfo::operator==, py::is_operator())
+          // pybind11 suggests the syntax  .def(hash(py::self)), with the
+          // unqualified "hash" function call. However the
+          // argument-dependent lookup for the function "hash" doesn't get
+          // triggered in this context because it conflicts with the struct
+          // torch::hash, so  we need to use the qualified name
+          // py::detail::hash, which unfortunately is in a detail namespace.
+          .def(py::detail::hash(py::self));
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -43,14 +56,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
 
-  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
-                      .def(
-                          "wait",
-                          &PyFuture::wait,
-                          py::call_guard<py::gil_scoped_release>());
-
   auto pyRRef =
-      shared_ptr_class_<PyRRef>(module, "RRef")
+      shared_ptr_class_<PyRRef>(module, "RRef", R"(
+          A class encapsulating a reference to a value of some type on a remote worker.
+          This handle will keep the referenced remote value alive on the worker.
+      )")
+          .def(py::init<const py::object&>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -89,10 +100,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
-          py::init<std::string, std::shared_ptr<::c10d::ProcessGroup>, int>(),
+          py::init<
+              std::string,
+              std::shared_ptr<::c10d::ProcessGroup>,
+              int,
+              std::chrono::milliseconds>(),
           py::arg("name"),
           py::arg("process_group"),
-          py::arg("num_send_recv_threads") = 4)
+          py::arg("num_send_recv_threads"),
+          py::arg("rpc_timeout"))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
@@ -126,7 +142,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def(
-      "invoke_rpc_builtin",
+      "_invoke_rpc_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
@@ -136,7 +152,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_rpc_python_udf",
+      "_invoke_rpc_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
@@ -145,7 +161,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_remote_builtin",
+      "_invoke_remote_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
@@ -155,13 +171,33 @@ PyObject* rpc_init(PyObject* /* unused */) {
       });
 
   module.def(
-      "invoke_remote_python_udf",
+      "_invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors) {
         return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
+
+  module.def(
+      "get_rpc_timeout",
+      []() { return RpcAgent::getDefaultRpcAgent()->getRpcTimeout(); },
+      R"(
+          Retrieve the timeout for all RPCs that was set during RPC initialization.
+
+          Returns:
+            `datetime.timedelta` instance indicating the RPC timeout.
+      )");
+
+  module.def(
+      "_set_rpc_timeout",
+      [](const std::chrono::milliseconds& rpcTimeout) {
+        RpcAgent::getDefaultRpcAgent()->setRpcTimeout(rpcTimeout);
+      },
+      R"(
+          Set the timeout for all RPCs. If an RPC is not completed within this
+          time, an exception indicating it has timed out will be raised.
+      )");
 
   Py_RETURN_TRUE;
 }

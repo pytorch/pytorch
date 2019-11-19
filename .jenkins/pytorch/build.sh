@@ -61,6 +61,25 @@ if ! which conda; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  # TODO: Fix Mac Java build
+  #POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      export JAVA_HOME="$JH"
+      export BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
+  fi
+fi
+
 # Use special scripts for Android builds
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
@@ -112,9 +131,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
-  # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
-  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+  python setup.py install --user
 
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
   bash tools/amd_build/unwrap_clang.sh
@@ -135,10 +152,6 @@ export TORCH_CUDA_ARCH_LIST="5.2"
 
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *xenial-py3.6-gcc5.4* ]]; then
-  export DEBUG=1
 fi
 
 # Patch required to build xla

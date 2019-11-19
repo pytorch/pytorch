@@ -117,14 +117,14 @@ void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dime
 void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t value, int dimension, scalar_t maxnorm)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
+  THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
+  THArgCheck(THCNumerics<scalar_t>::gt(value, scalar_cast<scalar_t>(0)), 2, "non-positive-norm not supported");
+  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
+
   THCTensor *self_;
   THCTensor *src_ = THCTensor_(newTranspose)(state, src, dimension, 0);
   THCTensor *data = THCTensor_(newClone)(state, src_);
   int64_t numel = THCTensor_(nElement)(state, data);
-
-  THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
-  THArgCheck(THCNumerics<scalar_t>::gt(value, scalar_cast<scalar_t>(0)), 2, "non-positive-norm not supported");
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
 
   if (numel > 0) {
     ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);

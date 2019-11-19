@@ -28,14 +28,14 @@ jobs:
             git config --global user.name "CircleCI"
             git config remote.origin.url https://github.com/pytorch/pytorch.git
             git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
             export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
             echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
             export GIT_COMMIT=${CIRCLE_SHA1}
             echo "GIT_COMMIT: " ${GIT_COMMIT}
             git checkout -f ${GIT_COMMIT}
             git reset --hard ${GIT_COMMIT}
-            git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+            git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
             set +x
           else
             echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
@@ -65,6 +65,8 @@ jobs:
             output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
+            elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-libtorch
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
@@ -98,6 +100,8 @@ jobs:
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
+          elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-libtorch
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -117,9 +121,20 @@ jobs:
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
+
+          retrieve_test_reports() {
+            echo "retrieving test reports"
+            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+          }
+          trap "retrieve_test_reports" ERR
+
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          retrieve_test_reports
+    - store_test_results:
+        path: test-reports
