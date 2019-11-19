@@ -1902,11 +1902,26 @@ TEST_F(FunctionalTest, AlphaDropout) {
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
-    auto output = F::detail::alpha_dropout(input, rate, false, false);
+    auto output = F::alpha_dropout(input, F::AlphaDropoutFuncOptions().p(rate).training(false));
     ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
     ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
   }
   auto output = F::detail::alpha_dropout(input, 0.5, false, false);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+}
+
+TEST_F(FunctionalTest, FeatureAlphaDropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::feature_alpha_dropout(input, F::FeatureAlphaDropoutFuncOptions().p(rate).training(false));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  }
+  auto output = F::feature_alpha_dropout(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
   ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
 }
