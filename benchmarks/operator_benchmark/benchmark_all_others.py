@@ -5,10 +5,11 @@ from __future__ import unicode_literals
 
 import operator_benchmark as op_bench
 from pt import ( # noqa
-    unary_test,  # noqa
+    add_test, batchnorm_test, cat_test, chunk_test, conv_test,  # noqa
+    gather_test, linear_test, matmul_test, pool_test,  # noqa
+    softmax_test, split_test, fill_test, as_strided_test,  # noqa
+    embeddingbag_test  # noqa
 )
-import benchmark_all_others  # noqa
-import benchmark_all_quantized_test  # noqa
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
