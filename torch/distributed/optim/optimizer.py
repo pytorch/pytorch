@@ -81,7 +81,7 @@ class DistributedOptimizer:
             remote_optim_rref = rpc.rpc_async(
                 worker,
                 _new_local_optimizer,
-                args=(optimizer_class, param_rrefs, *args),
+                args=(optimizer_class, param_rrefs) + args,
                 kwargs=kwargs,
             )
             remote_optim_futs.append(remote_optim_rref)
