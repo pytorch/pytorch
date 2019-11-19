@@ -856,7 +856,6 @@ class RpcTest(object):
 
         self.assertEqual(c, torch.ones(n, n) + 4)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_remote(self):
         n = self.rank + 1
