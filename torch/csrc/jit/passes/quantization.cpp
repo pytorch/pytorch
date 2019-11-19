@@ -765,6 +765,9 @@ class ModuleUseDeduper {
       Block* b = blocks_to_visit.top();
       blocks_to_visit.pop();
       for (Node* n : b->nodes()) {
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
         if (n->kind() != prim::CallMethod) {
           continue;
         }
@@ -793,10 +796,6 @@ class ModuleUseDeduper {
           GRAPH_DEBUG(
               "Can't handle the case of calling GetAttr on input ",
               " of the graph in make submodule uses unique");
-        }
-
-        for (Block* subblock : n->blocks()) {
-          blocks_to_visit.push(subblock);
         }
       }
     }
@@ -1215,10 +1214,10 @@ void FoldPrepackedWeightIntoModule(
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
         module, method.name(), linear_params_module, conv_params_module);
-    for (script::Module m : module.children()) {
-      FoldPrepackedWeightIntoModule(
-          m, linear_params_module, conv_params_module);
-    }
+  }
+  for (script::Module m : module.children()) {
+    FoldPrepackedWeightIntoModule(
+        m, linear_params_module, conv_params_module);
   }
 }
 
