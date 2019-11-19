@@ -1586,6 +1586,7 @@ TEST_F(FunctionalTest, InstanceNorm1d) {
                                   {-0.6833,  1.1056,  2.8944,  4.6833},
                                   {-1.0249,  1.6584,  4.3416,  7.0249},
                                   {-1.3665,  2.2112,  5.7888,  9.3665}}});
+  std::cout << output << std::endl;
   ASSERT_TRUE(output.allclose(expected));
 }
 
