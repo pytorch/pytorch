@@ -331,8 +331,13 @@ void EncoderBase::EncodeBlock(
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (!node->kind().is_onnx()) {
-      p_n->set_domain(node->kind().domainString());
-      domains_.insert(node->kind().domainString());
+      std::string domain;
+      if (node->kind().is_aten() || node->kind().is_caffe2())
+        domain = node->kind().domainString();
+	    else
+	      domain = node->kind().ns().toUnqualString();
+	    p_n->set_domain(domain);
+	    domains_.insert(domain);
     }
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
