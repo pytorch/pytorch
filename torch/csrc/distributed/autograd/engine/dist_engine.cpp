@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
 namespace torch {
@@ -48,8 +48,8 @@ void DistEngine::validateRootsAndRetrieveEdges(
         " does not have a valid gradient function.");
 
     // Compute the root edges and generate the appropriate gradients.
-    rootEdges.push_back(root.gradient_edge());
-    grads.push_back(at::ones_like(root));
+    rootEdges.push_back(torch::autograd::impl::gradient_edge(root));
+    grads.push_back(at::ones_like(root, at::MemoryFormat::Contiguous));
   }
 
   // Validate rootEdges and grads.
@@ -67,7 +67,10 @@ void DistEngine::computeDependencies(
 
   // Build the graph task and graph root.
   auto graphTask = std::make_shared<GraphTask>(
-      /* keep_graph */ false, /* create_graph */ false, /* depth */ 0);
+      /* keep_graph */ false,
+      /* create_graph */ false,
+      /* depth */ 0,
+      /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
   // GraphRoot and all send functions for this autograd context.
@@ -177,7 +180,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   // TODO: make this non-blocking
   // (https://github.com/pytorch/pytorch/issues/26359)
   variable_list grads = engine_.execute_with_graph_task(
-      *autogradContext.retrieveGraphTask(), graphRoot);
+      autogradContext.retrieveGraphTask(), graphRoot);
 
   // Accumulate all the gradients in the context.
   TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
@@ -210,11 +213,12 @@ void DistEngine::executeSendFunction(
     // Mark the autograd context id as initialized and unlock.
     initializedContextIds_.insert(autogradContext.contextId());
     lock.unlock();
+    ClearContextIdGuard guard(autogradContext.contextId());
 
     // Enqueue the current send function.
     auto graphTask = autogradContext.retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask.get(), sendFunction, torch::autograd::InputBuffer(0)));
+        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
 
     // Run the autograd engine.
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
@@ -225,7 +229,7 @@ void DistEngine::executeSendFunction(
     lock.unlock();
     auto graphTask = autogradContext.retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask.get(), sendFunction, torch::autograd::InputBuffer(0)));
+        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
   }
 }
 
@@ -259,10 +263,22 @@ void DistEngine::execute(const variable_list& roots) {
     initializedContextIds_.insert(autogradContext.contextId());
   }
 
+  ClearContextIdGuard guard(autogradContext.contextId());
+
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
   autogradContext.clearAndWaitForOutstandingRpcs();
+}
+
+void DistEngine::clearInitializedContextId(int64_t contextId) {
+  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
+  initializedContextIds_.erase(contextId);
+}
+
+size_t DistEngine::numBackwardPasses() const {
+  std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
+  return initializedContextIds_.size();
 }
 
 } // namespace autograd

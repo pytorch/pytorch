@@ -16,34 +16,24 @@
 namespace torch {
 namespace serialize {
 
-InputArchive::InputArchive() {}
+InputArchive::InputArchive() : module_("Module", std::make_shared<jit::script::CompilationUnit>()) {}
 
 void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
-  if (auto named_attr = module_.find_attribute(key)) {
-    ivalue = *named_attr;
-  } else {
-    TORCH_CHECK(
-      false,
-      "No such serialized IValue '",
-      key,
-      "'");
-  }
+  ivalue = module_.attr(key);
 }
 
 bool InputArchive::try_read(
     const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
-  auto param = module_.find_parameter(key);
-  auto buffer = module_.find_buffer(key);
-  if (!param && !buffer) return false;
-
-  // clang-format off
-  auto read_tensor = is_buffer ? *buffer : *param;
-  TORCH_CHECK(
-      bool(buffer) == is_buffer,
-      "Expected deserialized tensor for key '", key,
-      "' to ", is_buffer ? "not " : "", "be a buffer, but it was not");
+  if (!module_.hasattr(key)) {
+    return false;
+  }
+  auto iv = module_.attr(key);
+  if (!iv.isTensor()) {
+    return false;
+  }
+  auto read_tensor = iv.toTensor();
   // clang-format on
   if (tensor.defined()) {
     torch::NoGradGuard guard;
@@ -63,25 +53,33 @@ void InputArchive::read(
     Tensor& tensor,
     bool is_buffer) {
   TORCH_CHECK(
-    try_read(key, tensor, is_buffer),
-    "No such serialized tensor '",
-    key,
-    "'");
+      try_read(key, tensor, is_buffer),
+      "No such serialized tensor '",
+      hierarchy_prefix_,
+      key,
+      "'");
 }
 
 bool InputArchive::try_read(const std::string& key, InputArchive& archive) {
-  if (auto named_module = module_.find_module(key)) {
-    archive.module_ = std::move(*named_module);
-    return true;
-  } else {
+  if (!module_.hasattr(key)) {
     return false;
   }
+  auto iv = module_.attr(key);
+  if (!iv.isModule()) {
+    return false;
+  }
+  archive.module_ = iv.toModule();
+  archive.hierarchy_prefix_ = hierarchy_prefix_ + key + ".";
+  return true;
 }
 
 void InputArchive::read(const std::string& key, InputArchive& archive) {
   TORCH_CHECK(
-    try_read(key, archive),
-    "No such serialized submodule: '", key, "'");
+      try_read(key, archive),
+      "No such serialized submodule: '",
+      hierarchy_prefix_,
+      key,
+      "'");
 }
 
 void InputArchive::load_from(const std::string& filename,

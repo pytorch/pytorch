@@ -333,6 +333,45 @@ class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
 
 TORCH_MODULE(CELU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies glu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.GLU to learn
+/// about the exact behavior of this module.
+class TORCH_API GLUImpl : public torch::nn::Cloneable<GLUImpl> {
+ public:
+  explicit GLUImpl(const GLUOptions& options_ = {});
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `GLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  GLUOptions options;
+};
+
+TORCH_MODULE(GLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies gelu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.GELU to learn
+/// about the exact behavior of this module.
+class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `GELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(GELU);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies sigmoid over a given input.

@@ -58,7 +58,7 @@ inline void throw_error_out_requires_grad(const char* name) {
 inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
-    var.rebase_history({std::move(grad_fn), 0});
+    impl::rebase_history(var, {std::move(grad_fn), 0});
   }
 }
 
@@ -68,7 +68,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
       if (var.defined()) {
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var);
-        var.rebase_history({std::move(grad_fn), output_nr});
+        impl::rebase_history(var, {std::move(grad_fn), output_nr});
       } else {
         grad_fn->add_input_metadata(Node::undefined_input());
       }
@@ -77,11 +77,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
 }
 
 inline void increment_version(Tensor & t) {
-  as_variable_ref(t).bump_version();
-}
-
-inline bool isFloatingPoint(ScalarType s) {
-  return s == kFloat || s == kDouble || s == kHalf;
+  impl::bump_version(as_variable_ref(t));
 }
 
 struct Flatten : IterArgs<Flatten> {
@@ -142,50 +138,6 @@ inline void check_no_requires_grad(TensorList tensors, const char* name) {
 inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
   return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {
       return SavedVariable{tensor, false /* is output */}; });
-}
-
-// NOTE: For now, there is no guarantee that the tensors returned from
-// out-of-place ATen ops are not Variables. For example, the following operators:
-//
-// 1. `coalesce()` (called from `VariableType::coalesce()`)
-// 2. `_embedding_bag_cpu()` (called from `VariableType::_embedding_bag()`)
-//
-// can return its input or tensors created using the input's options, which can
-// potentially be Variables because inputs to ATen ops can be Variables.
-//
-// In the near future, once we make every tensor a Variable, these two
-// `as_variable()` functions are no-op and we can remove them.
-inline Tensor as_variable(Tensor tensor) {
-  return tensor.is_variable() ? tensor : make_variable(std::move(tensor), /*requires_grad=*/false);
-}
-
-inline std::vector<Tensor> as_variable(TensorList tl) {
-  return fmap(tl, [](const Tensor& t) -> Tensor {
-      return t.is_variable() ? t : make_variable(t, /*requires_grad=*/false);
-  });
-}
-
-template <typename... Tensors, size_t... Is>
-std::tuple<Tensors...> as_variable_impl(
-    std::tuple<Tensors...> tensors,
-    Indices<Is...>) {
-  // Expand the integer parameter pack into a sequence of Variable
-  // constructions. This turns into (boolean omitted):
-  // Variable(std::get<0>(tensors)), Variable(std::get<1>(tensors)), ...
-  return std::tuple<Tensors...>(
-      as_variable(std::get<Is>(tensors))...);
-}
-
-// NB: Because this was not forward declared, recursive std::tuple won't work.
-// You can probably rejigger this to make it supported if you really need it.
-template <typename... Tensors>
-std::tuple<Tensors...> as_variable(std::tuple<Tensors...> tensors) {
-  // `sizeof...(Tensors)` gets us the size of the `Tensors` parameter pack at
-  // compile time. We use it to parameterize a `MakeIndices` class, which will
-  // expand into an Indices object containing the numbers 0 to
-  // sizeof...(Tensors) - 1.
-  return as_variable_impl(
-      tensors, typename MakeIndices<sizeof...(Tensors)>::indices());
 }
 
 inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {

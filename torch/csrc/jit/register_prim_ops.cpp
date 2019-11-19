@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/vararg_functions.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -25,6 +26,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <bitset>
@@ -104,11 +106,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
-    auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    c10::List<dtype> vals =
-        c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
-    drop(stack, num_inputs);
-    push(stack, std::move(vals));
+    listConstructFunc<dtype>(num_inputs, stack);
     return 0;
   };
 }
@@ -131,7 +129,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer", "");
+        "Cannot convert float " + c10::to_string(a) + " to integer", "");
     return;
   }
 }
@@ -324,7 +322,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Scalar s;
            pop(stack, s);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
+           push(stack, at::scalar_to_tensor(s));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -335,7 +333,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            bool b;
            pop(stack, b);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(b)));
+           push(stack, at::scalar_to_tensor(b));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -735,6 +733,15 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
+         "aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)",
+         [](Stack& stack) {
+           bool _requires_grad = pop(stack).toBool();
+           at::Tensor self = pop(stack).toTensor();
+           self.requires_grad_(_requires_grad);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
          "prim::AutogradZero() -> Tensor",
          [](Stack& stack) {
            stack.emplace_back(at::Tensor());
@@ -922,15 +929,26 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AutogradAnyNonZero,
+         "prim::AutogradAnyNonZero(...) -> int",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
-           return [=](Stack& stack) {
+           return [num_inputs](Stack& stack) {
              bool result = false;
-             for (const IValue& t : last(stack, num_inputs)) {
-               if (t.toTensor().defined()) {
-                 result = true;
-                 break;
+             for (const IValue& v : last(stack, num_inputs)) {
+               if (v.isTensor()) {
+                 if (v.toTensor().defined()) {
+                   result = true;
+                   break;
+                 }
+               } else if (v.isTensorList()) {
+                 for (const at::Tensor& t : v.toTensorListRef()) {
+                   result = true;
+                 }
+                 if (result) {
+                   break;
+                 }
+               } else {
+                 TORCH_INTERNAL_ASSERT(false);
                }
              }
              drop(stack, num_inputs);
@@ -938,18 +956,25 @@ RegisterOperators reg(
              return 0;
            };
          },
-         aliasAnalysisSpecialCase()),
+         aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
          [](Stack& stack) {
            at::Tensor a, b;
            pop(stack, a, b);
-           if (!a.defined())
-             stack.emplace_back(b);
-           else if (!b.defined())
+           if (!a.defined() && !b.defined()) {
+             // undef + undef == undef
              stack.emplace_back(a);
-           else
+           }
+           else if (!a.defined()) {
+             stack.emplace_back(b);
+           }
+           else if (!b.defined()) {
+             stack.emplace_back(a);
+           }
+           else {
              stack.emplace_back(a + b);
+           }
            return 0;
          },
          aliasAnalysisSpecialCase()),
@@ -987,18 +1012,7 @@ RegisterOperators reg(
          [](const Node* node) -> Operation {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
-             auto tuple = pop(stack).toTuple();
-             if (tuple->elements().size() != num_elems) {
-               AT_ERROR(
-                   "Expected a tuple of ",
-                   num_elems,
-                   " elements, but got ",
-                   tuple->elements().size());
-             }
-             stack.insert(
-                 stack.end(),
-                 tuple->elements().begin(),
-                 tuple->elements().end());
+             tupleUnpackFunc(num_elems, stack);
              return 0;
            };
          },
@@ -1167,14 +1181,7 @@ RegisterOperators reg(
              return listConstruct<bool>(num_inputs);
            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
              return [=](Stack& stack) {
-               const size_t stack_size = stack.size();
-               c10::List<at::Tensor> vals;
-               vals.reserve(num_inputs);
-               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                 vals.emplace_back(std::move(stack[i]).toTensor());
-               }
-               drop(stack, num_inputs);
-               push(stack, std::move(vals));
+               tensorListConstructFunc(num_inputs, stack);
                return 0;
              };
            } else {
@@ -2371,7 +2378,8 @@ RegisterOperators reg2({
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          char c = string.at(index);
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
           return 0;
         },
@@ -2401,12 +2409,12 @@ RegisterOperators reg2({
           listSelect<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::append( " decl_type "[](a!) self, " decl_type                \
+          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type                \
           "(c -> *) el) -> " decl_type "[](a!)",                              \
           listAppend<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::reverse( " decl_type "[](a!) self) -> ()",                   \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",                   \
           listReverse<value_type>,                                            \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
@@ -2476,7 +2484,7 @@ RegisterOperators reg2({
           maxList<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
-          "aten::append(" decl_type "[](a!) self, " decl_type                  \
+          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type                  \
           " el) -> " decl_type "[](a!)",                                       \
           listAppend<value_type>,                                              \
           aliasAnalysisFromSchema()),                                          \
@@ -2728,7 +2736,8 @@ RegisterOperators reg2({
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          char c = string.at(index);
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
           return 0;
         },
