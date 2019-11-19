@@ -157,7 +157,12 @@ TEST_F(FunctionalTest, FractionalMaxPool2d) {
 
   auto y_with_indices = F::fractional_max_pool2d_with_indices(x, F::FractionalMaxPool2dFuncOptions(3).output_size(2));
   ASSERT_TRUE(torch::equal(y, std::get<0>(y_with_indices)));
-  ASSERT_TRUE(torch::allclose(std::get<1>(y_with_indices), torch::tensor({{{12}}, {{12}}})));
+  ASSERT_TRUE(torch::allclose(
+    std::get<1>(y_with_indices),
+    torch::tensor({{{ 0,  2},
+                    {10, 12}},
+                   {{ 0,  2},
+                    {10, 12}}})));
   ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
@@ -171,7 +176,16 @@ TEST_F(FunctionalTest, FractionalMaxPool3d) {
 
   auto y_with_indices = F::fractional_max_pool3d_with_indices(x, F::FractionalMaxPool3dFuncOptions(3).output_size(2));
   ASSERT_TRUE(torch::equal(y, std::get<0>(y_with_indices)));
-  ASSERT_TRUE(torch::allclose(std::get<1>(y_with_indices), torch::tensor({{{{62}}}, {{{62}}}})));
+  ASSERT_TRUE(torch::allclose(
+    std::get<1>(y_with_indices),
+    torch::tensor({{{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}},
+                   {{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}}})));
   ASSERT_EQ(std::get<1>(y_with_indices).sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
