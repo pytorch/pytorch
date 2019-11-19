@@ -1,3 +1,4 @@
+#include <torch/nn/functional/batchnorm.h>
 #include <torch/nn/modules/batchnorm.h>
 
 #include <torch/cuda.h>
@@ -9,6 +10,8 @@
 #include <ostream>
 #include <utility>
 #include <vector>
+
+namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
@@ -72,6 +75,19 @@ Tensor BatchNormImpl::pure_forward(
       options.momentum().value(),
       options.eps(),
       torch::cuda::cudnn_is_available());
+}
+
+// ===========================================================================
+
+template <size_t D, typename Derived> 
+void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::BatchNorm" << D << "d("
+         << this->options.num_features() << ", "
+         << "eps=" << this->options.eps() << ", "
+         << "momentum=" << this->options.momentum().value() << ", "
+         << "affine=" << this->options.affine() << ", "
+         << "track_running_stats=" << this->options.track_running_stats() << ")";
 }
 
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {

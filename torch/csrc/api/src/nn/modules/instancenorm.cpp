@@ -7,25 +7,12 @@ namespace torch {
 namespace nn {
 
 template <size_t D, typename Derived>
-void InstanceNormImpl<D, Derived>::_check_input_dim(const Tensor& input) {
-  TORCH_CHECK(false, "NotImplementedError");
-}
-
-template <size_t D, typename Derived>
-Tensor InstanceNormImpl<D, Derived>::forward(const Tensor& input) {
-  _check_input_dim(input);
-  return F::detail::instance_norm(
-    input, this->running_mean, this->running_var, this->weight, this->bias,
-    this->is_training() || !this->options.track_running_stats(), this->options.momentum().value(), this->options.eps());
-}
-
-template <size_t D, typename Derived>
 void InstanceNormImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::InstanceNorm" << D << "d("
          << this->options.num_features() << ", "
          << "eps=" << this->options.eps() << ", "
-         << "momentum=" << this->options.momentum().value() << ", "
+         << "momentum=" << this->options.momentum() << ", "
          << "affine=" << this->options.affine() << ", "
          << "track_running_stats=" << this->options.track_running_stats() << ")";
 }

@@ -8,14 +8,16 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) instance norm modules
 template <size_t D, typename Derived>
-class InstanceNormImpl : public torch::nn::BatchNormImplBase<D, Derived> {
- protected:
-  virtual void _check_input_dim(const Tensor& input) override;
-
+class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNormOptions> {
  public:
-  using torch::nn::BatchNormImplBase<D, Derived>::BatchNormImplBase;
+  using torch::nn::NormImplBase<D, Derived, InstanceNormOptions>::NormImplBase;
 
-  virtual Tensor forward(const Tensor& input) override;
+  Tensor forward(const Tensor& input) {
+    this->_check_input_dim(input);
+    return F::detail::instance_norm(
+      input, this->running_mean, this->running_var, this->weight, this->bias,
+      this->is_training() || !this->options.track_running_stats(), this->options.momentum(), this->options.eps());
+  }
 
   /// Pretty prints the `InstanceNorm{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;

@@ -81,47 +81,15 @@ TORCH_MODULE(BatchNorm);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Base class for all (dimension-specialized) batchnorm modules.
-template <size_t D, typename Derived>
-class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
+/// Base class for all (dimension-specialized) batchnorm and instancenorm modules.
+template <size_t D, typename Derived, typename DerivedOptions>
+class NormImplBase : public torch::nn::Cloneable<Derived> {
  protected:
   virtual void _check_input_dim(const Tensor& input) = 0;
 
  public:
-  BatchNormImplBase(const BatchNormOptions& options_) : options(options_) {
+  NormImplBase(const DerivedOptions& options_) : options(options_) {
     reset();
-  }
-
-  virtual Tensor forward(const Tensor& input) {
-    _check_input_dim(input);
-
-    double exponential_average_factor;
-    if (options.momentum() == c10::nullopt) {
-      exponential_average_factor = 0.0;
-    } else {
-      exponential_average_factor = options.momentum().value();
-    }
-
-    if (this->is_training() && options.track_running_stats()) {
-      if (num_batches_tracked.defined()) {
-        num_batches_tracked += 1;
-        if (options.momentum() == c10::nullopt) {  // use cumulative moving average
-          exponential_average_factor = 1.0 / num_batches_tracked.item<double>();
-        } else {  // use exponential moving average
-          exponential_average_factor = options.momentum().value();
-        }
-      }
-    }
-
-    return F::detail::batch_norm(
-        input,
-        running_mean,
-        running_var,
-        weight,
-        bias,
-        this->is_training() || !options.track_running_stats(),
-        /*momentum=*/exponential_average_factor,
-        options.eps());
   }
 
   void reset() override {
@@ -160,19 +128,8 @@ class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
     }
   }
 
-  /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override {
-    stream << std::boolalpha
-           << "torch::nn::BatchNorm" << D << "d("
-           << options.num_features() << ", "
-           << "eps=" << options.eps() << ", "
-           << "momentum=" << options.momentum().value() << ", "
-           << "affine=" << options.affine() << ", "
-           << "track_running_stats=" << options.track_running_stats() << ")";
-  }
-
   /// The options with which this module was constructed.
-  BatchNormOptions options;
+  DerivedOptions options;
 
   /// The learned weight.
   /// Only defined if the `affine` option was `true` upon construction.
@@ -193,6 +150,47 @@ class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
   /// The number of the forward call.
   /// Only defined if the `track_running_stats` option was `true` upon construction.
   Tensor num_batches_tracked;
+};
+
+/// Base class for all (dimension-specialized) batchnorm modules.
+template <size_t D, typename Derived>
+class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
+ public:
+  using NormImplBase<D, Derived, BatchNormOptions>::NormImplBase;
+
+  Tensor forward(const Tensor& input) {
+    this->_check_input_dim(input);
+    double exponential_average_factor;
+    if (this->options.momentum() == c10::nullopt) {
+      exponential_average_factor = 0.0;
+    } else {
+      exponential_average_factor = this->options.momentum().value();
+    }
+
+    if (this->is_training() && this->options.track_running_stats()) {
+      if (this->num_batches_tracked.defined()) {
+        this->num_batches_tracked += 1;
+        if (this->options.momentum() == c10::nullopt) {  // use cumulative moving average
+          exponential_average_factor = 1.0 / this->num_batches_tracked.template item<double>();
+        } else {  // use exponential moving average
+          exponential_average_factor = this->options.momentum().value();
+        }
+      }
+    }
+
+    return F::detail::batch_norm(
+        input,
+        this->running_mean,
+        this->running_var,
+        this->weight,
+        this->bias,
+        this->is_training() || !this->options.track_running_stats(),
+        /*momentum=*/exponential_average_factor,
+        this->options.eps());
+  }
+
+  /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 };
 
 /// Applies the BatchNorm1d function.
