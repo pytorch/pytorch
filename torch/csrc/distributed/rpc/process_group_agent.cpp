@@ -285,7 +285,6 @@ void ProcessGroupAgent::shutdown() {
     recvWork_->abort();
     rpcRunning_.store(false);
   }
-  threadPool_.waitWorkComplete();
   listenerThread_.join();
   PythonRpcHandler::getInstance().cleanup();
   RRefContext::getInstance().destroyInstance();
