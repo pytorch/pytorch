@@ -50,7 +50,7 @@ void serialize(
       key + "/size", torch::tensor(static_cast<int64_t>(buffers.size())));
   for (size_t index = 0; index < buffers.size(); ++index) {
     archive.write(
-        key + "/" + std::to_string(index), buffers[index], /*is_buffer=*/true);
+        key + "/" + c10::to_string(index), buffers[index], /*is_buffer=*/true);
   }
 }
 
@@ -67,7 +67,7 @@ void serialize(
   for (size_t index = 0; index < size; ++index) {
     buffers.emplace_back();
     archive.read(
-        key + "/" + std::to_string(index), buffers.back(), /*is_buffer=*/true);
+        key + "/" + c10::to_string(index), buffers.back(), /*is_buffer=*/true);
   }
 }
 
