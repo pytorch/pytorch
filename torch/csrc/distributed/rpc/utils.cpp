@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -89,7 +91,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
       return autograd::RpcWithAutograd::fromMessage(response);
     }
     case MessageType::BACKWARD_AUTOGRAD_RESP: {
-      return autograd::RpcWithAutograd::fromMessage(response);
+      return autograd::PropagateGradientsResp::fromMessage(response);
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
@@ -99,6 +101,39 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
           false, "Response type ", response.type(), " not supported.");
     }
   }
+}
+
+IValue deserializeResptoIValueInternal(
+    RpcCommandBase& rpc,
+    MessageType messageType) {
+  switch (messageType) {
+    case MessageType::SCRIPT_RET: {
+      auto& ret = static_cast<ScriptResp&>(rpc);
+      return ret.value();
+    }
+    case MessageType::FORWARD_AUTOGRAD_RESP: {
+      auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
+
+      // Attach 'recv' autograd function.
+      addRecvRpcBackward(
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
+
+      // Handle the original RPC.
+      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
+      return deserializeResptoIValueInternal(
+          rpcWithAutograd.wrappedRpc(), wrappedMessageType);
+    }
+    default: {
+      return IValue();
+    }
+  }
+}
+
+IValue deserializeRespToIValue(const Message& message) {
+  return deserializeResptoIValueInternal(
+      *deserializeResponse(message), message.type());
 }
 
 } // namespace rpc

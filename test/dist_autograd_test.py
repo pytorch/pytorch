@@ -8,6 +8,7 @@ import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+from torch._jit_internal import _qualified_name
 
 import threading
 
@@ -72,6 +73,9 @@ def my_rref_add(rref_t1, t2):
     ret = torch.add(rref_t1.local_value(), t2)
     return ret
 
+@torch.jit.script
+def my_script_add(t1, t2):
+    return torch.add(t1, t2)
 
 def my_nested_rref_add(dst, rref_t1, t2):
     return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
@@ -155,6 +159,8 @@ class ExecMode(Enum):
     LOCAL = 1  # Run the operation locally.
     RPC_SYNC = 2  # Run the operation using rpc_sync
     REMOTE = 3  # Run the operation using remote.
+    RPC_SYNC_SCRIPT_CALL = 4  # Run the torchscript call using rpc_sync
+    RPC_ASYNC_SCRIPT_CALL = 5  # Run the torchscript call using rpc_async
 
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
@@ -185,6 +191,13 @@ class DistAutogradTest(object):
         elif ExecMode.REMOTE == exec_mode:
             return rpc.remote('worker{}'.format(self._next_rank()), method,
                               args=(args)).to_here()
+        elif ExecMode.RPC_SYNC_SCRIPT_CALL == exec_mode:
+            return rpc._rpc_sync('worker{}'.format(self._next_rank()), method,
+                                 args=(args))
+        elif ExecMode.RPC_ASYNC_SCRIPT_CALL == exec_mode:
+            fut = rpc._rpc_async('worker{}'.format(self._next_rank()), method,
+                                 args=(args))
+            return fut.wait()
         else:
             raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
@@ -1169,6 +1182,23 @@ class DistAutogradTest(object):
         for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 ret = self._exec_func(exec_mode, my_py_add, t1, t2)
+                loss = ret.sum()
+                local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
+
+    @dist_init
+    def test_backward_simple_script_call(self):
+        # Run the same code locally and with dist autograd and verify gradients
+        # are same.
+        local_grads = None
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+    #    for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC_SCRIPT_CALL, ExecMode.RPC_ASYNC_SCRIPT_CALL]:
+        for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC_SCRIPT_CALL]:
+            with dist_autograd.context() as context_id:
+                if ExecMode.LOCAL == exec_mode:
+                    ret = self._exec_func(exec_mode, my_script_add, t1, t2)
+                else:
+                    ret = self._exec_func(exec_mode, _qualified_name(my_script_add), t1, t2)
                 loss = ret.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 

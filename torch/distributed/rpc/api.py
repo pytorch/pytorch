@@ -1,5 +1,6 @@
 from . import _invoke_rpc_builtin, _invoke_rpc_python_udf
 from . import _invoke_remote_builtin, _invoke_remote_python_udf
+from . import _invoke_rpc_script
 from . import _start_rpc_agent
 from . import _destroy_rref_context, _cleanup_python_rpc_handler
 from . import WorkerInfo
@@ -284,4 +285,99 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
+    return fut
+
+
+# All below private APIs are for making rpc torch script call.
+# Right now, rpc torch script call requires qualified_name to look up
+# compliation unit function, so rpc torch script call APIs are different
+# from rpc APIs for python call and built in operator call.
+# These private APIs are subject to be merged with above public rpc APIs when
+# jit supports torch script funciton to be a jit type.
+@_require_initialized
+def _rpc_sync(to, qualified_name, args=None, kwargs=None):
+    r"""
+    Make a blocking RPC call to run function ``func`` on worker ``to``. RPC
+    messages are sent and received in parallel to execution of Python code. This
+    method is thread-safe.
+
+    Arguments:
+        to (str): name of the destination worker.
+        qualified_name (str): python function annotated with @torch.jit.script
+                              (like ``moduleName::torchScriptFuncName``)
+                              can be sent over RPC more efficiently.
+        args (tuple): the argument tuple for the ``func`` invocation.
+        kwargs (dict): is a dictionary of keyword arguments for the ``func``
+                       invocation.
+
+    Returns:
+        Returns the result of running ``func``on ``args`` and ``kwargs``.
+
+    Example::
+        On worker 0:
+        >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
+        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
+        >>> rpc.init_model_parallel("worker0")
+        >>> ret = rpc.rpc_sync("worker1", "myModule::myTorchScriptFunc", args=(torch.ones(2), 3))
+        >>> rpc.join_rpc()
+
+        On worker 1:
+        >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
+        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
+        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.join_rpc()
+    """
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
+    fut = _invoke_rpc_script(to, qualified_name, *args, **kwargs)
+    return fut.wait()
+
+
+@_require_initialized
+def _rpc_async(to, qualified_name, args=None, kwargs=None):
+    r"""
+    Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
+    messages are sent and received in parallel to execution of Python code. This
+    method is thread-safe. This method will immediately return a
+    Future<Message> that can be awaited on.
+
+    Arguments:
+        to (str): name of the destination worker.
+        qualified_name (str): python function annotated with @torch.jit.script
+                              (like ``moduleName::torchScriptFuncName``)
+                              can be sent over RPC more efficiently.
+        args (tuple): the argument tuple for the ``func`` invocation.
+        kwargs (dict): is a dictionary of keyword arguments for the ``func``
+                       invocation.
+
+    Returns:
+        Returns a PythonFutureWrapper object that can be waited
+        on. When completed, the return value of ``func`` on ``args`` and
+        ``kwargs`` can be retrieved from the PythonFutureWrapper object.
+
+    Example::
+
+        On worker 0:
+        >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
+        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
+        >>> rpc.init_model_parallel("worker0")
+        >>> worker1 = rpc.get_worker_id("worker1")
+        >>> fut1 = rpc.rpc_async(worker1, "myModule::myTorchScriptFunc", args=(torch.ones(2), 3))
+        >>> fut2 = rpc.rpc_async(worker1, "myModule::myTorchScriptFunc", args=(1, 2))
+        >>> result = fut1.wait() + fut2.wait()
+        >>> rpc.join_rpc()
+
+        On worker 1:
+        >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
+        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
+        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.join_rpc()
+    """
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
+    fut = _invoke_rpc_script(to, qualified_name, *args, **kwargs)
     return fut

@@ -21,6 +21,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -43,7 +44,14 @@ Message RequestCallbackImpl::processRpc(
 
       // sc is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
-      scriptCall.op()->getOperation()(stack);
+      at::IValue res;
+      if (scriptCall.hasOp()) {
+        scriptCall.op()->getOperation()(stack);
+      } else {
+        torch::jit::get_python_cu()
+            ->get_function(scriptCall.qualifiedName())
+            .run(stack);
+      }
 
       TORCH_INTERNAL_ASSERT(
           stack.size() == 1,
@@ -213,7 +221,7 @@ Message RequestCallbackImpl::processRpc(
           false, "Request type ", messageType, " not supported.");
     }
   }
-}
+} // namespace rpc
 
 Message RequestCallbackImpl::processMessage(Message& request) const {
   std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);

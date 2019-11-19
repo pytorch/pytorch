@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/script_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/future.h>
@@ -150,6 +151,44 @@ PyObject* rpc_init(PyObject* /* unused */) {
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors) {
         return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
+      });
+
+  struct PythonFutureWrapper {
+    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+        : fut(std::move(fut)) {}
+
+    c10::intrusive_ptr<c10::ivalue::Future> fut;
+  };
+
+  py::class_<PythonFutureWrapper>(module, "PythonFutureWrapper")
+      .def("wait", [](PythonFutureWrapper& fut) {
+        fut.fut->wait();
+        auto res = fut.fut->value();
+        {
+          // acquiring GIL as torch::jit::toPyObject creates new py::object
+          // without grabbing the GIL.
+          AutoGIL ag;
+          return torch::jit::toPyObject(std::move(res));
+        }
+      });
+
+  module.def(
+      "_invoke_rpc_script",
+      [](const std::string& dst,
+         const std::string& qualifiedName,
+         const py::args& args,
+         const py::kwargs& kwargs) {
+        // No need to catch exception here, if function can not be found,
+        // exception will be thrown in get_function() call; if args do not match
+        // with function schema, exception will be thrown in
+        // createStackForSchema() call.
+        auto name = c10::QualifiedName(qualifiedName);
+        auto fnSchema =
+            torch::jit::get_python_cu()->get_function(name).getSchema();
+        auto stack = torch::jit::createStackForSchema(
+            fnSchema, args, kwargs, c10::nullopt);
+        auto fut = rpcTorchscriptCall(dst, name, stack);
+        return PythonFutureWrapper(fut.toFuture());
       });
 
   module.def(

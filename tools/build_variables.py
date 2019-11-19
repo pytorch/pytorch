@@ -299,6 +299,7 @@ def add_torch_libs():
         "torch/csrc/distributed/rpc/request_callback_impl.cpp",
         "torch/csrc/distributed/rpc/rref.cpp",
         "torch/csrc/distributed/rpc/rref_context.cpp",
+        "torch/csrc/distributed/rpc/script_functions.cpp",
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
