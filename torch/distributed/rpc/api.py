@@ -7,6 +7,7 @@ from . import backend_registry
 from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
+import contextlib
 import datetime
 import functools
 import sys
@@ -15,6 +16,19 @@ import torch
 
 _agent = None
 
+_default_pickler = _internal_rpc_pickler
+
+@contextlib.contextmanager
+def _use_rpc_pickler(rpc_pickler):
+    r"""
+    rpc_pickler: (.internal._InternalRPCPickler) Overrides the default RPC pickler
+    """
+    global _default_pickler
+    _default_pickler = rpc_pickler
+    try:
+        yield
+    finally:
+        _default_pickler = _internal_rpc_pickler
 
 def _require_initialized(func):
     @functools.wraps(func)
@@ -162,7 +176,7 @@ def remote(to, func, args=None, kwargs=None):
         return _invoke_remote_builtin(
             _agent, info, qualified_name, *args, **kwargs)
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         return _invoke_remote_python_udf(
             _agent, info, pickled_python_udf, tensors)
@@ -183,7 +197,7 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
             _agent, info, qualified_name, *args, **kwargs
         )
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = _invoke_rpc_python_udf(
             _agent, info, pickled_python_udf, tensors)
