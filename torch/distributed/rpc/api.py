@@ -41,7 +41,8 @@ def wait_all_workers():
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
-        >>> # do some work...
+        >>> # do some work
+        >>> result = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(1), 1))
         >>> # ready to shutdown
         >>> rpc.wait_all_workers()
 
