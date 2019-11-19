@@ -52,8 +52,9 @@ C10_EXPORT void SourceRange::print_with_context(
   for (size_t i = 0; begin_highlight > 0; --begin_highlight) {
     if (str[begin_highlight - 1] == '\n')
       ++i;
-    if (i >= context)
+    if (i >= context) {
       break;
+    }
   }
   AT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
 
@@ -62,8 +63,9 @@ C10_EXPORT void SourceRange::print_with_context(
   for (size_t i = 0; end_highlight < str.size(); ++end_highlight) {
     if (str[end_highlight] == '\n')
       ++i;
-    if (i >= context)
+    if (i >= context) {
       break;
+    }
   }
   AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
 
