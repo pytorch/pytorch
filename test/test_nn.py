@@ -59,6 +59,10 @@ import hypothesis_utils as hu
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+TEST_LARGE_TENSOR = TEST_CUDA
+if TEST_CUDA:
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+
 if TEST_SCIPY:
     from scipy import stats
     import scipy.ndimage
@@ -3547,6 +3551,46 @@ class TestNN(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
+        input = torch.randint(1, 10, (1, 32, 2 ** 17 + 1, 32), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (1, 32, 10, 32), dtype=torch.float32, device="cuda")
+
+        pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_adaptive_pooling_avg_nhwc_launch_config_forward(self):
+        input = torch.randint(1, 10, (1, 32, 16, 16), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        pool = torch.nn.AdaptiveAvgPool2d((2 ** 17 + 1, 32)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_pool = torch.nn.AdaptiveAvgPool2d((2 ** 17 + 1, 32)).cuda()
+
+        out = pool(input)
+        ref_out = ref_pool(ref_input)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_double_backwards_gpu(self):
@@ -8777,6 +8821,16 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
 
+    def _test_module_empty_input(self, module, inp):
+        inp.requires_grad_(True)
+        out = module(inp)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        self.assertEqual(out.size(), inp.size())
+        for p in module.parameters():
+            if p.requires_grad and p.grad is not None:
+                self.assertEqual(p.grad, torch.zeros_like(p.grad))
+
     def test_Dropout(self, device):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, device, input)
@@ -8806,7 +8860,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, d)
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, device)
 
-        if device == 'cuda':
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm1d, input, device)
 
     def test_InstanceNorm2d_general(self, device):
@@ -8818,7 +8872,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, h, w)
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm2d, input, device)
 
     def test_InstanceNorm3d_general(self, device):
@@ -8831,20 +8885,28 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, h, w, d)
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+    def test_BatchNorm_empty(self, device):
+        mod = torch.nn.BatchNorm2d(3).to(device)
+        inp = torch.randn(0, 3, 2, 2, device=device)
+        self._test_module_empty_input(mod, inp)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_module_empty_input(mod, inp)
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):

@@ -3364,6 +3364,20 @@ graph(%Ra, %Rb):
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    def test_mutable_default_values(self):
+        with self.assertRaisesRegex(Exception, "Mutable default parameters"):
+            @torch.jit.script
+            def foo(x=(1, [])):
+                # type: (Tuple[int, List[Tensor]])
+                return x
+
+        class Test(torch.nn.Module):
+            def forward(self, input=[]):
+                return input
+
+        with self.assertRaisesRegex(Exception, "Mutable default parameters"):
+            torch.jit.script(Test())
+
     def test_warnings(self):
         import warnings
 
@@ -10379,6 +10393,33 @@ a")
         torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs)
+
+    def test_trace_autograd_function(self):
+        class TestFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return torch.neg(input)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return torch.neg(grad_output)
+
+
+
+        class TracedModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(TestFunc.apply(x))
+
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super(Wrapper, self).__init__()
+                self.tm = TracedModule()
+
+            def forward(self, x):
+                return self.tm(x)
+
+        traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
 
     def test_interpolate_trace(self):
         class test(nn.Module):

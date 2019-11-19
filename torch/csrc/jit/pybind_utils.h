@@ -458,7 +458,7 @@ inline IValue toIValue(
       auto classType = type->expect<ClassType>();
       if (auto mod = script::as_module(py::cast<py::object>(obj))) {
         // if obj is already a ScriptModule, just return its ivalue
-        return mod.value().module_object();
+        return mod.value()._ivalue();
       }
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
@@ -487,7 +487,7 @@ inline IValue toIValue(
       IValue res;
       if (auto mod = script::as_module(py::cast<py::object>(obj))) {
         classType = mod.value().type();
-        res = mod.value().module_object();
+        res = mod.value()._ivalue();
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
@@ -926,7 +926,7 @@ inline py::object invokeScriptMethodFromPython(
     script::Method& callee,
     tuple_slice args,
     py::kwargs kwargs) {
-  auto self = callee.owner().module_object();
+  auto self = callee.owner()._ivalue();
   return runAndInsertCall(
       callee.function(),
       args,
