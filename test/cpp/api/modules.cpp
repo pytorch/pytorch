@@ -1468,7 +1468,6 @@ TEST_F(ModulesTest, InstanceNorm1d) {
   s.backward();
 
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2})));
 }
 
 TEST_F(ModulesTest, InstanceNorm2dStateful) {
@@ -1518,7 +1517,6 @@ TEST_F(ModulesTest, InstanceNorm2d) {
   s.backward();
 
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4})));
 }
 
 TEST_F(ModulesTest, InstanceNorm3dStateful) {
@@ -1568,7 +1566,6 @@ TEST_F(ModulesTest, InstanceNorm3d) {
   s.backward();
 
   ASSERT_EQ(input.sizes(), input.grad().sizes());
-  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5, 4, 4, 4})));
 }
 
 TEST_F(ModulesTest, Linear_CUDA) {
