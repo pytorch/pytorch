@@ -913,7 +913,7 @@ class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
                  policy='fixed', use_lr_adaption=False, lr_alpha=0.01,
                  normalized_lr_adaption=True, sparse_dedup_aggregator=None,
-                 rowWise=False, engine='', **kwargs):
+                 rowWise=False, engine='', enableRAdam=False, **kwargs):
         super(AdamOptimizer, self).__init__()
         self.alpha = alpha
         self.beta1 = beta1
@@ -926,6 +926,7 @@ class AdamOptimizer(Optimizer):
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.rowWise = rowWise
         self.engine = engine
+        self.enableRAdam = enableRAdam
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -985,12 +986,24 @@ class AdamOptimizer(Optimizer):
             else:
                 op = 'SparseAdam'
 
-            net.__getattr__(op)(
-                [param, m1, m2, grad.indices, grad.values, lr, iteration],
-                output_blobs,
-                beta1=self.beta1,
-                beta2=self.beta2,
-                epsilon=self.epsilon)
+            # Currently, only SparseAdam support RAdam, other Adam Ops will support later
+            if op == 'SparseAdam':
+                net.__getattr__(op)(
+                    [param, m1, m2, grad.indices, grad.values, lr, iteration],
+                    output_blobs,
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon,
+                    enableRAdam=self.enableRAdam)
+            else:
+                assert not self.enableRAdam, "Currently, RowWiseSparseAdam is not supported by RAdam!"
+                net.__getattr__(op)(
+                    [param, m1, m2, grad.indices, grad.values, lr, iteration],
+                    output_blobs,
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon)
+
             if self.use_lr_adaption:
                 net.LearningRateAdaption(
                     [lr, grad.values, effective_grad],
