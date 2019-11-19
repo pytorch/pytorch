@@ -430,7 +430,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
                 decl_copy['should_match_schema'] = False
                 additional_jit_decls.append(decl_copy)
 
-    jit_decls.extend(additional_jit_decls)
+    # jit_decls.extend(additional_jit_decls)
     jit_decls = filter_decls(jit_decls, disable_autograd)
 
     # Group and sort the generated snippets to ensure that the
