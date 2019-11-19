@@ -535,6 +535,8 @@ class HistogramObserver(_ObserverBase):
 
     Args:
         bins: Number of bins to use for the histogram
+        upsample_rate: Factor by which the histograms are upsampled, this is
+                       used to interpolate histgrams with varying ranges across observations
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
@@ -556,7 +558,7 @@ class HistogramObserver(_ObserverBase):
         "max_val": Optional[torch.Tensor],
     }
 
-    def __init__(self, bins=2048, dtype=torch.quint8,
+    def __init__(self, bins=2048, upsample_rate=128, dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine, reduce_range=False):
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(dtype=dtype,
@@ -567,7 +569,7 @@ class HistogramObserver(_ObserverBase):
         self.min_val = None
         self.max_val = None
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
-        self.upsample_rate = 128
+        self.upsample_rate = upsample_rate
 
     @torch.jit.ignore
     def _non_linear_param_search(self):
@@ -737,7 +739,6 @@ class HistogramObserver(_ObserverBase):
                                           dtype=torch.double)[downsample_rate - 1 :: downsample_rate]
         # Finally perform interpolation
         shifted_integral_histogram = torch.zeros((Nbins))
-        shifted_integral_histogram[0] = 0
         shifted_integral_histogram[1:Nbins] = integral_histogram[0:-1]
         interpolated_histogram = (integral_histogram - shifted_integral_histogram) / upsample_rate
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)
