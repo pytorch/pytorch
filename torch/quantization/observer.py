@@ -772,7 +772,7 @@ class HistogramObserver(_ObserverBase):
             new_max = torch.max(x)
             new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
             # combine the existing histogram and new histogram into 1 histogram
-            combined_histogram = torch.zeros_like(self.histogram)
+            combined_histogram = torch.zeros_like(self.histogram, memory_format=torch.contiguous_format)
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
             self._combine_histograms(

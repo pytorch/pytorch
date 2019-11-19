@@ -141,7 +141,7 @@ ALL_TENSORTYPES = [torch.float,
                    torch.half]
 
 def fake_empty_like(*args, **kwargs):
-    if 'memory_format' not in kwargs:
+    if 'memory_format' not in kwargs and not args[0].is_sparse:
         kwargs['memory_format'] = torch.contiguous_format
     return torch.empty_like(*args, **kwargs)
 
