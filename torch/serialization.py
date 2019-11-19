@@ -221,7 +221,6 @@ def _open_file_like(name_or_buffer, mode):
 
 class _open_zipfile_reader(_opener):
     def __init__(self, name_or_buffer):
-        _check_seekable(buffer)
         super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
