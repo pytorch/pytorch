@@ -3948,6 +3948,7 @@ class _TestTorchMixin(object):
 
         test(io.BytesIO())
 
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile(self):
         data = self._test_serialization_data()
 
