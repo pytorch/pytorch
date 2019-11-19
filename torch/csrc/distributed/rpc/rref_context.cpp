@@ -8,8 +8,8 @@ namespace distributed {
 namespace rpc {
 
 RRefContext& RRefContext::getInstance() {
-  // Intentionally leaky singleton; this module may be destructed before rref.cpp,
-  // which may use getInstance() in its module destructor.
+  // Intentionally leaky singleton; this module may be destructed before
+  // rref.cpp, which may use getInstance() in its module destructor.
   static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
   return *context;
 }
