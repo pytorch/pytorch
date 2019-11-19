@@ -273,7 +273,7 @@ template class MaxUnpoolImpl<3, MaxUnpool3dImpl>;
 
 // ============================================================================
 
-FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(const FractionalMaxPool2dOptions& options_)
+FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(const FractionalMaxPool2dOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
   reset();
 }
@@ -314,7 +314,7 @@ void FractionalMaxPool2dImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::FractionalMaxPool2d()";
 }
 
-FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(const FractionalMaxPool3dOptions& options_)
+FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(const FractionalMaxPool3dOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
   reset();
 }
