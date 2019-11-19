@@ -305,13 +305,13 @@ Spectral Ops
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
-.. autofunction:: cummax
 .. autofunction:: bincount
 .. autofunction:: broadcast_tensors
 .. autofunction:: cartesian_prod
 .. autofunction:: cdist
 .. autofunction:: combinations
 .. autofunction:: cross
+.. autofunction:: cummax
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: diag

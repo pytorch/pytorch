@@ -426,6 +426,17 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   return ret;
 }
 
+// Tensor cummax_backward(const Tensor & x, int64_t dim) {
+  // if (x.dim() == 0) {
+  //   return x;
+  // }
+  // auto ret = at::cumsum(-x, dim);
+  // auto ret_sum = ret.narrow(dim, ret.size(dim) - 1, 1).clone(at::MemoryFormat::Preserve);
+  // ret -= ret_sum.expand(ret.sizes());
+  // ret += x;
+  // return ret;
+// }
+
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
   if (!keepdim && self.dim() != 0) {
     grad = unsqueeze_multiple(grad, dim, self.sizes().size());
