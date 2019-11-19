@@ -78,13 +78,13 @@ class DistributedOptimizer:
 
         remote_optim_futs = []
         for worker, param_rrefs in per_worker_params_rref.items():
-            remote_optim_rref = rpc.rpc_async(
+            remote_optim_rref_fut = rpc.rpc_async(
                 worker,
                 _new_local_optimizer,
                 args=(optimizer_class, param_rrefs) + args,
                 kwargs=kwargs,
             )
-            remote_optim_futs.append(remote_optim_rref)
+            remote_optim_futs.append(remote_optim_rref_fut)
 
         self.remote_optimizers = _wait_for_all(remote_optim_futs)
 
