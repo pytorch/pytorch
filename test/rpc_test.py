@@ -117,6 +117,10 @@ def my_function(a, b, c):
 def my_tensor_function(a, b):
     return a + b
 
+def my_sleep_func(seconds=1):
+    import time
+    time.sleep(seconds)
+
 
 def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
@@ -493,25 +497,6 @@ class RpcTest(object):
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
             self.assertEqual(ret, torch.ones(n, n) * 2)
-
-    @dist_init
-    def test_sync_rpc(self):
-        dst_rank = (self.rank + 1) % self.world_size
-        for i in range(20):
-            rpc.sync_rpc()
-            n = i + self.rank + 1
-            ret1 = rpc.rpc_sync(
-                "worker{}".format(dst_rank),
-                torch.add,
-                args=(torch.ones(n, n), torch.ones(n, n)),
-            )
-            rpc.sync_rpc()
-            ret2 = rpc.rpc_sync(
-                "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
-            )
-            rpc.sync_rpc()
-            self.assertEqual(ret1, torch.ones(n, n) * 2)
-            self.assertEqual(ret2, torch.ones(n, n) * 3)
 
     @dist_init(setup_rpc=False)
     def test_join_rpc(self):
@@ -1001,6 +986,38 @@ class RpcTest(object):
         self.assertEqual(rets, [11, 12, 13])
 
     @dist_init
+    def test_owner_equality(self):
+        a = RRef(40)
+        b = RRef(50)
+
+        other_rank = (self.rank + 1) % self.world_size
+        other_a = rpc.remote(
+            "worker{}".format(other_rank), torch.add, args=(torch.ones(1), 1)
+        )
+        other_b = rpc.remote(
+            "worker{}".format(other_rank), torch.add, args=(torch.ones(1), 1)
+        )
+        other_a.to_here()  # to ensure clean termination
+        other_b.to_here()
+
+        self.assertNotEqual(a.owner(), 23)
+        self.assertEqual(other_a.owner(), other_b.owner())
+        self.assertNotEqual(a.owner(), other_a.owner())
+        self.assertEqual(other_a.owner(), other_a.owner())
+        self.assertEqual(other_a.owner(), other_b.owner())
+        self.assertEqual(a.owner(), a.owner())
+        self.assertEqual(a.owner(), b.owner())
+        self.assertEqual(a.owner(), rpc.get_worker_info())
+        x = dict()
+        x[a.owner()] = a
+        x[other_a.owner()] = other_a
+        self.assertEqual(x[a.owner()], a)
+        self.assertEqual(x[b.owner()], a)
+        self.assertEqual(x[other_a.owner()], other_a)
+        self.assertEqual(x[other_b.owner()], other_a)
+        self.assertEqual(len(x), 2)
+
+    @dist_init
     def test_pass_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1074,6 +1091,8 @@ class RpcTest(object):
             worker_name_to_id=self.worker_name_to_id,
             init_method=self.init_method,
         )
+        import time ; time.sleep(3)
+        print('done with code')
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -1107,7 +1126,7 @@ class RpcTest(object):
         self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
 
     @dist_init(setup_rpc=False)
-    def test_set_rpc_timeout(self):
+    def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
         rpc.init_rpc(
             self_name="worker{}".format(self.rank),
@@ -1121,6 +1140,35 @@ class RpcTest(object):
         self.assertEqual(timeout, set_timeout)
         rpc.join_rpc()
 
+    @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_rpc_timeouts(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        # futures should time out and be marked with an exception indicating it as such.
+        futs = [rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()) for _ in range(10)]
+        for fut in futs:
+            with self.assertRaisesRegex(RuntimeError, "RPC ran for more than"):
+                fut.wait()
+
+        # ensure that if a new timeout is set old futures don't time out but new ones do.
+        rpc._set_rpc_timeout(timedelta(seconds=200))
+        # create a longstanding RPC.
+        fut1 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        # now, set a short timeout.
+        rpc._set_rpc_timeout(timedelta(milliseconds=1))
+        # f2 should time out, f should not.
+        fut2 = rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=(1,))
+        with self.assertRaises(RuntimeError):
+            fut2.wait()
+        fut1.wait()
+
+        # future should run to completion if the timeout is zero.
+        rpc._set_rpc_timeout(timedelta(seconds=0))
+        rpc.rpc_async("worker{}".format(dst_rank), my_sleep_func, args=()).wait()
+
+        # reset to default timeout so shutdown messages can process cleanly.
+        rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT)
 
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")
