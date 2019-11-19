@@ -27,7 +27,6 @@ SHORT_SIZE = struct.Struct('=h').size
 
 MAGIC_NUMBER = 0x1950a86a20f9469cfc6c
 PROTOCOL_VERSION = 1001
-ZIPFILE_PROTOCOL_VERSION = 1002
 STORAGE_KEY_SEPARATOR = ','
 
 
@@ -198,7 +197,9 @@ class _open_file(_opener):
 
 
 class _open_buffer_reader(_opener):
-    pass
+    def __init__(self, buffer):
+        super(_open_buffer_reader, self).__init__(buffer)
+        _check_seekable(buffer)
 
 
 class _open_buffer_writer(_opener):
@@ -220,6 +221,7 @@ def _open_file_like(name_or_buffer, mode):
 
 class _open_zipfile_reader(_opener):
     def __init__(self, name_or_buffer):
+        _check_seekable(buffer)
         super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
@@ -518,8 +520,6 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
-    _check_seekable(f)
-
     if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
         pickle_load_args['encoding'] = 'utf-8'
 
