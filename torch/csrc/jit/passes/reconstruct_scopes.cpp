@@ -32,7 +32,7 @@ class ReconstructScopesPass {
 void ReconstructScopesPass::constructFunctionToModuleMap(
     script::Module& module) {
   for (auto& method : module.get_methods()) {
-    func_to_module[&method.function()] = module.module_object();
+    func_to_module[&method.function()] = module._ivalue();
   }
   for (script::Module m : module.children()) {
     constructFunctionToModuleMap(m);
@@ -42,7 +42,7 @@ void ReconstructScopesPass::constructFunctionToModuleMap(
 void ReconstructScopesPass::constructRelativeNamesForModules(
     script::Module& module,
     const std::string& prefix) {
-  module_names[module.module_object()] = prefix;
+  module_names[module._ivalue()] = prefix;
   for (script::NameModule s : module.named_children()) {
     constructRelativeNamesForModules(s.value, prefix + "." + s.name);
   }

@@ -1045,7 +1045,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
   void formatStackTrace(std::ostream& out) {
     std::string previous_fn_name = "";
-    for (int i = frames.size() - 1; i >= 0; i--) {
+    for (int64_t i = frames.size() - 1; i >= 0; i--) {
       const Frame& frame = frames[frames.size() - 1 - i];
       size_t pc = (i == 0) ? frame.pc
                            : frame.pc -
@@ -1054,11 +1054,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (node->callstack()) {
         for (const auto& p : (*node->callstack())->vec()) {
           p.second.print_with_context(
-              out, /*context=*/1, false, previous_fn_name);
+              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
           previous_fn_name = p.first->name();
         }
       }
-      node->sourceRange().print_with_context(out, 1, false, previous_fn_name);
+      node->sourceRange().print_with_context(
+          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
       if (node->kind() == prim::CallFunction) {
         previous_fn_name = node->inputs()
                                .at(0)
