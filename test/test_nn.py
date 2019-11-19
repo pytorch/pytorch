@@ -59,6 +59,10 @@ import hypothesis_utils as hu
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+TEST_LARGE_TENSOR = TEST_CUDA
+if TEST_CUDA:
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+
 if TEST_SCIPY:
     from scipy import stats
     import scipy.ndimage
@@ -2046,7 +2050,7 @@ class TestNN(NNTestCase):
 
     def test_random_pruning_orig(self):
         r"""Test that original tensor is correctly stored in 'orig'
-        after pruning is applied. Important to make sure we don't 
+        after pruning is applied. Important to make sure we don't
         lose info about the original unpruned parameter.
         """
         # fixturize test
@@ -2079,12 +2083,12 @@ class TestNN(NNTestCase):
             for name in names:
                 with self._compatible_subtest(m=m, name=name):
                     # tensor prior to pruning
-                    original_tensor = getattr(m, name) 
+                    original_tensor = getattr(m, name)
                     prune.random_unstructured(m, name=name, amount=0.1)
                     # weight = weight_orig * weight_mask
                     self.assertEqual(
                         getattr(m, name),
-                        getattr(m, name + '_orig') 
+                        getattr(m, name + '_orig')
                         * getattr(m, name + '_mask').to(
                             dtype=original_tensor.dtype
                         ),
@@ -2183,7 +2187,7 @@ class TestNN(NNTestCase):
         y_postpruning = m(input_)
         y_postpruning.sum().backward()
         # weight_orig is the parameter, so it's the tensor that will accumulate the grad
-        self.assertEqual(m.weight_orig.grad, mask)  # all 1s, except for masked units 
+        self.assertEqual(m.weight_orig.grad, mask)  # all 1s, except for masked units
         self.assertEqual(m.bias.grad, torch.ones_like(m.bias))
 
         # make sure that weight_orig update doesn't modify [1, 0] and [0, 3]
@@ -2220,7 +2224,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_remove_pruning_forward(self):
-        r"""Remove pruning and check forward is unchanged from previous 
+        r"""Remove pruning and check forward is unchanged from previous
         pruned state.
         """
         input_ = torch.ones(1, 5)
@@ -2284,26 +2288,26 @@ class TestNN(NNTestCase):
             hook,
             torch.nn.utils.prune.PruningContainer
         )
-        # check that container._tensor_name is correctly set no matter how 
+        # check that container._tensor_name is correctly set no matter how
         # many pruning methods are in the container
         self.assertEqual(hook._tensor_name, 'weight')
 
-        # check that the pruning container has the right length 
+        # check that the pruning container has the right length
         # equal to the number of pruning iters
         self.assertEqual(len(hook), 2)  # m.weight has been pruned twice
 
-        # check that the entries of the pruning container are of the expected 
+        # check that the entries of the pruning container are of the expected
         # type and in the expected order
         self.assertIsInstance(hook[0], torch.nn.utils.prune.L1Unstructured)
         self.assertIsInstance(hook[1], torch.nn.utils.prune.LnStructured)
 
-        # check that all entries that are 0 in the 1st mask are 0 in the 
+        # check that all entries that are 0 in the 1st mask are 0 in the
         # 2nd mask too
         self.assertTrue(torch.all(m.weight_mask[weight_mask0 == 0] == 0))
 
         # prune again
         prune.ln_structured(m, name='weight', amount=0.1, n=float('inf'), dim=1)
-        # check that container._tensor_name is correctly set no matter how 
+        # check that container._tensor_name is correctly set no matter how
         # many pruning methods are in the container
         hook = next(iter(m._forward_pre_hooks.values()))
         self.assertEqual(hook._tensor_name, 'weight')
@@ -2334,8 +2338,8 @@ class TestNN(NNTestCase):
             container.add_pruning_method('ugh')
 
     def test_pruning_container_compute_mask(self):
-        r"""Test `compute_mask` of pruning container with a known `t` and 
-        `default_mask`. Indirectly checks that Ln structured pruning is 
+        r"""Test `compute_mask` of pruning container with a known `t` and
+        `default_mask`. Indirectly checks that Ln structured pruning is
         acting on the right axis.
         """
         # create an empty container
@@ -2353,7 +2357,7 @@ class TestNN(NNTestCase):
         t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
         # create prior mask by hand
         default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
-        # since we are pruning the two lowest magnitude units, the outcome of 
+        # since we are pruning the two lowest magnitude units, the outcome of
         # the calculation should be this:
         expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
         computed_mask = container.compute_mask(t, default_mask)
@@ -2363,7 +2367,7 @@ class TestNN(NNTestCase):
         q = prune.LnStructured(amount=1, n=2, dim=0)
         q._tensor_name = 'test'
         container.add_pruning_method(q)
-        # since we are pruning the lowest magnitude one of the two rows, the 
+        # since we are pruning the lowest magnitude one of the two rows, the
         # outcome of the calculation should be this:
         expected_mask = torch.tensor([[0, 0, 0, 0], [1, 1, 0, 1]])
         computed_mask = container.compute_mask(t, default_mask)
@@ -2373,7 +2377,7 @@ class TestNN(NNTestCase):
         r = prune.LnStructured(amount=1, n=2, dim=1)
         r._tensor_name = 'test'
         container.add_pruning_method(r)
-        # since we are pruning the lowest magnitude of the four columns, the 
+        # since we are pruning the lowest magnitude of the four columns, the
         # outcome of the calculation should be this:
         expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]])
         computed_mask = container.compute_mask(t, default_mask)
@@ -2381,8 +2385,8 @@ class TestNN(NNTestCase):
 
 
     def test_l1_unstructured_pruning(self):
-        r"""Test that l1 unstructured pruning actually removes the lowest 
-        entries by l1 norm (by hand). It also checks that applying l1 
+        r"""Test that l1 unstructured pruning actually removes the lowest
+        entries by l1 norm (by hand). It also checks that applying l1
         unstructured pruning more than once respects the previous mask.
         """
         m = nn.Linear(4, 2)
@@ -2442,7 +2446,7 @@ class TestNN(NNTestCase):
         """
         m = nn.Conv2d(3, 1, 2)
         m.weight.data = torch.Tensor(
-            [[[[1., 2.], [1., 2.5]], 
+            [[[[1., 2.], [1., 2.5]],
              [[0.5, 1.], [0.1, 0.1]],
              [[-3., -5.], [0.1, -1.]]]]
         )
@@ -2565,7 +2569,7 @@ class TestNN(NNTestCase):
     def test_pruning_rollback(self):
         r"""Test that if something fails when the we try to compute the mask,
         then the model isn't left in some intermediate half-pruned state.
-        The try/except statement in `apply` should handle rolling back 
+        The try/except statement in `apply` should handle rolling back
         to the previous state before pruning began.
         """
         modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
@@ -2579,7 +2583,7 @@ class TestNN(NNTestCase):
                         "torch.nn.utils.prune.L1Unstructured.compute_mask"
                     ) as compute_mask:
                         compute_mask.side_effect = Exception('HA!')
-                        with self.assertRaises(Exception): 
+                        with self.assertRaises(Exception):
                             prune.l1_unstructured(m, name=name, amount=0.9)
 
                         self.assertTrue(
@@ -2595,7 +2599,7 @@ class TestNN(NNTestCase):
     def test_pruning_serialization_model(self):
         # create a model
         model = torch.nn.Sequential(
-            torch.nn.Linear(10, 10), 
+            torch.nn.Linear(10, 10),
             torch.nn.ReLU(),
             torch.nn.Linear(10, 1),
         )
@@ -2631,7 +2635,7 @@ class TestNN(NNTestCase):
     def test_pruning_serialization_state_dict(self):
         # create a model
         model = torch.nn.Sequential(
-            torch.nn.Linear(10, 10), 
+            torch.nn.Linear(10, 10),
             torch.nn.ReLU(),
             torch.nn.Linear(10, 1),
         )
@@ -2651,7 +2655,7 @@ class TestNN(NNTestCase):
 
         pruned_weight = model[0].weight
 
-        # make pruning permanent and restore parameter names as in base 
+        # make pruning permanent and restore parameter names as in base
         # architecture
         prune.remove(module=model[0], name='weight')
 
@@ -2662,7 +2666,7 @@ class TestNN(NNTestCase):
 
         # save the state dict of model and reload it into new_model
         new_model = torch.nn.Sequential(
-            torch.nn.Linear(10, 10), 
+            torch.nn.Linear(10, 10),
             torch.nn.ReLU(),
             torch.nn.Linear(10, 1),
         )
@@ -2670,7 +2674,7 @@ class TestNN(NNTestCase):
             torch.save(model.state_dict(), fname)
             new_model.load_state_dict(torch.load(fname))
 
-        # check that the original weight and the new mask are not present in 
+        # check that the original weight and the new mask are not present in
         # new_model either.
         self.assertNotIn('0.weight_orig', new_model.state_dict())
         self.assertNotIn('0.weight_mask', new_model.state_dict())
@@ -2686,7 +2690,7 @@ class TestNN(NNTestCase):
         t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
         # create prior mask by hand
         default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
-        # since we are pruning the two lowest magnitude units, the outcome of 
+        # since we are pruning the two lowest magnitude units, the outcome of
         # the calculation should be this:
         expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
         pruned_tensor = p.prune(t, default_mask)
@@ -3547,6 +3551,46 @@ class TestNN(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
+        input = torch.randint(1, 10, (1, 32, 2 ** 17 + 1, 32), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (1, 32, 10, 32), dtype=torch.float32, device="cuda")
+
+        pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((10, 32)).cuda()
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_adaptive_pooling_avg_nhwc_launch_config_forward(self):
+        input = torch.randint(1, 10, (1, 32, 16, 16), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        pool = torch.nn.AdaptiveAvgPool2d((2 ** 17 + 1, 32)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_pool = torch.nn.AdaptiveAvgPool2d((2 ** 17 + 1, 32)).cuda()
+
+        out = pool(input)
+        ref_out = ref_pool(ref_input)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_double_backwards_gpu(self):
@@ -7833,6 +7877,18 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad.dtype, dtype)
         self.assertEqual(input.grad, inputf.grad, prec=1e-1)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_convert_sync_batchnorm(self):
+        module = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(100),
+            torch.nn.InstanceNorm1d(100)
+        ).cuda()
+        sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module)
+        children = list(sync_bn_module.children())
+        self.assertEqual(children[0].__class__, torch.nn.SyncBatchNorm)
+        self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
+
+
 class TestNNInit(TestCase):
     def setUp(self):
         super(TestNNInit, self).setUp()
@@ -8777,6 +8833,16 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
 
+    def _test_module_empty_input(self, module, inp):
+        inp.requires_grad_(True)
+        out = module(inp)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+        self.assertEqual(out.size(), inp.size())
+        for p in module.parameters():
+            if p.requires_grad and p.grad is not None:
+                self.assertEqual(p.grad, torch.zeros_like(p.grad))
+
     def test_Dropout(self, device):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, device, input)
@@ -8806,7 +8872,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, d)
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, device)
 
-        if device == 'cuda':
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm1d, input, device)
 
     def test_InstanceNorm2d_general(self, device):
@@ -8818,7 +8884,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, h, w)
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm2d, input, device)
 
     def test_InstanceNorm3d_general(self, device):
@@ -8831,20 +8897,28 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(b, c, h, w, d)
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
-        if 'cuda' in device:
+        if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+    def test_BatchNorm_empty(self, device):
+        mod = torch.nn.BatchNorm2d(3).to(device)
+        inp = torch.randn(0, 3, 2, 2, device=device)
+        self._test_module_empty_input(mod, inp)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_module_empty_input(mod, inp)
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
