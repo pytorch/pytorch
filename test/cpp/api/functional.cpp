@@ -625,7 +625,7 @@ TEST_F(FunctionalTest, NLLLoss) {
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::kFloat);
-  auto target = torch::tensor({1, 0, 2}, torch::kLong); 
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
   auto output = F::nll_loss(
       input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
   auto expected = torch::tensor(2.4258, torch::kFloat);
@@ -1916,6 +1916,36 @@ TEST_F(FunctionalTest, MarginRankingLoss) {
   }
 }
 
+TEST_F(FunctionalTest, AlphaDropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::alpha_dropout(input, F::AlphaDropoutFuncOptions().p(rate).training(false));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  }
+  auto output = F::detail::alpha_dropout(input, 0.5, false, false);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+}
+
+TEST_F(FunctionalTest, FeatureAlphaDropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::feature_alpha_dropout(input, F::FeatureAlphaDropoutFuncOptions().p(rate).training(false));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  }
+  auto output = F::feature_alpha_dropout(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+}
+
 TEST_F(FunctionalTest, Dropout) {
   auto input = torch::randn(5000);
   auto input_mean = input.mean();
@@ -2065,7 +2095,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     auto weight = torch::rand(4);
     ASSERT_TRUE(torch::allclose(
       F::binary_cross_entropy_with_logits(output, target,
-        F::BCEWithLogitsLossFuncOptions().weight(weight)
+        F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
       ),
       F::binary_cross_entropy(sigmoid(output), target,
         F::BCELossFuncOptions().weight(weight)
@@ -2082,7 +2112,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
 
     ASSERT_TRUE(torch::allclose(
       F::binary_cross_entropy_with_logits(output, target,
-        F::BCEWithLogitsLossFuncOptions().reduction(torch::kNone)
+        F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone)
       ),
       F::binary_cross_entropy(sigmoid(output), target,
         F::BCELossFuncOptions().reduction(torch::kNone)
@@ -2092,7 +2122,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     weight = torch::rand({1}, torch::kFloat);
     ASSERT_TRUE(torch::allclose(
       F::binary_cross_entropy_with_logits(output, target,
-        F::BCEWithLogitsLossFuncOptions().weight(weight)
+        F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
       ),
       F::binary_cross_entropy(sigmoid(output), target,
         F::BCELossFuncOptions().weight(weight)
@@ -2103,7 +2133,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     const auto output = torch::zeros({3, 1}, torch::requires_grad());
     const auto target = torch::zeros({3, 1});
     F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().reduction(torch::kSum)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kSum)
     ).backward();
     const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
     ASSERT_TRUE(torch::allclose(output.grad(), expected_grad));
@@ -2114,24 +2144,24 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
 
     auto weight = torch::rand(4);
     auto out1 = F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().weight(weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
     );
 
     weight = weight.expand({16, 4}).contiguous();
     auto out2 = F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().weight(weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
     );
 
     ASSERT_TRUE(torch::allclose(out1, out2));
 
     weight = torch::rand({16, 1});
     out1 = F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().weight(weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
     );
 
     weight = weight.expand({16, 4}).contiguous();
     out2 = F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().weight(weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
     );
 
     ASSERT_TRUE(torch::allclose(out1, out2));
@@ -2144,7 +2174,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     ASSERT_TRUE(torch::allclose(
       F::binary_cross_entropy_with_logits(output, target),
       F::binary_cross_entropy_with_logits(output, target,
-        F::BCEWithLogitsLossFuncOptions().pos_weight(pos_weight)
+        F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight)
       )
     ));
   }
@@ -2153,17 +2183,17 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     const auto output = torch::rand({64, 4}) - 0.5;
     const auto pos_weight = torch::rand(4);
     const auto out1 = F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().pos_weight(pos_weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight)
     );
 
     const auto pos_weight1 = pos_weight.expand({1, 4});
     const auto out2 = F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().pos_weight(pos_weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight)
     );
 
     const auto pos_weight2 = pos_weight.expand({64, 4});
     const auto out3 = F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().pos_weight(pos_weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight)
     );
 
     ASSERT_TRUE(torch::allclose(out1, out2));
@@ -2174,7 +2204,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     const auto target = torch::zeros({3, 1});
     const auto pos_weight = torch::ones({3, 1});
     F::binary_cross_entropy_with_logits(output, target,
-      F::BCEWithLogitsLossFuncOptions().pos_weight(pos_weight).reduction(torch::kSum)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight).reduction(torch::kSum)
     ).backward();
     const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
     const auto grad = output.grad();
@@ -2189,7 +2219,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     ASSERT_TRUE(torch::isfinite(out1).all().item<bool>());
 
     const auto out2 = F::binary_cross_entropy_with_logits(output, target,
-      BCEWithLogitsLossOptions().pos_weight(pos_weight)
+      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight)
     );
     ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
   }

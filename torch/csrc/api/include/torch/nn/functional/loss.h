@@ -597,9 +597,8 @@ inline Tensor cross_entropy(
 
 namespace detail {
 inline Tensor binary_cross_entropy_with_logits(
-  const Tensor& input, const Tensor& target,
-  const Tensor& weight, const Tensor& pos_weight,
-  BCEWithLogitsLossOptions::reduction_t reduction) {
+  const Tensor& input, const Tensor& target, const Tensor& weight,
+  BCEWithLogitsLossOptions::reduction_t reduction, const Tensor& pos_weight) {
 
   TORCH_CHECK(target.sizes() == input.sizes(),
     "Target size (", target.sizes(),
@@ -614,9 +613,9 @@ inline Tensor binary_cross_entropy_with_logits(
 
 inline Tensor binary_cross_entropy_with_logits(
   const Tensor& input, const Tensor& target,
-  const BCEWithLogitsLossFuncOptions& options = {}) {
+  const BinaryCrossEntropyWithLogitsFuncOptions& options = {}) {
   return detail::binary_cross_entropy_with_logits(input, target,
-    options.weight(), options.pos_weight(), options.reduction());
+    options.weight(), options.reduction(), options.pos_weight());
 }
 
 } // namespace functional

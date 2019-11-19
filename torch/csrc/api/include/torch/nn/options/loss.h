@@ -319,7 +319,7 @@ struct TORCH_API BCEWithLogitsLossOptions {
   TORCH_ARG(Tensor, pos_weight) = {};
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCEWithLogitsLoss, BCEWithLogitsLossFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCEWithLogitsLoss, BinaryCrossEntropyWithLogitsFuncOptions)
 
 } // namespace nn
 } // namespace torch

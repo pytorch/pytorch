@@ -495,6 +495,12 @@ struct TORCH_API BCEWithLogitsLossImpl : public Cloneable<BCEWithLogitsLossImpl>
 
   /// The options with which this `Module` was constructed.
   BCEWithLogitsLossOptions options;
+
+  /// A manual rescaling weight given to the loss of each batch element.
+  Tensor weight;
+
+  /// A weight of positive examples.
+  Tensor pos_weight;
 };
 
 /// A `ModuleHolder` subclass for `BCEWithLogitsLossImpl`.

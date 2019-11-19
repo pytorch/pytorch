@@ -342,8 +342,8 @@ BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
 }
 
 void BCEWithLogitsLossImpl::reset() {
-  register_buffer("weight", options.weight());
-  register_buffer("pos_weight", options.pos_weight());
+  weight = register_buffer("weight", options.weight());
+  pos_weight = register_buffer("pos_weight", options.pos_weight());
 }
 
 void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
@@ -353,7 +353,7 @@ void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
 Tensor BCEWithLogitsLossImpl::forward(
   const Tensor& input, const Tensor& target) {
   return F::detail::binary_cross_entropy_with_logits(input, target,
-    options.weight(), options.pos_weight(), options.reduction());
+    options.weight(), options.reduction(), options.pos_weight());
 }
 
 } // namespace nn
