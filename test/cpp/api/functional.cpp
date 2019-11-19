@@ -625,7 +625,7 @@ TEST_F(FunctionalTest, NLLLoss) {
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::kFloat);
-  auto target = torch::tensor({1, 0, 2}, torch::kLong); 
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
   auto output = F::nll_loss(
       input, target, F::NLLLossFuncOptions().ignore_index(-100).reduction(torch::kMean));
   auto expected = torch::tensor(2.4258, torch::kFloat);
@@ -1914,6 +1914,36 @@ TEST_F(FunctionalTest, MarginRankingLoss) {
       (-target * (input1 - input2) + margin).clamp(0).mean()
     ));
   }
+}
+
+TEST_F(FunctionalTest, AlphaDropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::alpha_dropout(input, F::AlphaDropoutFuncOptions().p(rate).training(false));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  }
+  auto output = F::detail::alpha_dropout(input, 0.5, false, false);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+}
+
+TEST_F(FunctionalTest, FeatureAlphaDropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::feature_alpha_dropout(input, F::FeatureAlphaDropoutFuncOptions().p(rate).training(false));
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  }
+  auto output = F::feature_alpha_dropout(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
 }
 
 TEST_F(FunctionalTest, Dropout) {
