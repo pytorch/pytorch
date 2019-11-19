@@ -11,6 +11,7 @@ embeddingbag_short_configs = op_bench.cross_product_configs(
     input_size=[8, 16, 64],
     offset=[0],
     sparse=[True],
+    device=['cpu'],
     tags=['short']
 )
 
