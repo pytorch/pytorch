@@ -31,9 +31,7 @@ class ReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
   explicit ReadAdapter(
       facebook::jni::alias_ref<JReadAdapter::javaobject> jReadAdapter)
       : jReadAdapter_(facebook::jni::make_global(jReadAdapter)),
-        size_(jReadAdapter_->size()),
-        jBuf_(nullptr),
-        jBufSize_(0){};
+        size_(jReadAdapter_->size()){};
 
   size_t size() const override {
     return size_;
@@ -44,20 +42,15 @@ class ReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
     if (pos >= size_) {
       return 0;
     }
-    uint8_t* ubuf = static_cast<uint8_t*>(buf);
-    if (jBufSize_ < n) {
-      facebook::jni::local_ref<facebook::jni::JByteBuffer> jBuf =
-          facebook::jni::JByteBuffer::wrapBytes(static_cast<uint8_t*>(buf), n);
-      jBuf_ = facebook::jni::make_global(jBuf);
-    }
-
+    facebook::jni::local_ref<facebook::jni::JByteBuffer> jBuf =
+        facebook::jni::JByteBuffer::wrapBytes(static_cast<uint8_t*>(buf), n);
     static const auto method =
         JReadAdapter::javaClassStatic()
             ->getMethod<jint(
                 jlong,
                 facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
                 jint)>("read");
-    jint result = method(jReadAdapter_, pos, jBuf_, n);
+    jint result = method(jReadAdapter_, pos, jBuf, n);
     return result > 0 ? result : 0;
   }
 
@@ -66,8 +59,6 @@ class ReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
  private:
   facebook::jni::global_ref<JReadAdapter::javaobject> jReadAdapter_;
   size_t size_ = {};
-  mutable facebook::jni::global_ref<facebook::jni::JByteBuffer> jBuf_;
-  size_t jBufSize_ = {};
 };
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
