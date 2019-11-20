@@ -429,13 +429,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
       "_round_robin_process_groups",
       [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
           -> std::shared_ptr<::c10d::ProcessGroup> {
-        if (processGroups.size() < 2) {
+        if (processGroups.size() == 0) {
           throw std::invalid_argument("Specify at least 1 process group");
         }
-        const auto& processGroup = processGroups.front();
+        const auto& first = processGroups.front();
         return std::make_shared<::c10d::ProcessGroupRoundRobin>(
-            processGroup->getRank(),
-            processGroup->getSize(),
+            first->getRank(),
+            first->getSize(),
             std::move(processGroups));
       },
       py::arg("process_groups"),
