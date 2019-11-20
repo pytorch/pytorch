@@ -251,6 +251,19 @@ void smooth_l1_kernel(TensorIterator& iter) {
   });
 }
 
+void sigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+    auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+    cpu_kernel_vec(iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t {
+        return a * (scalar_t(1) - b) * b;
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a * (one_vec - b) * b;
+      });
+  });
+}
+
 void mse_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
     cpu_kernel_vec(iter,
@@ -282,6 +295,7 @@ REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
 
 }} // namespace at::native

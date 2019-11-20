@@ -77,8 +77,10 @@ class Linear(nnq.Linear):
             weight_observer(mod.weight)
             wt_scale, wt_zp = weight_observer.calculate_qparams()
             qweight = torch.quantize_per_tensor(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
-        else:
+        elif dtype == torch.float16:
             qweight = mod.weight.float()
+        else:
+            raise RuntimeError('Unsupported dtype specified for dynamic quantized Linear!')
         qlinear = Linear(mod.in_features, mod.out_features, dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear

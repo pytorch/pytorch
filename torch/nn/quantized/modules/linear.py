@@ -51,8 +51,10 @@ class Linear(torch.nn.Module):
         if dtype == torch.qint8:
             qweight = torch._empty_affine_quantized(
                 [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
+        elif dtype == torch.float16:
+            qweight = mod.weight.float()
         else:
-            qweight = torch.empty([out_features, in_features], dtype=torch.float)
+            raise RuntimeError('Unsupported dtype specified for quantized Linear!')
 
         self.dtype = dtype
         self.set_weight_bias(qweight, bias)
