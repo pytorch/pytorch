@@ -129,7 +129,7 @@ class DiagonalTensor(object):
         return self._i * torch.eye(self._N)
 
     def __torch_function__(self, func, args=(), kwargs=None):
-        if(kwargs is None):
+        if kwargs is None:
             kwargs = {}
         if func not in self.handled_functions:
             return NotImplemented
