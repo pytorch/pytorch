@@ -7,6 +7,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 #include <typeinfo>
+#include <ATen/CPUApplyUtils.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
@@ -123,10 +124,15 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   qparams.scale = scale;
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
-  fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
-                             /*dst=*/qd,
-                             /*len=*/rtensor.numel(),
+  at::parallel_for(0, rtensor.numel(), 1, [&](int64_t start, int64_t end){
+    const float *rd_cur_thread = rd + start;
+    typename T::underlying* qd_cur_thread = qd + start;
+    int64_t len_cur_thread = end - start;
+    fbgemm::Quantize<typename T::underlying>(/*src=*/rd_cur_thread,
+                             /*dst=*/qd_cur_thread,
+                             /*len=*/len_cur_thread,
                              /*qparams=*/qparams);
+  });
   return qtensor;
 }
 
@@ -151,10 +157,15 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
   float* rd = rtensor.data_ptr<float>();
-  fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
-                              /*dst=*/rd,
-                              /*len=*/qtensor.numel(),
+  at::parallel_for(0, qtensor.numel(), 1, [&](int64_t start, int64_t end){
+    const auto *qd_cur_thread = qd + start;
+    float *rd_cur_thread = rd + start;
+    int64_t len_cur_thread = end - start;
+    fbgemm::Dequantize<typename T::underlying>(/*src=*/qd_cur_thread,
+                              /*dst=*/rd_cur_thread,
+                              /*len=*/len_cur_thread,
                               /*qparams=*/qparams);
+  });
   return rtensor;
 }
 #else  // USE_FBGEMM
