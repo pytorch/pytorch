@@ -747,8 +747,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       sizes_[dim] = new_size[dim];
     }
 
-    empty_tensor_restride(MemoryFormat::Contiguous);
     refresh_numel();
+    empty_tensor_restride(MemoryFormat::Contiguous);
   }
 
   /**
