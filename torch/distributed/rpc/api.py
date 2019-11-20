@@ -250,7 +250,7 @@ def rpc_async(to, func, args=None, kwargs=None):
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
     method is thread-safe. This method will immediately return a
-    ``torch.distributed.FutureMessage`` that can be awaited on.
+    Future<Message> that can be awaited on.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.

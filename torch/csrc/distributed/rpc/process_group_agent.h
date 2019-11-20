@@ -81,12 +81,12 @@ class ProcessGroupAgent : public RpcAgent {
   // additional information to manage timeouts and destination information,
   // which is needed for termination detection.
   struct FutureInfo {
-    std::shared_ptr<FutureMessage> future_;
+    std::shared_ptr<torch::utils::Future<Message>> future_;
     std::chrono::milliseconds startTime_;
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
-        const std::shared_ptr<FutureMessage>& future,
+        const std::shared_ptr<torch::utils::Future<Message>>& future,
         const std::chrono::milliseconds& startTime,
         int dstRank,
         const std::chrono::milliseconds timeout)
