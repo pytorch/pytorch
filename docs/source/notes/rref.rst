@@ -11,16 +11,16 @@ through message flows in different scenarios. Make sure you're familiar with the
 Background
 ^^^^^^^^^^
 
-RRef stands for Remote REFerence. It is a reference of an object which locates
-on the local or a remote worker, and transparently handles reference counting
-under the hood. Conceptually, it can be considered as a distributed shared
-pointer. Applications can create an RRef by calling
-`torch.distributed.rpc.remote`. Each RRef is owned by the callee worker of the
-`torch.distributed.rpc.remote` call (i.e., owner) and can be used by multiple
+RRef stands for Remote REFerence. It is a reference of an object which is
+located on the local or a remote worker, and transparently handles reference
+counting under the hood. Conceptually, it can be considered as a distributed
+shared pointer. Applications can create an RRef by calling
+:meth:`~torch.distributed.rpc.api.remote`. Each RRef is owned by the callee worker of the
+:meth:`~torch.distributed.rpc.api.remote` call (i.e., owner) and can be used by multiple
 users. The owner stores the real data and keeps track of the global reference
 count. Every RRef can be uniquely identified by a global ``RRefId``,
 which is assigned at the time of creation on the caller of the
-`torch.distributed.rpc.remote` call.
+:meth:`~torch.distributed.rpc.api.remote` call.
 
 On the owner worker, there is only one ``OwnerRRef`` instance, which contains
 the real data, while on user workers, there can be as many ``UserRRefs`` as

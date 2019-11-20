@@ -4,13 +4,13 @@ from . import _start_rpc_agent
 from . import _destroy_rref_context, _cleanup_python_rpc_handler
 from . import WorkerInfo
 from . import backend_registry
-from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
-import datetime
 import functools
+import numbers
 import sys
 import torch
+import torch.distributed as dist
 
 
 _agent = None
@@ -22,7 +22,7 @@ def _require_initialized(func):
         if _agent is None:
             raise RuntimeError(
                 "RPC has not been initialized. Call "
-                "torch.distributed.rpc.init_model_parallel first."
+                "torch.distributed.rpc.init_rpc first."
             )
         return func(*args, **kwargs)
     return wrapper
@@ -47,31 +47,41 @@ def join_rpc():
         _cleanup_python_rpc_handler()
 
 
-@_require_initialized
-def sync_rpc():
-    r"""
-    Block until all local and remote RPC processes reach this method and finish
-    sending all pending RPCs. As this method synchronizes at the process
-    level, if multiple threads are spawned, only one of them should call this
-    method at a time.
-    """
-
-    _agent.sync()
-
-
-
-# TODO: add a context manager to wrap _init_rpc and join_rpc
-def _init_rpc(
+# TODO: add a context manager to wrap _init_rpc_backend and join_rpc
+def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,
     store=None,
-    self_name=None,
-    self_rank=-1,
-    worker_name_to_id=None,
-    num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-    rpc_timeout=DEFAULT_RPC_TIMEOUT,
+    name=None,
+    rank=-1,
+    world_size=-1,
+    rpc_agent_options=None,
 ):
+    from . import RpcAgentOptions
+
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
+
+    if not isinstance(backend, backend_registry.BackendType):
+        raise RuntimeError("`backend` must be a `backend_registry.BackendType`.")
+
+    if not isinstance(store, dist.Store):
+        raise RuntimeError("`store` must be a `c10d::Store`. {}".format(store))
+
+    if not isinstance(name, str):
+        raise RuntimeError("`name` must be a string. {}".format(name))
+
+    if not isinstance(rank, numbers.Integral):
+        raise RuntimeError("`rank` must be an integer. {}".format(rank))
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+
+    if not isinstance(rpc_agent_options, RpcAgentOptions):
+        raise RuntimeError(
+            "`rpc_agent_options` must be an `RpcAgentOptions`. {}".format(
+                rpc_agent_options
+            )
+        )
 
     global _agent
 
@@ -79,19 +89,13 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    if not isinstance(rpc_timeout, datetime.timedelta):
-        raise RuntimeError(
-            "`rpc_timeout` must be a `datetime.timedelta`."
-        )
-
     _agent = backend_registry.init_backend(
         backend,
         store=store,
-        self_name=self_name,
-        self_rank=self_rank,
-        worker_name_to_id=worker_name_to_id,
-        num_send_recv_threads=num_send_recv_threads,
-        rpc_timeout=rpc_timeout,
+        name=name,
+        rank=rank,
+        world_size=world_size,
+        rpc_agent_options=rpc_agent_options,
     )
     _start_rpc_agent(_agent)
 
@@ -152,7 +156,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
+        >>> rpc.init_rpc("worker0")
         >>> worker1 = rpc.get_worker_info("worker1")
         >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
@@ -162,7 +166,7 @@ def remote(to, func, args=None, kwargs=None):
         On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
+        >>> dist.init_rpc("worker1")
         >>> rpc.join_rpc()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -227,7 +231,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
+        >>> rpc.init_rpc("worker0")
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rpc.join_rpc()
 
@@ -235,7 +239,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.init_rpc("worker1")
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -269,7 +273,7 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
+        >>> rpc.init_rpc("worker0")
         >>> worker1 = rpc.get_worker_id("worker1")
         >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
         >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
@@ -280,7 +284,7 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.init_rpc("worker1")
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
