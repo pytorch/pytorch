@@ -23,9 +23,9 @@ for opset_version in _onnx_stable_opsets:
     _symbolic_versions[opset_version] = module
 
 
-def register_custom_domain(domain, version=1):
+def set_custom_domain_version(domain, version=1):
     global _domains
-    if not domain in _domains:
+    if domain not in _domains:
         _domains[domain] = {}
     _domains[domain] = version
 
