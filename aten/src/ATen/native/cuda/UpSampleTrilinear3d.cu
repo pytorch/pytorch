@@ -387,7 +387,7 @@ Tensor upsample_trilinear3d_cuda(
     double scales_1,
     double scales_2,
     double scales_3) {
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_trilinear3d_out_cuda_template(
       output, input, output_size, align_corners, scales_1, scales_2, scales_3);
   return output;
@@ -415,7 +415,7 @@ Tensor upsample_trilinear3d_backward_cuda(
     double scales_1,
     double scales_2,
     double scales_3) {
-  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
+  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_trilinear3d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2, scales_3);
   return grad_input;
