@@ -87,6 +87,16 @@ Tensor isnan(const Tensor& self) {
   return self != self;
 }
 
+Tensor isfinite(const Tensor& self) {
+  // Integral tensor types are finite
+  if (!self.is_floating_point()) {
+    return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
+    return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
+  });
+}
+
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
   AT_ASSERT(n >= 0);
