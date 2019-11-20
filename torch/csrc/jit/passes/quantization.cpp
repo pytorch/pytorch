@@ -456,6 +456,10 @@ class QuantizeHelper {
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
   void quantizeTensor(Value* v);
+  // Remove the observer for value `v`. This function returns
+  // the original value (i.e. before observation), and thus all
+  // uses of the passed-in `v` should be replaced by the caller with
+  // the return value
   Value* removeObserver(Value* v, const std::string& observer_name);
   void removeModulesAndNodes() {
     // Remove observer modules from last one to first one in order to
