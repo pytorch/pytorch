@@ -77,6 +77,20 @@ def my_rref_add(rref_t1, t2):
 def my_script_add(t1, t2):
     return torch.add(t1, t2)
 
+@torch.jit.script
+class MyScriptClass:
+    def __init__(self):
+        self.a = 10
+
+class MyScriptModule(torch.jit.ScriptModule):
+    def __init__(self):
+        super().__init__()
+        self.a = 10
+
+    @torch.jit.script_method
+    def my_method(self):
+        self.a = 11
+
 def my_nested_rref_add(dst, rref_t1, t2):
     return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
 
@@ -1192,15 +1206,32 @@ class DistAutogradTest(object):
         local_grads = None
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
-    #    for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC_SCRIPT_CALL, ExecMode.RPC_ASYNC_SCRIPT_CALL]:
-        for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC_SCRIPT_CALL]:
+        for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC_SCRIPT_CALL, ExecMode.RPC_ASYNC_SCRIPT_CALL]:
             with dist_autograd.context() as context_id:
                 if ExecMode.LOCAL == exec_mode:
                     ret = self._exec_func(exec_mode, my_script_add, t1, t2)
                 else:
                     ret = self._exec_func(exec_mode, _qualified_name(my_script_add), t1, t2)
                 loss = ret.sum()
-                local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
+                ret = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
+                local_grads = ret if ret else local_grads
+
+        # Right now rpc torchscript call does not accept annotated torchscript
+        # class name or script module class name or their class method names
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync('worker{}'.format(self._next_rank()),
+                                _qualified_name(MyScriptClass),
+                                args=(t1, t2))
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync('worker{}'.format(self._next_rank()),
+                                _qualified_name(MyScriptModule),
+                                args=(t1, t2))
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync('worker{}'.format(self._next_rank()),
+                                _qualified_name(MyScriptModule().my_method),
+                                args=(t1, t2))
 
     def _complex_python_udf(t1, t2):
         t3 = torch.nn.functional.linear(t1, t2)

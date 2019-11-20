@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -183,8 +184,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
         auto name = c10::QualifiedName(qualifiedName);
-        auto fnSchema =
-            torch::jit::get_python_cu()->get_function(name).getSchema();
+        auto fnSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(name)
+                            .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
         auto fut = rpcTorchscriptCall(dst, name, stack);

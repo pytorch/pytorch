@@ -2,10 +2,10 @@
 
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -22,7 +22,8 @@ c10::IValue rpcTorchscriptCall(
       *agent, agent->getWorkerInfo(dst), std::move(*scriptCall).toMessage());
   // Get function return type to construct c10::ivalue::Future.
   // Script call only allows single IValue returned.
-  auto returns = torch::jit::get_python_cu()
+  auto returns = PythonRpcHandler::getInstance()
+                     .jitCompilationUnit()
                      ->get_function(qualifiedName)
                      .getSchema()
                      .returns();
