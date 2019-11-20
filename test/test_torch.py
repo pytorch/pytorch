@@ -13235,12 +13235,12 @@ class TestTorchDeviceType(TestCase):
         mi = torch.min(a, b)
 
         for i in range(750):
-            self.assertTrue(torch.isnan(ma[i]))
-            self.assertTrue(torch.isnan(mi[i]))
+            self.assertTrue(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
+            self.assertTrue(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
 
         for i in range(750, 1000):
-            self.assertFalse(torch.isnan(ma[i]))
-            self.assertFalse(torch.isnan(mi[i]))
+            self.assertFalse(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
+            self.assertFalse(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
 
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
