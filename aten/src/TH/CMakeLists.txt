@@ -10,7 +10,7 @@ IF(C_AVX2_FOUND)
 ENDIF(C_AVX2_FOUND)
 
 SET(hdr
-  THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h THMath.h
+  THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
   THLapack.h THLogAdd.h THVector.h )
 
 set(ATen_TH_SRCS
@@ -57,7 +57,6 @@ CONFIGURE_FILE(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
 INSTALL(FILES
   TH.h
   THAllocator.h
-  THMath.h
   THBlas.h
   THDiskFile.h
   THFile.h

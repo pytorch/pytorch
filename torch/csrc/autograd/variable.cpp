@@ -8,6 +8,8 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 
+#include <ATen/core/VariableHooksInterface.h>
+
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 
@@ -61,6 +63,7 @@ static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_fa
 namespace impl {
 
   AutogradMeta* materialize_autograd_meta(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call materialize_autograd_meta() on undefined tensor");
     auto p = self.unsafeGetTensorImpl();
     if (!p->autograd_meta()) {
       p->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
@@ -153,7 +156,7 @@ namespace impl {
     }
   }
 
-  void set_gradient_edge(const Variable& self, Edge edge) noexcept {
+  void set_gradient_edge(const Variable& self, Edge edge) {
     auto* meta = materialize_autograd_meta(self);
     meta->grad_fn_ = std::move(edge.function);
     meta->output_nr_ = edge.input_nr;
@@ -172,15 +175,18 @@ namespace impl {
 
   void set_version_counter(
       const Variable& self,
-      const c10::VariableVersion& version_counter) noexcept {
+      const c10::VariableVersion& version_counter) {
+    TORCH_CHECK(self.defined(), "cannot call set_version_counter() on undefined tensor");
     self.unsafeGetTensorImpl()->set_version_counter(version_counter);
   }
 
-  void bump_version(const Variable& self) noexcept {
+  void bump_version(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call bump_version() on undefined tensor");
     self.unsafeGetTensorImpl()->bump_version();
   }
 
-  const c10::VariableVersion& version_counter(const Variable& self) noexcept {
+  const c10::VariableVersion& version_counter(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call version_counter() on undefined tensor");
     return self.unsafeGetTensorImpl()->version_counter();
   }
 
@@ -198,7 +204,7 @@ namespace impl {
   // TODO: Return an ArrayRef instead (and delete the singleton while you're at
   // it
   const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(const Variable& self)
-      noexcept {
+      {
     if (get_autograd_meta(self)) {
       return get_autograd_meta(self)->hooks_;
     } else {
@@ -218,19 +224,147 @@ namespace impl {
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void set_pyobj(const Variable& self, PyObject* pyobj) noexcept {
+  void set_pyobj(const Variable& self, PyObject* pyobj) {
+    TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
     self.unsafeGetTensorImpl()->set_pyobj(pyobj);
   }
 
-  PyObject* pyobj(const Variable& self) noexcept {
+  PyObject* pyobj(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
     return self.unsafeGetTensorImpl()->pyobj();
   }
 
-  AutogradMeta* get_autograd_meta(const Variable& self) noexcept {
+  AutogradMeta* get_autograd_meta(const Variable& self) {
     // NB: could return null
+    TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
     return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
   }
 
 } // namespace impl
+
+using at::Tensor;
+
+struct VariableHooks final : at::impl::VariableHooksInterface {
+  Tensor tensor_data(const Tensor&) const override;
+  Tensor variable_data(const Tensor&) const override;
+  const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const override;
+  unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const override;
+  void remove_hook(const Tensor&, unsigned pos) const override;
+  bool is_view(const Tensor&) const override;
+  const Tensor& base(const Tensor&) const override;
+  const std::string& name(const Tensor&) const override;
+};
+
+VariableHooks variableHooks;
+at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
+
+Tensor VariableHooks::variable_data(const Tensor& self) const {
+  TORCH_CHECK(self.defined(), "cannot call variable_data() on undefined tensor");
+  auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
+    /*version_counter=*/0,
+    /*allow_tensor_metadata_change=*/false);
+  self_impl_copy->set_autograd_meta(nullptr);
+  return at::Tensor(self_impl_copy);
+}
+
+Tensor VariableHooks::tensor_data(const Tensor& self) const {
+  TORCH_CHECK(self.defined(), "cannot call tensor_data() on undefined tensor");
+  auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
+    /*version_counter=*/self.unsafeGetTensorImpl()->version_counter(),
+    /*allow_tensor_metadata_change=*/self.unsafeGetTensorImpl()->allow_tensor_metadata_change());
+  return at::Tensor(self_impl_copy);
+}
+
+// View Variables
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+bool VariableHooks::is_view(const Tensor& self) const {
+  if (torch::autograd::impl::get_autograd_meta(self)) {
+    return torch::autograd::impl::get_autograd_meta(self)->is_view_;
+  } else {
+    return false;
+  }
+}
+
+const Tensor& VariableHooks::base(const Tensor& self) const {
+  if (self.is_view()) {
+    // is_view() implies get_autograd_meta()
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+    return diff_view_meta->base_;
+  } else {
+    throw std::runtime_error("Can't get base of non-view Variable");
+  }
+}
+
+namespace {
+  std::string singleton_string;
+}
+
+const std::string& VariableHooks::name(const Tensor& self) const {
+  TORCH_CHECK(self.defined(), "cannot call variable_data() on undefined tensor");
+  if (torch::autograd::impl::get_autograd_meta(self)) {
+    return torch::autograd::impl::get_autograd_meta(self)->name_;
+  } else {
+    return singleton_string;
+  }
+}
+
+namespace {
+  std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
+}
+
+const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
+  if (self.is_view()) {
+    // NB: is_view() ==> get_autograd_meta()
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+    std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
+    if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
+      return diff_view_meta->grad_fn_;
+    }
+    auto current_version = self._version();
+    if (diff_view_meta->attr_version != current_version) {
+      AT_ASSERT(diff_view_meta->output_nr_ == 0);
+      auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
+      fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
+      fn->size = self.sizes().vec();
+      fn->stride = self.strides().vec();
+      fn->storage_offset = self.storage_offset();
+      fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
+      fn->add_input_metadata(
+        diff_view_meta->base_.type()
+      , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
+      , diff_view_meta->base_.device());
+      diff_view_meta->grad_fn_ = std::move(fn);
+      diff_view_meta->attr_version = current_version;
+    }
+    return diff_view_meta->grad_fn_;
+  } else {
+    if (torch::autograd::impl::get_autograd_meta(self)) {
+      return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
+    } else {
+      return singleton_shared_ptr;
+    }
+  }
+}
+
+void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
+  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
+  // Hook will be ignored
+  (*list)[pos] = nullptr;
+}
+
+unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
+  TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
+                           "doesn't require gradient");
+  // NB: materialize_autograd_meta unnecessary due to requires grad check
+  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list;
+  if(!list) {
+    torch::autograd::impl::create_cpp_hook(self);
+  }
+  unsigned idx = list->size();
+  list->push_back(hook);
+  return idx;
+}
 
 }} // namespace torch::autograd

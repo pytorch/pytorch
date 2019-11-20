@@ -96,7 +96,7 @@ namespace impl {
 
   // WARNING: This may return a nullptr.  If you require AutogradMeta to return
   // a materialized structure, use materialize_autograd_meta instead.
-  TORCH_API AutogradMeta* get_autograd_meta(const Variable&) noexcept;
+  TORCH_API AutogradMeta* get_autograd_meta(const Variable&);
 
   // Returns the current autograd meta, materializing it if it was previously
   // none.  This counts as a *mutating* operation, so do not call it on
@@ -132,7 +132,7 @@ namespace impl {
   /// and never the `grad_accumulator`. For the latter, use
   /// `set_grad_accumulator`. This allows late construction of an interior
   /// `Variable`.
-  TORCH_API void set_gradient_edge(const Variable&, Edge edge) noexcept;
+  TORCH_API void set_gradient_edge(const Variable&, Edge edge);
 
   // Autograd Graph Interaction
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -149,19 +149,19 @@ namespace impl {
   TORCH_API Node* grad_fn_unsafe(const Variable&);
 
   /// Increments the version count of this `Variable`.
-  TORCH_API void bump_version(const Variable&) noexcept;
-  TORCH_API void set_version_counter(const Variable&, const c10::VariableVersion& version_counter) noexcept;
+  TORCH_API void bump_version(const Variable&);
+  TORCH_API void set_version_counter(const Variable&, const c10::VariableVersion& version_counter);
 
   /// Retrieves this `Variable`s version counter.
-  TORCH_API const c10::VariableVersion& version_counter(const Variable&) noexcept;
+  TORCH_API const c10::VariableVersion& version_counter(const Variable&);
 
-  TORCH_API PyObject* pyobj(const Variable&) noexcept;
-  TORCH_API void set_pyobj(const Variable&, PyObject* pyobj) noexcept;
+  TORCH_API PyObject* pyobj(const Variable&);
+  TORCH_API void set_pyobj(const Variable&, PyObject* pyobj);
 
   TORCH_API void set_name(const Variable&, const std::string& name);
 
   TORCH_API void add_hook(const Variable&, std::shared_ptr<FunctionPreHook> hook);
-  TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(const Variable&) noexcept;
+  TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(const Variable&);
   TORCH_API void clear_hooks(const Variable&);
 
   TORCH_API void create_cpp_hook(const Variable&);
