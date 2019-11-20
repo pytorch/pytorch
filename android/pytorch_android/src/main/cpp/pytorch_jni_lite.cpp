@@ -22,7 +22,7 @@ private:
   torch::jit::mobile::Module module_;
 
 public:
-  constexpr static auto kJavaDescriptor = "Lorg/pytorch/Module$NativePeer;";
+  constexpr static auto kJavaDescriptor = "Lorg/pytorch/LiteNativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
