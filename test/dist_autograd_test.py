@@ -474,6 +474,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def test_graph_for_py_nested_call(self):
         self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29938")
     @dist_init
     def test_graph_for_py_nested_remote_call(self):
         self._test_graph_for_py_nested_call(ExecMode.REMOTE)
