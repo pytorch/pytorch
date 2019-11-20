@@ -162,7 +162,7 @@ F::max_pool2d|Yes|No
 F::max_pool3d|Yes|No
 F::max_unpool1d|Yes|No
 F::max_unpool2d|Yes|No
-F::max_unpool3d|Yes|No
+F::max_unpool3d|No|No
 F::lp_pool1d|Yes|No
 F::lp_pool2d|Yes|No
 F::adaptive_max_pool1d|Yes|No
@@ -193,7 +193,6 @@ F::softmax|Yes|No
 F::softshrink|Yes|No
 F::gumbel_softmax|Yes|No
 F::log_softmax|Yes|No
-F::tanh|Yes|No
 F::batch_norm|Yes|No
 F::instance_norm|Yes|No
 F::layer_norm|Yes|No
