@@ -238,6 +238,15 @@ class TestNamedTensor(TestCase):
             output = x.index_fill('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
             self.assertEqual(output.names, expected_names)
 
+    def test_equal(self):
+        for device in torch.testing.get_all_device_types():
+            tensor = torch.randn(2, 3, device=device)
+            other = tensor.clone()
+
+            self.assertTrue(torch.equal(tensor.rename('N', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename('M', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename(None, 'C'), other.rename('N', 'C')))
+
     def test_squeeze(self):
         x = create('N:3,C:1,H:1,W:1')
         output = x.squeeze('C')
@@ -275,12 +284,11 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
-    @unittest.skip("Issue 27753")
-    def test_big_tensor_repr(self):
+    def test_big_tensor_repr_has_names(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
-            expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
-            self.assertEqual(repr(named_tensor), expected)
+            names_tag = 'names={}'.format(named_tensor.names)
+            self.assertIn(names_tag, repr(named_tensor))
 
         check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
 
@@ -1053,6 +1061,14 @@ class TestNamedTensor(TestCase):
             for out in output:
                 self.assertEqual(out.names, expected_names)
 
+        def sum_all_outputs(output):
+            if isinstance(output, torch.Tensor):
+                return output.sum()
+            result = 0
+            for out in output:
+                result = out + result
+            return result.sum()
+
         def test_simple_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             check_output(op(t, 1), ['N', 'L'])
@@ -1062,6 +1078,11 @@ class TestNamedTensor(TestCase):
                 op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
                 op(t, 'H')
+
+        def test_autograd_supports_dimname_overload(op, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device, requires_grad=True)
+            sum_all_outputs(op(t, 'C')).backward()
+            self.assertIsNotNone(t.grad)
 
         def test_complete_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
@@ -1126,6 +1147,7 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op = testcase.op
             test_simple_reduce(op, device)
+            test_autograd_supports_dimname_overload(op, device)
 
             if testcase.supports_keepdim:
                 test_keepdim(op, device)

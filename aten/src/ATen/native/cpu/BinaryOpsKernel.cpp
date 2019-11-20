@@ -93,6 +93,29 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void bitwise_xor_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
+    // integral types.
+    cpu_kernel(
+          iter,
+          [](bool a, bool b) {
+            return a != b;
+          });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            return a ^ b;
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a ^ b;
+          });
+    });
+  }
+}
+
 void logical_xor_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_xor_cpu", [&]() {
@@ -228,6 +251,19 @@ void smooth_l1_kernel(TensorIterator& iter) {
   });
 }
 
+void sigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+    auto one_vec = Vec256<scalar_t>((scalar_t)(1));
+    cpu_kernel_vec(iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t {
+        return a * (scalar_t(1) - b) * b;
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a * (one_vec - b) * b;
+      });
+  });
+}
+
 void mse_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
     cpu_kernel_vec(iter,
@@ -250,6 +286,7 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
+REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 REGISTER_DISPATCH(lt_stub, &lt_kernel);
 REGISTER_DISPATCH(le_stub, &le_kernel);
@@ -258,6 +295,7 @@ REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
 
 }} // namespace at::native

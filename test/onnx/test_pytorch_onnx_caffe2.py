@@ -336,7 +336,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -379,7 +379,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -420,7 +420,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -583,9 +583,24 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model = nn.BatchNorm1d(224)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    def test_batchnorm1d(self):
+        c = torch.randn(BATCH_SIZE, 224, 224)
+        model = nn.BatchNorm1d(224)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
+
+    def test_batchnorm1d_noaffine(self):
+        c = torch.randn(BATCH_SIZE, 224)
+        model = nn.BatchNorm1d(224, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
     def test_batchnorm2d_noaffine(self):
         c = torch.randn(128, 128, 1, 1)
         model = nn.BatchNorm2d(128, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
+    def test_batchnorm3d_noaffine(self):
+        c = torch.randn(128, 128, 1, 1, 1)
+        model = nn.BatchNorm3d(128, affine=False)
         self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
 
     def test_constant(self):
@@ -1489,7 +1504,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(16, 3, 256, 256)
         self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    # InstanceNorm model (used in the subgraph) includes unused weights, 
+    # InstanceNorm model (used in the subgraph) includes unused weights,
     # so skip this in TestCaffe2BackendEmbed
     @skipIfEmbed
     def test_group_norm(self):

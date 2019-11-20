@@ -192,7 +192,6 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
   return at::_nnpack_available() &&
          input.type().backend() == at::Backend::CPU &&
          input.scalar_type() == kFloat && // only on CPU Float Tensors
-         !is_strided() && // doesn't support strides
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
          input.ndimension() == 4 // must be in NCHW format
@@ -565,6 +564,10 @@ at::Tensor _convolution(
   check_shape_forward(input, weight, bias, params, input_is_mkldnn);
 
   if (k == 3) {
+    // avoid accidentally going through NHWC for permuted 3d input.
+    if (!input_is_mkldnn) {
+      input = input.contiguous();
+    }
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -644,7 +647,7 @@ at::Tensor _convolution(
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
     if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
       output = convolution_depthwise3x3_winograd_stub(
-        input.device().type(), input, weight, bias, params.padding, params.stride, params.groups);
+        input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
     } else if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
@@ -714,7 +717,7 @@ at::Tensor _convolution_nogroup(
         if (params.use_nnpack(input)) {
 #if AT_NNPACK_ENABLED()
           return at::_nnpack_spatial_convolution(
-              input, weight, bias, padding);
+              input, weight, bias, padding, stride);
 #endif
         } else {
           /* CPU implementation has specialized MM kernels
@@ -731,7 +734,7 @@ at::Tensor _convolution_nogroup(
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
-      return at::thnn_conv3d(
+      return at::slow_conv3d(
           input, weight, kernel_size, bias,
           stride, padding);
     }
@@ -746,8 +749,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(input),
-          at::empty_like(weight),
+          at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
+          at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
           at::empty({}));
 }
 
@@ -802,7 +805,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    ggO = at::zeros_like(gO);
+    ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (ggb.defined()) {
@@ -893,7 +896,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gW = at::zeros_like(weight);
+    gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   // Compute gI = convT(ggW, gO.t()) if !transposed
@@ -982,12 +985,12 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gI = at::zeros_like(input);
+    gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
-  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input);
-  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight);
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }

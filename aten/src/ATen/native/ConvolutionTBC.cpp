@@ -69,7 +69,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   auto olen = input_size[0] - kw + 1 + pad * 2;
   int real_pad = (olen - ilen + kw - 1) / 2;
 
-  Tensor dInput = at::zeros_like(input);
+  Tensor dInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   for (int k = 0; k < kw; k++) {
     int iShift = std::max(0, k - real_pad);
     int oShift = std::max(0, real_pad - k);
@@ -82,7 +82,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
     }
   }
 
-  Tensor dWeight = at::zeros_like(weight);
+  Tensor dWeight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   for (int k = 0; k < kw; k++) {
     int iShift = std::max(0, k - real_pad);
     int oShift = std::max(0, real_pad - k);
@@ -96,7 +96,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
     }
   }
 
-  Tensor dBias = at::zeros_like(bias);
+  Tensor dBias = at::zeros_like(bias, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto tmp = dOutput.sum(0, false);
   dBias.copy_(tmp.sum(0));
 

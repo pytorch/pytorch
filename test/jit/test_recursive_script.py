@@ -8,11 +8,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.testing import FileCheck
+from collections import OrderedDict
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
+
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
 
 class TestRecursiveScript(JitTestCase):
     def test_inferred_nonetype(self):
@@ -108,12 +114,12 @@ class TestRecursiveScript(JitTestCase):
 
         # sm1 was created while m had training = True
         self.assertTrue(sm1.training)
-        self.assertEqual(sm1.training, sm1._c._get_attribute('training'))
+        self.assertEqual(sm1.training, sm1._c.getattr('training'))
         self.assertEqual(sm1(), 2)
 
         # sm2 was created after m was eval'ed
         self.assertFalse(sm2.training)
-        self.assertEqual(sm2.training, sm2._c._get_attribute('training'))
+        self.assertEqual(sm2.training, sm2._c.getattr('training'))
         self.assertEqual(sm2(), 0)
 
     def test_module_name(self):
@@ -230,8 +236,38 @@ class TestRecursiveScript(JitTestCase):
         f.check('Submodule')
         f.run(out[0])
 
-
         self.assertEqual(m.original_name, 'MyModule')
+
+    def test_dir(self):
+        def test_module_dir(mod):
+            dir_set = dir(mod)
+            scripted_mod = torch.jit.script(mod)
+            dir_scripted = set(dir(scripted_mod))
+            # set not currently copied over
+            ignore_set = ["training", "__delitem__", "__setitem__", "clear", "items",
+                          "keys", "pop", "update", "values"]
+            for attr in dir_set:
+                if attr in ignore_set:
+                    continue
+                self.assertTrue(attr in dir_scripted, attr)
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = nn.Conv2d(10, 10, 3)
+                self.lin = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin(x) + self.conv(x)
+
+        test_module_dir(MyModule())
+
+        # test custom __dir__ for containers
+        conv = nn.Conv2d(10, 10, 3)
+        linear = nn.Linear(10, 10)
+
+        test_module_dir(nn.Sequential(conv, linear))
+        test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
         def other_fn(a, b):
@@ -555,8 +591,62 @@ class TestRecursiveScript(JitTestCase):
         m = M()
         self.checkModule(m, (torch.randn(5, 5), ))
 
+    def test_property(self):
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.x = 0
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+            @property
+            def x_and_1(self):
+                return self.x + 1
+
+            def forward(self, new_x):
+                # type: (int) -> int
+                self.x = new_x
+                return self.x_and_1
+
+        with self.assertRaisesRegex(RuntimeError, "property"):
+            torch.jit.script(M())
+
+    def test_inner_traced_module(self):
+        class Dummy(nn.Module):
+            def forward(self, x):
+                return x
+
+        class Model(nn.Module):
+            def __init__(self, dummies):
+                super(Model, self).__init__()
+                self._dummies = dummies
+
+            def forward(self, x):
+                out = []
+                for dummy in self._dummies:
+                    out.append(dummy(x))
+                return out
+
+        dummy = torch.jit.trace(Dummy(), torch.randn(1, 2))
+        dummies = nn.ModuleList([dummy])
+        model = Model(dummies)
+        self.checkModule(model, (torch.rand(5, 5), ))
+
+    def test_script_loaded_module(self):
+        """
+        Test that we can hold a loaded ScriptModule as a submodule.
+        """
+        class Dummy(nn.Module):
+            def forward(self, x):
+                return x
+
+        dummy = torch.jit.script(Dummy())
+        dummy = self.getExportImportCopy(dummy)
+
+        class ContainsLoaded(torch.nn.Module):
+            def __init__(self):
+                super(ContainsLoaded, self).__init__()
+                self.encoder = dummy
+
+            def forward(self, input):
+                return self.encoder(input)
+
+        self.checkModule(ContainsLoaded(), (torch.rand(2, 3), ))

@@ -340,12 +340,12 @@ Libtorch packages are built in the wheel build scripts: manywheel/build_*.sh for
 
 All linux builds occur in docker images. The docker images are
 
-* soumith/conda-cuda
+* pytorch/conda-cuda
     * Has ALL CUDA versions installed. The script pytorch/builder/conda/switch_cuda_version.sh sets /usr/local/cuda to a symlink to e.g. /usr/local/cuda-10.0 to enable different CUDA builds
     * Also used for cpu builds
-* soumith/manylinux-cuda90
-* soumith/manylinux-cuda92
-* soumith/manylinux-cuda100
+* pytorch/manylinux-cuda90
+* pytorch/manylinux-cuda92
+* pytorch/manylinux-cuda100
     * Also used for cpu builds
 
 The Dockerfiles are available in pytorch/builder, but there is no circleci job or script to build these docker images, and they cannot be run locally (unless you have the correct local packages/paths). Only Soumith can build them right now.
@@ -411,7 +411,7 @@ You can build Linux binaries locally easily using docker.
 
 ```
 # Run the docker
-# Use the correct docker image, soumith/conda-cuda used here as an example
+# Use the correct docker image, pytorch/conda-cuda used here as an example
 #
 # -v path/to/foo:path/to/bar makes path/to/foo on your local machine (the
 #    machine that you're running the command on) accessible to the docker
@@ -426,7 +426,7 @@ docker run \
     -v your/pytorch/repo:/pytorch \
     -v your/builder/repo:/builder \
     -v where/you/want/packages/to/appear:/final_pkgs \
-    -it soumith/conda-cuda /bin/bash
+    -it pytorch/conda-cuda /bin/bash
 
 # Export whatever variables are important to you. All variables that you'd
 # possibly need are in .circleci/scripts/binary_populate_env.sh

@@ -498,9 +498,9 @@ std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cuda(
              {input_bias, "input_bias", 3}, {hidden_bias, "hidden_bias", 4},
              /*factor=*/4, {cx, "prev_hidden", 5});
 
-  auto workspace = at::empty_like(input_gates);
-  auto hy = at::empty_like(cx);
-  auto cy = at::empty_like(cx);
+  auto workspace = at::empty_like(input_gates, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto hy = at::empty_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto cy = at::empty_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.scalar_type(), "_thnn_fused_lstm_cell_cuda", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       lstm_forward_impl<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace);
@@ -538,8 +538,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
                          {cx, "cx", 3}, {cy, "cy", 4},
                          {workspace, "workspace", 5});
 
-  auto grad_gates = at::empty_like(workspace);
-  auto grad_cx = at::empty_like(cx);
+  auto grad_gates = at::empty_like(workspace, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_cx = at::empty_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(workspace.scalar_type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       lstm_backward_impl<scalar_t, int32_t>(grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx);
@@ -564,7 +564,7 @@ std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
              /*factor=*/3, {hx, "prev_hidden", 5});
 
   auto workspace = at::empty({hx.size(0), hx.size(1) * GRU_WORKSPACE_MULTIPLIER}, hx.options());
-  auto hy = at::empty_like(hx);
+  auto hy = at::empty_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.scalar_type(), "_thnn_fused_gru_cell_cuda", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       gru_forward_impl<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, hx, hy, workspace);
@@ -588,7 +588,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_gru_cell_backward
   int64_t hidden_size = workspace.size(1) / GRU_WORKSPACE_MULTIPLIER;
   auto grad_input_gates = at::empty({workspace.size(0), hidden_size * 3}, workspace.options());
   auto grad_hidden_gates = at::empty({workspace.size(0), hidden_size * 3}, workspace.options());
-  auto grad_hx = at::empty_like(grad_hy);
+  auto grad_hx = at::empty_like(grad_hy, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.scalar_type(), "_thnn_fused_gru_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       gru_backward_impl<scalar_t, int32_t>(grad_hy, workspace, grad_input_gates, grad_hidden_gates, grad_hx);

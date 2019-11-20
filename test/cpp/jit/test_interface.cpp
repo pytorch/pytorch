@@ -64,14 +64,14 @@ void testModuleInterfaceSerialization() {
   parentMod.register_attribute(
       "subMod",
       cu->get_interface("__torch__.OneForward"),
-      subMod.module_object(),
+      subMod._ivalue(),
       /*is_parameter=*/false);
   parentMod.define(parentForward, nativeResolver());
-  ASSERT_TRUE(parentMod.find_module("subMod").has_value());
+  ASSERT_TRUE(parentMod.hasattr("subMod"));
   std::stringstream ss;
   parentMod.save(ss);
   Module reloaded_mod = jit::load(ss);
-  ASSERT_TRUE(reloaded_mod.find_module("subMod").has_value());
+  ASSERT_TRUE(reloaded_mod.hasattr("subMod"));
   InterfaceTypePtr submodType =
       reloaded_mod.type()->getAttribute("subMod")->cast<InterfaceType>();
   ASSERT_TRUE(submodType->is_module());

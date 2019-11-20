@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 
 namespace torch {
@@ -14,7 +14,7 @@ namespace autograd {
 // autograd context. Finally, the RPC message is updated with appropriate
 // autograd information for the recipient.
 TORCH_API void addSendRpcBackward(
-    DistAutogradContext& autogradContext,
+    const ContextPtr& autogradContext,
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     const rpc::worker_id_t dst);
@@ -25,9 +25,8 @@ TORCH_API void addSendRpcBackward(
 // creates a new autograd context if needed and registers the 'recv' function
 // with this context.
 //
-// Returns a pointer to the autograd context created (nullptr in case of no
-// autograd information was needed.)
-TORCH_API DistAutogradContext* addRecvRpcBackward(
+// Returns a pointer to the autograd context created.
+TORCH_API ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId);
