@@ -239,7 +239,7 @@ Tensor upsample_linear1d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners) {
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_linear1d_out_cuda_template(
       output, input, output_size, align_corners);
   return output;
@@ -261,7 +261,7 @@ Tensor upsample_linear1d_backward_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners) {
-  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
+  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_linear1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners);
   return grad_input;

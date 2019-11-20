@@ -159,7 +159,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   TORCH_CHECK(pdist.is_contiguous(), "_pdist_backward requires pdist to be contiguous");
   auto device = self.type().device_type();
   TORCH_CHECK(device == kCPU || device == kCUDA, "_pdist_backward only supports CPU and CUDA devices, got: ", device);
-  Tensor result = at::empty_like(self, at::MemoryFormat::Contiguous);
+  Tensor result = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   pdist_backward_stub(device, result, grad, self, p, pdist);
   return result;
 }
