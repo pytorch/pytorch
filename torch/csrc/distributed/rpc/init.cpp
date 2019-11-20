@@ -14,6 +14,7 @@
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
+#include <pybind11/operators.h>
 
 namespace torch {
 namespace distributed {
@@ -33,9 +34,18 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(rpc_module).cast<py::module>();
 
-  auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
-                        .def_readonly("name", &WorkerInfo::name_)
-                        .def_readonly("id", &WorkerInfo::id_);
+  auto workerInfo =
+      shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
+          .def_readonly("name", &WorkerInfo::name_)
+          .def_readonly("id", &WorkerInfo::id_)
+          .def("__eq__", &WorkerInfo::operator==, py::is_operator())
+          // pybind11 suggests the syntax  .def(hash(py::self)), with the
+          // unqualified "hash" function call. However the
+          // argument-dependent lookup for the function "hash" doesn't get
+          // triggered in this context because it conflicts with the struct
+          // torch::hash, so  we need to use the qualified name
+          // py::detail::hash, which unfortunately is in a detail namespace.
+          .def(py::detail::hash(py::self));
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -177,6 +187,16 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
           Returns:
             `datetime.timedelta` instance indicating the RPC timeout.
+      )");
+
+  module.def(
+      "_set_rpc_timeout",
+      [](const std::chrono::milliseconds& rpcTimeout) {
+        RpcAgent::getDefaultRpcAgent()->setRpcTimeout(rpcTimeout);
+      },
+      R"(
+          Set the timeout for all RPCs. If an RPC is not completed within this
+          time, an exception indicating it has timed out will be raised.
       )");
 
   Py_RETURN_TRUE;
