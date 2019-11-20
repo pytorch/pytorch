@@ -456,7 +456,7 @@ void insertQuantDeQuantCall(
   while (!v->uses().empty()) {
     Node* cur = v->uses()[0].user;
     if (isObserverNode(cur, observer_name)) {
-      // temprorialy remove observer use and restore later
+      // temporarily remove observer use and restore later
       observer_node = cur;
       v->replaceFirstUseWith(quant->output());
     } else if (cur != quant) {
@@ -465,7 +465,7 @@ void insertQuantDeQuantCall(
       v->replaceFirstUseWith(dequant->output());
       g->insertNode(dequant);
     } else {
-      // temprorialy remove quant use and restore later
+      // temporarily remove quant use and restore later
       v->replaceFirstUseWith(quant->output());
     }
   }
