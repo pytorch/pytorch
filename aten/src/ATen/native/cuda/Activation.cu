@@ -329,14 +329,14 @@ void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
-  Tensor Y = at::native::empty_like(self, at::MemoryFormat::Contiguous);
+  Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
   GeluKernel(kCUDA, it);
   return Y;
 }
 
 Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(self, at::MemoryFormat::Contiguous);
+  Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::binary_op(dX, grad, self);
   GeluBackwardKernel(kCUDA, it);
   return dX;
