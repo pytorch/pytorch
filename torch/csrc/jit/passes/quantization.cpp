@@ -19,10 +19,23 @@ namespace torch {
 namespace jit {
 namespace {
 
+struct PatternInfo {
+  std::string pattern_string;
+  std::unique_ptr<Graph> pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+
+  static PatternInfo parse_from_str(std::string pattern_string) {
+    PatternInfo rv{
+        std::move(pattern_string), at::guts::make_unique<Graph>(), {}};
+    script::parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
+    return rv;
+  }
+};
+
 struct PatternsAndModules {
   bool is_conv;
   bool is_per_channel;
-  std::string pattern;
+  const PatternInfo& pattern;
   script::Module packed_params_module;
 };
 
@@ -135,7 +148,7 @@ class InsertObserversHelper {
 
   void findIntermediateValuesInPattern(
       Graph& graph,
-      const std::string& pattern);
+      const PatternInfo& pattern);
 
   void addIntermediateValuesToSkipObserver(
       const script::Module& module,
@@ -239,10 +252,9 @@ Node* InsertObserversHelper::insertObserverFor(
 
 void InsertObserversHelper::findIntermediateValuesInPattern(
     Graph& graph,
-    const std::string& pattern) {
-  Graph pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+    const PatternInfo& pattern) {
+  const Graph& pattern_graph = *pattern.pattern_graph;
+  const std::unordered_map<std::string, Value*>& vmap = pattern.vmap;
 
   const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
@@ -262,28 +274,29 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
 
   // Note that the name of the value we want to skip inserting observer for
   // is hard coded as "intermediate_val"
-  std::string conv_functional_relu = R"(
+  static const PatternInfo conv_functional_relu =
+      PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
     %conv = match::module[name="Conv2d"](%self)
     %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
     %r = prim::CallFunction(%relu, %intermediate_val, %inplace)
-    return (%r) )";
-  std::string conv_relu_module = R"(
+    return (%r) )");
+  static const PatternInfo conv_relu_module = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
     %conv = match::module[name="Conv2d"](%self)
     %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
     %relu = match::module[name="ReLU"](%self)
     %r = prim::CallMethod[name="forward"](%relu, %intermediate_val)
-    return (%r) )";
-  std::string matmul_add = R"(
+    return (%r) )");
+  static const PatternInfo matmul_add = PatternInfo::parse_from_str(R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
      %intermediate_val = aten::matmul(%input, %weight_t)
      %res = aten::add_(%intermediate_val, %bias, %4)
-     return (%res) )";
-  std::vector<std::string> patterns = {
-      conv_functional_relu, conv_relu_module, matmul_add};
+     return (%res) )");
+  static const std::vector<std::reference_wrapper<const PatternInfo>> patterns =
+      {conv_functional_relu, conv_relu_module, matmul_add};
 
   for (const auto& pattern : patterns) {
     findIntermediateValuesInPattern(*graph, pattern);
@@ -814,21 +827,20 @@ static bool tryExtractingConvBNParameters(
 }
 
 void FoldConvBatchNorm2d(const script::Module& module) {
-  std::string pattern = R"IR(
+  static const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
     %conv_submodule = match::module[name="Conv2d"](%self)
     %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
     %bn_submodule = match::module[name="BatchNorm2d"](%self)
     %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
-    return (%bn_out))IR";
+    return (%bn_out))IR");
 
-  Graph pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
-  Value* pattern_conv_out = vmap["conv_out"];
-  Value* pattern_bn_out = vmap["bn_out"];
-  Value* pattern_conv_submodule = vmap["conv_submodule"];
-  Value* pattern_bn_submodule = vmap["bn_submodule"];
+  const Graph& pattern_graph = *pattern.pattern_graph;
+  const auto& vmap = pattern.vmap;
+  Value* pattern_conv_out = vmap.at("conv_out");
+  Value* pattern_bn_out = vmap.at("bn_out");
+  Value* pattern_conv_submodule = vmap.at("conv_submodule");
+  Value* pattern_bn_submodule = vmap.at("bn_submodule");
   Node* pattern_conv = pattern_conv_out->node();
   Node* pattern_bn = pattern_bn_out->node();
 
@@ -926,14 +938,14 @@ graph(%self, %x):
 void FoldQuantizeCallIntoBuffer(
     script::Module& module,
     const std::string& method_name) {
-  const std::string pattern = R"(
+  const PatternInfo& pattern = PatternInfo::parse_from_str(R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
    %weight_quant = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
-   return (%weight_quant) )";
-  Graph pattern_graph;
-  std::unordered_map<std::string, Value*> vmap;
-  script::parseIR(pattern, &pattern_graph, vmap);
+   return (%weight_quant) )");
+  const Graph& pattern_graph = *pattern.pattern_graph;
+  const auto& vmap = pattern.vmap;
+
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   const auto& matches = findPatternMatches(pattern_graph, *graph);
@@ -969,7 +981,7 @@ graph(%self, %scale, %zero_point, %dtype):
     %weight_quant = prim::GetAttr[name="_quantized_weight"](%self)
     return (%weight_quant) )";
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(pattern, replacement);
+  rewriter.RegisterRewritePattern(pattern.pattern_string, replacement);
   rewriter.runOnGraph(graph, filter);
 }
 
@@ -999,29 +1011,32 @@ void FoldPrepackedWeightIntoModule(
       "Before FoldPrepackWeightIntoModule: ",
       graph);
 
-  std::string linear_prepack_per_tensor = R"(
+  static const PatternInfo linear_prepack_per_tensor =
+      PatternInfo::parse_from_str(R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::linear_prepack(%w_quant, %b)
-        return (%packed_params) )";
+        return (%packed_params) )");
 
-  std::string linear_prepack_per_channel = R"(
+  static const PatternInfo linear_prepack_per_channel =
+      PatternInfo::parse_from_str(R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype):
         %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
         %packed_params = quantized::linear_prepack(%w_quant, %b)
-        return (%packed_params) )";
+        return (%packed_params) )");
 
-  std::string conv2d_prepack = R"(
+  static const PatternInfo conv2d_prepack = PatternInfo::parse_from_str(R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        return (%packed_params))";
+        return (%packed_params))");
 
-  std::string conv2d_prepack_per_channel = R"(
+  static const PatternInfo conv2d_prepack_per_channel =
+      PatternInfo::parse_from_str(R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        return (%packed_params))";
+        return (%packed_params))");
 
   // (is_conv, is_per_channel, pattern, packed_params_module)
   std::vector<PatternsAndModules> pattern_and_modules = {
@@ -1030,9 +1045,8 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %
     {true, false, conv2d_prepack, conv_params_module},
     {true, true, conv2d_prepack_per_channel, conv_params_module}};
   for (const auto& pm : pattern_and_modules) {
-    Graph pattern_graph;
-    std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(pm.pattern, &pattern_graph, vmap);
+    const Graph& pattern_graph = *pm.pattern.pattern_graph;
+    const auto& vmap = pm.pattern.vmap;
     const auto& matches = findPatternMatches(pattern_graph, *graph);
     TORCH_INTERNAL_ASSERT(
         matches.size() <= 1, "We only support at most one match right now");
