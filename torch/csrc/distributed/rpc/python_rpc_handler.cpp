@@ -34,8 +34,8 @@ void PythonRpcHandler::cleanup() {
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
-  static PythonRpcHandler handler;
-  return handler;
+  static PythonRpcHandler* handler = new PythonRpcHandler;
+  return *handler;
 }
 
 std::vector<char> PythonRpcHandler::generatePythonUDFResult(
