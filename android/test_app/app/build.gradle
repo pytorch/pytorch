@@ -2,12 +2,10 @@ apply plugin: 'com.android.application'
 
 repositories {
     jcenter()
+    maven {
+        url "https://oss.sonatype.org/content/repositories/snapshots"
+    }
 }
-
-def props = new Properties()
-file("../gradle.properties").withInputStream { props.load(it) }
-
-def buildConfigProps = { k -> "\"${props.get(k)}\"" }
 
 android {
     compileSdkVersion rootProject.compileSdkVersion
@@ -21,8 +19,10 @@ android {
         ndk {
             abiFilters ABI_FILTERS.split(",")
         }
-        buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME'))
+        buildConfigField ("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
         buildConfigField ("String", "LOGCAT_TAG", "@string/app_name")
+        buildConfigField ("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 228, 228}")
+
         addManifestPlaceholders([APP_NAME: "@string/app_name"])
     }
     buildTypes {
@@ -30,21 +30,27 @@ android {
             minifyEnabled false
         }
     }
-    flavorDimensions "model"
+    flavorDimensions "model", "build"
     productFlavors {
         mobNet2Quant {
             dimension "model"
             applicationIdSuffix ".mobNet2Quant"
-            buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME_MOBNET2_QUANT'))
+            buildConfigField ("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
             addManifestPlaceholders([APP_NAME: "PyMobNet2Quant"])
             buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-mobnet2q\"")
         }
         resnet18 {
             dimension "model"
             applicationIdSuffix ".resneti18"
-            buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME_RESNET18'))
+            buildConfigField ("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
             addManifestPlaceholders([APP_NAME: "PyResNet18"])
             buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
+        }
+        local {
+            dimension "build"
+        }
+        nightly {
+            dimension "build"
         }
     }
     packagingOptions {
@@ -56,6 +62,8 @@ android {
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
 
-    implementation project(':pytorch_android')
-    implementation project(':pytorch_android_torchvision')
+    localImplementation project(':pytorch_android')
+    localImplementation project(':pytorch_android_torchvision')
+    nightlyImplementation 'org.pytorch:pytorch_android:1.4.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.4.0-SNAPSHOT'
 }
