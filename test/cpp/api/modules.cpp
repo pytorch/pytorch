@@ -402,6 +402,73 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+TEST_F(ModulesTest, FractionalMaxPool2d) {
+  FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
+}
+
+TEST_F(ModulesTest, FractionalMaxPool2dReturnIndices) {
+  FractionalMaxPool2d model(FractionalMaxPool2dOptions(3).output_size(2));
+  auto x = torch::ones({2, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{ 0,  2},
+                    {10, 12}},
+                   {{ 0,  2},
+                    {10, 12}}})));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
+}
+
+TEST_F(ModulesTest, FractionalMaxPool3d) {
+  FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(2));
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+}
+
+TEST_F(ModulesTest, FractionalMaxPool3dReturnIndices) {
+  FractionalMaxPool3d model(FractionalMaxPool3dOptions(3).output_size(2));
+  auto x = torch::ones({2, 5, 5, 5}, torch::requires_grad());
+  torch::Tensor y, indices;
+  std::tie(y, indices) = model->forward_with_indices(x);
+
+  ASSERT_EQ(y.dim(), 4);
+  ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+
+  ASSERT_TRUE(torch::allclose(
+    indices,
+    torch::tensor({{{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}},
+                   {{{ 0,  2},
+                     {10, 12}},
+                    {{50, 52},
+                     {60, 62}}}})));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
+}
+
 TEST_F(ModulesTest, LPPool1d) {
   int norm_type = 2;
   int stride = 2;
@@ -2814,6 +2881,169 @@ TEST_F(ModulesTest, MarginRankingLoss) {
   }
 }
 
+TEST_F(ModulesTest, BCEWithLogitsLoss) {
+  using namespace at::Reduction;
+  { // test BCE with logits raises if target and input are different size
+    {
+      const auto target = torch::rand(5);
+      const auto input = torch::rand({5, 1});
+      ASSERT_THROWS_WITH(
+        BCEWithLogitsLoss()(input, target),
+        "must be the same as input size"
+      );
+    }
+    {
+      const auto target = torch::rand({5, 1});
+      const auto input = torch::rand(5);
+      ASSERT_THROWS_WITH(
+        BCEWithLogitsLoss()(input, target),
+        "must be the same as input size"
+      );
+    }
+  }
+  { // test BCE with logits gives same result as sigmoid and bce loss
+    auto sigmoid = Sigmoid();
+
+    auto target = torch::rand({64, 4});
+    auto output = torch::rand({64, 4}) - 0.5;
+
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss()(output, target),
+      BCELoss()(sigmoid(output), target)
+    ));
+
+    auto weight = torch::rand(4);
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss(
+        BCEWithLogitsLossOptions().weight(weight)
+      )(output, target),
+      BCELoss(
+        BCELossOptions().weight(weight)
+      )(sigmoid(output), target)
+    ));
+
+    target = torch::zeros({4, 1}, torch::kFloat);
+    output = torch::empty({4, 1}, torch::kFloat).fill_(-100);
+
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss()(output, target),
+      BCELoss()(sigmoid(output), target)
+    ));
+
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss(
+        BCEWithLogitsLossOptions().reduction(torch::kNone)
+      )(output, target),
+      BCELoss(
+        BCELossOptions().reduction(torch::kNone)
+      )(sigmoid(output), target)
+    ));
+
+    weight = torch::rand({1}, torch::kFloat);
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss(
+        BCEWithLogitsLossOptions().weight(weight)
+      )(output, target),
+      BCELoss(
+        BCELossOptions().weight(weight)
+      )(sigmoid(output), target)
+    ));
+  }
+  { // test BCE with logits has correct grad at zero
+    const auto output = torch::zeros({3, 1}, torch::requires_grad());
+    const auto target = torch::zeros({3, 1});
+    BCEWithLogitsLoss(BCEWithLogitsLossOptions()
+      .reduction(torch::kSum))(output, target).backward();
+    const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    ASSERT_TRUE(torch::allclose(output.grad(), expected_grad));
+  }
+  { // test BCE with logits broadcasts weights
+    const auto target = torch::rand({16, 4});
+    const auto output = torch::rand({16, 4}) - 0.5;
+
+    auto weight = torch::rand(4);
+    auto out1 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().weight(weight)
+    )(output, target);
+
+    weight = weight.expand({16, 4}).contiguous();
+    auto out2 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().weight(weight)
+    )(output, target);
+
+    ASSERT_TRUE(torch::allclose(out1, out2));
+
+    weight = torch::rand({16, 1});
+    out1 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().weight(weight)
+    )(output, target);
+
+    weight = weight.expand({16, 4}).contiguous();
+    out2 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().weight(weight)
+    )(output, target);
+
+    ASSERT_TRUE(torch::allclose(out1, out2));
+  }
+  { // test BCE with logits ones in pos weights are the same as none
+    const auto target = torch::rand({64, 4});
+    const auto output = torch::rand({64, 4}) - 0.5;
+    const auto pos_weight = torch::ones({64, 4});
+
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss()(output, target),
+      BCEWithLogitsLoss(
+        BCEWithLogitsLossOptions().pos_weight(pos_weight)
+      )(output, target)
+    ));
+  }
+  { // test BCE with logits broadcasts pos weights
+    const auto target = torch::rand({64, 4});
+    const auto output = torch::rand({64, 4}) - 0.5;
+    const auto pos_weight = torch::rand(4);
+    const auto out1 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().pos_weight(pos_weight)
+    )(output, target);
+
+    const auto pos_weight1 = pos_weight.expand({1, 4});
+    const auto out2 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().pos_weight(pos_weight)
+    )(output, target);
+
+    const auto pos_weight2 = pos_weight.expand({64, 4});
+    const auto out3 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().pos_weight(pos_weight)
+    )(output, target);
+
+    ASSERT_TRUE(torch::allclose(out1, out2));
+    ASSERT_TRUE(torch::allclose(out1, out3));
+  }
+  { // test BCE with logits with pos weight has correct grad at zero
+    const auto output = torch::zeros({3, 1}, torch::requires_grad());
+    const auto target = torch::zeros({3, 1});
+    const auto pos_weight = torch::ones({3, 1});
+    BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().pos_weight(pos_weight).reduction(torch::kSum)
+    )(output, target).backward();
+    const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    const auto grad = output.grad();
+    ASSERT_TRUE(torch::allclose(grad, expected_grad));
+  }
+  { // test BCE with logits stability
+    const auto output = torch::tensor({0., -120.});
+    const auto target = torch::tensor({0., 1.});
+    const auto pos_weight = torch::tensor({1., 1.});
+
+    const auto out1 = BCEWithLogitsLoss()(output, target);
+    ASSERT_TRUE(torch::isfinite(out1).all().item<bool>());
+
+    const auto out2 = BCEWithLogitsLoss(
+      BCEWithLogitsLossOptions().pos_weight(pos_weight)
+    )(output, target);
+    ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -3327,6 +3557,15 @@ TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool2d(options)),
       "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
+}
+
+TEST_F(ModulesTest, PrettyPrinFractionalMaxPool) {
+  ASSERT_EQ(
+      c10::str(FractionalMaxPool2d(FractionalMaxPool2dOptions(5).output_size(1))),
+      "torch::nn::FractionalMaxPool2d()");
+  ASSERT_EQ(
+      c10::str(FractionalMaxPool3d(FractionalMaxPool3dOptions(5).output_size(1))),
+      "torch::nn::FractionalMaxPool3d()");
 }
 
 TEST_F(ModulesTest, PrettyPrintLPPool) {
@@ -3910,4 +4149,14 @@ TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
     "torch::nn::FeatureAlphaDropout(p=0.2, inplace=false)");
   ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2).inplace(true))),
     "torch::nn::FeatureAlphaDropout(p=0.2, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
+  ASSERT_EQ(c10::str(BCEWithLogitsLoss()), "torch::nn::BCEWithLogitsLoss()");
+  ASSERT_EQ(c10::str(BCEWithLogitsLoss(
+    BCEWithLogitsLossOptions()
+    .weight(torch::ones({3, 3}))
+    .pos_weight(torch::ones({3, 3}))
+    .reduction(torch::kSum))),
+    "torch::nn::BCEWithLogitsLoss()");
 }

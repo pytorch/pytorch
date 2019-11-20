@@ -4,13 +4,13 @@ from . import _start_rpc_agent
 from . import _destroy_rref_context, _cleanup_python_rpc_handler
 from . import WorkerInfo
 from . import backend_registry
-from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
-import datetime
 import functools
+import numbers
 import sys
 import torch
+import torch.distributed as dist
 
 
 _agent = None
@@ -51,14 +51,37 @@ def join_rpc():
 def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,
     store=None,
-    self_name=None,
-    self_rank=-1,
-    worker_name_to_id=None,
-    num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-    rpc_timeout=DEFAULT_RPC_TIMEOUT,
+    name=None,
+    rank=-1,
+    world_size=-1,
+    rpc_agent_options=None,
 ):
+    from . import RpcAgentOptions
+
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
+
+    if not isinstance(backend, backend_registry.BackendType):
+        raise RuntimeError("`backend` must be a `backend_registry.BackendType`.")
+
+    if not isinstance(store, dist.Store):
+        raise RuntimeError("`store` must be a `c10d::Store`. {}".format(store))
+
+    if not isinstance(name, str):
+        raise RuntimeError("`name` must be a string. {}".format(name))
+
+    if not isinstance(rank, numbers.Integral):
+        raise RuntimeError("`rank` must be an integer. {}".format(rank))
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+
+    if not isinstance(rpc_agent_options, RpcAgentOptions):
+        raise RuntimeError(
+            "`rpc_agent_options` must be an `RpcAgentOptions`. {}".format(
+                rpc_agent_options
+            )
+        )
 
     global _agent
 
@@ -66,19 +89,13 @@ def _init_rpc_backend(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    if not isinstance(rpc_timeout, datetime.timedelta):
-        raise RuntimeError(
-            "`rpc_timeout` must be a `datetime.timedelta`."
-        )
-
     _agent = backend_registry.init_backend(
         backend,
         store=store,
-        self_name=self_name,
-        self_rank=self_rank,
-        worker_name_to_id=worker_name_to_id,
-        num_send_recv_threads=num_send_recv_threads,
-        rpc_timeout=rpc_timeout,
+        name=name,
+        rank=rank,
+        world_size=world_size,
+        rpc_agent_options=rpc_agent_options,
     )
     _start_rpc_agent(_agent)
 
@@ -86,17 +103,18 @@ def _init_rpc_backend(
 @_require_initialized
 def get_worker_info(worker_name=None):
     r"""
-    Get ``WorkerInfo`` of a given worker name. Use this ``WorkerInfo`` to avoid
-    passing an expensive string on every invocation. The ``WorkerInfo`` contains
-    the name and the id of the worker.
+    Get :class:`~torch.distributed.rpc.WorkerInfo` of a given worker name.
+    Use this :class:`~torch.distributed.rpc.WorkerInfo` to avoid passing an
+    expensive string on every invocation.
 
     Arguments:
         worker_name (str): the string name of a worker. If ``None``, return the
                            the id of the current worker. (default ``None``)
 
     Returns:
-        ``WorkerInfo`` instance for the given ``worker_name`` or ``WorkerInfo``
-        of the current worker if ``worker_name`` is ``None``.
+        :class:`~torch.distributed.rpc.WorkerInfo` instance for the given
+        ``worker_name`` or :class:`~torch.distributed.rpc.WorkerInfo` of the
+        current worker if ``worker_name`` is ``None``.
     """
     if worker_name:
         return _agent.get_worker_info(worker_name)
@@ -116,30 +134,32 @@ def _to_worker_info(name_or_info):
 @_require_initialized
 def remote(to, func, args=None, kwargs=None):
     r"""
-    Make a ``remote`` call to run ``func`` on worker ``to``, and returns an
-    ``RRef`` to the result value immediately. Worker ``to`` will be the owner
-    of the returned ``RRef``, and this worker is a user. The owner manages the
-    global reference count of its ``RRef``s, and the owner ``RRef`` is only
-    destructed when globally there is no living references to it.
+    Make a remote call to run ``func`` on worker ``to`` and return an
+    :class:`~torch.distributed.rpc.RRef` to the result value immediately.
+    Worker ``to`` will be the owner of the returned
+    :class:`~torch.distributed.rpc.RRef`, and the worker calling ``remote`` is
+    a user. The owner manages the global reference count of its
+    :class:`~torch.distributed.rpc.RRef`, and the owner
+    :class:`~torch.distributed.rpc.RRef` is only destructed when globally there
+    are no living references to it.
 
     Arguments:
-        to (int or str): id or name of the destination worker.
-        func (callable): builtin functions (like ``torch.add``).
+        to (str or WorkerInfo): id or name of the destination worker.
+        func (callable): builtin functions (like :meth:`torch.add`).
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
 
     Returns:
-        A user ``RRef`` instance to the result value. Use the blocking API
-        ``RRef.to_here()`` to retrieve the result value locally.
+        A user :class:`~torch.distributed.rpc.RRef` instance to the result
+        value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
+        to retrieve the result value locally.
 
     Example::
 
         On worker 0:
-        >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_rpc("worker0")
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> worker1 = rpc.get_worker_info("worker1")
         >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
@@ -147,9 +167,8 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.join_rpc()
 
         On worker 1:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_rpc("worker1")
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
         >>> rpc.join_rpc()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -198,9 +217,9 @@ def rpc_sync(to, func, args=None, kwargs=None):
     method is thread-safe.
 
     Arguments:
-        to (int or str): id or name of the destination worker.
+        to (str or WorkerInfo): id or name of the destination worker.
         func (callable): any callable function. builtin functions (like
-                         ``torch.add``) can be sent over RPC more efficiently.
+                         :meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -211,18 +230,14 @@ def rpc_sync(to, func, args=None, kwargs=None):
     Example::
 
         On worker 0:
-        >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_rpc("worker0")
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rpc.join_rpc()
 
         On worker 1:
-        >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_rpc("worker1")
+        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -235,12 +250,12 @@ def rpc_async(to, func, args=None, kwargs=None):
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
     method is thread-safe. This method will immediately return a
-    torch.distributed.FutureMessage that can be awaited on.
+    ``torch.distributed.FutureMessage`` that can be awaited on.
 
     Arguments:
-        to (int or str): id or name of the destination worker.
+        to (str or WorkerInfo): id or name of the destination worker.
         func (callable): any callable function. builtin functions (like
-                         ``torch.add``) can be sent over RPC more efficiently.
+                         :meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -253,10 +268,8 @@ def rpc_async(to, func, args=None, kwargs=None):
     Example::
 
         On worker 0:
-        >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_rpc("worker0")
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> worker1 = rpc.get_worker_id("worker1")
         >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
         >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
@@ -264,10 +277,8 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.join_rpc()
 
         On worker 1:
-        >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_rpc("worker1")
+        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
         >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
