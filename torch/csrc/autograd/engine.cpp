@@ -214,7 +214,7 @@ Engine::~Engine() {
   }
   if (noBackward) {
     for (auto& queue : ready_queues_) {
-      for (int i = 0; i < num_threads_per_device_; ++i) {
+      for (size_t i = 0; i < num_threads_per_device_; ++i) {
         queue->pushShutdownTask();
       }
     }
@@ -877,7 +877,7 @@ auto Engine::start_threads() -> void {
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
   for (int i = 0; i < num_devices; ++i) {
-    for (int j = 0; j < num_threads_per_device_; ++j) {
+    for (size_t j = 0; j < num_threads_per_device_; ++j) {
       std::thread t(&Engine::thread_init, this, i - 1);
       t.detach();
     }

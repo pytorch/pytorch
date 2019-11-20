@@ -252,7 +252,7 @@ protected:
 
  private:
   std::atomic_bool threads_initialized_;
-  std::atomic<int64_t> num_threads_per_device_;
+  std::atomic<uint64_t> num_threads_per_device_;
 };
 
 // allow python_engine to override the default engine when it loads
