@@ -215,7 +215,7 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
     const SourceRange& loc,
     Function& m) {
   std::vector<std::string> submoduleNames;
-  const auto& selfType = concreteType_->getJitType();
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
     if (!attrType) {
@@ -266,23 +266,23 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     Function& m,
     const std::string& field) {
   // 1. Look inside script::Module object for the field.
-  const auto& selfType = concreteType_->getJitType();
+  const auto& selfType_ = concreteType_->getJitType();
+  if (selfType_->cast<InterfaceType>()) {
+    return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+  }
+
+  const auto& selfType = selfType_->expect<ClassType>();
+
   if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
-    if (submoduleConcreteType != nullptr) {
-      return std::make_shared<ModuleValue>(
-          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
-    } else {
-      // if submodule concrete type is not found, it is a Module Interface type,
-      // we return a SimpleValue instead of ModuleValue.
-      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
-    }
+    return std::make_shared<ModuleValue>(
+        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
   } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
-      // ...otherwise, methods, parameters, attributes, and buffers are all
-      // first class so they get returned as SimpleValues
-      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+    // ...otherwise, methods, parameters, attributes, and buffers are all
+    // first class so they get returned as SimpleValues
+    return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   }
 
   // 2. Check if it's a user-provided constant property.

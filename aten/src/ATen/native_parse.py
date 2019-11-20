@@ -414,6 +414,7 @@ def run(paths):
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bfloat16'] = func.get('cpu_bfloat16', False)
+                declaration['cuda_bfloat16'] = func.get('cuda_bfloat16', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)

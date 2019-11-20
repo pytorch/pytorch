@@ -1,6 +1,5 @@
 #pragma once
 
-#include <TH/THMath.h>
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 
