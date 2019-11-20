@@ -49,7 +49,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
   auto in_tensor = self;
   const int64_t total_dims = in_tensor.dim();
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  Tensor out_tensor = at::empty_like(in_tensor, at::MemoryFormat::Contiguous);
+  Tensor out_tensor = at::empty_like(in_tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // create contiguous strides for input tensor
   auto stride_contiguous_v = std::vector<int64_t>(total_dims);

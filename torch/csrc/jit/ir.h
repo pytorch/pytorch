@@ -250,6 +250,7 @@ struct TORCH_API Node {
   Block* owning_block_;
   c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
+  c10::optional<InlinedCallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -316,6 +317,13 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+  c10::optional<InlinedCallStackPtr> callstack() const {
+    return callstack_;
+  }
+  void setCallStack(InlinedCallStackPtr cs) {
+    callstack_ = cs;
+  }
+
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
   // We can't return a std::vector<Node*>& because there's no
@@ -718,7 +726,6 @@ struct TORCH_API Node {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
-    AT_ASSERT(!v.defined() || v.is_variable());
     return setAttr<TensorAttr>(
         name, std::forward<TensorAttr::ConstructorType>(v));
   }
@@ -727,9 +734,6 @@ struct TORCH_API Node {
   }
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
-    for (const at::Tensor& t : v) {
-      AT_ASSERT(!t.defined() || t.is_variable());
-    }
     return setAttr<TensorsAttr>(
         name, std::forward<TensorsAttr::ConstructorType>(v));
   }
@@ -1129,7 +1133,7 @@ struct Graph {
 
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
-      IValue val,
+      const IValue& val,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 
@@ -1323,20 +1327,26 @@ TORCH_API void LintGraph(const std::shared_ptr<Graph>& graph);
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
 
 /** Insert graph \p CALLEE into graph \p G using \p INPUTS as input values.
- *
  * The insertion happens at the current insertion point.
+ * Optionally, one can also pass \p VALUE_MAP to get a map between \p CALLEE
+ * values and their cloned copies in \p G.
  */
 TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs);
+TORCH_API std::vector<Value*> insertGraph(
+    Graph& g,
+    Graph& callee,
+    ArrayRef<Value*> inputs,
+    std::unordered_map<Value*, Value*>& value_map);
 
-/** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
- * replace all its uses with corresponding outputs of the inserted graph. The
- * function asserts that the number of outputs of the original node and the
+/** Insert function \p CALLEE after node \p TO_REPLACE, remove the node and
+ * replace all its uses with corresponding outputs of the inserted function.
+ * This asserts that the number of outputs of the original node and the
  * graph are the same.
  */
-TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Graph& callee);
+TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

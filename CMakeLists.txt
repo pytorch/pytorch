@@ -120,6 +120,7 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
@@ -204,6 +205,8 @@ cmake_dependent_option(
   "MSVC" OFF)
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+set(SELECTED_OP_LIST "" CACHE STRING
+    "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -317,7 +320,6 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(USE_FBGEMM OFF)
   set(USE_PYTORCH_QNNPACK ON)
   set(USE_QNNPACK OFF)
-  set(USE_STATIC_DISPATCH ON)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
   set(INTERN_USE_EIGEN_BLAS ON)
@@ -645,6 +647,13 @@ add_subdirectory(modules)
 # built in the previous Modules section above).
 if (BUILD_BINARY)
   add_subdirectory(binaries)
+endif()
+
+# ---[ JNI
+if (BUILD_JNI)
+  set(BUILD_LIBTORCH_WITH_JNI 1)
+  set(FBJNI_SKIP_TESTS 1)
+  add_subdirectory(android/pytorch_android)
 endif()
 
 include(cmake/Summary.cmake)

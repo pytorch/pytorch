@@ -251,7 +251,8 @@ protected:
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
  private:
- int num_threads_per_device_;
+  std::atomic_bool threads_initialized_;
+  std::atomic<int64_t> num_threads_per_device_;
 };
 
 // allow python_engine to override the default engine when it loads

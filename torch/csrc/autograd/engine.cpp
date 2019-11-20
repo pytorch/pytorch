@@ -201,7 +201,7 @@ auto ReadyQueue::pop(const std::chrono::microseconds &timeout)
 }
 
 // This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100), num_threads_per_device_(1) {}
+Engine::Engine() : max_recursion_depth_(100), threads_initialized_(false), num_threads_per_device_(1) {}
 
 // Send shutdown tasks to all ReadyQueues if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest
@@ -225,6 +225,9 @@ Engine::~Engine() {
 int Engine::get_num_threads_per_device() { return num_threads_per_device_; }
 
 void Engine::set_num_threads_per_device(int num_threads_per_device) {
+  if (threads_initialized_) {
+    throw std::runtime_error("could not set `number_threads_per_device` after the thread pool creation");
+  }
   num_threads_per_device_ = num_threads_per_device;
 }
 
@@ -853,6 +856,8 @@ auto Engine::ready_queue_by_index(int device_index) -> ReadyQueue& {
 }
 
 auto Engine::start_threads() -> void {
+  // set threads_initialized flag to true to avoid resetting
+  threads_initialized_ = true;
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {

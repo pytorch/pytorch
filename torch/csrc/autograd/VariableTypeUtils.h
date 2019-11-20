@@ -58,7 +58,7 @@ inline void throw_error_out_requires_grad(const char* name) {
 inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
-    var.rebase_history({std::move(grad_fn), 0});
+    impl::rebase_history(var, {std::move(grad_fn), 0});
   }
 }
 
@@ -68,7 +68,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
       if (var.defined()) {
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var);
-        var.rebase_history({std::move(grad_fn), output_nr});
+        impl::rebase_history(var, {std::move(grad_fn), output_nr});
       } else {
         grad_fn->add_input_metadata(Node::undefined_input());
       }
@@ -77,7 +77,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
 }
 
 inline void increment_version(Tensor & t) {
-  as_variable_ref(t).bump_version();
+  impl::bump_version(as_variable_ref(t));
 }
 
 struct Flatten : IterArgs<Flatten> {
