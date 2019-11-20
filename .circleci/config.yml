@@ -1309,7 +1309,7 @@ jobs:
       - checkout
       - run_brew_for_ios_build
       - run:
-          name: cert install
+          name: Run Fastlane
           no_output_timeout: "1h"
           command: |
             set -e
