@@ -185,6 +185,46 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
+    def test_googlenet_quantization(self):
+        model = torchvision.models.quantization.googlenet(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_inception_quantization(self):
+        model = torchvision.models.quantization.inception_v3(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mobilenet_quantization(self):
+        model = torchvision.models.quantization.mobilenet_v2(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_resnet_quantization(self):
+        model = torchvision.models.quantization.resnet50(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_shufflenet_quantization(self):
+        model = torchvision.models.quantization.shufflenet_v2_x1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_r3d_18_video(self):
+        model = torchvision.models.video.r3d_18(pretrained=True)
+        x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mc3_18_video(self):
+        model = torchvision.models.video.mc3_18(pretrained=True)
+        x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_r2plus1d_18_video(self):
+        model = torchvision.models.video.r2plus1d_18(pretrained=True)
+        x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
     def run_word_language_model(self, model_name):
         ntokens = 50
         emsize = 5
