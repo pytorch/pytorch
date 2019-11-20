@@ -3530,6 +3530,27 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_pooling_avg_nhwc_propagation(self):
+        input = torch.randint(1, 10, (4, 8, 1, 1), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (4, 8, 4, 4), dtype=torch.float32, device="cuda")
+        pool = torch.nn.AdaptiveAvgPool2d((4, 4))
+        
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((4, 4)).cuda()
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last)
@@ -7456,6 +7477,36 @@ class TestNN(NNTestCase):
         ref_input = input.detach().clone().contiguous().requires_grad_(True)
         ref_grad = grad.detach().clone().contiguous()
         ref_conv = nn.Conv2d(8, 4, 3).cuda().float()
+        # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
+        ref_conv.load_state_dict(conv.state_dict())
+
+        out = conv(input)
+        out.backward(grad)
+        ref_out = ref_conv(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
+        self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_conv_cudnn_nhwc_size_1_filter(self):
+        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True)
+        input = input.contiguous(memory_format=torch.channels_last)
+        input.retain_grad()
+        grad = torch.randint(1, 10, (2, 4, 4, 4), dtype=torch.float32, device="cuda")
+        grad = grad.contiguous(memory_format=torch.channels_last)
+        conv = nn.Conv2d(8, 4, 1).cuda().float()
+        conv.weight.data = conv.weight.contiguous(memory_format=torch.channels_last)
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_conv = nn.Conv2d(8, 4, 1).cuda().float()
         # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
         ref_conv.load_state_dict(conv.state_dict())
 

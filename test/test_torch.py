@@ -5676,6 +5676,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, x)
 
+        x = torch.randn(4, 1, 8, 8)
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+        self.assertEqual(x.stride(), (64, 64, 8, 1))
+        self.assertEqual(nhwc.stride(), (64, 1, 8, 1))
+
+        x = torch.randn(4, 8, 1, 1)
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+        self.assertEqual(x.stride(), (8, 1, 1, 1))
+        self.assertEqual(nhwc.stride(), (8, 1, 8, 8))
+
     def test_memory_format_contiguous_returns_same_tensor_if_already_satisfies(self):
         x = torch.randn(4, 8, 8, 3).permute(0, 3, 1, 2)
         alias = x.contiguous(memory_format=torch.channels_last)

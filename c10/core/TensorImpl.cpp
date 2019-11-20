@@ -117,13 +117,15 @@ bool TensorImpl::compute_strides_like_channels_last() const {
   if (dim() == 4) {
     int64_t min = 0;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) > min) {
-          min = stride(d);
-        } else {
-          return false;
-        }
+      if (stride(d) < min) {
+        return false;
       }
+      // special case for N111, so we have NCHW as default layout;
+      // There's no way to distinguish NHWC and NCHW layout here: issue #24090
+      if (d==0 && min==1) {
+        return false;
+      }
+      min = stride(d);
     }
     return true;
   }
