@@ -163,6 +163,17 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
   return div_out_sparse_zerodim(self, self, value);
 }
 
+// inplace coalesce
+const SparseTensor& coalesce_(const SparseTensor& tensor) {
+  SparseTensor coalesced = tensor.coalesce();
+  tensor._values().resize_as_(coalesced._values());
+  tensor._indices().resize_as_(coalesced._indices());
+  tensor._values().copy_(coalesced._values());
+  tensor._indices().copy_(coalesced._indices());
+  tensor._coalesced_(true);
+  return tensor;
+}
+
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "sparse division only supports division by a scalar (got shape ",
       value.sizes(), " for argument 'other')");
@@ -171,8 +182,17 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   AT_ASSERT(t.is_sparse());
 
   if (is_same_tensor(r, t)) {
+    // Can't divide an uncoalesced integral tensor accurately. e.g. for a sparse int tensor with value 6
+    // represented as values=[3, 3], integer division by 2 would give values=[1, 1] => 2 instead
+    // of 6 / 2 => 3
+    if (!r.is_coalesced() && isIntegralType(r.scalar_type(), true)) {
+      coalesce_(r);
+    }
     r._values().div_(value);
   } else {
+    if (!t.is_coalesced() && isIntegralType(r.scalar_type(), true)) {
+      coalesce_(t);
+    }
     r.resize_as_(t);
     auto indices = r._indices();
     indices.resize_as_(t._indices());
@@ -242,11 +262,11 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     bool coalesced = t.is_coalesced() && src.is_coalesced();
     int64_t sparse_dim = src.sparse_dim();
 
-    LongTensor r_indices = at::empty({src.sparse_dim(), max_nnz}, t.indices().options());
-    Tensor r_values = new_values_with_size_of(src.values(), max_nnz, commonDtype).zero_();
+    LongTensor r_indices = at::empty({src.sparse_dim(), max_nnz}, t._indices().options());
+    Tensor r_values = new_values_with_size_of(src._values(), max_nnz, commonDtype).zero_();
 
-    Tensor t_values = maybe_promoted_tensor(t.values(), commonDtype);
-    Tensor s_values = maybe_promoted_tensor(src.values(), commonDtype);
+    Tensor t_values = maybe_promoted_tensor(t._values(), commonDtype);
+    Tensor s_values = maybe_promoted_tensor(src._values(), commonDtype);
 
     int64_t blockSize = r_values.stride(0);
     int64_t cmp, d;
@@ -324,8 +344,8 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
 }
 
 SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value, ScalarType commonDtype) {
-    Tensor t_values = maybe_promoted_tensor(t.values(), commonDtype);
-    Tensor s_values = maybe_promoted_tensor(src.values(), commonDtype);
+    Tensor t_values = maybe_promoted_tensor(t._values(), commonDtype);
+    Tensor s_values = maybe_promoted_tensor(src._values(), commonDtype);
 
     // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
     // and we concat the indices and values tensors instead.
@@ -336,7 +356,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
           }
         });
 
-    LongTensor r_indices = at::cat({t.indices(), src.indices()}, 1);
+    LongTensor r_indices = at::cat({t._indices(), src._indices()}, 1);
     Tensor r_values = at::cat({t_values, s_values}, 0);
 
     if (r.scalar_type() != commonDtype) {
@@ -376,7 +396,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 
   r.resize_as_(src);
 
-  if (src.values().is_contiguous() && t.values().is_contiguous()) {
+  if (src._values().is_contiguous() && t._values().is_contiguous()) {
     return add_out_sparse_contiguous(r, t, src, value, commonDtype);
   } else {
     return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
@@ -516,10 +536,10 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   auto commonDtype = promoteTypes(t_.scalar_type(), src_.scalar_type());
   TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
 
-  Tensor t_values = maybe_promoted_tensor(t.values(), commonDtype);
-  Tensor s_values = maybe_promoted_tensor(src.values(), commonDtype);
+  Tensor t_values = maybe_promoted_tensor(t._values(), commonDtype);
+  Tensor s_values = maybe_promoted_tensor(src._values(), commonDtype);
 
-  Tensor r_values = new_values_with_size_of(t.values(), max_nnz, r.scalar_type()).zero_();
+  Tensor r_values = new_values_with_size_of(t._values(), max_nnz, r.scalar_type()).zero_();
   r.resize_as_(src);
   Tensor r_buffer = r_values;
   if (r_values.scalar_type() != commonDtype) {

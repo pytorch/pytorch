@@ -172,7 +172,7 @@ class TestTypePromotion(TestCase):
                 func(x, y).sum().backward()
 
     def _get_test_tensor(self, device, dtype, remove_zeros=False):
-        shape = [20, 20, 20]
+        shape = [10, 10, 10]
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
         elif dtype.is_floating_point:
@@ -182,7 +182,7 @@ class TestTypePromotion(TestCase):
             if remove_zeros:
                 tensor[torch.abs(tensor) < 0.05] = 5
         else:
-            tensor = torch.randint(-5, 15, shape, device=device, dtype=dtype)
+            tensor = torch.randint(-5 if dtype.is_signed else 0, 10, shape, device=device, dtype=dtype)
             if remove_zeros:
                 tensor[tensor == 0] = 5
         return tensor
@@ -431,23 +431,40 @@ class TestTypePromotion(TestCase):
         a = torch.tensor([[True, True], [False, True]], device=device)
         self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
 
-    def get_sparse_tensors(self, device, dtype=torch.int, zeros=True):
+    def get_sparse_tensors(self, device, dtype, coalesced, zeros=True):
         t = self._get_test_tensor(device, dtype, not zeros)
-        s = t.to_sparse()
+        if coalesced:
+            s = t.to_sparse()
+        else:
+            s = t.to_sparse()
+            indices = torch.cat((s.indices(), s.indices()), 1)
+            values = torch.cat((s.values(), s.values()), 0)
+            s = torch.sparse_coo_tensor(indices=indices, values=values, size=s.size(), dtype=dtype, device=device)
+            t = s.to_dense()
         return (t, s)
 
-    def _test_sparse_op(self, op_name, inplace, dtype1, dtype2, device):
+    def _sparse_precision(self, dtype, coalesced):
+        if dtype == torch.half and not coalesced:
+            # very low precision for uncoalesced float16 sparse tensors since
+            # ops like (s1 + s2).to_dense() will add four low-precision
+            # floating point values.
+            return 5e-2
+        if dtype == torch.half:
+            return 5e-3
+        return 1e-5
+
+    def _test_sparse_op(self, op_name, inplace, dtype1, dtype2, device, coalesced):
         suffix = '_' if inplace else ''
         # uncomment for debugging:
-        # print("testing ", op_name + suffix, " with ", dtype1, " and ", dtype2)
+        # print("testing", "  coalesced" if coalesced else "uncoalesced", op_name + (suffix + ' ')[0], "with", dtype1, "and", dtype2)
 
         def op(t1, t2):
             return getattr(t1, op_name + suffix)(t2)
 
         div, sub, mul, add = [op_name == x for x in ['div', 'sub', 'mul', 'add']]
 
-        (dense1, sparse1) = self.get_sparse_tensors(device, dtype1)
-        (dense2, sparse2) = self.get_sparse_tensors(device, dtype2, not div)
+        (dense1, sparse1) = self.get_sparse_tensors(device, dtype1, coalesced)
+        (dense2, sparse2) = self.get_sparse_tensors(device, dtype2, coalesced, not div)
         common_dtype = torch.result_type(dense1, dense2)
         if self.device_type == 'cpu' and common_dtype == torch.half:
             self.assertRaises(RuntimeError, lambda: op(s1, d2))
@@ -459,15 +476,15 @@ class TestTypePromotion(TestCase):
             return
 
         expected = op(dense1.clone(), dense2)
+        precision = self._sparse_precision(expected.dtype, coalesced)
         test_tensors = [expected, dense1, sparse1, dense2, sparse2]
         e, d1, s1, d2, s2 = [x.clone() for x in test_tensors] if inplace else test_tensors
 
         # Test op(sparse, sparse)
         if not div:
             sparse = op(s1, s2)
-            if not inplace:
-                self.assertEqual(sparse.dtype, e.dtype)
-            self.assertEqual(e, sparse.to_dense())
+            self.assertEqual(sparse.dtype, e.dtype)
+            self.assertEqual(e, sparse.to_dense(), prec=precision)
         else:
             # sparse division only supports division by a scalar
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
@@ -477,7 +494,7 @@ class TestTypePromotion(TestCase):
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
-            self.assertEqual(e, dense_sparse)
+            self.assertEqual(e, dense_sparse, prec=precision)
         else:
             # sparse division only supports division by a scalar
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
@@ -497,9 +514,8 @@ class TestTypePromotion(TestCase):
 
             sparse = op(s1, scalar)
             dense_scalar = op(d1, scalar)
-            if not inplace:
-                self.assertEqual(sparse.dtype, dense_scalar.dtype)
-            self.assertEqual(dense_scalar, sparse.to_dense())
+            self.assertEqual(sparse.dtype, dense_scalar.dtype)
+            self.assertEqual(dense_scalar, sparse.to_dense(), prec=precision)
         else:
             # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
@@ -509,14 +525,9 @@ class TestTypePromotion(TestCase):
         dtypes = torch.testing.get_all_math_dtypes(device)
         ops = ['add', 'sub', 'mul', 'div']
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
-            # skip non-promoting case
-            if dtype1 == dtype2:
-                continue
             for op_name in ops:
-                # outplace:
-                self._test_sparse_op(op_name, False, dtype1, dtype2, device)
-                # inplace:
-                self._test_sparse_op(op_name, True, dtype1, dtype2, device)
+                for inplace, coalesced in itertools.product([True, False], [True, False]):
+                    self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 
 instantiate_device_type_tests(TestTypePromotion, globals())
 

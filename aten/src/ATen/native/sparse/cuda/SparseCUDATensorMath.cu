@@ -294,7 +294,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     return r_;
   }
 
-  auto commonDtype = promoteTypes(dense.scalar_type(), sparse.scalar_type());
+  auto commonDtype = at::result_type(dense, sparse);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
 
   Tensor r = r_;
@@ -407,7 +407,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
 
   TORCH_CHECK(cuda::check_device({r_, t, src}));
 
-  auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
+  auto commonDtype = at::result_type(t, src);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
 
   TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
@@ -438,14 +438,13 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
         }
       });
   LongTensor r_indices_ = at::cat({t_indices_, s_indices_}, 1);
-  
   Tensor r_values_ = at::cat({t_values_, s_values_}, 0);
+
   if (r_.scalar_type() != commonDtype) {
     SparseTensor promoted = at::empty({0}, r_.options().dtype(commonDtype));
     promoted.resize_as_(src);
     alias_into_sparse(promoted, r_indices_, r_values_);
-    promoted = promoted.coalesce().to(r_.scalar_type());
-    r_values_ = promoted._values();
+    r_values_ = promoted._values().to(r_.scalar_type());
     r_indices_ = promoted._indices();
   } else {
     r_.resize_as_(src);
@@ -493,7 +492,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz();
   int64_t max_nnz = std::min(t_nnz, s_nnz);  // multiply by zero is zero, and can be dropped
   int64_t sparse_dim = src.sparse_dim();
-  auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
+  auto commonDtype = at::result_type(t, src);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
   LongTensor t_indices_ = t._indices();
   Tensor t_values_ = maybe_promoted_tensor(t._values(), commonDtype);
