@@ -56,14 +56,14 @@ class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
     def forward(self):
         return self.qlinear(self.input)
 
-class QLinearBenchmark(QLinearBenchmarkBase):
+class QLinearBenchmark(_QLinearBenchmarkBase):
     def init(self, N, IN, OUT):
         self.qlinear = nnq.Linear(IN, OUT)
         self.set_module_name("QLinear")
         super(QLinearBenchmark, self).init(N, IN, OUT)
 
 
-class QDynamicLinearBenchmark(QLinearBenchmarkBase):
+class QDynamicLinearBenchmark(_QLinearBenchmarkBase):
     def init(self, N, IN, OUT):
         self.qlinear = nnqd.Linear(IN, OUT)
         self.set_module_name("QDynamicLinear")
