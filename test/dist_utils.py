@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import threading
 from functools import partial, wraps
-from os import getenv
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -14,7 +13,7 @@ if not dist.is_available():
 
 
 class TestConfig:
-    __slots__ = ["rpc_backend_name"]
+    __slots__ = ["rpc_backend_name", "build_rpc_agent_options"]
 
     def __init__(self, *args, **kwargs):
         assert len(args) == 0, "TestConfig only takes kwargs."
@@ -22,7 +21,7 @@ class TestConfig:
             setattr(self, k, v)
 
 
-TEST_CONFIG = TestConfig(rpc_backend_name=getenv("RPC_BACKEND_NAME", "PROCESS_GROUP"))
+TEST_CONFIG = TestConfig()
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
@@ -74,22 +73,20 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
     @wraps(old_test_method)
     def new_test_method(self, *arg, **kwargs):
         self.worker_id = self.rank
-        self.worker_name_to_id = {
-            "worker{}".format(rank): rank for rank in range(self.world_size)
-        }
 
         if setup_rpc:
             global _ALL_NODE_NAMES
-            _ALL_NODE_NAMES = self.worker_name_to_id.keys()
+            _ALL_NODE_NAMES = {
+                "worker{}".format(rank) for rank in range(self.world_size)
+            }
 
-            # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
             rpc.init_rpc(
-                self_name="worker%d" % self.rank,
+                name="worker%d" % self.rank,
                 backend=self.rpc_backend,
                 init_method=self.init_method,
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         return_value = old_test_method(self, *arg, **kwargs)
@@ -131,3 +128,12 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
         return return_value
 
     return new_test_method
+
+
+# Set PROCESS_GROUP as the default RPC backend.
+TEST_CONFIG.rpc_backend_name = "PROCESS_GROUP"
+TEST_CONFIG.build_rpc_agent_options = lambda test_object: rpc.backend_registry.construct_rpc_agent_options(
+    test_object.rpc_backend,
+    # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
+    num_send_recv_threads=16,
+)

@@ -771,6 +771,14 @@ class TestOperators(TestCase):
         input = torch.randn(5, 3, 2)
         self.assertONNX(TestModel(), input, opset_version=11)
 
+    def test_bitshift(self):
+        class BitshiftModel(torch.nn.Module):
+            def forward(self, input, input2):
+                return input >> 1, input2 >> 2
+        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
+        input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
+        self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
+
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)

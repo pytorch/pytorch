@@ -114,11 +114,11 @@ namespace at {
 namespace native {
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
-  return at::empty_like(self, at::MemoryFormat::Contiguous).bernoulli_(self, gen);
+  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
 }
 
 Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
-  return at::empty_like(self, at::MemoryFormat::Contiguous).bernoulli_(p, gen);
+  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(p, gen);
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
