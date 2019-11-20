@@ -384,7 +384,7 @@ void THBlas_(gemm)(
   }
 #endif
 
-#ifdef USE_FBGEMM && defined(TH_REAL_IS_LONG)
+#ifdef defined(USE_FBGEMM) && defined(TH_REAL_IS_LONG)
   if (alpha == 1 && (beta == 0 || beta == 1)) {
     // In FBGEMM, we assume row-major ordering; However, here we assume the
     // column-major ordering following the FORTRAN tradition in BLAS interface
