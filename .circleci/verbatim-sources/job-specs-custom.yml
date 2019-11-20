@@ -462,12 +462,15 @@
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            #build pytorch from source
+            #build the latest PyTorch from source
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
             #run unit test
             source ~/anaconda/bin/activate
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            pip install torchvision
+            python trace_model.py
             ruby setup.rb
+            cd ${PROJ_ROOT}/ios/TestApp
             fastlane scan
             
