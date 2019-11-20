@@ -39,9 +39,11 @@ using BatchNorm1dOptions = BatchNormOptions;
 using BatchNorm2dOptions = BatchNormOptions;
 using BatchNorm3dOptions = BatchNormOptions;
 
+// ============================================================================
+
 namespace functional {
 
-/// Options for the `BatchNorm` module.
+/// Options for the `BatchNorm` functional.
 struct TORCH_API BatchNormFuncOptions {
   TORCH_ARG(Tensor, weight) = Tensor();
 
