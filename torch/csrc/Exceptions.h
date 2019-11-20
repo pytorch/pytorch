@@ -9,6 +9,7 @@
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP_export.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>

@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 
