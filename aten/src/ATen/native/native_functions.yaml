@@ -2131,15 +2131,9 @@
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _reciprocal__cpu
-    CUDA: _reciprocal__cuda
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _reciprocal_out_cpu
-    CUDA: _reciprocal_out_cuda
 
 - func: neg(Tensor self) -> Tensor
   use_c10_dispatcher: full

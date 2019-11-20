@@ -180,6 +180,15 @@ void trunc_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void reciprocal_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "reciprocal_cuda", [&]() {
+    using acc_t = std::conditional<std::is_same<scalar_t, at::Half>::value, float, scalar_t>::type;
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return static_cast<acc_t>(1) / a;
+    });
+  });
+}
+
 void rsqrt_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "rsqrt_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -291,6 +300,7 @@ REGISTER_DISPATCH(log10_stub, &log10_kernel_cuda);
 REGISTER_DISPATCH(log2_stub, &log2_kernel_cuda);
 REGISTER_DISPATCH(log1p_stub, &log1p_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
+REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel_cuda);
 REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);

@@ -239,7 +239,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
     }
     // clip norms
     __syncthreads();
-    norm = THCNumerics<AccT>::pow(buffer[0], THCNumerics<AccT>::cinv(value));
+    norm = THCNumerics<AccT>::pow(buffer[0], static_cast<AccT>(1) / value);
   }
 
   if (THCNumerics<AccT>::gt(norm, maxnorm)) {

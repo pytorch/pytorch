@@ -113,6 +113,10 @@ Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
+Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, reciprocal_stub); }
+Tensor reciprocal(const Tensor& self) { return unary_op_impl(self, at::reciprocal_out); }
+Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
+
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
 Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
@@ -314,7 +318,6 @@ IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)

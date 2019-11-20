@@ -11234,7 +11234,7 @@ class TestTorchDeviceType(TestCase):
             ("neg", doubles, True, True, 'cpu'),
             ("neg", doubles, True, True, 'cuda'),
             ("reciprocal", doubles, True, True, 'cpu'),
-            ("reciprocal", doubles, False, True, 'cuda'),
+            ("reciprocal", doubles, True, True, 'cuda'),
             ("round", doubles, True, True, 'cpu'),
             ("round", doubles, True, True, 'cuda'),
             ("rsqrt", positives, True, True, 'cpu'),

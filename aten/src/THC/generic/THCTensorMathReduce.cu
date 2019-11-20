@@ -258,7 +258,7 @@ void THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t
     THC_reduceDim<scalar_t>(state, self, src,
                         TensorNormOp<accreal, -1>{value},
                         ReduceAdd<accreal>{},
-                        ReducePow<accreal>{THCNumerics<accreal>::cinv(value)},
+                        ReducePow<accreal>{static_cast<accreal>(1) / value},
                         scalar_cast<accreal>(0),
                         dimension, keepdim);
   }
@@ -309,8 +309,7 @@ accreal THCTensor_(normall)(THCState *state, THCTensor *self, scalar_t _value)
                         ReduceAdd<accreal>{},
                         scalar_cast<accreal>(0),
                         &result, 0);
-    result = THCNumerics<accreal>::pow(result,
-                                       THCNumerics<accreal>::cinv(value));
+    result = THCNumerics<accreal>::pow(result, static_cast<accreal>(1) / value);
   }
 
   THCudaCheck(cudaGetLastError());
@@ -364,7 +363,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       thrust::plus<accreal>(),
       ThrustTensorDistOp<scalar_t, accreal>(value));
 
-    result = THCNumerics<accreal>::pow(result, THCNumerics<accreal>::cinv(value));
+    result = THCNumerics<accreal>::pow(result, static_cast<accreal>(1) / value);
   }
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
