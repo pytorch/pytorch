@@ -54,6 +54,7 @@ namespace jit {
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
   _(SubgraphRewriter)                  \
+  _(ModuleCloneInstance)               \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
