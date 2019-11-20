@@ -326,7 +326,7 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
                 rpc_agent_options=self.rpc_agent_options,
             )
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
     @dist_init(setup_rpc=False)
     def test_reinit(self):
@@ -361,7 +361,7 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
                 rpc_agent_options=self.rpc_agent_options,
             )
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
@@ -429,8 +429,8 @@ class RpcTest(RpcAgentTestFixture):
 
         from torch.distributed.rpc.api import _agent
         self.assertEqual(_agent, None)
-        # join_rpc() should not do anything as _agent is None
-        rpc.join_rpc()
+        # wait_all_workers() should not do anything as _agent is None
+        rpc.wait_all_workers()
         # We need this barrier here because although init_process_group is
         # blocking, it does not guarantee that all ranks are done with
         # initialization after the call. We did run into issues with it where
@@ -507,7 +507,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @dist_init(setup_rpc=False)
-    def test_join_rpc(self):
+    def test_wait_all_workers(self):
         # Initialize RPC.
         rpc.init_rpc(
             name="worker%d" % self.rank,
@@ -526,7 +526,7 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
             rpc.rpc_sync(
@@ -535,8 +535,8 @@ class RpcTest(RpcAgentTestFixture):
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
 
-        # it's safe to call join_rpc() multiple times
-        rpc.join_rpc()
+        # it's safe to call wait_all_workers() multiple times
+        rpc.wait_all_workers()
 
     @dist_init
     def test_expected_src(self):
@@ -1106,7 +1106,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_join_and_shutdown(self):
-        # This tests ensures that both rpc.join_rpc() and rpc.shutdown() can be
+        # This tests ensures that both rpc.wait_all_workers() and rpc.shutdown() can be
         # called without errors being raised due to attempting to shut down
         # multiple times.
         rpc.init_rpc(
@@ -1117,7 +1117,7 @@ class RpcTest(RpcAgentTestFixture):
             init_method=self.init_method,
             rpc_agent_options=self.rpc_agent_options
         )
-        rpc.join_rpc()
+        rpc.wait_all_workers()
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
@@ -1139,7 +1139,7 @@ class RpcTest(RpcAgentTestFixture):
         )
         set_timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, set_timeout)
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
