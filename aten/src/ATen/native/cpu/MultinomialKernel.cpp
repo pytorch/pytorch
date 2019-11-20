@@ -46,6 +46,7 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
 // so we manually cast it to a double and perform the check.
 #if defined(__clang__)
       TORCH_CHECK(std::isfinite(static_cast<double>(val)),
+                  "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
 #else
       TORCH_CHECK(std::isfinite(val),
                   "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
