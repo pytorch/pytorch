@@ -450,14 +450,13 @@ void insertQuantDeQuantCall(
 
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
-  g->insertNode(quant);
 
   // Insert all the dequants first
   Node* observer_node = nullptr;
   while (!v->uses().empty()) {
     Node* cur = v->uses()[0].user;
     if (isObserverNode(cur, observer_name)) {
-      // temporarily remove observer use and restore later
+      // temprorialy remove observer use and restore later
       observer_node = cur;
       v->replaceFirstUseWith(quant->output());
     } else if (cur != quant) {
@@ -466,7 +465,7 @@ void insertQuantDeQuantCall(
       v->replaceFirstUseWith(dequant->output());
       g->insertNode(dequant);
     } else {
-      // temporarily remove quant use and restore later
+      // temprorialy remove quant use and restore later
       v->replaceFirstUseWith(quant->output());
     }
   }
@@ -475,6 +474,7 @@ void insertQuantDeQuantCall(
     observer_node->replaceInputWith(quant->output(), v);
   }
   quant->replaceInputWith(quant->output(), v);
+  g->insertNode(quant);
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -623,6 +623,18 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
               "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
 }
+
+// void QuantizeHelper::quantizeTensor(Value* v) {
+//   auto observer_name = findObserverName(v);
+//   if (!observer_name) {
+//     return;
+//   }
+//   auto tp = getQParams(v);
+//   auto qparams = std::get<0>(tp);
+//   auto scalar_type = std::get<1>(tp);
+//   removeObserver(v, observer_name.value());
+//   insertQuantDeQuantCall(v, qparams, scalar_type, observer_name.value());
+// }
 
 c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
     Value* child_instance) {
