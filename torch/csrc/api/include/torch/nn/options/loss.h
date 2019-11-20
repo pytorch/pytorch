@@ -304,5 +304,22 @@ struct TORCH_API CrossEntropyLossOptions {
 
 TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CrossEntropyLoss, CrossEntropyFuncOptions)
 
+// ============================================================================
+
+/// Options for BCEWithLogitsLoss functional and module.
+struct TORCH_API BCEWithLogitsLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+  /// A manual rescaling weight given to the loss of each batch element.
+  /// If given, has to be a Tensor of size `nbatch`.
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// A weight of positive examples.
+  /// Must be a vector with length equal to the number of classes.
+  TORCH_ARG(Tensor, pos_weight) = {};
+};
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCEWithLogitsLoss, BinaryCrossEntropyWithLogitsFuncOptions)
+
 } // namespace nn
 } // namespace torch
