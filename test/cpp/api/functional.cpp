@@ -689,7 +689,7 @@ TEST_F(FunctionalTest, CrossEntropy) {
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  auto y = F::max_unpool1d(x, indices, F::MaxUnpool1dFuncOptions(3));
+  auto y = F::max_unpool1d(x, indices, /*kernel_size=*/3);
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(
@@ -751,7 +751,7 @@ TEST_F(FunctionalTest, MaxUnpool2d) {
 TEST_F(FunctionalTest, MaxUnpool3d) {
   auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
   auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
-  auto y = F::max_unpool3d(x, indices, F::MaxUnpool3dFuncOptions(3));
+  auto y = F::max_unpool3d(x, indices, /*kernel_size=*/3);
 
   ASSERT_EQ(y.dim(), 5);
   ASSERT_TRUE(torch::allclose(y, torch::tensor(
