@@ -421,6 +421,11 @@ class PerChannelMinMaxObserver(_ObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
+    __annotations__ = {
+        "min_vals": Optional[torch.Tensor],
+        "max_vals": Optional[torch.Tensor],
+    }
+
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_channel_affine, reduce_range=False):
@@ -428,8 +433,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range)
         self.ch_axis = ch_axis
-        self.register_buffer('min_vals', None)
-        self.register_buffer('max_vals', None)
+        self.min_vals = None
+        self.max_vals = None
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -440,6 +445,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
             )
 
     def forward(self, x_orig):
+        return self._forward(x_orig)
+
+    @torch.jit.ignore
+    def _forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
         min_vals = self.min_vals
         max_vals = self.max_vals
@@ -460,16 +469,20 @@ class PerChannelMinMaxObserver(_ObserverBase):
         self.max_vals = max_vals
         return x_orig
 
+    @torch.jit.export
     def calculate_qparams(self):
         return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
 
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'min_vals'] = self.min_vals
+        destination[prefix + 'max_vals'] = self.max_vals
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        # We have to handle min_vals and max_vals manually even though they are registered as buffers
-        # as they are initialized to None
         self.min_vals = state_dict.pop(prefix + 'min_vals')
         self.max_vals = state_dict.pop(prefix + 'max_vals')
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
@@ -772,7 +785,7 @@ class HistogramObserver(_ObserverBase):
             new_max = torch.max(x)
             new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
             # combine the existing histogram and new histogram into 1 histogram
-            combined_histogram = torch.zeros_like(self.histogram)
+            combined_histogram = torch.zeros_like(self.histogram, memory_format=torch.contiguous_format)
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
             self._combine_histograms(
