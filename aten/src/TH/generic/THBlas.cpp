@@ -384,18 +384,18 @@ void THBlas_(gemm)(
   }
 #endif
 
-#ifdef USE_FBGEMM
-#if defined(TH_REAL_IS_LONG)
+#ifdef USE_FBGEMM && defined(TH_REAL_IS_LONG)
   if (alpha == 1 && (beta == 0 || beta == 1)) {
-    bool accumulate;
-    if (beta == 0) {
-      accumulate = false;
-    } else {
-      accumulate = true;
-    }
-    // In FBGEMM, we assume row-major ordering; But here we use the column-major
-    // ordering following the FORTRAN tradition in BLAS interface. So we compute
-    // C^T = B^T * A^T instead.
+    // In FBGEMM, we assume row-major ordering; However, here we assume the
+    // column-major ordering following the FORTRAN tradition in BLAS interface
+    // in this function: we can configure the layout (row/column-major ordering)
+    // of A and B by changing transa_ and transb_, but we cannot change the
+    // layout of C with this FORTRAN-style BLAS interface.
+    //
+    // The workaround is that we compute
+    // C^T (n x m) = B^T (n x k) * A^T (k x m) instead.
+    //
+    // In this way we view C^T as the row-major ordering when passing to FBGEMM.
     fbgemm::cblas_gemm_i64_i64acc(
         transb_ ? fbgemm::matrix_op_t::Transpose
                 : fbgemm::matrix_op_t::NoTranspose,
@@ -408,12 +408,11 @@ void THBlas_(gemm)(
         ldb,
         a,
         lda,
-        accumulate,
+        beta == 1,
         c,
         ldc);
     return;
   }
-#endif
 #endif
 
   {
