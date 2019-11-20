@@ -172,7 +172,7 @@ private:
   at::Scalar scalar_slow(int i);
 };
 
-struct FunctionSignature {
+struct PYBIND11_EXPORT FunctionSignature {
   explicit FunctionSignature(const std::string& fmt);
 
   bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
