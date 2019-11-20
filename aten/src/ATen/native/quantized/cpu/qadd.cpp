@@ -226,7 +226,7 @@ class QAddScalar final : public c10::OperatorKernel {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Add.");
-    auto qc = at::empty_like(qa, at::MemoryFormat::Contiguous);
+    auto qc = at::empty_like(qa, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     return _add_scalar_out<ReLUFused>(qc, qa, b);
   }
 };
