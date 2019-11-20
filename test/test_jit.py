@@ -740,6 +740,11 @@ class TestJit(JitTestCase):
             z = x + 2 * y + x * y
             return torch.autograd.grad((z.sum(), ), (x, y))
 
+        def test_grad_retain_graph(x, y):
+            # type: (Tensor, Tensor) -> List[Tensor]
+            z = x + 2 * y + x * y
+            return torch.autograd.grad((z.sum(), ), (x, y), retain_graph=True)
+
         def test_simple_grad_with_grad_outputs(x, y):
             # type: (Tensor, Tensor) -> List[Tensor]
             z = x + 2 * y + x * y
@@ -749,6 +754,7 @@ class TestJit(JitTestCase):
         x = torch.randn(2, 2, requires_grad=True)
         y = torch.randn(2, 2, requires_grad=True)
         self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_grad_retain_graph, (x, y), inputs_requires_grad=True)
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
 
     def test_script_backward(self):
@@ -770,11 +776,24 @@ class TestJit(JitTestCase):
             sum_out = output.sum()
             sum_out.backward()
 
+        def test_tensor_backward_retain_graph(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            sum_out = output.sum()
+            sum_out.backward(retain_graph=True)
+
         def test_torch_autograd_backward(input):
             # type: (Tensor) -> None
             output = torch.relu(input)
             output = output.softmax(0)
             torch.autograd.backward(output.sum())
+
+        def test_torch_autograd_backward_retain_graph(input):
+            # type: (Tensor) -> None
+            output = torch.relu(input)
+            output = output.softmax(0)
+            torch.autograd.backward(output.sum(), retain_graph=True)
 
         def test_torch_autograd_backward_with_grad_tensors(input):
             # type: (Tensor) -> None
@@ -785,7 +804,9 @@ class TestJit(JitTestCase):
 
         inp = torch.randn(2, 2, requires_grad=True)
         checkBackwardScript(test_tensor_backward, (inp,))
+        checkBackwardScript(test_tensor_backward_retain_graph, (inp,))
         checkBackwardScript(test_torch_autograd_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward_retain_graph, (inp,))
         checkBackwardScript(test_torch_autograd_backward_with_grad_tensors, (inp,))
 
     def test_diff_subgraph_clones_constants(self):

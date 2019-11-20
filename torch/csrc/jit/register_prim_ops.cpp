@@ -659,11 +659,11 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
          [](Stack& stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
-           auto keep_graph = pop(stack).toOptional<bool>();
+           auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_outputs = pop(stack);
            auto inputs = pop(stack).toTensorList();
            auto outputs = pop(stack).toTensorList();
@@ -678,6 +678,7 @@ RegisterOperators reg(
              }
            }
 
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
            auto res = torch::autograd::grad(
                output_vars,
                input_vars,
@@ -712,8 +713,9 @@ RegisterOperators reg(
              }
            }
 
+           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
            torch::autograd::backward(
-               output_vars, gradients, retain_graph, create_graph);
+               output_vars, gradients, keep_graph, create_graph);
            return 0;
          },
          aliasAnalysisConservative()),
