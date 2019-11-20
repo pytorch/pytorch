@@ -1,3 +1,5 @@
+.. _distributed-autograd-design:
+
 .. warning::
   The :ref:`distributed-rpc-framework` is experimental and subject to change.
 
@@ -185,6 +187,8 @@ described in detail below.
 In the general case it might not be necessary that every ``send`` and ``recv``
 function is valid as part of the backward pass. To address this, we also have
 a `SMART mode algorithm`_ which is described in a later section.
+
+.. _fast-mode-algorithm:
 
 FAST mode algorithm
 -------------------
