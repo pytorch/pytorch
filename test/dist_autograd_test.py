@@ -1202,6 +1202,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t2 = torch.rand((3, 3), requires_grad=True)
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC_SCRIPT_CALL, ExecMode.RPC_ASYNC_SCRIPT_CALL]:
             with dist_autograd.context() as context_id:
+                print("rank: {}, exec_mode: {}, t1: {}, t2: {}".format(self.rank, exec_mode, t1.numel(), t2.numel()))
                 if ExecMode.LOCAL == exec_mode:
                     ret = self._exec_func(exec_mode, my_script_add, t1, t2)
                 else:

@@ -230,6 +230,10 @@ Otherwise, throws an exception.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
+        std::cout << "dst: " << dst
+                  << ", creat stack, stack size: " << stack.size()
+                  << ", t1: " << stack.at(0).toTensor().numel()
+                  << ", t2: " << stack.at(1).toTensor().numel() << "\n";
         auto fut = rpcTorchscriptCall(dst, name, stack);
         return PythonFutureWrapper(fut.toFuture());
       });

@@ -101,6 +101,9 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     return c10::guts::make_unique<ScriptCall>(op, std::move(ivalues));
   } else {
     ivalues.pop_back();
+    std::cout << "deserialize ivalues, ivalues size: " << ivalues.size()
+              << ", t1: " << ivalues.at(0).toTensor().numel()
+              << ", t2: " << ivalues.at(1).toTensor().numel() << "\n";
     return c10::guts::make_unique<ScriptCall>(
         c10::QualifiedName(qualifiedName), std::move(ivalues));
   }

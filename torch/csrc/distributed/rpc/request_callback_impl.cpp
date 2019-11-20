@@ -47,6 +47,9 @@ Message RequestCallbackImpl::processRpc(
       if (scriptCall.hasOp()) {
         scriptCall.op()->getOperation()(stack);
       } else {
+        std::cout << "run stack, stack size: " << stack.size()
+                  << ", t1: " << stack.at(0).toTensor().numel()
+                  << ", t2: " << stack.at(1).toTensor().numel() << "\n";
         PythonRpcHandler::getInstance()
             .jitCompilationUnit()
             ->get_function(scriptCall.qualifiedName())
