@@ -112,10 +112,6 @@ class Test_ListNestedTensor(TestCase):
         self.assertEqual(a.nested_size(), na)
         values = [torch.rand(1, 2) for i in range(10)]
         values = [values[1:i] for i in range(2, 10)]
-        nt = torch._ListNestedTensor(values)
-        # nts = nt.nested_size(1)
-        # lens = tuple(map(len, values))
-        # self.assertTrue(nts == lens)
 
     def test_len(self):
         a = torch._ListNestedTensor([torch.tensor([1, 2]),
@@ -129,19 +125,6 @@ class Test_ListNestedTensor(TestCase):
         a = torch._ListNestedTensor([torch.tensor([1, 2])])
         self.assertEqual(len(a), 1)
 
-    # Not just about class
-    # def test_equal(self):
-    #     a1 = torch.nested_tensor([torch.tensor([1, 2]),
-    #                               torch.tensor([7, 8])])
-    #     a2 = torch.nested_tensor([torch.tensor([1, 2]),
-    #                               torch.tensor([7, 8])])
-    #     a3 = torch.nested_tensor([torch.tensor([3, 4]),
-    #                               torch.tensor([5, 6])])
-    #     # Just exercising them until we have __bool__, all() etc.
-    #     self.assertTrue((a1 == a2).all())
-    #     self.assertTrue((a1 != a3).all())
-    #     self.assertTrue(not (a1 != a2).any())
-    #     self.assertTrue(not (a1 == a3).any())
 
     def test_nested_dim(self):
         nt = torch._ListNestedTensor([torch.tensor(3)])
@@ -161,18 +144,6 @@ class Test_ListNestedTensor(TestCase):
         a = gen_float_tensor(1, (2, 3)).add_(1)
         nt = torch._ListNestedTensor([a])
         self.assertTrue((a == nt.unbind()[0]).all())
-
-    # def test_size(self):
-    #     a1 = torch._ListNestedTensor([[torch.rand(1, 8),
-    #                                torch.rand(3, 8)],
-    #                               [torch.rand(7, 8)]])
-    #     a2 = torch._ListNestedTensor([torch.rand(1, 2),
-    #                               torch.rand(1, 8)])
-    #     a3 = torch._ListNestedTensor([torch.rand(3, 4),
-    #                               torch.rand(5, 4)])
-    #     self.assertTrue(a1.size() == (2, None, None, 8))
-    #     self.assertTrue(a2.size() == (2, 1, None))
-    #     self.assertTrue(a3.size() == (2, None, 4))
 
     def test_contiguous(self):
         a = torch._ListNestedTensor([torch.tensor([1, 2]),
