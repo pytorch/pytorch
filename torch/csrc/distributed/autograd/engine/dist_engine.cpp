@@ -22,8 +22,9 @@ DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
 
 DistEngine& DistEngine::getInstance() {
-  static DistEngine engine;
-  return engine;
+  // Leaky singleton to avoid module destructor races.
+  static DistEngine* engine = new DistEngine;
+  return *engine;
 }
 
 void DistEngine::validateRootsAndRetrieveEdges(
