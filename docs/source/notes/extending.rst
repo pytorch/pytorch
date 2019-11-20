@@ -207,10 +207,18 @@ This is how a ``Linear`` module can be implemented::
 Extending :mod:`torch`
 ----------------------
 
-The functions in the :mod:`torch` namespace can be overrided with custom
-user-specified implementations via the `__torch_function__` protocol introduced
-in PyTorch 1.4. Custom Python types with a `__torch_function__` method will
-bypass the standard PyTorch dispatch for :class:`Tensor` types. This works with
+You can create custom types that emulate :class:`Tensor` by defining a custom
+class with methods that match :class:`Tensor`. But what if you want to be able
+to pass these types to functions like :func:`torch.add` in the top-level
+:mod:`torch` namespace that accept :class:`Tensor` operands?
+
+If your custom python type defines a method named `__torch_function__`, PyTorch
+will invoke your `__torch_function__` implementation when an instance of your
+custom class is passed to a function in the :mod:`torch` namespace. This makes
+it possible to define custom implementations for any of the functions in the
+:mod:`torch` namespace which your `__torch_function__` implementation can call,
+allowing your users to make use of your custom type with existing PyTorch
+workflows that they have already written for :class:`Tensor`. This works with
 "duck" types that are unrelated to :class:`Tensor` as well as user-defined
 subclasses of :class:`Tensor`.
 
