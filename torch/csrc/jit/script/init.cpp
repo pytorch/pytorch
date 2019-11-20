@@ -297,7 +297,7 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   }
 
   ClassTypePtr getClassType() const override {
-    return concreteType_->getJitType();
+    return concreteType_->getJitType()->expect<ClassType>();
   }
 
  private:
@@ -1052,42 +1052,51 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
+  py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
+      m, "ConcreteModuleTypeBuilder")
+      .def(py::init<py::object>())
+      .def("add_constant", &ConcreteModuleTypeBuilder::addConstant)
+      .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
+      .def(
+          "add_function_attribute",
+          &ConcreteModuleTypeBuilder::addFunctionAttribute)
+      .def("add_module", &ConcreteModuleTypeBuilder::addModule)
+      .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
+      .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
+      .def("add_failed_attribute", &ConcreteModuleTypeBuilder::addFailedAttribute)
+      .def(
+          "set_module_dict",
+          [](ConcreteModuleTypeBuilder& self) {
+            self.setIterableModuleKind(IterableModuleKind::DICT);
+          })
+      .def("build", &ConcreteModuleTypeBuilder::build)
+      .def(
+          "equals",
+          [](const ConcreteModuleTypeBuilder& self,
+             const ConcreteModuleTypeBuilder& other) { return self.equals(other); })
+      .def("set_module_list", [](ConcreteModuleTypeBuilder& self) {
+        self.setIterableModuleKind(IterableModuleKind::LIST);
+      });
+
   py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(
       m, "ConcreteModuleType")
-      .def(py::init<>())
       .def_property_readonly("py_class", &ConcreteModuleType::getPyClass)
       .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
+      .def_static("from_jit_type", &ConcreteModuleType::fromJitType)
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
-      .def("add_constant", &ConcreteModuleType::addConstant)
-      .def("add_attribute", &ConcreteModuleType::addAttribute)
-      .def("add_function_attribute", &ConcreteModuleType::addFunctionAttribute)
-      .def("add_module", &ConcreteModuleType::addModule)
-      .def("add_module_interface", &ConcreteModuleType::addModuleInterface)
-      .def("add_pyclass", &ConcreteModuleType::addPyClass)
-      .def("add_overload", &ConcreteModuleType::addOverload)
-      .def("add_jit_type", &ConcreteModuleType::addJitType)
-      .def("set_poisoned", &ConcreteModuleType::setPoisoned)
-      .def(
-          "set_module_dict",
-          [](ConcreteModuleType& self) {
-            self.setIterableModuleKind(IterableModuleKind::DICT);
-          })
-      .def(
-          "set_module_list",
-          [](ConcreteModuleType& self) {
-            self.setIterableModuleKind(IterableModuleKind::LIST);
-          })
-      .def(
-          "create_new_type_from_this",
-          &ConcreteModuleType::createNewTypeFromThis)
-      .def("add_failed_attribute", &ConcreteModuleType::addFailedAttribute)
       .def("dump", &ConcreteModuleType::dump)
       .def(
           "equals",
           [](const ConcreteModuleType& self, const ConcreteModuleType& other) {
-            return self == other;
+            return self.equals(other);
+          })
+      .def(
+          "equals",
+          [](const ConcreteModuleType& self,
+             const ConcreteModuleTypeBuilder& other) {
+            return self.equals(other);
           })
       .def(
           "_create_methods",
@@ -1101,7 +1110,8 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            const auto& selfType = concreteType->getJitType();
+            const auto& selfType =
+                concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();

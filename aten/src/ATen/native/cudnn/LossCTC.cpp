@@ -103,7 +103,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   ctc_loss_desc.setEx(
       CUDNN_DATA_FLOAT, CUDNN_LOSS_NORMALIZATION_SOFTMAX, CUDNN_PROPAGATE_NAN);
   TensorDescriptor log_probs_desc{log_probs_t};
-  Tensor grad = at::empty_like(log_probs_t, at::MemoryFormat::Contiguous);
+  Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
 
   size_t workspace_size;
