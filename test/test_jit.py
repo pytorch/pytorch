@@ -1146,11 +1146,11 @@ graph(%x : Tensor,
                    .check("return") \
                    .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
 
-    @_tmp_donotuse_dont_inline_everything
     def test_insert_prepack_unpack(self):
-        class M(torch.nn.Module):
+        # Module with linear and per tensor/channel quantized weight
+        class L(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(L, self).__init__()
                 self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
                 self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
 
@@ -1160,25 +1160,68 @@ graph(%x : Tensor,
                 r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
                 rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
                 return rq
-        m = torch.jit.script(M())
-        torch._C._jit_pass_insert_prepack_unpack(m._c)
-        FileCheck().check("quantized::linear_prepack") \
-                   .check("quantized::linear_unpack") \
-                   .run(get_forward_graph(m._c))
 
-        conv_input_str = """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
-        %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK: quantized::conv2d_prepack
-        # CHECK: quantized::conv2d_unpack
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        return (%r)"""
-        graph = parse_ir(conv_input_str)
-        torch._C._jit_pass_insert_prepack_unpack(graph)
-        FileCheck().run(conv_input_str, graph)
+        class L2(torch.nn.Module):
+            def __init__(self):
+                super(L2, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_channel(self.weight,
+                                                torch.tensor([2], dtype=torch.float),
+                                                torch.tensor([0], dtype=torch.long),
+                                                0,
+                                                torch.qint8)
+                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+
+        for M in [L, L2]:
+            m = torch.jit.script(M())
+            torch._C._jit_pass_insert_prepack_unpack(m._c)
+            FileCheck().check("quantized::linear_prepack") \
+                       .check("quantized::linear_unpack") \
+                       .run(get_forward_graph(m._c))
+
+        # Module with conv2d and per tensor/channel quantized weight
+        class C(torch.nn.Module):
+            def __init__(self):
+                super(C, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                r = torch.conv2d(xq.dequantize(), wq.dequantize(), self.bias)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+
+        class C2(torch.nn.Module):
+            def __init__(self):
+                super(C2, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_channel(self.weight,
+                                                torch.tensor([2], dtype=torch.float),
+                                                torch.tensor([0], dtype=torch.long),
+                                                0,
+                                                torch.qint8)
+                r = torch.conv2d(xq.dequantize(), wq.dequantize(), self.bias)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+
+        for M in [C, C2]:
+            m = torch.jit.script(M())
+            torch._C._jit_pass_insert_prepack_unpack(m._c)
+            FileCheck().check("quantized::conv2d_prepack") \
+                       .check("quantized::conv2d_unpack") \
+                       .run(get_forward_graph(m._c))
 
     def test_quant_fusion(self):
         input_strs = [
@@ -3426,7 +3469,8 @@ graph(%Ra, %Rb):
         out = torch.jit.trace(fn, (torch.ones(2, 2),))
         check(out)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    @unittest.skipIf(IS_WINDOWS or True, "TODO: need to fix this test case for "
+                                         "Windows, re-enable with https://github.com/pytorch/pytorch/pull/29339")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
