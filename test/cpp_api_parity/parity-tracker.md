@@ -128,7 +128,7 @@ torch::nn::Upsample|Yes|No
 torch::nn::DataParallel|No|No
 torch::nn::parallel::DistributedDataParallel|No|No
 torch::nn::utils::clip_grad_norm_|Yes|No
-torch::nn::utils::clip_grad_value_|No|No
+torch::nn::utils::clip_grad_value_|Yes|No
 torch::nn::utils::parameters_to_vector|No|No
 torch::nn::utils::vector_to_parameters|No|No
 torch::nn::utils::weight_norm|No|No
