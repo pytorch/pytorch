@@ -748,6 +748,25 @@ TEST_F(FunctionalTest, MaxUnpool2d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 5, 5}));
 }
 
+TEST_F(FunctionalTest, MaxUnpool3d) {
+  auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
+  auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto y = F::max_unpool3d(x, indices, F::MaxUnpool3dFuncOptions(3));
+
+  ASSERT_EQ(y.dim(), 5);
+  ASSERT_TRUE(torch::allclose(y, torch::tensor(
+   {{{{{ 0,  0,  0},
+       { 0,  0,  0},
+       { 0,  0,  0}},
+      {{ 0,  0,  0},
+       { 0,  0,  0},
+       { 0,  0,  0}},
+      {{ 0,  0,  0},
+       { 0,  0,  0},
+       { 0,  0, 26}}}}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3, 3, 3}));
+}
+
 TEST_F(FunctionalTest, ELU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
