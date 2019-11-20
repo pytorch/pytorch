@@ -224,6 +224,7 @@ struct TORCH_API Module : public Object {
 
   // Create a deep copy of this module.
   Module clone() const;
+  Module clone_instance() const;
 
   void clone_method(const Module& orig, const std::string& name);
 
