@@ -5,7 +5,6 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_helper import _black_list_in_opset
 from torch.onnx.symbolic_opset9 import expand
 from torch.nn.modules.utils import _single, _pair, _triple
 
