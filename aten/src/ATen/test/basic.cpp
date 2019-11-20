@@ -3,11 +3,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
 
-// for TH compat test only...
-struct THFloatTensor;
-extern "C" THFloatTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
-extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
-
 #include <iostream>
 #include <chrono>
 #include <string.h>
@@ -201,13 +196,6 @@ void TestZeroDim(DeprecatedTypeProperties& type) {
   f[2] = zeros({4}, type);
   f[1][0] = -1;
   ASSERT_EQ_RESOLVED(f[2][0].item<double>(), 0);
-}
-
-void TestTensorFromTH() {
-  int a = 4;
-  THFloatTensor* t = THFloatTensor_newWithSize2d(a, a);
-  THFloatTensor_fill(t, a);
-  ASSERT_NO_THROW(at::unsafeTensorFromTH(t, false));
 }
 
 void TestToCFloat() {
