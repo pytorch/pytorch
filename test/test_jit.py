@@ -1214,7 +1214,6 @@ graph(%x : Tensor,
         get_forward(m._c)(data, weight, weight, weight)
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
-        print(m.graph)
         assert len(m._modules._c.items()) == 0, \
             'Expected to have zero submodule of conv'
 
