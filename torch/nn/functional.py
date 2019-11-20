@@ -3216,7 +3216,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if use_separate_proj_weight is not True:
+    if not use_separate_proj_weight:
         if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
             q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
