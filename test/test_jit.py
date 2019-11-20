@@ -955,7 +955,6 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         observer = torch.jit.script(Observer())
-        torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
         qconfig_dict = {
             '':
             QConfig(
@@ -1128,8 +1127,8 @@ graph(%x : Tensor,
 
         for is_per_channel in [True, False]:
             m = torch.jit.script(M())
-            observer = default_per_channel_weight_observer.with_args(ch_axis=1) if is_per_channel \
-                else default_observer
+            observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
+                if is_per_channel else default_observer
             qconfig = QConfig(activation=observer, weight=observer)
             qconfig_dict = {
                 '': script_qconfig(qconfig)
