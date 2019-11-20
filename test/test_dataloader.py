@@ -283,11 +283,11 @@ class TestConcatDataset(TestCase):
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
     if HAS_FAULTHANDLER:
-        faulthandler.enable()
+        faulthandler.enable(sys.__stderr__)
         if not IS_WINDOWS:
             # windows does not have faulthandler.register
             # chain=False prevents the default behavior of killing the process
-            faulthandler.register(signal.SIGUSR1, chain=False)
+            faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
 
 
 set_faulthander_if_available()

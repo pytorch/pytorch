@@ -67,8 +67,7 @@ void testLiteInterpreterConv() {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.run_method("forward", inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
