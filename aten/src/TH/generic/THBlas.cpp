@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THBlas.cpp"
 #else
 
+#ifdef USE_FBGEMM
+#include "fbgemm/FbgemmI64.h"
+#endif // USE_FBGEMM
 
 #ifdef BLAS_F2C
 # define ffloat double
@@ -380,6 +383,39 @@ void THBlas_(gemm)(
     return;
   }
 #endif
+
+#ifdef USE_FBGEMM
+#if defined(TH_REAL_IS_LONG)
+  if (alpha == 1 && (beta == 0 || beta == 1)) {
+    bool accumulate;
+    if (beta == 0) {
+      accumulate = false;
+    } else {
+      accumulate = true;
+    }
+    // In FBGEMM, we assume row-major ordering; But here we use the column-major
+    // ordering following the FORTRAN tradition in BLAS interface. So we compute
+    // C^T = B^T * A^T instead.
+    fbgemm::cblas_gemm_i64_i64acc(
+        transb_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        transa_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        n,
+        m,
+        k,
+        b,
+        ldb,
+        a,
+        lda,
+        accumulate,
+        c,
+        ldc);
+    return;
+  }
+#endif
+#endif
+
   {
     if(!transa_ && !transb_)
     {
