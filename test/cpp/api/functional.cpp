@@ -2488,7 +2488,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
         F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
       ),
       F::binary_cross_entropy(sigmoid(output), target,
-        F::BCELossFuncOptions().weight(weight)
+        F::BinaryCrossEntropyFuncOptions().weight(weight)
       )
     ));
 
@@ -2505,7 +2505,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
         F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone)
       ),
       F::binary_cross_entropy(sigmoid(output), target,
-        F::BCELossFuncOptions().reduction(torch::kNone)
+        F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone)
       )
     ));
 
@@ -2515,7 +2515,7 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
         F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)
       ),
       F::binary_cross_entropy(sigmoid(output), target,
-        F::BCELossFuncOptions().weight(weight)
+        F::BinaryCrossEntropyFuncOptions().weight(weight)
       )
     ));
   }
