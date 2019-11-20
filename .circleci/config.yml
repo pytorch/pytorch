@@ -851,7 +851,7 @@ jobs:
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -879,7 +879,7 @@ jobs:
   binary_ios_upload: 
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -1302,7 +1302,7 @@ jobs:
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -1395,7 +1395,6 @@ jobs:
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
             #run unit test
-            source ~/anaconda/bin/activate
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             pip install torchvision
             python trace_model.py
@@ -1915,17 +1914,17 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
       - pytorch_ios_build:
-          name: pytorch_ios_10_2_1_x86_64_build
+          name: pytorch_ios_11_2_1_x86_64_build
           context: org-member
-          build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          build_environment: "pytorch-ios-11.2.1-x86_64_build"
           ios_arch: "x86_64"
           ios_platform: "SIMULATOR"
           requires:
             - setup
       - pytorch_ios_build:
-          name: pytorch_ios_10_2_1_arm64_build
+          name: pytorch_ios_11_2_1_arm64_build
           context: org-member
-          build_environment: "pytorch-ios-10.2.1-arm64_build"
+          build_environment: "pytorch-ios-11.2.1-arm64_build"
           ios_arch: "arm64"
           ios_platform: "OS"
           requires:
@@ -3765,8 +3764,8 @@ workflows:
               only: nightly
       # Pytorch iOS binary builds
       - binary_ios_build:
-          name: pytorch_ios_10_2_1_nightly_x86_64_build
-          build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
+          name: pytorch_ios_11_2_1_nightly_x86_64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-x86_64-build"
           context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
@@ -3776,8 +3775,8 @@ workflows:
             branches:
               only: nightly
       - binary_ios_build:
-          name: pytorch_ios_10_2_1_nightly_arm64_build
-          build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
+          name: pytorch_ios_11_2_1_nightly_arm64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-arm64-build"
           context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
@@ -3787,12 +3786,12 @@ workflows:
             branches:
               only: nightly
       - binary_ios_upload:
-          build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
+          build_environment: "libtorch-ios-11.2.1-nightly-binary-build-upload"
           context: org-member
           requires:
             - setup
-            - pytorch_ios_10_2_1_nightly_x86_64_build
-            - pytorch_ios_10_2_1_nightly_arm64_build
+            - pytorch_ios_11_2_1_nightly_x86_64_build
+            - pytorch_ios_11_2_1_nightly_arm64_build
           filters:
             branches:
               only: nightly

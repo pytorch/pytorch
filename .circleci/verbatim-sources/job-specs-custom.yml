@@ -373,7 +373,7 @@
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -466,7 +466,6 @@
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
             MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
             #run unit test
-            source ~/anaconda/bin/activate
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             pip install torchvision
             python trace_model.py
