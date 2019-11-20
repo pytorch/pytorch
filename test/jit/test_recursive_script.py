@@ -629,3 +629,24 @@ class TestRecursiveScript(JitTestCase):
         dummies = nn.ModuleList([dummy])
         model = Model(dummies)
         self.checkModule(model, (torch.rand(5, 5), ))
+
+    def test_script_loaded_module(self):
+        """
+        Test that we can hold a loaded ScriptModule as a submodule.
+        """
+        class Dummy(nn.Module):
+            def forward(self, x):
+                return x
+
+        dummy = torch.jit.script(Dummy())
+        dummy = self.getExportImportCopy(dummy)
+
+        class ContainsLoaded(torch.nn.Module):
+            def __init__(self):
+                super(ContainsLoaded, self).__init__()
+                self.encoder = dummy
+
+            def forward(self, input):
+                return self.encoder(input)
+
+        self.checkModule(ContainsLoaded(), (torch.rand(2, 3), ))

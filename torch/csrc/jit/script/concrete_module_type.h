@@ -9,7 +9,9 @@
 namespace torch {
 namespace jit {
 namespace script {
+
 enum class IterableModuleKind { NONE, LIST, DICT };
+class ConcreteModuleType;
 
 // You can think of an nn.Module as a template that corresponds to a family of
 // JIT types. The template "arguments" are things like the constant values.
@@ -41,21 +43,22 @@ enum class IterableModuleKind { NONE, LIST, DICT };
 // ModuleValue::attr calls. This is so we can guarantee that if two Module's
 // share a JIT type (and thus a ConcreteModuleType), then they behave the same
 // way when you access attributes on them.
-class VISIBILITY_HIDDEN ConcreteModuleType {
- public:
-  // ConcreteModuleType has two states.
-  // 1. Building: First we build it up, during the ScriptModule conversion
-  // process
-  //      ... to transition, we freeze the type by associating with a JIT type.
-  // 2. Querying: Then we ask use it as a source of truth during method
-  // compilation.
-  //              During this time the ModuleType is effectively const.
-  // Yes, it could be two different types. Not terribly worth the verbosity.
 
-  /**
-   * Builder methods (jitType must be null)
-   */
-  void addPyClass(py::object pyClass);
+// ConcreteModuleType has two phases.
+// 1. Creation: First we build it up, during the ScriptModule conversion
+// process. This is represented by ConcreteModuleTypeBuilder.
+//    ...then the converter calls ConcreteModuleTypeBuilder::build(), producing a
+//       ConcreteModuleType ready for querying.
+// 2. Querying: We use ConcreteModuleType as a source of truth for
+// ModuleValue::attr calls during method compilation.
+
+// Represents a concrete type during in the process for construction. We use
+// this to decide whether we can share types between modules.
+class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
+ public:
+  explicit ConcreteModuleTypeBuilder(py::object pyClass) {
+    pyClass_ = std::move(pyClass);
+  }
   void addConstant(std::string name, py::object value);
   void addAttribute(std::string name, TypePtr type, bool isParameter);
   void addFunctionAttribute(
@@ -63,105 +66,27 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       const TypePtr& type,
       py::object pyFunction);
 
-  // add a submodule to the ConcreteModuleType can either be ConcreteModuleType
-  // that get constructed recursively, or InterfaceType (Module)
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
-  void addModuleInterface(std::string name, const TypePtr& type);
 
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
+
+  // If a ConcreteModuleType is poisoned, it will never compare equal to any other
+  // concrete type
   void setPoisoned();
 
-  /**
-   * Freezing methods
-   */
-
-  // Based on the data in this ConcreteType, create an equivalent JIT type and
-  // associate this module type with it.
-  ClassTypePtr createNewTypeFromThis();
-  // Associate the provided type with this ConcreteType
-  void addJitType(ClassTypePtr type);
-
-  /**
-   * Query methods (jitType must be non-null)
-   */
-  ClassTypePtr getJitType() const;
-  py::object getPyClass() const;
-  IterableModuleKind getIterableModuleKind() const;
-  c10::optional<py::object> findConstant(const std::string& name) const;
-  c10::optional<std::vector<std::string>> findOverloads(
-      const std::string& name) const;
-  c10::optional<Function*> findFunctionAttribute(const std::string& name) const;
-  std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
-      const std::string& name) const;
-  c10::optional<std::string> findFailedAttribute(const std::string& name) const;
-
-  // These getters are only here to return things as types that can be
-  // automatically converted by pybind.
-  std::unordered_map<std::string, py::object> getConstantsPy() const;
-  std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
-      const;
-  std::vector<std::pair<std::string, TypePtr>> getModulesPy() const;
+  std::shared_ptr<ConcreteModuleType> build() const {
+    return std::make_shared<ConcreteModuleType>(*this);
+  }
 
   // This determines whether two modules can share a type. The container structs
   // used by ConcreteModuleType have been defined such that operator==
   // implements a meaningful comparison in that context.
-  friend bool operator==(
-      const ConcreteModuleType& lhs,
-      const ConcreteModuleType& rhs) {
-    if (lhs.jitType_ == rhs.jitType_) {
-      // If the computed types are the same, these modules can (obviously) share
-      // a type.
-      return true;
-    }
+  bool equals(const ConcreteModuleTypeBuilder& other) const;
 
-    if (lhs.isPoisoned_ || rhs.isPoisoned_) {
-      return false;
-    }
-
-    // clang-format off
-    // These are vaguely ordered so that cheap, discriminating checks happen first.
-    bool equal =
-      lhs.pyClass_.is(rhs.pyClass_) &&
-      lhs.iterableModuleKind_ == rhs.iterableModuleKind_ &&
-      lhs.constants_ == rhs.constants_ &&
-      lhs.attributes_ == rhs.attributes_ &&
-      lhs.overloads_ == rhs.overloads_ &&
-      lhs.functionAttributes_ == rhs.functionAttributes_;
-    // clang-format on
-    if (!equal) {
-      return false;
-    }
-
-    // We store modules in order of insertion (to make compilation
-    // deterministic). However, for the purposes of equality, insertion order
-    // should not matter, so sort them by name.
-    // We put this check last because it involves the most work.
-    auto lhsSorted = lhs.modules_;
-    std::sort(
-        lhsSorted.begin(),
-        lhsSorted.end(),
-        [](const ModuleInfo& a, const ModuleInfo& b) {
-          return a.name_ < b.name_;
-        });
-
-    auto rhsSorted = rhs.modules_;
-    std::sort(
-        rhsSorted.begin(),
-        rhsSorted.end(),
-        [](const ModuleInfo& a, const ModuleInfo& b) {
-          return a.name_ < b.name_;
-        });
-
-    return lhsSorted == rhsSorted;
-  }
-
-  void dump() const;
-
- private:
   struct Constant {
     /* implicit */ Constant(py::object v) : v_(std::move(v)) {}
     friend bool operator==(const Constant& lhs, const Constant& rhs) {
@@ -202,31 +127,17 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
 
   struct ModuleInfo {
     ModuleInfo(std::string name, std::shared_ptr<ConcreteModuleType> meta)
-        : name_(std::move(name)), meta_(std::move(meta)), type_(nullptr) {}
+        : name_(std::move(name)), meta_(std::move(meta)) {}
 
-    ModuleInfo(std::string name, const TypePtr& type)
-        : name_(std::move(name)), meta_(nullptr), type_(type) {}
-    friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
-      if (lhs.meta_ != nullptr && rhs.meta_ != nullptr) {
-        return *(lhs.meta_) == *(rhs.meta_);
-      } else if (lhs.type_ != nullptr && rhs.type_ != nullptr) {
-        return  *(lhs.type_) == *(rhs.type_);
-      } else {
-        return false;
-      }
-    }
+    friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs);
 
-    TypePtr getJitType() const {
-      return meta_ == nullptr? type_ : meta_->getJitType();
-    }
     std::string name_;
-
-    // Module Info contains either an ConcreateModuleType or a type (which is
-    // a Module Interface), these two are union relationship.
     std::shared_ptr<ConcreteModuleType> meta_;
-    TypePtr type_;
-
   };
+
+ private:
+  ConcreteModuleTypeBuilder() {}
+  ClassTypePtr createTypeFromThis() const;
 
   // If true, this type will never compare equally to anything else. This is
   // used if we want to ensure that this type is not shared (for example, if it
@@ -256,11 +167,58 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   // The original `nn.Module` class that we derived this ScriptModule from.
   py::object pyClass_;
 
-  // The JIT type derived from this ConcreteModuleType.
-  ClassTypePtr jitType_ = nullptr;
   // NOTE: If you ever add any more state to this struct, you need to make sure
-  // operator== still makes sense! The only field that can be excluded from it
-  // is `jitType_`.
+  // operator== still makes sense!
+  friend ConcreteModuleType;
+};
+
+// Represents a finalized concrete type, used to service ModuleValue::attr calls
+// during method compilation.
+class VISIBILITY_HIDDEN ConcreteModuleType {
+ public:
+  explicit ConcreteModuleType(ConcreteModuleTypeBuilder data);
+
+  static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
+
+  TypePtr getJitType() const;
+  py::object getPyClass() const;
+  IterableModuleKind getIterableModuleKind() const;
+  c10::optional<py::object> findConstant(const std::string& name) const;
+  c10::optional<std::vector<std::string>> findOverloads(
+      const std::string& name) const;
+  c10::optional<Function*> findFunctionAttribute(const std::string& name) const;
+  std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
+      const std::string& name) const;
+  c10::optional<std::string> findFailedAttribute(const std::string& name) const;
+
+  // These getters are only here to return things as types that can be
+  // automatically converted by pybind.
+  std::unordered_map<std::string, py::object> getConstantsPy() const;
+  std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
+      const;
+  std::vector<std::pair<std::string, TypePtr>> getModulesPy() const;
+
+  bool equals(const ConcreteModuleType& other) const {
+    if (jitType_ == other.jitType_) {
+      // If the computed types are the same, these modules can (obviously) share
+      // a type.
+      return true;
+    }
+
+    return data_.equals(other.data_);
+  }
+  bool equals(const ConcreteModuleTypeBuilder& other) const {
+    return data_.equals(other);
+  }
+
+  void dump() const;
+
+ private:
+  ConcreteModuleType() {}
+
+  // The JIT type derived from this ConcreteModuleType.
+  ConcreteModuleTypeBuilder data_;
+  TypePtr jitType_;
 };
 
 } // namespace script
