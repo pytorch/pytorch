@@ -154,9 +154,12 @@ void testTHNNConv() {
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
-  at::Tensor grad_output = torch::randn_like(output);
-  at::Tensor grad_finput = torch::zeros_like(finput);
-  at::Tensor grad_fgradinput = torch::zeros_like(fgradinput);
+  at::Tensor grad_output =
+      torch::randn_like(output, at::MemoryFormat::Preserve);
+  at::Tensor grad_finput =
+      torch::zeros_like(finput, at::MemoryFormat::Preserve);
+  at::Tensor grad_fgradinput =
+      torch::zeros_like(fgradinput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
@@ -262,9 +265,12 @@ void testATenNativeBatchNorm() {
       eps);
 
   // make grad_outputs
-  at::Tensor grad_output = torch::randn_like(output);
-  at::Tensor grad_savemean = torch::zeros_like(savemean);
-  at::Tensor grad_saveinvstd = torch::zeros_like(saveinvstd);
+  at::Tensor grad_output =
+      torch::randn_like(output, at::MemoryFormat::Preserve);
+  at::Tensor grad_savemean =
+      torch::zeros_like(savemean, at::MemoryFormat::Preserve);
+  at::Tensor grad_saveinvstd =
+      torch::zeros_like(saveinvstd, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
@@ -742,14 +748,14 @@ void testRecordFunction() {
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   auto t2 = invokeTestRecordFunction(t);
-  t2.backward(torch::ones_like(t2));
+  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   auto eager_inputs = traced_inputs;
   traced_inputs.clear();
 
   t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   t2 = invokeTestRecordFunctionJIT(t);
-  t2.backward(torch::ones_like(t2));
+  t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   auto jit_inputs = traced_inputs;
   traced_inputs.clear();
 
@@ -865,7 +871,7 @@ void testThreadLocalDebugInfo() {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = t.pow(2);
-    t2.backward(torch::ones_like(t2));
+    t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
   }
   autograd::profiler::popCallback();
 
