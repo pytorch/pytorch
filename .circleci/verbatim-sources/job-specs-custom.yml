@@ -434,7 +434,7 @@
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
-          name: Test
+          name: Build Test
           no_output_timeout: "30m"
           command: |
             set -e
@@ -451,3 +451,25 @@
               echo 'xcodebuild failed!'
               exit 1
             fi
+        - run:
+          name: Run Simulator Tests
+          no_output_timeout: "2h"
+          command: |
+            set -e
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
+              echo "not SIMULATOR build, skip it."
+              exit 0
+            fi
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
+            source ~/anaconda/bin/deactivate
+            #build pytorch from source
+            export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+            MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
+            ccmake build
+            #run unit test
+            source ~/anaconda/bin/activate
+            cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            ruby setup.rb
+            fastlane scan
+
