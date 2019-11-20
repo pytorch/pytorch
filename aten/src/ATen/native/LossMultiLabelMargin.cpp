@@ -335,7 +335,7 @@ Tensor multilabel_margin_loss_backward_cpu(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
-  auto grad_input = at::zeros_like(self, at::MemoryFormat::Contiguous);
+  auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   multilabel_margin_loss_backward_cpu_out(
       grad_input, grad_output, self, target, reduction, is_target);
   return grad_input;
