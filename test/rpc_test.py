@@ -1102,11 +1102,6 @@ class RpcTest(object):
         rpc.join_rpc()
         rpc.shutdown()
 
-    @dist_init
-    def test_get_default_rpc_timeout(self):
-        timeout = rpc.get_rpc_timeout()
-        self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
-
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
