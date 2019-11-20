@@ -33,7 +33,7 @@ namespace detail {
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
-    KLDivFuncOptions::reduction_t reduction) {
+    KLDivLossFuncOptions::reduction_t reduction) {
   torch::Reduction::Reduction reduction_enum;
 
   if (c10::get_if<enumtype::kMean>(&reduction)) {
@@ -62,7 +62,7 @@ inline Tensor kl_div(
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
-    const KLDivFuncOptions& options = {}) {
+    const KLDivLossFuncOptions& options = {}) {
   return detail::kl_div(input, target, options.reduction());
 }
 
@@ -112,7 +112,7 @@ inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,
-    BinaryCrossEntropyFuncOptions::reduction_t reduction) {
+    BCELossFuncOptions::reduction_t reduction) {
   auto reduction_enum = enumtype::reduction_get_enum(reduction);
 
   if (target.sizes() != input.sizes()) {
@@ -140,7 +140,7 @@ inline Tensor binary_cross_entropy(
 inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
-    const BinaryCrossEntropyFuncOptions& options = {}) {
+    const BCELossFuncOptions& options = {}) {
   return detail::binary_cross_entropy(input, target, options.weight(), options.reduction());
 }
 
