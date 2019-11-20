@@ -10375,13 +10375,13 @@ class TestTorchDeviceType(TestCase):
         for shape in shapes:
             for dt in torch.testing.get_all_dtypes():
                 self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
-                self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                self.assertEqual(shape, fake_zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
-                self.assertEqual(shape, torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
+                self.assertEqual(shape, fake_full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
                 self.assertEqual(shape, torch.ones(shape, device=device, dtype=dt).shape)
-                self.assertEqual(shape, torch.ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                self.assertEqual(shape, fake_ones_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty(shape, device=device, dtype=dt).shape)
-                self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
+                self.assertEqual(shape, fake_empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
                 if dt == torch.half and device == "cpu":
