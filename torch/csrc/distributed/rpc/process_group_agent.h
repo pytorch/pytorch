@@ -93,7 +93,6 @@ class ProcessGroupAgent : public RpcAgent {
           startTime_(startTime),
           dstRank_(dstRank),
           timeout_(timeout) {}
-    FutureInfo() {}
   };
 
   void collectNames();

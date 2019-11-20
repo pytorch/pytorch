@@ -298,8 +298,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       if (timeout.count() == 0) {
         timeout = INFINITE_TIMEOUT;
       }
-      auto futureInfo = FutureInfo(future, futureStartTime, to.id_, timeout);
-      futures_[requestId] = futureInfo;
+      auto& futureInfo = futures_
+                             .emplace(
+                                 std::piecewise_construct,
+                                 std::forward_as_tuple(requestId),
+                                 std::forward_as_tuple(FutureInfo(
+                                     future, futureStartTime, to.id_, timeout)))
+                             .first->second;
       auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[rpcEndTime].push_back(requestId);
