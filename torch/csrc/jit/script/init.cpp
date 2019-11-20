@@ -297,7 +297,7 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   }
 
   ClassTypePtr getClassType() const override {
-    return concreteType_->getJitType();
+    return concreteType_->getJitType()->expect<ClassType>();
   }
 
  private:
@@ -1061,7 +1061,6 @@ void initJitScriptBindings(PyObject* module) {
           "add_function_attribute",
           &ConcreteModuleTypeBuilder::addFunctionAttribute)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
-      .def("add_module_interface", &ConcreteModuleTypeBuilder::addModuleInterface)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
       .def("add_failed_attribute", &ConcreteModuleTypeBuilder::addFailedAttribute)
@@ -1083,6 +1082,7 @@ void initJitScriptBindings(PyObject* module) {
       m, "ConcreteModuleType")
       .def_property_readonly("py_class", &ConcreteModuleType::getPyClass)
       .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
+      .def_static("from_interface", &ConcreteModuleType::fromInterface)
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
@@ -1110,7 +1110,8 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            const auto& selfType = concreteType->getJitType();
+            const auto& selfType =
+                concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();

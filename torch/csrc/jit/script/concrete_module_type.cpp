@@ -29,10 +29,18 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
 
   for (const auto& moduleInfo : modules_) {
     cls->addAttribute(
-        moduleInfo.name_, moduleInfo.getJitType(), /*is_parameter=*/false);
+        moduleInfo.name_, moduleInfo.meta_->getJitType(), /*is_parameter=*/false);
   }
 
   return cls;
+}
+
+std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromInterface(
+    InterfaceTypePtr interface) {
+  TORCH_INTERNAL_ASSERT(interface->is_module());
+  auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
+  ret->jitType_ = std::move(interface);
+  return ret;
 }
 
 ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
@@ -40,20 +48,11 @@ ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
   jitType_ = data_.createTypeFromThis();
 }
 
-TypePtr ConcreteModuleTypeBuilder::ModuleInfo::getJitType() const {
-  return meta_ == nullptr ? type_ : meta_->getJitType();
-}
 
 bool operator==(
     const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
     const ConcreteModuleTypeBuilder::ModuleInfo& rhs) {
-  if (lhs.meta_ != nullptr && rhs.meta_ != nullptr) {
-    return lhs.meta_->equals(*rhs.meta_);
-  } else if (lhs.type_ != nullptr && rhs.type_ != nullptr) {
-    return *(lhs.type_) == *(rhs.type_);
-  } else {
-    return false;
-  }
+  return lhs.meta_->equals(*rhs.meta_);
 }
 
 bool ConcreteModuleTypeBuilder::equals(
@@ -99,7 +98,7 @@ bool ConcreteModuleTypeBuilder::equals(
   return thisSorted == otherSorted;
 }
 
-ClassTypePtr ConcreteModuleType::getJitType() const {
+TypePtr ConcreteModuleType::getJitType() const {
   return jitType_;
 }
 
@@ -194,14 +193,6 @@ void ConcreteModuleTypeBuilder::addModule(
       ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
 }
 
-void ConcreteModuleTypeBuilder::addModuleInterface(
-    std::string name,
-    const TypePtr& type) {
-  TORCH_INTERNAL_ASSERT(type->cast<InterfaceType>() && type->is_module());
-  modules_.emplace_back(
-      ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), type});
-}
-
 void ConcreteModuleTypeBuilder::addOverload(
     std::string methodName,
     std::vector<std::string> overloadedMethodNames) {
@@ -237,7 +228,7 @@ void ConcreteModuleType::dump() const {
   std::cout << "\nSubmodules: \n";
   for (const auto& info : data_.modules_) {
     std::cout << "\t" << info.name_ << ": "
-          << info.getJitType()->python_str() << "\n";
+              << info.meta_->getJitType()->python_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {
@@ -279,7 +270,7 @@ std::vector<std::pair<std::string, TypePtr>> ConcreteModuleType::getModulesPy()
   std::vector<std::pair<std::string, TypePtr>> ret;
 
   for (const auto& info : data_.modules_) {
-    ret.emplace_back(std::make_pair(info.name_, info.getJitType()));
+    ret.emplace_back(std::make_pair(info.name_, info.meta_->getJitType()));
   }
   return ret;
 }
