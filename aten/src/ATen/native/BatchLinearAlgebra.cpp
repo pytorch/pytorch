@@ -1091,7 +1091,7 @@ Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Ten
   std::vector<int64_t> infos(batchCount(self), 0);
 
   if (self.numel() == 0 || LU_data.numel() == 0) {
-    return at::zeros_like(self, at::MemoryFormat::Contiguous);
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);
