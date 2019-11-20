@@ -122,4 +122,3 @@ register_backend(
     _process_group_construct_rpc_agent_options_handler,
     _process_group_init_backend_handler,
 )
-register_backend("PROCESS_GROUP", _process_group_init_backend_handler)
