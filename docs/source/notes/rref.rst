@@ -149,12 +149,14 @@ Things get a little trickier if the RRef is created on a user:
       A -> Y -> Z
 
 
-If Z calls to_here on the ``UserRRef``, the owner at least knows A when Z is
-deleted, because otherwise, ``to_here`` wouldn't finish. If Z does not call
-to_here, it is possible that the owner receives all messages from Z before
-any message from A and Y. In this case, as the real data of the ``OwnerRRef``
-has not been created yet, there is nothing to be deleted either. It is the same
-as Z does not exist at all. Hence, it's still OK.
+If Z calls :meth:`~torch.distributed.rpc.RRef.to_here` on the ``UserRRef``, the
+owner at least knows A when Z is deleted, because otherwise,
+:meth:`~torch.distributed.rpc.RRef.to_here` wouldn't finish. If Z does not call
+:meth:`~torch.distributed.rpc.RRef.to_here`, it is possible that the owner
+receives all messages from Z before any message from A and Y. In this case, as
+the real data of the ``OwnerRRef`` has not been created yet, there is nothing to
+be deleted either. It is the same as Z does not exist at all. Hence, it's still
+OK.
 
 Implementation
 --------------
@@ -189,7 +191,7 @@ User Share RRef with Owner as Return Value
 
 In this case, the ``UserRRef`` is created on the user worker A, then it is
 passed to the owner worker B together with the remote message, and then B
-creates the ``OwnerRRef``. The method :meth:`~torch.distributed.rpc.remote``
+creates the ``OwnerRRef``. The method :meth:`~torch.distributed.rpc.remote`
 returns immediately, meaning that the ``UserRRef`` can be forked/used before
 the owner knows about it.
 
@@ -207,7 +209,7 @@ is not deleted until it receives the ACK from the owner.
 The diagram above shows the message flow, where solid arrow contains user
 function and dashed arrow are builtin messages. Note that the first two messages
 from A to B (:meth:`~torch.distributed.rpc.remote` and
-:meth:`~torch.distributed.rpc.remotetorch.distributed.rpc.RRef.to_here`) may
+:meth:`~torch.distributed.rpc.RRef.to_here`) may
 arrive at B in any order, but the final delete message will only be sent out
 when:
 
