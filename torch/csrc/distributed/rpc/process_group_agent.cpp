@@ -128,7 +128,6 @@ ProcessGroupAgent::ProcessGroupAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
           c10::guts::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
-      shutdown_{false},
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
@@ -187,13 +186,13 @@ void ProcessGroupAgent::join() {
   //    feed it a message or kill the thread.
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
-  shutdown_.store(true);
+  rpcRunning_.store(false);
+
   sync();
   // This is needed in case no futures were created, otherwise the future
   // timeout watchdog would sleep forever.
 
   futureTimeoutCV_.notify_one();
-  rpcRunning_.store(false);
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
@@ -282,14 +281,16 @@ void ProcessGroupAgent::shutdown() {
     return;
   }
   LOG(INFO) << "Stopping ProcessGroupAgent.";
-  // CV to make sure we don't abort recvWork in an invalid state.
+  rpcRunning_.store(false);
   {
     std::unique_lock<std::mutex> lock(recvWorkMutex_);
-    recvWorkCV_.wait(lock, [this]() { return recvWork_; });
-    recvWork_->abort();
-    rpcRunning_.store(false);
+    if (recvWork_) {
+      recvWork_->abort();
+    }
   }
   listenerThread_.join();
+  futureTimeoutCV_.notify_one();
+  futureTimeoutThread_.join();
   threadPool_.waitWorkComplete();
   PythonRpcHandler::getInstance().cleanup();
   RRefContext::getInstance().destroyInstance();
@@ -486,8 +487,6 @@ void ProcessGroupAgent::listenLoop() {
       recvWork_ = pg_->recvAnysource(preamble, pg_->getRank());
     }
 
-    recvWorkCV_.notify_one();
-
     if (!rpcRunning_.load()) {
       return;
     }
@@ -519,7 +518,7 @@ void ProcessGroupAgent::listenLoop() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (!shutdown_.load()) {
+  while (rpcRunning_.load()) {
     std::chrono::milliseconds sleepTime;
     std::unique_lock<std::mutex> lock{futureMutex_};
     // Estimate amount of time the first future will time out in, and sleep
@@ -541,7 +540,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       futureTimeoutCV_.wait_for(lock, sleepTime);
     }
 
-    if (shutdown_.load()) {
+    if (!rpcRunning_.load()) {
       return;
     }
 

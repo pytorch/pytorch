@@ -1078,19 +1078,6 @@ class RpcTest(object):
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_rpc_agent_destructor(self):
-        # This test ensures that the rpc agent destructor safely shuts down the
-        # local RPC framework even if rpc.shutdown is not called
-        rpc.init_rpc(
-            self_name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-            self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
-            init_method=self.init_method,
-        )
-
-    @dist_init(setup_rpc=False)
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_local_shutdown(self):
         rpc.init_rpc(
             self_name="worker%d" % self.rank,
