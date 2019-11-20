@@ -12,6 +12,8 @@ namespace jit {
   _(ADFormulas)                        \
   _(Attributes)                        \
   _(Blocks)                            \
+  _(CallStack)                         \
+  _(CallStackCaching)                  \
   _(CodeTemplate)                      \
   _(ControlFlow)                       \
   _(CreateAutodiffSubgraphs)           \
@@ -69,6 +71,8 @@ namespace jit {
   _(LiteInterpreterAdd)                \
   _(LiteInterpreterConv)               \
   _(LiteInterpreterInline)             \
+  _(LiteInterpreterTuple)              \
+  _(LiteInterpreterPrimOverload)       \
   _(CommonAncestor)
 
 #define TH_FORALL_TESTS_CUDA(_) \

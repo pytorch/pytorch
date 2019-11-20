@@ -128,27 +128,27 @@ parseWireSections(const void* data, size_t data_size) {
 
   std::vector<std::pair<std::string, size_t>> header_ents;
   bool ok = false;
-  while (ptr < endp) {
+  while (ptr != endp) {
     if (*ptr == '\n') {
       ok = true;
       break;
     }
     const char* num_ptr = ptr;
-    while (*ptr != ' ' && ptr < endp) {
+    while (*ptr != ' ' && ptr != endp) {
       ptr++;
     }
-    if (ptr >= endp) {
+    if (ptr == endp) {
       break;
     }
     std::string name(num_ptr, ptr - num_ptr);
-    if (++ptr >= endp) {
+    if (++ptr == endp) {
       break; // past the ' '
     }
     const char* size_ptr = ptr;
-    while (*ptr != '\n' && ptr < endp) {
+    while (*ptr != '\n' && ptr != endp) {
       ptr++;
     }
-    if (ptr >= endp) {
+    if (ptr == endp) {
       break;
     }
     size_t sz = c10::stoll(std::string(size_ptr, ptr - size_ptr));
@@ -162,7 +162,7 @@ parseWireSections(const void* data, size_t data_size) {
     out[header_ents[i].first] = {ptr, header_ents[i].second};
     ptr += header_ents[i].second;
   }
-  if (!ok || ptr > endp) {
+  if (!ok || ptr != endp) {
     throw std::runtime_error("failed bounds");
   }
   return out;
