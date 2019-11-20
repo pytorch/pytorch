@@ -267,6 +267,14 @@ class TestNamedTensor(TestCase):
         none_named_tensor = torch.zeros(2, 3).rename_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
 
+    def test_diagonal(self):
+        named_tensor = torch.zeros(2, 3, 5, 7, names=list('ABCD'))
+        self.assertEqual(named_tensor.diagonal().names, ['C', 'D', None])
+        self.assertEqual(named_tensor.diagonal(1, 3).names, ['A', 'C', None])
+
+        self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
+                         ['A', 'C', 'E'])
+
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
         buf = io.BytesIO()

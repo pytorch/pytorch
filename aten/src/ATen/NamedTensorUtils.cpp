@@ -232,6 +232,25 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
   return outnames;
 }
 
+std::vector<Dimname> compute_diagonal_outnames(
+    const Tensor& tensor,
+    int64_t dim1,
+    int64_t dim2) {
+  if (!tensor.has_names()) {
+    return {};
+  }
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (int64_t d = 0; d < tensor.dim(); d++) {
+    if (d == dim1 || d == dim2) {
+      continue;
+    }
+    outnames.push_back(tensor_names[d]);
+  }
+  outnames.push_back(Dimname::wildcard());
+  return outnames;
+}
+
 // tensor_dotted_dim and other_dotted_dim are the dimensions of the two
 // tensors that we contract together. Usually other_dotted_dim is 0
 // and tensor_dotted_dim is the last dim of tensor, but there are some special

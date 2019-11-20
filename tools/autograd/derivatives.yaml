@@ -273,7 +273,7 @@
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
 
-- name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
+- name: diagonal.int(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   self: diagonal_backward(grad, self.sizes(), offset, dim1, dim2)
 
 - name: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
