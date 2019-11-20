@@ -26,7 +26,8 @@ torch.nn.MaxUnpool3d|Yes|No
 torch.nn.AvgPool1d|Yes|No
 torch.nn.AvgPool2d|Yes|No
 torch.nn.AvgPool3d|Yes|No
-torch.nn.FractionalMaxPool2d|No|No
+torch.nn.FractionalMaxPool2d|Yes|No
+torch.nn.FractionalMaxPool3d|Yes|No
 torch.nn.LPPool1d|Yes|No
 torch.nn.LPPool2d|Yes|No
 torch.nn.AdaptiveMaxPool1d|Yes|No
@@ -75,9 +76,9 @@ torch.nn.BatchNorm2d|Yes|No
 torch.nn.BatchNorm3d|Yes|No
 torch.nn.GroupNorm|Yes|No
 torch.nn.SyncBatchNorm|No|No
-torch.nn.InstanceNorm1d|No|No
-torch.nn.InstanceNorm2d|No|No
-torch.nn.InstanceNorm3d|No|No
+torch.nn.InstanceNorm1d|Yes|No
+torch.nn.InstanceNorm2d|Yes|No
+torch.nn.InstanceNorm3d|Yes|No
 torch.nn.LayerNorm|Yes|No
 torch.nn.LocalResponseNorm|Yes|No
 torch.nn.CrossMapLRN2d|Yes|No
@@ -113,7 +114,7 @@ torch.nn.NLLLoss|Yes|No
 torch.nn.PoissonNLLLoss|Yes|No
 torch.nn.KLDivLoss|Yes|No
 torch.nn.BCELoss|Yes|No
-torch.nn.BCEWithLogitsLoss|No|No
+torch.nn.BCEWithLogitsLoss|Yes|No
 torch.nn.MarginRankingLoss|Yes|No
 torch.nn.HingeEmbeddingLoss|Yes|No
 torch.nn.MultiLabelMarginLoss|Yes|No
@@ -140,5 +141,4 @@ torch.nn.utils.rnn.pack_padded_sequence|No|No
 torch.nn.utils.rnn.pad_packed_sequence|No|No
 torch.nn.utils.rnn.pad_sequence|No|No
 torch.nn.utils.rnn.pack_sequence|No|No
-torch.nn.FractionalMaxPool3d|No|No
 torch.nn.SampleModule|Yes|Yes

@@ -4403,7 +4403,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:19".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 1)):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -4412,7 +4412,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:23".format(lineno + 2)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 2)):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -4478,7 +4478,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(RuntimeError, 'test_jit.py\", line {}'.format(lineno + 3)):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4504,7 +4504,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py\", line {}'.format(lineno + 3)):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -6781,6 +6781,60 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
+
+    def test_error_stacktrace(self):
+        @torch.jit.script
+        def baz(c, b):
+            return c + b
+
+        @torch.jit.script
+        def foo(c, b):
+            return baz(c, b)
+
+        @torch.jit.script
+        def bar(c, b):
+            return foo(c, b)
+
+        with self.assertRaises(RuntimeError) as cm:
+            bar(torch.rand(10), torch.rand(9))
+        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
+
+    def test_error_stacktrace_interface(self):
+        global IFace
+        @torch.jit.script
+        def baz(c, b):
+            return c + b
+
+        @torch.jit.script
+        def foo(c, b):
+            return baz(c, b)
+
+        @torch.jit.script
+        def bar(c, b):
+            return foo(c, b)
+
+        @torch.jit.script
+        class Bar(object):
+            def one(self, x, y):
+                return bar(x, y)
+
+        @torch.jit.interface
+        class IFace(object):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+        @torch.jit.script
+        def as_interface(x):
+            # type: (IFace) -> IFace
+            return x
+
+        f = as_interface(Bar())
+
+        with self.assertRaises(RuntimeError) as cm:
+            x = f.one(torch.rand(10), torch.rand(9))
+            bar(torch.rand(10), torch.rand(9))
+        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
 
     def test_binop_unsupported_error(self):
         with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
