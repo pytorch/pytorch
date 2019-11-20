@@ -24,8 +24,8 @@ public:
   Vec256() {}
   Vec256(__m256 v) : values(v) {}
   Vec256(std::complex<float> val) {
-    float real_value = std::real(val);
-    float imag_value = std::imag(val);
+    float real_value = val.real();
+    float imag_value = val.imag();
     values = _mm256_setr_ps(real_value, imag_value,
                             real_value, imag_value,
                             real_value, imag_value,
@@ -33,10 +33,10 @@ public:
                             );
   }
   Vec256(std::complex<float> val1, std::complex<float> val2, std::complex<float> val3, std::complex<float> val4) {
-    values = _mm256_setr_ps(std::real(val1), std::imag(val1),
-                            std::real(val2), std::imag(val2),
-                            std::real(val3), std::imag(val3),
-                            std::real(val4), std::imag(val4)
+    values = _mm256_setr_ps(val1.real(), val1.imag(),
+                            val2.real(), val2.imag(),
+                            val3.real(), val3.imag(),
+                            val4.real(), val4.imag()
                             );
   }
   operator __m256() const {
