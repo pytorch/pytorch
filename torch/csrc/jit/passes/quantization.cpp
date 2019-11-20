@@ -450,6 +450,7 @@ void insertQuantDeQuantCall(
 
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
+  g->insertNode(quant);
 
   // Insert all the dequants first
   Node* observer_node = nullptr;
@@ -474,7 +475,6 @@ void insertQuantDeQuantCall(
     observer_node->replaceInputWith(quant->output(), v);
   }
   quant->replaceInputWith(quant->output(), v);
-  g->insertNode(quant);
 }
 
 // find the observer for Value `v` and return the name of the observer
