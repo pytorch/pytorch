@@ -1,7 +1,6 @@
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 
@@ -150,36 +149,6 @@ static Py_ssize_t _ListNestedTensorVariable_len(PyObject *self_) {
   return PyLong_AsSsize_t(PyLong_FromLong(self.__len__()));
 }
 
-// TODO: This could be multithreaded by inlining invokeScriptFunctionFromPython 
-// and accumulating all AutoNoGIL code.
-static _NestedNode apply_jit_function(const _NestedNode nested_node, Function& fn) {
-  if (nested_node._children.size() == 0) {
-  Variable child_variable = nested_node._variable_node._variable;
-  PyObject *child = THPVariable_Wrap(child_variable);
-  pybind11::object self = pybind11::reinterpret_borrow<pybind11::object>(child);
-  py::object result = invokeScriptFunctionFromPython(
-      fn, torch::jit::tuple_slice(py::make_tuple(self)), py::dict());
-  return _NestedNode(result.cast<Variable>());
-
-  } else { 
-    std::vector<_NestedNode> result;
-    for (size_t i= 0; i < nested_node._children.size(); i++){
-      result.push_back(apply_jit_function(nested_node._children[i], fn));
-    }
-    return _NestedNode(result);
-  }
-}
-
-
-static PyObject *_ListNestedTensorVariable_jit_apply(PyObject *self__,
-                                                     PyObject *fn) {
-  auto &self_ = reinterpret_cast<_ListNestedTensorVariable *>(self__)->cdata;
-  pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
-  auto sfn = torch::jit::script::as_function(ofn).value();
-  Function &callee = *sfn.function_;
-  return _ListNestedTensorVariable_Wrap(_ListNestedTensor(apply_jit_function(self_.get_structure(), callee)));
-}
-
 static PyObject *
 _ListNestedTensorVariable_dtype(_ListNestedTensorVariable *self, void *unused) {
   HANDLE_TH_ERRORS
@@ -232,8 +201,6 @@ static PyMethodDef _ListNestedTensorVariable_methods[] = {
      "Detaches and returns."},
     {"requires_grad_", (PyCFunction)_ListNestedTensorVariable_requires_grad_,
      METH_O, "requires_grad_ and returns."},
-    {"jit_apply", (PyCFunction)_ListNestedTensorVariable_jit_apply, METH_O,
-     "jit_apply and returns."},
     {"backward", (PyCFunction)_ListNestedTensorVariable_backward, METH_VARARGS,
      "backward and returns."},
     {"is_pinned", (PyCFunction)_ListNestedTensorVariable_is_pinned, METH_NOARGS,
