@@ -1,12 +1,14 @@
 .. warning::
   The :ref:`distributed-rpc-framework` is experimental and subject to change.
 
+.. _distributed-autograd-design:
+
 Distributed Autograd Design
 ===========================
 
 This note will present the detailed design for distributed autograd and walk
 through the internals of the same. Make sure you're familiar with
-:ref:`autograd-mechanics` and the :ref:`distributed-rpc-framework` before 
+:ref:`autograd-mechanics` and the :ref:`distributed-rpc-framework` before
 proceeding.
 
 Background
@@ -66,7 +68,7 @@ an RPC.
 - Each ``send-recv`` pair is assigned a globally unique ``autograd_message_id``
   to uniquely identify the pair. This is useful to lookup the corresponding
   function on a remote node during the backward pass.
-- For :ref:`rref`, whenever we call :meth:`torch.distributed.rpc.RRef.to_here` 
+- For :ref:`rref`, whenever we call :meth:`torch.distributed.rpc.RRef.to_here`
   we attach an appropriate ``send-recv`` pair for the tensors involved.
 
 As an example, this is what the autograd graph for our example above would look
@@ -80,8 +82,8 @@ Distributed Autograd Context
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Each forward and backward pass that uses distributed autograd is assigned a
-unique :class:`torch.distributed.autograd.context` and this context has a 
-globally unique ``autograd_context_id``. This context is created on each node 
+unique :class:`torch.distributed.autograd.context` and this context has a
+globally unique ``autograd_context_id``. This context is created on each node
 as needed.
 
 This context serves the following purpose:
@@ -92,7 +94,7 @@ This context serves the following purpose:
    before we have the opportunity to run the optimizer. This is similar to
    calling :meth:`torch.autograd.backward` multiple times locally. In order to
    provide a way of separating out the gradients for each backward pass, the
-   gradients are accumulated in the :class:`torch.distributed.autograd.context` 
+   gradients are accumulated in the :class:`torch.distributed.autograd.context`
    for each backward pass.
 2. During the forward pass we store the ``send`` and ``recv`` functions for
    each autograd pass in this context. This ensures we hold references to the
@@ -186,6 +188,8 @@ In the general case it might not be necessary that every ``send`` and ``recv``
 function is valid as part of the backward pass. To address this, we also have
 a `SMART mode algorithm`_ which is described in a later section.
 
+.. _fast-mode-algorithm:
+
 FAST mode algorithm
 -------------------
 
@@ -265,22 +269,22 @@ The distributed autograd graph with dependencies would be as follows:
 
 The `FAST mode algorithm`_ applied to the above example would be as follows:
 
-1. On ``Worker 0`` we start from the roots ``loss`` and ``send1`` to compute 
-   dependencies. As a result ``send1`` is marked with a dependency of 1 and ``mul`` 
+1. On ``Worker 0`` we start from the roots ``loss`` and ``send1`` to compute
+   dependencies. As a result ``send1`` is marked with a dependency of 1 and ``mul``
    on ``Worker 0`` is marked with a dependency of 1.
-2. Now, we kickoff the local autograd engine on ``Worker 0``. We first execute 
-   the ``mul`` function, accumulate its output in the autograd context as the 
-   gradient for ``t4``. Then, we execute ``recv2`` which sends the gradients to 
+2. Now, we kickoff the local autograd engine on ``Worker 0``. We first execute
+   the ``mul`` function, accumulate its output in the autograd context as the
+   gradient for ``t4``. Then, we execute ``recv2`` which sends the gradients to
    ``Worker 1``.
-3. Since this is the first time ``Worker 1`` has heard about this backward pass, 
-   it starts dependency computation and marks the dependencies for ``send2``, 
+3. Since this is the first time ``Worker 1`` has heard about this backward pass,
+   it starts dependency computation and marks the dependencies for ``send2``,
    ``add`` and ``recv1`` appropriately.
-4. Next, we enqueue ``send2`` on the local autograd engine of ``Worker 1``, which 
+4. Next, we enqueue ``send2`` on the local autograd engine of ``Worker 1``, which
    in turn executes ``add`` and ``recv1``.
 5. When ``recv1`` is executed it sends the gradients over to ``Worker 0``.
-6. Since ``Worker 0`` has already computed dependencies for this backward pass, 
+6. Since ``Worker 0`` has already computed dependencies for this backward pass,
    it just enqueues and executes ``send1`` locally.
-7. Finally, gradients for ``t1``, ``t2`` and ``t4`` are accumulated in the 
+7. Finally, gradients for ``t1``, ``t2`` and ``t4`` are accumulated in the
    `Distributed Autograd Context`_.
 
 SMART mode algorithm
@@ -291,6 +295,87 @@ you can refer to **Distributed Autograd Algorithm Smart mode** section in the
 
 Distributed Optimizer
 ^^^^^^^^^^^^^^^^^^^^^
-Coming soon...
+
+The :class:`~torch.distributed.optim.DistributedOptimizer` operates as follows:
+
+1. Takes a list of remote parameters (:class:`~torch.distributed.rpc.RRef`) to
+   optimize. These could also be local parameters wrapped within a local
+   ``RRef``.
+2. Takes a :class:`~torch.optim.Optimizer` class as the local
+   optimizer to run on all distinct ``RRef`` owners.
+3. The distributed optimizer creates an instance of the local ``Optimizer`` on
+   each of the worker nodes and holds an ``RRef`` to them.
+4. When :meth:`torch.distributed.optim.DistributedOptimizer.step` is invoked,
+   the distributed optimizer uses RPC to remotely execute all the local
+   optimizers on the appropriate remote workers.
+5. If multiple concurrent distributed optimizers are updating the same
+   parameters on a worker, these updates are serialized via a lock.
+
+Simple end to end example
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Putting it all together, a very simple end to end example using distributed
+autograd and distributed optimizer is as follows:
+
+.. code::
+
+  import multiprocessing as mp
+  from tempfile import NamedTemporaryFile
+  import torch
+  import torch.distributed.autograd as dist_autograd
+  from torch.distributed import rpc
+  from torch import optim
+  from torch.distributed.optim import DistributedOptimizer
+
+  def random_tensor():
+      return torch.rand((3, 3), requires_grad=True)
+
+  def _run_process(self_rank, dst_rank, file_name):
+      self_name = "worker{}".format(self_rank)
+      dst_name = "worker{}".format(dst_rank)
+
+      # Initialize RPC.
+      rpc.init_rpc(
+          self_name=self_name,
+          self_rank=self_rank,
+          worker_name_to_id={"worker0": 0, "worker1": 1},
+          init_method="file://{}".format(file_name),
+      )
+
+      # Use a distributed autograd context.
+      with dist_autograd.context() as context_id:
+         # Forward pass (create references on remote nodes).
+         rref1 = rpc.remote(dst_name, random_tensor)
+         rref2 = rpc.remote(dst_name, random_tensor)
+         loss = rref1.to_here() + rref2.to_here()
+
+         # Backward pass (run distributed autograd).
+         dist_autograd.backward([loss.sum()])
+
+         # Build DistributedOptimizer.
+         dist_optim = DistributedOptimizer(
+           optim.SGD,
+           [rref1, rref2],
+           lr=0.05,
+         )
+
+         # Run the distributed optimizer step.
+         dist_optim.step()
+
+  def run_process(self_rank, dst_rank, file_name):
+      _run_process(self_rank, dst_rank, file_name)
+      rpc.join_rpc()
+
+  file_name = NamedTemporaryFile().name
+  processes = []
+
+  # Run two workers.
+  for i in range(2):
+      p = mp.Process(target=run_process, args=(i, (i + 1) % 2, file_name))
+      p.start()
+      processes.append(p)
+
+  for p in processes:
+      p.join()
 
 .. _RFC: https://github.com/pytorch/pytorch/issues/23110
