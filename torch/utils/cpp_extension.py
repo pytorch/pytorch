@@ -104,7 +104,7 @@ COMMON_NVCC_FLAGS = [
 
 # See comment in load_inline for more information
 # The goal is to be able to call the safe version of the
-# function exactely as if it was the original one.
+# function exactly as if it was the original one.
 # We need to create a pointer to this new function to give
 # it to pybind later.
 
@@ -943,6 +943,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         lib_path = os.path.join(torch_path, 'lib')
 
         extra_ldflags.append('c10.lib')
+        extra_ldflags.append('torch_cpu.lib')
+        if with_cuda:
+            extra_ldflags.append('torch_cuda.lib')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
         extra_ldflags.append('_C.lib')

@@ -749,8 +749,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
         bool transposed, IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
   return std::tuple<Tensor, Tensor, Tensor>(
-          at::empty_like(input, at::MemoryFormat::Contiguous),
-          at::empty_like(weight, at::MemoryFormat::Contiguous),
+          at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
+          at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT),
           at::empty({}));
 }
 
@@ -805,7 +805,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
+    ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (ggb.defined()) {
@@ -896,7 +896,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
+    gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   // Compute gI = convT(ggW, gO.t()) if !transposed
@@ -985,12 +985,12 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
+    gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
-  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }
