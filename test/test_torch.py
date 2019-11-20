@@ -13223,6 +13223,32 @@ class TestTorchDeviceType(TestCase):
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
 
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_max_min_nan(self, device, dtype):
+        a = torch.rand(1000, dtype=dtype, device=device)
+        b = torch.rand(1000, dtype=dtype, device=device)
+
+        # 0:250: a -- nan, b -- not nan
+        a[:250] = float('nan')
+        # 250:500: a -- not nan, b -- nan
+        b[250:500] = float('nan')
+        # 500:750: a and b both nan
+        a[500:750] = float('nan')
+        b[500:750] = float('nan')
+        # 750:1000: neither nan
+
+        ma = torch.max(a, b)
+        mi = torch.min(a, b)
+
+        for i in range(750):
+            self.assertTrue(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
+            self.assertTrue(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
+
+        for i in range(750, 1000):
+            self.assertFalse(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
+            self.assertFalse(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
+
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
     def test_threshold(self, device, dtype):
