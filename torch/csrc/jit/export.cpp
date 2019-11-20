@@ -91,17 +91,6 @@ void validateBlock(
             "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
             getNodeStackTraceString(node));
       }
-      bool is_aten_enabled = operator_export_type ==
-              onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      bool is_onnx = operator_export_type ==
-              onnx_torch::OperatorExportTypes::ONNX;
-      if (!node->kind().is_onnx() && !node->kind().is_caffe2() &&
-          !is_aten_enabled && !node->mustBeNone() && !is_onnx) {
-        FAIL_EXPORT(
-            "Couldn't export operator " + node->kind().toDisplayString() +
-            "\n\nDefined at:\n" + getNodeStackTraceString(node));
-      }
     }
 #undef FAIL_EXPORT
   }
@@ -341,6 +330,7 @@ void EncoderBase::EncodeBlock(
       if (node->kind().is_aten() || node->kind().is_caffe2())
         domain = node->kind().domainString();
 	    else
+//	    Custom namespace and domain
 	      domain = node->kind().ns().toUnqualString();
 	    p_n->set_domain(domain);
 	    domains_.insert(domain);
@@ -468,6 +458,7 @@ class GraphEncoder : public EncoderBase {
       const std::shared_ptr<Graph>& graph,
       int64_t onnx_opset_version,
       onnx_torch::OperatorExportTypes operator_export_type,
+      const std::map<std::string, int>& registered_domain_version,
       const std::map<std::string, at::Tensor>& initializers,
       const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
       bool defer_weight_export,
@@ -492,6 +483,7 @@ GraphEncoder::GraphEncoder(
     const std::shared_ptr<Graph>& graph,
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
+    const std::map<std::string, int>& registered_domain_version,
     const std::map<std::string, at::Tensor>& initializers,
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export,
@@ -509,11 +501,15 @@ GraphEncoder::GraphEncoder(
 
   EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes, keep_initializers_as_inputs);
 
-  for (const std::string& domain : domains_) {
-    auto* opset = model_proto_.add_opset_import();
+	for (const std::string& domain : domains_) {
+		auto* opset = model_proto_.add_opset_import();
     opset->set_domain(domain);
-    opset->set_version(1);
-  }
+//    Check if the domain version is registered. If not, set version to 1 for default
+    if (registered_domain_version.find(domain) == registered_domain_version.end())
+      opset->set_version(1);
+    else
+      opset->set_version(registered_domain_version.at(domain));
+	}
 }
 
 void GraphEncoder::EncodeTensor(
@@ -963,12 +959,14 @@ std::string pretty_print_onnx(
     int64_t onnx_opset_version,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
+    const std::map<std::string, int>& registered_domain_version,
     bool google_printer,
     bool keep_initializers_as_inputs) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
       operator_export_type,
+      registered_domain_version,
       initializers,
       std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>{},
       defer_weight_export,
@@ -992,12 +990,14 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::unordered_map<std::string, std::unordered_map<std::int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
+    const std::map<std::string, int>& registered_domain_version,
     bool strip_doc_string,
     bool keep_initializers_as_inputs) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
       operator_export_type,
+      registered_domain_version,
       initializers,
       dynamic_axes,
       defer_weight_export,

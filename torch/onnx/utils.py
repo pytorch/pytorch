@@ -371,8 +371,10 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                     example_outputs, propagate, _retain_param_name,
                                                     do_constant_folding, fixed_batch_size=fixed_batch_size)
 
+    import torch.onnx.symbolic_registry as sym_registry
+    domains = sym_registry.get_registered_domains()
     return graph._pretty_print_onnx(params_dict, opset_version, False,
-                                    operator_export_type, google_printer,
+                                    operator_export_type, domains, google_printer,
                                     val_keep_init_as_ip)
 
 
@@ -422,13 +424,16 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
         _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
 
+        import torch.onnx.symbolic_registry as sym_registry
+        domains = sym_registry.get_registered_domains()
+
         if export_params:
             proto, export_map = graph._export_onnx(
                 params_dict, opset_version, dynamic_axes, defer_weight_export,
-                operator_export_type, strip_doc_string, val_keep_init_as_ip)
+                operator_export_type, domains, strip_doc_string, val_keep_init_as_ip)
         else:
             proto, export_map = graph._export_onnx(
-                {}, opset_version, dynamic_axes, False, operator_export_type,
+                {}, opset_version, dynamic_axes, False, operator_export_type, domains,
                 strip_doc_string, val_keep_init_as_ip)
 
         if export_type == ExportTypes.PROTOBUF_FILE:

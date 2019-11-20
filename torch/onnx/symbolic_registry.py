@@ -10,11 +10,30 @@ from inspect import getmembers, isfunction
 # The map's entries are as follows : _registry[(domain, version)][op_name] = op_symbolic
 _registry = {}
 
+# _domains is a dictionary that maps custom domains to the registered version. This is optional
+# register a domain with a specific version. If a specific version is not registered, the domain
+# version is set to 1 by default.
+# Dict entries are _domains[domain] = version
+_domains = {}
+
 _symbolic_versions = {}
 from torch.onnx.symbolic_helper import _onnx_stable_opsets
 for opset_version in _onnx_stable_opsets:
     module = importlib.import_module('torch.onnx.symbolic_opset{}'.format(opset_version))
     _symbolic_versions[opset_version] = module
+
+
+def register_custom_domain(domain, version=1):
+    global _domains
+    if not domain in _domains:
+        _domains[domain] = {}
+    _domains[domain] = version
+
+
+def get_registered_domains():
+    global _domains
+    return _domains
+
 
 def register_version(domain, version):
     if not is_registered_version(domain, version):
