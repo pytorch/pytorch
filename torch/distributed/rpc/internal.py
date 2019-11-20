@@ -119,6 +119,9 @@ def _run_function(binary_data, tensor_table):
         result = RemoteException(except_str)
     return result
 
+def _handle_exception(result):
+    if isinstance(result, RemoteException):
+        raise Exception(result.msg)
 
 def _load_return_value(binary_data, tensor_table):
     r"""
@@ -129,8 +132,7 @@ def _load_return_value(binary_data, tensor_table):
     Raises exception if the return value is a wrapped exception.
     """
     result = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
-    if isinstance(result, RemoteException):
-        raise Exception(result.msg)
+    _handle_exception(result)
     return result
 
 

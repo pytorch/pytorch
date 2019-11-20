@@ -119,7 +119,7 @@ class ConvBn2d(nn.Conv2d):
             batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
             n = float(conv_orig.numel() / conv_orig.size()[1])
             unbiased_batch_var = batch_var * (n / (n - 1))
-            batch_rstd = torch.ones_like(batch_var) / torch.sqrt(batch_var + self.eps)
+            batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
 
             rescale_factor = running_std * batch_rstd
             conv = conv * rescale_factor.reshape([1, -1, 1, 1])

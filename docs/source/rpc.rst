@@ -51,8 +51,12 @@ RPC and RRef primitives
 This library provides primitives allowing users to create and modify references
 (RRefs) to remote data as well as remotely execute functions.
 
-.. automodule:: torch.distributed.rpc.api
-    :members:
+.. automodule:: torch.distributed.rpc
+.. autofunction:: rpc_sync
+.. autofunction:: rpc_async
+.. autofunction:: remote
+.. autofunction:: get_worker_info
+.. autofunction:: join_rpc
 
 Distributed Autograd Framework
 ------------------------------
@@ -62,7 +66,13 @@ used for applications such as model parallel training. In short, applications
 may send and receive gradient recording tensors over RPC. In the forward pass,
 we record when gradient recording tensors are sent over RPC and during the
 backward pass we use this information to perform a distributed backward pass
-using RPC. For more details see the design doc for distributed autograd: :doc:`/notes/distributed_autograd`.
+using RPC. For more details see :ref:`distributed-autograd-design`.
 
 .. automodule:: torch.distributed.autograd
-    :members:
+    :members: context, backward, get_gradients
+
+Distributed Optimizer
+---------------------
+
+.. automodule:: torch.distributed.optim
+    :members: DistributedOptimizer

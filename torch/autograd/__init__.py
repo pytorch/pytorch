@@ -32,7 +32,7 @@ def _make_grads(outputs, grads):
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
-                new_grads.append(torch.ones_like(out))
+                new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)
         else:

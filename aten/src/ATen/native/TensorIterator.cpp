@@ -114,11 +114,13 @@ static std::tuple<Device, ScalarType, bool> compute_common_type_(at::ArrayRef<Op
   if (all_same_type) {
     return std::make_tuple(device, common_type, true);
   }
-  //TODO refactor so that no tensor copies are done
-  std::vector<Tensor> tensors;
-  std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
-                  [](const OperandInfo& op) { return op.tensor; });
-  auto dtype = at::native::result_type(tensors);
+
+  at::native::ResultTypeState state = {};
+  for (const auto& op : operands) {
+    state = at::native::update_result_type_state(op.tensor, state);
+  }
+  auto dtype = at::native::result_type(state);
+
   auto result = std::make_tuple(device, dtype, false);
   TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
   return result;
