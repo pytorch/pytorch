@@ -701,7 +701,6 @@ TORCH_API script::Module InsertObservers(
     const QConfigDict& qconfig_dict,
     bool inplace) {
   script::Module module = inplace ? input_module : input_module.clone();
-  std::cout << "before\n";
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);

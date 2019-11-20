@@ -951,9 +951,7 @@ graph(%x : Tensor,
                 activation=observer._c,
                 weight=observer._c)
         }
-        m.save('/home/jamesreed/before.zip')
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        m.save('/home/jamesreed/after.zip')
         assert len([x for x, _ in m._modules._c.items()
                     if x.startswith('_observer_')]) == 0, \
             'Expected to have 0 observer submodules'
