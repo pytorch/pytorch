@@ -22,7 +22,7 @@ inline Tensor dropout(Tensor& input, double p, bool training, bool inplace) {
 
 } // namespace detail
 
-inline Tensor dropout(Tensor& input,
+inline Tensor dropout(Tensor input,
     const DropoutFuncOptions& options = {}) {
   return detail::dropout(
       input, options.p(), options.training(), options.inplace());
@@ -46,7 +46,7 @@ inline Tensor dropout2d(Tensor& input, double p, bool training, bool inplace) {
 
 } // namespace detail
 
-inline Tensor dropout2d(Tensor& input,
+inline Tensor dropout2d(Tensor input,
     const Dropout2dFuncOptions& options = {}) {
   return detail::dropout2d(
       input, options.p(), options.training(), options.inplace());
@@ -70,7 +70,7 @@ inline Tensor dropout3d(Tensor& input, double p, bool training, bool inplace) {
 
 } // namespace detail
 
-inline Tensor dropout3d(Tensor& input,
+inline Tensor dropout3d(Tensor input,
     const Dropout3dFuncOptions& options = {}) {
   return detail::dropout3d(
       input, options.p(), options.training(), options.inplace());
