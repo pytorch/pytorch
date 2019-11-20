@@ -352,9 +352,10 @@ a tensor or tensor-like that defines ``__torch_function__``, for example for
          return torch.add(ensure_tensor(input), ensure_tensor(other))
 
 This version has a fast path for when both operands are ``ScalarTensor``
-instances and also a slower path degrades to converting the data to tensors when
-that is not the case. That makes it work when either operand is a
-``ScalarTensor`` or a regular :class:`Tensor`::
+instances and also a slower path whcih degrades to converting the data to
+tensors when either operand is not a ``ScalarTensor``. That makes the override
+function correctly when either operand is a ``ScalarTensor`` or a regular
+:class:`Tensor`::
 
   >>> s = ScalarTensor(2, 2)
   >>> torch.add(s, s)
