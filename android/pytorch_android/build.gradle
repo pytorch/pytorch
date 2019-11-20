@@ -27,6 +27,10 @@ android {
     }
     sourceSets {
         main {
+            java {
+                exclude 'org/pytorch/LiteModuleLoader.java'
+                exclude 'org/pytorch/LiteNativePeer.java'
+            }
             jniLibs.srcDirs = ['src/main/jniLibs']
         }
     }
@@ -42,8 +46,9 @@ android {
         } else {
             pickFirst '**/libfbjni.so'
         }
-        if (nativeLibsDoNotStrip) {
+        if (nativeLibsDoNotStrip.toBoolean()) {
             doNotStrip "**/*.so"
+            logger.warn('WARNING: nativeLibsDoNotStrip==true; debug symbols included')
         }
     }
 

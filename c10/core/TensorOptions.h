@@ -144,25 +144,6 @@ struct C10_API TensorOptions {
     this->set_dtype(dtype);
   }
 
-  /// True if all elements of the `TensorOptions` match that of the other.
-  bool operator==(const TensorOptions& other) const noexcept {
-    return
-        has_dtype_ == other.has_dtype_ &&
-        has_layout_ == other.has_layout_ &&
-        has_device_ == other.has_device_ &&
-        has_requires_grad_ == other.has_requires_grad_ &&
-        (!has_dtype_ || dtype_ == other.dtype_) &&
-        (!has_layout_ || layout_ == other.layout_) &&
-        (!has_device_ || device_ == other.device_) &&
-        (!requires_grad_ || requires_grad_ == other.requires_grad_);
-  }
-
-  /// True if any of the elements of this `TensorOptions` do not match that of
-  /// the other.
-  bool operator!=(const TensorOptions& other) const noexcept {
-    return !(*this == other);
-  }
-
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
   /// cleared if `device` is `nullopt`.
   C10_NODISCARD TensorOptions device(c10::optional<Device> device) const noexcept {
