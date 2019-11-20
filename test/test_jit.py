@@ -1220,9 +1220,9 @@ graph(%x : Tensor,
         get_forward(m._c)(data, weight, weight, weight)
         FileCheck().check("aten::dequantize") \
                    .check("aten::conv2d") \
+                   .check("aten::quantize_per_tensor") \
                    .check("aten::dequantize") \
                    .check_next("aten::dequantize") \
-                   .check("aten::quantize_per_tensor") \
                    .check("aten::conv2d") \
                    .check("aten::conv2d") \
                    .check("return") \
