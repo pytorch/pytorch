@@ -514,6 +514,10 @@ void lgamma_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(abs_stub, &abs_kernel_cuda);
+REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
+REGISTER_DISPATCH(real_stub, &real_kernel_cuda);
+REGISTER_DISPATCH(imag_stub, &imag_kernel_cuda);
+REGISTER_DISPATCH(conj_stub, &conj_kernel_cuda);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
