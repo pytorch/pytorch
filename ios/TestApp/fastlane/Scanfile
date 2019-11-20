@@ -1,0 +1,3 @@
+scheme("TestAppTests")
+open_report(false)
+clean(true)

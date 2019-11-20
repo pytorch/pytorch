@@ -489,7 +489,7 @@ template<template<typename, typename, typename> class Epilogue, bool is_log_soft
 Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float){
   if (half_to_float) AT_ASSERTM(input_.scalar_type() == ScalarType::Half,"conversion is supported for Half type only");
   auto input = input_.contiguous();
-  Tensor output = half_to_float ? at::empty_like(input, input.options().dtype(ScalarType::Float)) : at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = half_to_float ? at::empty_like(input, input.options().dtype(ScalarType::Float), LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
@@ -571,7 +571,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
 template<template<typename, typename, typename> class Epilogue, bool is_log_softmax>
 Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool half_to_float){
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
-  Tensor gI = half_to_float ? at::empty_like(grad_, grad_.options().dtype(ScalarType::Half)) : at::empty_like(grad_, at::MemoryFormat::Contiguous);
+  Tensor gI = half_to_float ? at::empty_like(grad_, grad_.options().dtype(ScalarType::Half), LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::empty_like(grad_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (grad_.numel() == 0) {
     return gI;
   }
