@@ -724,6 +724,7 @@ TEST_F(FunctionalTest, ELU) {
       }
     }
   }
+  ASSERT_TRUE(F::elu(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, SELU) {
@@ -750,6 +751,7 @@ TEST_F(FunctionalTest, SELU) {
     auto expected = F::selu(input, false);
     ASSERT_TRUE(output.allclose(expected));
   }
+  ASSERT_TRUE(F::selu(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, GLU) {
@@ -856,6 +858,7 @@ TEST_F(FunctionalTest, Hardtanh) {
       }
     }
   }
+  ASSERT_TRUE(F::hardtanh(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, LeakyReLU) {
@@ -876,6 +879,7 @@ TEST_F(FunctionalTest, LeakyReLU) {
       }
     }
   }
+  ASSERT_TRUE(F::leaky_relu(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, LogSigmoid) {
@@ -1204,6 +1208,7 @@ TEST_F(FunctionalTest, ReLU) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
   }
+  ASSERT_TRUE(F::relu(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, ReLUDefaultOptions) {
@@ -1242,6 +1247,7 @@ TEST_F(FunctionalTest, ReLU6) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
   }
+  ASSERT_TRUE(F::relu6(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, ReLU6DefaultOptions) {
@@ -1278,6 +1284,7 @@ TEST_F(FunctionalTest, RReLU) {
       }
     }
   }
+  ASSERT_TRUE(F::rrelu(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, RReLUDefaultOptions) {
@@ -1314,6 +1321,7 @@ TEST_F(FunctionalTest, CELU) {
       }
     }
   }
+  ASSERT_TRUE(F::celu(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, CELUDefaultOptions) {
@@ -1484,6 +1492,7 @@ TEST_F(FunctionalTest, Threshold) {
       }
     }
   }
+  ASSERT_TRUE(F::threshold(torch::tensor(1.), F::ThresholdFuncOptions(0.5, 0.5)).defined());
 }
 
 TEST_F(FunctionalTest, BatchNorm1d) {
@@ -1916,6 +1925,112 @@ TEST_F(FunctionalTest, MarginRankingLoss) {
   }
 }
 
+TEST_F(FunctionalTest, ConvTranspose1d) {
+  auto x = torch::arange(20.).view({2, 2, 5});
+  auto weight = torch::arange(18.).view({2, 3, 3});
+  auto y = F::conv_transpose1d(x, weight, F::ConvTranspose1dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{  45.,  104.,  179.,  212.,  245.,  188.,  107.},
+                                  {  60.,  140.,  242.,  293.,  344.,  260.,  146.},
+                                  {  75.,  176.,  305.,  374.,  443.,  332.,  185.}},
+                                 {{ 135.,  304.,  509.,  542.,  575.,  428.,  237.},
+                                  { 210.,  460.,  752.,  803.,  854.,  620.,  336.},
+                                  { 285.,  616.,  995., 1064., 1133.,  812.,  435.}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv_transpose1d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
+TEST_F(FunctionalTest, ConvTranspose2dEven) {
+  auto x = torch::arange(50.).view({1, 2, 5, 5});
+  auto weight = torch::arange(54.).view({2, 3, 3, 3});
+  auto y = F::conv_transpose2d(x, weight, F::ConvTranspose2dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{{  675.,  1402.,  2183.,  2270.,  2357.,  1634.,   849.},
+                                   { 1560.,  3240.,  5044.,  5236.,  5428.,  3760.,  1952.},
+                                   { 2685.,  5574.,  8673.,  8988.,  9303.,  6438.,  3339.},
+                                   { 3180.,  6594., 10248., 10563., 10878.,  7518.,  3894.},
+                                   { 3675.,  7614., 11823., 12138., 12453.,  8598.,  4449.},
+                                   { 2820.,  5832.,  9040.,  9268.,  9496.,  6544.,  3380.},
+                                   { 1605.,  3314.,  5129.,  5252.,  5375.,  3698.,  1907.}},
+                                  {{  900.,  1870.,  2912.,  3053.,  3194.,  2210.,  1146.},
+                                   { 2100.,  4356.,  6772.,  7072.,  7372.,  5092.,  2636.},
+                                   { 3630.,  7518., 11670., 12147., 12624.,  8706.,  4500.},
+                                   { 4395.,  9078., 14055., 14532., 15009., 10326.,  5325.},
+                                   { 5160., 10638., 16440., 16917., 17394., 11946.,  6150.},
+                                   { 3900.,  8028., 12388., 12724., 13060.,  8956.,  4604.},
+                                   { 2190.,  4502.,  6938.,  7115.,  7292.,  4994.,  2564.}},
+                                  {{ 1125.,  2338.,  3641.,  3836.,  4031.,  2786.,  1443.},
+                                   { 2640.,  5472.,  8500.,  8908.,  9316.,  6424.,  3320.},
+                                   { 4575.,  9462., 14667., 15306., 15945., 10974.,  5661.},
+                                   { 5610., 11562., 17862., 18501., 19140., 13134.,  6756.},
+                                   { 6645., 13662., 21057., 21696., 22335., 15294.,  7851.},
+                                   { 4980., 10224., 15736., 16180., 16624., 11368.,  5828.},
+                                   { 2775.,  5690.,  8747.,  8978.,  9209.,  6290.,  3221.}}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv_transpose2d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
+TEST_F(FunctionalTest, ConvTranspose2dUneven) {
+  auto x = torch::arange(40.).view({1, 2, 5, 4});
+  auto weight = torch::arange(36.).view({2, 3, 3, 2});
+  auto y = F::conv_transpose2d(x, weight, F::ConvTranspose2dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{{ 360.,  758.,  796.,  834.,  440.},
+                                   { 832., 1752., 1836., 1920., 1012.},
+                                   {1432., 3014., 3152., 3290., 1732.},
+                                   {1696., 3566., 3704., 3842., 2020.},
+                                   {1960., 4118., 4256., 4394., 2308.},
+                                   {1504., 3152., 3252., 3352., 1756.},
+                                   { 856., 1790., 1844., 1898.,  992.}},
+                                  {{ 480., 1010., 1072., 1134.,  596.},
+                                   {1120., 2352., 2484., 2616., 1372.},
+                                   {1936., 4058., 4268., 4478., 2344.},
+                                   {2344., 4898., 5108., 5318., 2776.},
+                                   {2752., 5738., 5948., 6158., 3208.},
+                                   {2080., 4328., 4476., 4624., 2404.},
+                                   {1168., 2426., 2504., 2582., 1340.}},
+                                  {{ 600., 1262., 1348., 1434.,  752.},
+                                   {1408., 2952., 3132., 3312., 1732.},
+                                   {2440., 5102., 5384., 5666., 2956.},
+                                   {2992., 6230., 6512., 6794., 3532.},
+                                   {3544., 7358., 7640., 7922., 4108.},
+                                   {2656., 5504., 5700., 5896., 3052.},
+                                   {1480., 3062., 3164., 3266., 1688.}}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv_transpose2d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
+TEST_F(FunctionalTest, ConvTranspose3d) {
+  auto x = torch::arange(16.).view({1, 2, 2, 2, 2});
+  auto weight = torch::arange(32.).view({2, 2, 2, 2, 2});
+  auto y = F::conv_transpose3d(x, weight, F::ConvTranspose3dFuncOptions().stride(1));
+  auto expected = torch::tensor({{{{{ 128.,  280.,  154.},
+                                    { 304.,  664.,  364.},
+                                    { 184.,  400.,  218.}},
+                                   {{ 352.,  768.,  420.},
+                                    { 832., 1808.,  984.},
+                                    { 496., 1072.,  580.}},
+                                   {{ 256.,  552.,  298.},
+                                    { 592., 1272.,  684.},
+                                    { 344.,  736.,  394.}}},
+                                  {{{ 192.,  424.,  234.},
+                                    { 464., 1016.,  556.},
+                                    { 280.,  608.,  330.}},
+                                   {{ 544., 1184.,  644.},
+                                    {1280., 2768., 1496.},
+                                    { 752., 1616.,  868.}},
+                                   {{ 384.,  824.,  442.},
+                                    { 880., 1880., 1004.},
+                                    { 504., 1072.,  570.}}}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  auto y_no_options = F::conv_transpose3d(x, weight);
+  ASSERT_TRUE(torch::allclose(y_no_options, expected));
+}
+
 TEST_F(FunctionalTest, AlphaDropout) {
   auto input = torch::randn(5000);
   auto input_mean = input.mean();
@@ -1959,6 +2074,7 @@ TEST_F(FunctionalTest, Dropout) {
   auto output = F::dropout(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
   ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  ASSERT_TRUE(F::dropout(torch::tensor(1.)).defined());
 }
 
 TEST_F(FunctionalTest, Dropout2d) {
@@ -1974,6 +2090,7 @@ TEST_F(FunctionalTest, Dropout2d) {
   auto output = F::dropout2d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
   ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  ASSERT_TRUE(F::dropout2d(torch::randn({50, 100})).defined());
 }
 
 TEST_F(FunctionalTest, Dropout3d) {
@@ -1989,4 +2106,5 @@ TEST_F(FunctionalTest, Dropout3d) {
   auto output = F::dropout3d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
   ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
+  ASSERT_TRUE(F::dropout3d(torch::randn({50, 100})).defined());
 }
