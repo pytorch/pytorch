@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -73,43 +72,6 @@ void Module::to(at::ScalarType dtype, bool non_blocking) {
 
 void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
-}
-
-void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
-#ifndef C10_MOBILE
-  ExportModule(*this, out, extra_files, false);
-#else
-  AT_ERROR("Saving module is not supported on mobile.");
-#endif
-}
-
-void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
-    const {
-#ifndef C10_MOBILE
-  ExportModule(*this, filename, extra_files, false);
-#else
-  AT_ERROR("Saving module is not supported on mobile.");
-#endif
-}
-
-void Module::_save_for_mobile(
-    std::ostream& out,
-    const ExtraFilesMap& extra_files) const {
-#ifndef C10_MOBILE
-  ExportModule(*this, out, extra_files, true);
-#else
-  AT_ERROR("Saving module is not supported on mobile.");
-#endif
-}
-
-void Module::_save_for_mobile(
-    const std::string& filename,
-    const ExtraFilesMap& extra_files) const {
-#ifndef C10_MOBILE
-  ExportModule(*this, filename, extra_files, true);
-#else
-  AT_ERROR("Saving module is not supported on mobile.");
-#endif
 }
 
 void module_state_to(
