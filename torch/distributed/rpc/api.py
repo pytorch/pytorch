@@ -4,13 +4,13 @@ from . import _start_rpc_agent
 from . import _destroy_rref_context, _cleanup_python_rpc_handler
 from . import WorkerInfo
 from . import backend_registry
-from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
-import datetime
 import functools
+import numbers
 import sys
 import torch
+import torch.distributed as dist
 
 
 _agent = None
@@ -51,14 +51,37 @@ def join_rpc():
 def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,
     store=None,
-    self_name=None,
-    self_rank=-1,
-    worker_name_to_id=None,
-    num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-    rpc_timeout=DEFAULT_RPC_TIMEOUT,
+    name=None,
+    rank=-1,
+    world_size=-1,
+    rpc_agent_options=None,
 ):
+    from . import RpcAgentOptions
+
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
+
+    if not isinstance(backend, backend_registry.BackendType):
+        raise RuntimeError("`backend` must be a `backend_registry.BackendType`.")
+
+    if not isinstance(store, dist.Store):
+        raise RuntimeError("`store` must be a `c10d::Store`. {}".format(store))
+
+    if not isinstance(name, str):
+        raise RuntimeError("`name` must be a string. {}".format(name))
+
+    if not isinstance(rank, numbers.Integral):
+        raise RuntimeError("`rank` must be an integer. {}".format(rank))
+
+    if not isinstance(world_size, numbers.Integral):
+        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+
+    if not isinstance(rpc_agent_options, RpcAgentOptions):
+        raise RuntimeError(
+            "`rpc_agent_options` must be an `RpcAgentOptions`. {}".format(
+                rpc_agent_options
+            )
+        )
 
     global _agent
 
@@ -66,19 +89,13 @@ def _init_rpc_backend(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    if not isinstance(rpc_timeout, datetime.timedelta):
-        raise RuntimeError(
-            "`rpc_timeout` must be a `datetime.timedelta`."
-        )
-
     _agent = backend_registry.init_backend(
         backend,
         store=store,
-        self_name=self_name,
-        self_rank=self_rank,
-        worker_name_to_id=worker_name_to_id,
-        num_send_recv_threads=num_send_recv_threads,
-        rpc_timeout=rpc_timeout,
+        name=name,
+        rank=rank,
+        world_size=world_size,
+        rpc_agent_options=rpc_agent_options,
     )
     _start_rpc_agent(_agent)
 
