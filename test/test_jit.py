@@ -4203,23 +4203,23 @@ def foo(x):
             return (cmp_key(obj1), cmp_key(obj2))
 
         def f():
-            val = torch.classes.Foo(5, 3)
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
             val.increment(1)
             return val
         test_equality(f, lambda x: x)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int'"):
-            val = torch.classes.Foo(5, 3)
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
             val.increment('foo')
 
         def f():
-            ss = torch.classes.StackString(["asdf", "bruh"])
+            ss = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
             return ss.pop()
         test_equality(f, lambda x: x)
 
         def f():
-            ss1 = torch.classes.StackString(["asdf", "bruh"])
-            ss2 = torch.classes.StackString(["111", "222"])
+            ss1 = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            ss2 = torch.classes._TorchScriptTesting_StackString(["111", "222"])
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)

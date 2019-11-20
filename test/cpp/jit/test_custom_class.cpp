@@ -46,7 +46,7 @@ struct Stack : torch::jit::CustomClassHolder {
   }
 };
 
-static auto test = torch::jit::class_<Foo>("Foo")
+static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
                        .def(torch::jit::init<int64_t, int64_t>())
                        // .def(torch::jit::init<>())
                        .def("info", &Foo::info)
@@ -54,10 +54,11 @@ static auto test = torch::jit::class_<Foo>("Foo")
                        .def("add", &Foo::add)
                        .def("combine", &Foo::combine);
 
-static auto testStack = torch::jit::class_<Stack<std::string>>("StackString")
-                            .def(torch::jit::init<std::vector<std::string>>())
-                            .def("push", &Stack<std::string>::push)
-                            .def("pop", &Stack<std::string>::pop);
+static auto testStack =
+    torch::jit::class_<Stack<std::string>>("_TorchScriptTesting_StackString")
+        .def(torch::jit::init<std::vector<std::string>>())
+        .def("push", &Stack<std::string>::push)
+        .def("pop", &Stack<std::string>::pop);
 
 } // namespace
 
