@@ -1261,6 +1261,12 @@ struct getTypePtr_<at::Scalar> final {
   }
 };
 template <>
+struct getTypePtr_<at::QScheme*> final {
+  static TypePtr call() {
+    return OptionalType::create(QScheme::get());
+  }
+};
+template <>
 struct getTypePtr_<at::Generator*> final {
   static TypePtr call() {
     return OptionalType::create(GeneratorType::get());

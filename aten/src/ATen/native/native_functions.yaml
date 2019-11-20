@@ -3489,6 +3489,7 @@
     CPU: make_per_channel_quantized_tensor_cpu
 
 - func: qscheme(Tensor self) -> QScheme
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     QuantizedCPU: qscheme_quant
