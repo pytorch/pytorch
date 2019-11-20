@@ -451,7 +451,7 @@
               echo 'xcodebuild failed!'
               exit 1
             fi
-        - run:
+      - run:
           name: Run Simulator Tests
           no_output_timeout: "2h"
           command: |
@@ -472,4 +472,4 @@
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             ruby setup.rb
             fastlane scan
-
+            
