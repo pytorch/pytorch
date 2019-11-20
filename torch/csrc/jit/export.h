@@ -1,8 +1,10 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <caffe2/serialize/inline_container.h>
 
 #include <ostream>
 
@@ -58,6 +60,15 @@ TORCH_API void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
     bool bytecode_format = false);
+
+// Write the bytes of a pickle archive and the tensors referenced inside that
+// archive
+TORCH_API void writeArchiveAndTensors(
+    const std::string& archive_name,
+    const char* pickle_bytes,
+    size_t size,
+    const std::vector<WriteableTensorData>& tensors,
+    caffe2::serialize::PyTorchStreamWriter& out);
 
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.

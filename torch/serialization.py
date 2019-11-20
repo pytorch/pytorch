@@ -439,7 +439,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
     for key in sorted(serialized_storages.keys()):
-        name = 'tensors/{}'.format(key)
+        name = 'data/{}'.format(key)
         storage = serialized_storages[key]
         num_bytes = storage.size() * storage.element_size()
         zip_file.write_record(name, storage.data_ptr(), num_bytes)
@@ -754,7 +754,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     def load_tensor(obj, size, key, location):
         loaded_storages[key] = restore_location(obj, location)
-        name = 'tensors/{}'.format(key)
+        name = 'data/{}'.format(key)
         size_long = struct.pack("<Q", size)
         tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
         offset = None
@@ -768,7 +768,6 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
         assert typename == 'storage', \
             "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
-
         data_type, key, location, size = data
         if key not in loaded_storages:
             load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
