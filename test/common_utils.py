@@ -28,9 +28,10 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-from subprocess import check_call
-from uuid import uuid4
-import shutil
+if sys.version_info[0] == 2:
+    from urllib2 import urlopen  # noqa f811
+else:
+    from urllib.request import urlopen
 
 import __main__
 import errno
@@ -564,40 +565,31 @@ except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
 disabled_test_from_issues = None
-disabled_query = 'is%3Aissue+is%3Aopen+label%3A%22topic%3A+flaky-tests%22+repo:pytorch/pytorch+in%3Atitle+DISABLED'
 def check_disabled(test_name):
     global disabled_test_from_issues
     if disabled_test_from_issues is None:
-        disabled_test_from_issues = set()
+        disabled_test_from_issues = {}
 
         def read_and_process():
-            with open('disabled_tests.json', 'r') as opened:
-                contents = opened.read()
+            url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
+            contents = urlopen(url, timeout=1).read()
             the_response = json.loads(contents)
             for item in the_response['items']:
                 title = item['title']
                 key = 'DISABLED '
                 if title.startswith(key):
                     test_name = title[len(key):].strip()
-                    disabled_test_from_issues.add(test_name)
+                    disabled_test_from_issues[test_name] = item['html_url']
 
         if not IS_SANDCASTLE:
             try:
-                try:
-                    read_and_process()
-                except FileNotFoundError:
-                    repo_dir = tempfile.mkdtemp()
-                    check_call(['git', 'clone', 'https://github.com/zdevito/pytorch_disabled_tests.git', repo_dir])
-                    tmp_name = 'disabled_tests_{}.json'.format(uuid4())
-                    shutil.copyfile(os.path.join(repo_dir, 'result.json'), tmp_name)
-                    os.rename(tmp_name, 'disabled_tests.json')
-                    read_and_process()
+                read_and_process()
             except Exception:
                 print("Couldn't download test skip set, leaving all tests enabled...")
-
+                raise
     if test_name in disabled_test_from_issues:
         raise unittest.SkipTest(
-            "Test is disabled because an issue exists disabling it: https://github.com/search?q={}".format(disabled_query))
+            "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]))
 
 class TestCase(expecttest.TestCase):
     precision = 1e-5
