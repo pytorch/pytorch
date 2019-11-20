@@ -1071,6 +1071,36 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(result, sum(vals))
 
     @dist_init(setup_rpc=False)
+    def test_clear_local_rref(self):
+        rpc.init_rpc(
+            self_name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
+            init_method=self.init_method,
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
+        )
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+
+        rref = rpc.remote(
+            "worker{}".format((self.rank + 1) % self.world_size),
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )
+        rpc.join_rpc()
+
+    @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
         rpc.init_rpc(

@@ -1,7 +1,8 @@
 from . import _invoke_rpc_builtin, _invoke_rpc_python_udf
 from . import _invoke_remote_builtin, _invoke_remote_python_udf
 from . import _start_rpc_agent
-from . import _destroy_rref_context, _cleanup_python_rpc_handler
+from . import _destroy_rref_context, _clear_local_user_rrefs
+from . import _cleanup_python_rpc_handler
 from . import WorkerInfo
 from . import backend_registry
 from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
@@ -37,6 +38,8 @@ def join_rpc():
     global _agent
 
     if _agent:
+        _agent.sync()
+        _clear_local_user_rrefs()
         _agent.join()
         _agent = None
         _destroy_rref_context()

@@ -133,6 +133,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
     agent->start();
   });
 
+  module.def("_clear_local_user_rrefs", []() {
+    RRefContext::getInstance().delAllUsers();
+  });
+
   module.def("_destroy_rref_context", []() {
     RRefContext::getInstance().destroyInstance();
   });

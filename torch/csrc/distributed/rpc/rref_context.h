@@ -111,6 +111,9 @@ class RRefContext {
   void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
+  void delUser(const worker_id_t owner, const RRefId& rrefId, const ForkId& forkId);
+  void delAllUsers();
+
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
@@ -131,6 +134,8 @@ class RRefContext {
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  std::unordered_map<ForkId, std::weak_ptr<RRef>, ForkId::Hash> users_;
+
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<
       RRefId,

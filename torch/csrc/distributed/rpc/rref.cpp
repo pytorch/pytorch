@@ -136,16 +136,8 @@ UserRRef<T>::UserRRef(
 
 template <typename T>
 UserRRef<T>::~UserRRef() {
-  // TODO: queue this in RRefContext instead of doing it here.
-  auto& ctx = RRefContext::getInstance();
-  if (ctx.getWorkerId() != ownerId_) {
-    auto fm = ctx.agent()->send(
-        ctx.agent()->getWorkerInfo(ownerId_),
-        RRefUserDelete(rrefId_, forkId_).toMessage());
-
-    fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
-  }
+  if (markInvalid())
+    RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
 }
 
 template <typename T>

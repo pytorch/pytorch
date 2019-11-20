@@ -208,6 +208,10 @@ class RRef {
     return rrefId_;
   }
 
+  inline bool markInvalid() {
+    return valid_.exchange(false);
+  }
+
   // Returns true if this is the ``OwnerRRef``
   virtual bool isOwner() const = 0;
 
@@ -223,6 +227,7 @@ class RRef {
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
+  std::atomic<bool> valid_{true};
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user

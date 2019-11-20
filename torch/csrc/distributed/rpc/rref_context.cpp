@@ -81,7 +81,13 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
   // The reason for not adding the pending user here is to put addPendingUser()
   // close to where the RPC occurs, and it is more clear to pair it with
   // deletePendingUser() in the response callback at the call site.
-  return std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
+  auto userRRef =
+      std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    users_[forkId] = userRRef;
+  }
+  return userRRef;
 }
 
 template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
@@ -274,6 +280,49 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
       iter != pendingUsers_.end(),
       "Inconsistent states: attempt to delete a non-exist UserRRef.");
   pendingUsers_.erase(iter);
+}
+
+void RRefContext::delUser(
+    const worker_id_t owner, const RRefId& rrefId, const ForkId& forkId) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    users_.erase(forkId);
+  }
+
+  auto fm = agent_->send(
+      agent_->getWorkerInfo(owner),
+      RRefUserDelete(rrefId, forkId).toMessage());
+
+  fm->addCallback(
+      [](const Message& message) { RRefContext::handleException(message); });
+}
+
+void RRefContext::delAllUsers() {
+  std::vector<std::shared_ptr<FutureMessage>> fms;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (auto user: users_) {
+      if (auto rref = user.second.lock()) {
+        if (rref->markInvalid()) {
+          auto fm = agent_->send(
+              agent_->getWorkerInfo(rref->owner()),
+              RRefUserDelete(rref->rrefId(), user.first).toMessage());
+
+          fm->addCallback(
+              [](const Message& message) { RRefContext::handleException(message); });
+
+          fms.emplace_back(fm);
+        }
+      }
+    }
+
+    users_.clear();
+  }
+
+  for (auto& fm: fms) {
+    fm->wait();
+  }
 }
 
 void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
