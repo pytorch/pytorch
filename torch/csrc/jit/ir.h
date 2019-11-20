@@ -250,6 +250,7 @@ struct TORCH_API Node {
   Block* owning_block_;
   c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
+  c10::optional<InlinedCallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -316,6 +317,13 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+  c10::optional<InlinedCallStackPtr> callstack() const {
+    return callstack_;
+  }
+  void setCallStack(InlinedCallStackPtr cs) {
+    callstack_ = cs;
+  }
+
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
   // We can't return a std::vector<Node*>& because there's no
