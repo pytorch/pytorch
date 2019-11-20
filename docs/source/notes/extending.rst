@@ -225,20 +225,20 @@ Extending :mod:`torch` with a :class:`Tensor`-like type
           more details.
 
 To make this concrete, let's begin with a simple example that illustrates the
-API dispatch mechanism. We'll create a custom :class:`Tensor`-like type that
-represents a 2D scalar tensor, parametrized by the order ``N`` and value
-along the diagonal entries, ``value``::
+API dispatch mechanism. We'll create a custom type that represents a 2D scalar
+tensor, parametrized by the order ``N`` and value along the diagonal entries,
+``value``::
 
-  >>> class ScalarTensor(object):
-  ...  def __init__(self, N, value):
-  ...      self._N = N
-  ...      self._value = value
-  ...
-  ...  def __repr__(self):
-  ...      return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
-  ...
-  ...  def tensor(self):
-  ...      return self._value * torch.eye(self._N)
+     class ScalarTensor(object):
+        def __init__(self, N, value):
+            self._N = N
+            self._value = value
+
+        def __repr__(self):
+            return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+
+        def tensor(self):
+            return self._value * torch.eye(self._N)
 
 This first iteration of the design isn't very useful. The main functionality of
 ``ScalarTensor`` is to provide a more compact string representation of a scalar
@@ -297,20 +297,20 @@ implementation for ``torch.mean`` for ``ScalarTensor`` operands and add the
 implementation to the ``HANDLED_FUNCTIONS`` dispatch table dictionary. One way
 of doing this is to define a decorator::
 
-  >>> import functools
-  >>> def implements(torch_function):
-  ...     """Register a torch function override for ScalarTensor"""
-  ...     @functools.wraps(torch_function)
-  ...     def decorator(func):
-  ...         HANDLED_FUNCTIONS[torch_function] = func
-  ...         return func
-  ...     return decorator
+  import functools
+  def implements(torch_function):
+      """Register a torch function override for ScalarTensor"""
+      @functools.wraps(torch_function)
+      def decorator(func):
+          HANDLED_FUNCTIONS[torch_function] = func
+          return func
+      return decorator
 
-which can be applied to the implementation of our override:
+which can be applied to the implementation of our override::
 
-  >>> @implements(torch.mean)
-  ... def mean(input):
-  ...     return float(input._value) / input._N
+  @implements(torch.mean)
+  def mean(input):
+      return float(input._value) / input._N
 
 With this change we can now use ``torch.mean`` with ``ScalarTensor``::
 
@@ -324,20 +324,20 @@ override a function that takes more than one operand, any one of which might be
 a tensor or tensor-like that defines ``__torch_function__``, for example for
 :func:`torch.add`::
 
-  >>> def ensure_tensor(data):
-  ...     if isinstance(data, ScalarTensor):
-  ...         return data.tensor()
-  ...     return torch.as_tensor(data)
-  ...
-  >>> @implements(torch.add)
-  ... def add(input, other):
-  ...    try:
-  ...        if input._N == other._N:
-  ...            return ScalarTensor(input._N, input._value + other._value)
-  ...        else:
-  ...            raise ValueError("Shape mismatch!")
-  ...    except AttributeError:
-  ...        return torch.add(ensure_tensor(input), ensure_tensor(other))
+  def ensure_tensor(data):
+      if isinstance(data, ScalarTensor):
+          return data.tensor()
+      return torch.as_tensor(data)
+
+  @implements(torch.add)
+  def add(input, other):
+     try:
+         if input._N == other._N:
+             return ScalarTensor(input._N, input._value + other._value)
+         else:
+             raise ValueError("Shape mismatch!")
+     except AttributeError:
+         return torch.add(ensure_tensor(input), ensure_tensor(other))
 
 This version has a fast path for when both operands are ``ScalarTensor``
 instances and also a slower path degrades to converting the data to tensors when
@@ -387,21 +387,24 @@ is a generic sort of wrapping for the full :mod:`torch` API, we do not need to
 individually implement each override so we can make the `__torch_function__`
 implementation more permissive about what operations are allowed::
 
-  >>> class MetadataTensor(object):
-  ...     def __init__(self, data, metadata=None, **kwargs):
-  ...         self._t = torch.as_tensor(data, **kwargs)
-  ...         self._metadata = metadata
-  ...
-  ...     def __repr__(self):
-  ...         return "Metadata:\n{}\n\ndata:\n{}".format(self._metadata, self._t)
-  ...
-  ...     def __torch_function__(self, func, args=(), kwargs=None):
-  ...         if kwargs is None:
-  ...             kwargs = {}
-  ...         args = [a._t if hasattr(a, '_t') else a for a in args]
-  ...         ret = func(*args, **kwargs)
-  ...         return MetadataTensor(ret, metadata=self._metadata)
-  ...
+  class MetadataTensor(object):
+      def __init__(self, data, metadata=None, **kwargs):
+          self._t = torch.as_tensor(data, **kwargs)
+          self._metadata = metadata
+
+      def __repr__(self):
+          return "Metadata:\n{}\n\ndata:\n{}".format(self._metadata, self._t)
+
+      def __torch_function__(self, func, args=(), kwargs=None):
+          if kwargs is None:
+              kwargs = {}
+          args = [a._t if hasattr(a, '_t') else a for a in args]
+          ret = func(*args, **kwargs)
+          return MetadataTensor(ret, metadata=self._metadata)
+
+This simple implementation won't necessarily work with every function in the
+:mod:`torch` API but it is good enough to capture most common operations::
+
   >>> metadata = {'owner': 'Ministry of Silly Walks'}
   >>> m = MetadataTensor([[1, 2], [3, 4]], metadata=metadata)
   >>> t = torch.tensor([[1, 2], [1, 2]]])
