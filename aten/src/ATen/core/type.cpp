@@ -43,6 +43,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::FutureType) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
+  } else if(t.kind() == TypeKind::RRefType) {
+    auto elem = t.cast<RRefType>()->getElementType();
+    out << "RRef[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
       out << "NamedTuple";

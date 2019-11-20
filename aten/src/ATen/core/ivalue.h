@@ -23,6 +23,7 @@ template<class T> class List;
 struct IValue;
 struct ClassType;
 struct Type;
+class RRef;
 using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
@@ -60,7 +61,8 @@ struct PythonObject;
   _(Object) \
   _(PythonObject) \
   _(Uninitialized) \
-  _(Capsule)
+  _(Capsule) \
+  _(RRef) \
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -207,6 +209,12 @@ struct CAFFE2_API IValue final {
   bool isFuture() const { return Tag::Future == tag; }
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const &;
+
+  // RRef
+  IValue(c10::intrusive_ptr<c10::RRef> v);
+  bool isRRef() const { return Tag::RRef == tag; }
+  c10::intrusive_ptr<c10::RRef> toRRef() &&;
+  c10::intrusive_ptr<c10::RRef> toRRef() const &;
 
   // Int
   IValue(int64_t i)

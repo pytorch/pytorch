@@ -8,6 +8,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <ATen/core/RRef.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 
@@ -65,6 +66,14 @@ inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const & {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return toIntrusivePtr<ivalue::Future>();
+}
+inline c10::intrusive_ptr<c10::RRef> IValue::toRRef() && {
+  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  return moveToIntrusivePtr<c10::RRef>();
+}
+inline c10::intrusive_ptr<c10::RRef> IValue::toRRef() const & {
+  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  return toIntrusivePtr<c10::RRef>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
@@ -475,6 +484,7 @@ DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
+DEFINE_TO(c10::intrusive_ptr<c10::RRef>, toRRef)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
@@ -785,6 +795,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
   payload.as_intrusive_ptr = v.release();
 }
 
+inline IValue::IValue(c10::intrusive_ptr<c10::RRef> v)
+: tag(Tag::RRef), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline const std::string& IValue::toStringRef() const {
   return toString()->string();
 }

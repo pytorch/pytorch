@@ -25,7 +25,7 @@ constexpr int RREF_TUPLE_SIZE = 2;
 
 ///////////////////////////  PyRRef  //////////////////////////////////
 
-PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
+PyRRef::PyRRef(std::shared_ptr<RRefBase> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
@@ -110,7 +110,7 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
       t.size() == RREF_TUPLE_SIZE, "Pickled RRef must contain 2 numbers.");
   auto& ctx = RRefContext::getInstance();
   auto rfd = RRefForkData::fromPyTuple(t[RFD_IDX].cast<py::tuple>());
-  std::shared_ptr<RRef> rref = nullptr;
+  std::shared_ptr<RRefBase> rref = nullptr;
   bool isPyObj = t[TYPE_IDX].cast<bool>();
   if (isPyObj) {
     rref = ctx.getOrCreateRRef<py::object>(rfd);

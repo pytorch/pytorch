@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Optional.h>
+#include <ATen/core/RRef.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
@@ -12,7 +13,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-class RRef;
+class RRefBase;
 class RRefContext;
 template <typename T>
 class UserRRef;
@@ -28,7 +29,7 @@ struct RRefForkData {
   const worker_id_t parent_;
 
  private:
-  friend class RRef;
+  friend class RRefBase;
   friend class RRefContext;
   template <typename T>
   friend class UserRRef;
@@ -188,15 +189,15 @@ static_assert(
 //
 // ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
 // Each ``RRef`` has a globally unique ``RRefId``.
-class RRef {
+class RRefBase : public c10::RRef {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
-  RRef(const RRef& other) = delete;
-  RRef(RRef&& other) = delete;
-  RRef& operator=(RRef&& other) = delete;
+  RRefBase(const c10::RRef& other) = delete;
+  RRefBase(c10::RRef&& other) = delete;
+  RRefBase& operator=(c10::RRef&& other) = delete;
 
-  virtual ~RRef() = default;
+  virtual ~RRefBase() = default;
 
   // returns the worker id of the owner
   inline worker_id_t owner() const {
@@ -217,7 +218,7 @@ class RRef {
  protected:
   friend class RRefContext;
 
-  RRef(worker_id_t ownerId, const RRefId& rrefId);
+  RRefBase(worker_id_t ownerId, const RRefId& rrefId);
 
   RRefForkData fork() const;
 
@@ -230,7 +231,7 @@ class RRef {
 // never owns the real value, the only way to get the value of the ``RRef`` is
 // to call ``to_here()`` and get a copy..
 template <typename T>
-class UserRRef final : public RRef {
+class UserRRef final : public RRefBase {
  public:
   UserRRef(const UserRRef& other) = delete;
   UserRRef(UserRRef&& other) = delete;
@@ -266,7 +267,7 @@ class UserRRef final : public RRef {
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
 template <typename T>
-class OwnerRRef final : public RRef {
+class OwnerRRef final : public RRefBase {
  public:
   OwnerRRef(const OwnerRRef& other) = delete;
   OwnerRRef(OwnerRRef&& other) = delete;
@@ -297,7 +298,7 @@ class OwnerRRef final : public RRef {
       : OwnerRRef(ownerId, rrefId, {}) {}
 
   OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, c10::optional<T> value)
-      : RRef(ownerId, rrefId) {
+      : RRefBase(ownerId, rrefId) {
     value_ = std::move(value);
   }
 

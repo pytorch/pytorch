@@ -56,6 +56,8 @@ TypePtr IValue::type() const {
       return ListType::create(toGenericList().elementType());
     case Tag::Future:
       return toFuture()->type();
+    // case Tag::RRef:
+    //   return toRRef()->type();
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
@@ -163,6 +165,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toGenericList(), "[", "]");
+    case IValue::Tag::RRef:
+      return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:

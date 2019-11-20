@@ -3,7 +3,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <atomic>
@@ -54,7 +54,7 @@ class RRefContext {
   // This RRef could have already existed before, or could be created in this
   // method.
   template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd);
+  std::shared_ptr<RRefBase> getOrCreateRRef(const RRefForkData& rfd);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
   // one.
@@ -86,14 +86,14 @@ class RRefContext {
   void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
 
   // Invoked when pickling an RRef to setup child/fork properly
-  RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
+  RRefForkData prepareChildFork(const std::shared_ptr<RRefBase>& rref);
   // Invoked when unpickling an RRef to send RREF_FORK_REQUEST to owner and
   // send RREF_CHILD_ACCEPT to the parent.
   // NB: forkId is necessary here as the rref could be an OwnerRRef
   void notifyOwnerAndParentOfFork(
       const ForkId& forkId,
       worker_id_t parent,
-      const std::shared_ptr<RRef>& rref);
+      const std::shared_ptr<RRefBase>& rref);
 
   // When a UserRRef is forked to another worker (user or owner), it is added
   // into pendingChildren_ to be held alive until it receives RREF_CHILD_ACCEPT
@@ -103,12 +103,12 @@ class RRefContext {
   // previously submitted rpc/remote calls are acked before sending out the
   // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
   // soon.
-  void addPendingChild(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
+  void addPendingChild(const ForkId& forkId, const std::shared_ptr<RRefBase>& rref);
   void delPendingChild(const ForkId& forkId);
 
   // When a UserRRef is created, it is added into pendingUsers_ to be held alive
   // until it receives RREF_USER_ACCEPT from the owner.
-  void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
+  void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRefBase>& rref);
   void delPendingUser(const ForkId& forkId);
 
  private:
@@ -130,7 +130,7 @@ class RRefContext {
   const std::shared_ptr<RpcAgent> agent_;
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
-  std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  std::unordered_map<RRefId, std::shared_ptr<RRefBase>, RRefId::Hash> owners_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<
       RRefId,
@@ -147,7 +147,7 @@ class RRefContext {
   //     It can be used or shared, but cannot be deleted, and hence kept alive
   //     in this map. A message of type RREF_USER_ACCEPT will remove the
   //     corresponding RRef from this map.
-  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
+  std::unordered_map<ForkId, std::shared_ptr<RRefBase>, ForkId::Hash> pendingUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by
   //     the owner yet.
@@ -155,7 +155,7 @@ class RRefContext {
   //     In this case, this UserRRef cannot send out RREF_USER_DELETE message,
   //     as it could potentially trigger the OwnerRRef been deleted before the
   //     owner learns about the forked child.
-  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
+  std::unordered_map<ForkId, std::shared_ptr<RRefBase>, ForkId::Hash>
       pendingChildren_;
 };
 
