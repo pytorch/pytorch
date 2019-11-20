@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/TypeProperties.h>
 #include <type_traits>
 
 namespace at { namespace native {
@@ -68,27 +69,37 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   return lower;
 }
 
-ScalarType result_type(TensorList tensors) {
-  auto dimResult = ScalarType::Undefined;
-  auto zeroResult = ScalarType::Undefined;
-  auto wrappedResult = ScalarType::Undefined;
-  for (const Tensor& tensor : tensors) {
-    if (!tensor.defined()) {
-      continue;
-    }
-    ScalarType current = tensor.scalar_type();
-    if (tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(current)) {
-      current = typeMetaToScalarType(at::get_default_dtype());
-    }
-    if ( tensor.dim() > 0 ) {
-      dimResult = promote_skip_undefined(dimResult, current);
-    } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      wrappedResult = promote_skip_undefined(wrappedResult, current);
-    } else {
-      zeroResult = promote_skip_undefined(zeroResult, current);
-    }
+ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeState& in_state) {
+  if (!tensor.defined()) {
+    return in_state;
   }
-  return combine_categories(dimResult, combine_categories(zeroResult, wrappedResult));
+  ResultTypeState new_state = in_state;
+  ScalarType current = tensor.scalar_type();
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(current)) {
+    current = typeMetaToScalarType(at::get_default_dtype());
+  }
+  if ( tensor.dim() > 0 ) {
+    new_state.dimResult = promote_skip_undefined(in_state.dimResult, current);
+  } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    new_state.wrappedResult = promote_skip_undefined(in_state.wrappedResult, current);
+  } else {
+    new_state.zeroResult = promote_skip_undefined(in_state.zeroResult, current);
+  }
+
+  return new_state;
+}
+
+ScalarType result_type(const ResultTypeState& in_state) {
+  return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
+}
+
+ScalarType result_type(TensorList tensors) {
+  ResultTypeState state = {};
+  for (const Tensor& tensor : tensors) {
+    state = update_result_type_state(tensor, state);
+  }
+
+  return result_type(state);
 }
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
