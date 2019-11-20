@@ -230,8 +230,9 @@ def main():
         current_env["LOCAL_RANK"] = str(local_rank)
 
         # spawn the processes
+        with_python = not args.no_python
         cmd = []
-        if not args.no_python:
+        if with_python:
             cmd = [sys.executable, "-u"]
             if args.module:
                 cmd.append("-m")
