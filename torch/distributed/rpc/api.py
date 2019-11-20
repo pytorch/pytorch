@@ -30,17 +30,16 @@ def _require_initialized(func):
 
 def wait_all_workers():
     r"""
-    Block until all local and remote RPC processes reach this method, process
-    (send and receive) all pending messages, and then destroy local RPC agent.
-    Every RPC process must call this method before exit. This should be used to
-    terminate the RPC framework, and there is no guarantee that the RPC
-    framework will work after this method returns.
+    Block until all local and remote RPC processes reach this method, and then
+    destroy local the RPC agent. Every RPC process must call this method before
+    exit. This should be used to terminate the RPC framework, and there is no
+    guarantee that the RPC framework will work after this method returns.
 
     Example::
 
         On worker 0:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> # do some work
         >>> result = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(1), 1))
         >>> # ready to shutdown
@@ -48,7 +47,7 @@ def wait_all_workers():
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", self_rank=1, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> # wait for worker 0 to finish work, and then shutdown.
         >>> rpc.wait_all_workers()
     """
@@ -154,7 +153,7 @@ def remote(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
@@ -162,7 +161,7 @@ def remote(to, func, args=None, kwargs=None):
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", self_rank=1, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -225,13 +224,13 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", self_rank=1, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -263,7 +262,7 @@ def rpc_async(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", self_rank=0, world_size=2)
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
         >>> fut2 = rpc.rpc_async("worker1", min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
@@ -271,7 +270,7 @@ def rpc_async(to, func, args=None, kwargs=None):
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", self_rank=1, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
