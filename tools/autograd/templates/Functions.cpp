@@ -1894,7 +1894,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
       return singular_case_backward(grad, self, det);
     }
 
-    Tensor grad_det = at::empty_like(self, at::MemoryFormat::Contiguous);
+    Tensor grad_det = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
     // invertible case
     grad_det.index_put_(/*indices=*/nonzero_det_indices,
@@ -1944,7 +1944,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
       return singular_case_backward(grad, self);
     }
 
-    Tensor grad_logdet = at::empty_like(self, at::MemoryFormat::Contiguous);
+    Tensor grad_logdet = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
     // invertible case
     grad_logdet.index_put_(/*indices=*/finite_logdet_indices,
@@ -1996,7 +1996,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
       return singular_case_backward(grad_logabsdet, self);
     }
 
-    Tensor grad_slogdet = at::empty_like(self, at::MemoryFormat::Contiguous);
+    Tensor grad_slogdet = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
     // invertible case
     grad_slogdet.index_put_(/*indices=*/nonzero_signdet_indices,
