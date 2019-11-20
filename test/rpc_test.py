@@ -688,7 +688,6 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29381")
     @dist_init
     def test_nested_rpc(self):
         n = self.rank + 1
@@ -866,7 +865,6 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(c, torch.ones(n, n) + 4)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_remote(self):
         n = self.rank + 1
@@ -880,7 +878,6 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29382")
     @dist_init
     def test_nested_rref(self):
         n = self.rank + 1
@@ -934,8 +931,13 @@ class RpcTest(RpcAgentTestFixture):
     def test_remote_with_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
+        # check ref to other workers
         rref = rpc.remote("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
+            rref.to_here()
+        # check ref to itself
+        rref = rpc.remote("worker{}".format(self.rank), no_result, args=(10,))
+        with self.assertRaisesRegex(Exception, "TypeError"):
             rref.to_here()
 
     @dist_init
