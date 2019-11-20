@@ -1,9 +1,237 @@
 Extending PyTorch
 =================
 
-In this note we'll cover ways of extending :mod:`torch.nn`,
+In this note we'll cover ways of extending :mod:`torch`, :mod:`torch.nn`,
 :mod:`torch.autograd`, and writing custom C extensions utilizing our C
 libraries.
+
+Extending :mod:`torch`
+----------------------
+
+The functions in the :mod:`torch` namespace can be overrided with custom
+user-specified implementations via the `__torch_function__` protocol introduced
+in PyTorch 1.4. Custom Python types with a `__torch_function__` method will
+bypass the standard PyTorch dispatch for :class:`Tensor` types. This works with
+"duck" types that are unrelated to :class:`Tensor` as well as user-defined
+subclasses of :class:`Tensor`.
+
+Extending :mod:`torch` with a :class:`Tensor`-like type
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. note:: This functionality is inspired by the NumPy ``__array_function__``
+          protocol.
+
+To make this concrete, let's begin with a simple example that illustrates the
+API dispatch mechanism. We'll create a custom :class:`Tensor`-like type that
+represents a 2D scalar tensor, parametrized by the order ``N`` and value
+along the diagonal entries, ``value``::
+
+  >>> class ScalarTensor(object):
+  ...  def __init__(self, N, value):
+  ...      self._N = N
+  ...      self._value = value
+  ...
+  ...  def __repr__(self):
+  ...      return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+  ...
+  ...  def tensor(self):
+  ...      return self._value * torch.eye(self._N)
+
+This first iteration of the design isn't very useful. The main functionality of
+``ScalarTensor`` is to provide a more compact string representation of a scalar
+tensor than in the base tensor class::
+
+  >>> d = ScalarTensor(5, 2)
+  >>> d
+  ScalarTensor(N=5, value=2)
+  >>> d.tensor()
+  tensor([[2., 0., 0., 0., 0.],
+          [0., 2., 0., 0., 0.],
+          [0., 0., 2., 0., 0.],
+          [0., 0., 0., 2., 0.],
+          [0., 0., 0., 0., 2.]])
+
+If we try to use this object with the :mod:`torch` API, we will run
+into issues::
+
+  >>> import torch
+  >>> torch.mean(d)
+  TypeError: mean(): argument 'input' (position 1) must be Tensor, not ScalarTensor
+
+Adding a ``__torch_function__`` implementation to ``ScalarTensor`` makes it
+possible for the above operation to succeed. Let's re-do our implementation,
+this time adding a ``__torch_function__`` implementation::
+
+  >>> HANDLED_FUNCTIONS = {}
+  >>> class ScalarTensor(object):
+  ...  def __init__(self, N, value):
+  ...      self._N = N
+  ...      self._value = value
+  ...
+  ...  def __repr__(self):
+  ...      return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+  ...
+  ...  def tensor(self):
+  ...      return self._value * torch.eye(self._N)
+  ...
+  ...  def __torch_function__(self, func, args=(), kwargs=None):
+  ...      if kwargs is None:
+  ...          kwargs = {}
+  ...      if func not in HANDLED_FUNCTIONS:
+  ...          return NotImplemented
+  ...      return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+The `__torch_function__` method takes three arguments: ``func``, a reference to
+the torch API function that is being overrided, ``args``, the tuple of arguments
+passed to the function, and ``kwargs``, the dict of keyword arguments passed to
+the function. It uses a global dispatch stable named ``HANDLED_FUNCTIONS`` to
+store custom implementations. The keys of this dictionary are functions in the
+``torch`` namepsace and the values are implementations for ``ScalarTensor``.
+
+This class definition isn't quite enough to make ``torch.mean`` do the right
+thing when we pass it a ``ScalarTensor`` -- we also need to define an
+implementation for ``torch.mean`` for ``ScalarTensor`` operands and add the
+implementation to the ``HANDLED_FUNCTIONS`` dispatch table dictionary. One way
+of doing this is to define a decorator::
+
+  >>> import functools
+  >>> def implements(torch_function):
+  ...     """Register a torch function override for ScalarTensor"""
+  ...     @functools.wraps(torch_function)
+  ...     def decorator(func):
+  ...         HANDLED_FUNCTIONS[torch_function] = func
+  ...         return func
+  ...     return decorator
+
+which can be applied to the implementation of our override:
+
+  >>> @implements(torch.mean)
+  ... def mean(input):
+  ...     return float(input._value) / input._N
+
+With this change we can now use ``torch.mean`` with ``ScalarTensor``::
+
+  >>> d = ScalarTensor(5, 2)
+  >>> torch.mean(d)
+  0.4
+
+Of course ``torch.mean`` is an example of the simplest kind of function to
+override since it only takes one operand. We can use the same machinery to
+override a function that takes more than one operand, any one of which might be
+a tensor or tensor-like that defines ``__torch_function__``, for example for
+:func:`torch.add`::
+
+  >>> def ensure_tensor(data):
+  ...     if isinstance(data, ScalarTensor):
+  ...         return data.tensor()
+  ...     return torch.as_tensor(data)
+  ...
+  >>> @implements(torch.add)
+  ... def add(input, other):
+  ...    try:
+  ...        if input._N == other._N:
+  ...            return ScalarTensor(input._N, input._value + other._value)
+  ...        else:
+  ...            raise ValueError("Shape mismatch!")
+  ...    except AttributeError:
+  ...        return torch.add(ensure_tensor(input), ensure_tensor(other))
+
+This version has a fast path for when both operands are ``ScalarTensor``
+instances and also a slower path degrades to converting the data to tensors when
+that is not the case. That makes it work when either operand is a
+``ScalarTensor`` or a regular :class:`Tensor`::
+
+  >>> s = ScalarTensor(2, 2)
+  >>> torch.add(s, s)
+  DiagonalTensor(N=2, value=4)
+  >>> t = torch.tensor([[1, 1,], [1, 1]])
+  >>> torch.add(s, t)
+  tensor([[3., 1.],
+          [1., 3.]])
+
+Note that our implementation of ``add`` does not take ``alpha`` or ``out`` as
+keyword arguments like :func:`torch.add` does::
+
+  >>> torch.add(s, s, alpha=2)
+  TypeError: add() got an unexpected keyword argument 'alpha'
+
+For speed and flexibility the ``__torch_function__`` dispatch mechanism does not
+check that the signature of an override function matches the signature of the
+function being overrided in the :mod:`torch` API. For some applications ignoring
+optional arguments would be fine but to ensure full compatibility with
+:class:`Tensor`, user implementations of torch API functions should take care to
+exactly emulate the API of the function that is being overrided.
+
+Functions in the :mod:`torch` API that do not have explicit overrides will
+return ``NotImplemented`` from ``__torch_function__``. If all operands with
+``__torch_function__`` defined on them return ``NotImplemented``, PyTorch will
+raise a ``TypeError``. This means that most of the time operations that do not
+have explicit overrides for a type will raise a ``TypeError`` when an instance
+of such a type is passed::
+
+  >>> torch.mul(s, 3)
+  TypeError: no implementation found for 'torch.mul' on types that
+  implement __torch_function__: [ScalarTensor]
+
+Extending :mod:`torch` with a :class:`Tensor` wrapper type
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Another useful case is a type that wraps a :class:`Tensor`, either as an
+attribute or via subclassing. Below we implement a special case of this sort of
+type, a ``MetadataTensor`` that attaches a dictionary of metadata to a
+:class:`Tensor` that is propagated through :mod:`torch` operations. Since this
+is a generic sort of wrapping for the full :mod:`torch` API, we do not need to
+individually implement each override so we can make the `__torch_function__`
+implementation more permissive about what operations are allowed::
+
+  >>> class MetadataTensor(object):
+  ...     def __init__(self, data, metadata=None, **kwargs):
+  ...         self._t = torch.as_tensor(data, **kwargs)
+  ...         self._metadata = metadata
+  ...
+  ...     def __repr__(self):
+  ...         return "Metadata:\n{}\n\ndata:\n{}".format(self._metadata, self._t)
+  ...
+  ...     def __torch_function__(self, func, args=(), kwargs=None):
+  ...         if kwargs is None:
+  ...             kwargs = {}
+  ...         args = [a._t if hasattr(a, '_t') else a for a in args]
+  ...         ret = func(*args, **kwargs)
+  ...         return MetadataTensor(ret, metadata=self._metadata)
+  ...
+  >>> metadata = {'owner': 'Ministry of Silly Walks'}
+  >>> m = MetadataTensor([[1, 2], [3, 4]], metadata=metadata)
+  >>> t = torch.tensor([[1, 2], [1, 2]]])
+  >>> torch.add(t, m)
+  Metadata:
+  {'owner': 'Ministry of Silly Walks'}
+
+  data:
+  tensor([[2, 4],
+          [4, 6]])
+  >>> torch.mul(t, m)
+  Metadata:
+  {'owner': 'Ministry of Silly Walks'}
+
+  data:
+  tensor([[1, 4],
+          [3, 8]])
+
+Operations on multiple types that define ``__torch_function__``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+It is possible to use the torch API with multiple distinct types that each have
+a ``__torch_function__`` implementation, but special care must be taken. In such
+a case the rules are:
+
+* The dispatch operation gathers all distinct implementations of
+  ``__torch_function__`` for each operand and calls them in order: subclasses
+  before superclasses, and otherwise left to right in the operater expression.
+* If any value other than ``NotImplemented`` is returned, that value is
+  returned as the result. Implementations can register that they do not
+  implement an operation by returning ``NotImplemented``.
+* If all of the ``__torch_function__`` implementations return
+  ``NotImplemented``, PyTorch raises a ``TypeError``.
 
 Extending :mod:`torch.autograd`
 -------------------------------
