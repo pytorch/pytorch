@@ -443,7 +443,7 @@ class CAFFE2_API Tensor {
   /// returned `Tensor`'s tensor metadata (e.g. sizes / strides / storage / storage_offset)
   /// will not update the original `Variable`, due to the fact that this function
   /// shallow-copies the `Variable`'s underlying TensorImpl.
-  at::Tensor tensor_data() const noexcept;
+  at::Tensor tensor_data() const;
 
   /// NOTE: `var.variable_data()` in C++ has the same semantics as `tensor.data`
   /// in Python, which create a new `Variable` that shares the same storage and
@@ -456,7 +456,7 @@ class CAFFE2_API Tensor {
   /// `allow_tensor_metadata_change_` to false to make such changes explicitly illegal,
   /// in order to prevent users from changing metadata of `var.variable_data()`
   /// and expecting the original variable `var` to also be updated.
-  at::Tensor variable_data() const noexcept;
+  at::Tensor variable_data() const;
 
   // Gradient Node and Edges
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -498,7 +498,7 @@ public:
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   /// Returns true if this `Variable` is a view of another `Variable`.
-  bool is_view() const noexcept;
+  bool is_view() const;
 
   /// Returns the `Variable` that this `Variable` is a view of. If this
   /// `Variable` is not a view, throw a `std::runtime_error`.
@@ -507,7 +507,7 @@ public:
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  const std::string& name() const noexcept;
+  const std::string& name() const;
 
 protected:
   friend class ::caffe2::Tensor;
