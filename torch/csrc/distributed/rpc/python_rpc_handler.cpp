@@ -25,6 +25,7 @@ PythonRpcHandler::PythonRpcHandler() {
   pyRunFunction_ = getFunction(module, "_run_function");
   pyLoadReturnValue_ = getFunction(module, "_load_return_value");
   pySerialize_ = getFunction(module, "serialize");
+  pyHandleException_ = getFunction(module, "_handle_exception");
   jitCompilationUnit_ = torch::jit::get_python_cu();
 }
 
@@ -33,6 +34,7 @@ void PythonRpcHandler::cleanup() {
   pyRunFunction_ = py::none();
   pyLoadReturnValue_ = py::none();
   pySerialize_ = py::none();
+  pyHandleException_ = py::none();
   jitCompilationUnit_ = nullptr;
 }
 
@@ -85,6 +87,11 @@ py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
   AutoGIL ag;
   return pyLoadReturnValue_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
+}
+
+void PythonRpcHandler::handleException(const py::object& obj) {
+  AutoGIL ag;
+  pyHandleException_(obj);
 }
 
 } // namespace rpc

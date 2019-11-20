@@ -17,6 +17,9 @@ android {
                 }
             }
         }
+        ndk {
+            abiFilters ABI_FILTERS.split(",")
+        }
     }
     buildTypes {
         debug {

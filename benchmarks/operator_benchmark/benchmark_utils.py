@@ -313,6 +313,23 @@ def is_pytorch_enabled(framework_arg):
     return 'PyTorch' in framework_arg
 
 
+def get_operator_range(chars_range):
+    """Generates the characters from chars_range inclusive."""
+    if chars_range == 'None' or chars_range is None:
+        return None
+
+    ops_start_chars_set = set()
+    ranges = chars_range.split(',')
+    for item in ranges: 
+        if len(item) == 1: 
+            ops_start_chars_set.add(item.lower)
+            continue
+        start, end = item.split("-")
+        for c in range(ord(start), ord(end) + 1):
+            ops_start_chars_set.add(chr(c).lower)
+    return ops_start_chars_set
+
+
 def process_arg_list(arg_list):
     if arg_list == 'None':
         return None
