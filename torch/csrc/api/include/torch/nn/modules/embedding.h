@@ -1,61 +1,15 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
+#include <torch/nn/options/embedding.h>
+#include <torch/nn/functional/embedding.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
 #include <cstddef>
-#include <vector>
 
 namespace torch {
 namespace nn {
-
-/// Options for the `Embedding` module.
-struct TORCH_API EmbeddingOptions {
-  EmbeddingOptions(int64_t num_embeddings, int64_t embedding_dim) :
-   num_embeddings_(num_embeddings), embedding_dim_(embedding_dim) {};
-  /// The size of the dictionary of embeddings.
-  TORCH_ARG(int64_t, num_embeddings);
-  /// The size of each embedding vector.
-  TORCH_ARG(int64_t, embedding_dim);
-  /// If given, pads the output with the embedding vector at `padding_idx` (initialized to zeros) whenever it encounters the index.
-  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
-  /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
-  TORCH_ARG(c10::optional<float>, max_norm) = c10::nullopt;
-  /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
-  TORCH_ARG(float, norm_type) = 2.;
-  /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
-  TORCH_ARG(bool, scale_grad_by_freq) = false;
-  /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
-  TORCH_ARG(bool, sparse) = false;
-  /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
-  TORCH_ARG(torch::Tensor, _weight) = Tensor();
-};
-
-/// Options for the `EmbeddingBag` module.
-struct TORCH_API EmbeddingBagOptions {
-  EmbeddingBagOptions(int64_t num_embeddings, int64_t embedding_dim) :
-   num_embeddings_(num_embeddings), embedding_dim_(embedding_dim) {};
-  /// The size of the dictionary of embeddings.
-  TORCH_ARG(int64_t, num_embeddings);
-  /// The size of each embedding vector.
-  TORCH_ARG(int64_t, embedding_dim);
-  /// If given, each embedding vector with norm larger than `max_norm` is renormalized to have norm `max_norm`.
-  TORCH_ARG(c10::optional<float>, max_norm) = c10::nullopt;
-  /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
-  TORCH_ARG(float, norm_type) = 2.;
-  /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
-  /// Note: this option is not supported when ``mode="max"``.
-  TORCH_ARG(bool, scale_grad_by_freq) = false;
-  /// ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag. ``"sum"`` computes the weighted sum, taking `per_sample_weights`
-  /// into consideration. ``"mean"`` computes the average of the values in the bag, ``"max"`` computes the max value over each bag.
-  TORCH_ARG(string, mode) = "mean";
-  /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
-  /// Note: this option is not supported when ``mode="max"``.
-  TORCH_ARG(bool, sparse) = false;
-  /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
-  TORCH_ARG(torch::Tensor, _weight) = Tensor();
-};
 
 /// Performs a lookup in a fixed size embedding table.
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
@@ -65,6 +19,8 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   explicit EmbeddingImpl(const EmbeddingOptions& options_);
 
   void reset() override;
+
+  void reset_parameters();
 
   /// Pretty prints the `Embedding` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -89,16 +45,22 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
  public:
   using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
 
-  static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true) {
+  static Embedding from_pretrained(const torch::Tensor& embeddings, const EmbeddingFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-    if (options != c10::nullopt) {
-      TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
-      TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
-    } else {
-      options = EmbeddingOptions(embeddings.size(0), embeddings.size(1));
-    }
-    Embedding embedding((*options)._weight(embeddings));
-    embedding->weight.set_requires_grad(!freeze);
+
+    int64_t rows, cols;
+    rows = embeddings.size(0);
+    cols = embeddings.size(1);
+
+    Embedding embedding(
+      EmbeddingOptions(rows, cols)
+        ._weight(embeddings)
+        .padding_idx(options.padding_idx())
+        .max_norm(options.max_norm())
+        .norm_type(options.norm_type())
+        .scale_grad_by_freq(options.scale_grad_by_freq())
+        .sparse(options.sparse()));
+    embedding->weight.set_requires_grad(!options.freeze());
     return embedding;
   }
 };
@@ -111,11 +73,12 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
 
   void reset() override;
 
+  void reset_parameters();
+
   /// Pretty prints the `EmbeddingBag` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  torch::Tensor forward(const Tensor& input, const torch::Tensor& offsets = torch::Tensor(),
-    const torch::Tensor& per_sample_weights = torch::Tensor());
+  Tensor forward(const Tensor& input, const Tensor& offsets = {}, const Tensor& per_sample_weights = {});
 
   /// The `Options` used to configure this `EmbeddingBag` module.
   EmbeddingBagOptions options;
@@ -131,16 +94,22 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
  public:
   using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
 
-  static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options = c10::nullopt, bool freeze = true) {
+  static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, const EmbeddingBagFromPretrainedOptions& options = {}) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-    if (options != c10::nullopt) {
-      TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
-      TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
-    } else {
-      options = EmbeddingBagOptions(embeddings.size(0), embeddings.size(1));
-    }
-    EmbeddingBag embeddingbag((*options)._weight(embeddings));
-    embeddingbag->weight.set_requires_grad(!freeze);
+
+    int64_t rows, cols;
+    rows = embeddings.size(0);
+    cols = embeddings.size(1);
+
+    EmbeddingBag embeddingbag(
+      EmbeddingBagOptions(rows, cols)
+        ._weight(embeddings)
+        .max_norm(options.max_norm())
+        .norm_type(options.norm_type())
+        .scale_grad_by_freq(options.scale_grad_by_freq())
+        .mode(options.mode())
+        .sparse(options.sparse()));
+    embeddingbag->weight.set_requires_grad(!options.freeze());
     return embeddingbag;
   }
 };

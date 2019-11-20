@@ -48,7 +48,7 @@ class Rprop(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['prev'] = torch.zeros_like(p.data)
+                    state['prev'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
                     state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
 
                 etaminus, etaplus = group['etas']
@@ -67,7 +67,7 @@ class Rprop(Optimizer):
 
                 # for dir<0, dfdx=0
                 # for dir>=0 dfdx=dfdx
-                grad = grad.clone()
+                grad = grad.clone(memory_format=torch.preserve_format)
                 grad[sign.eq(etaminus)] = 0
 
                 # update parameters

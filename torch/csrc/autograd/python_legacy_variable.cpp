@@ -50,8 +50,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto options = TensorOptions(scalar_type)
         .device(computeDeviceType(type_id))
-        .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
-        .is_variable(true);
+        .layout(layout_from_backend(tensorTypeIdToBackend(type_id)));
     var = at::empty({0}, options);
   } else if (THPVariable_Check(data)) {
     var = ((THPVariable*)data)->cdata.detach();
@@ -75,7 +74,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   var.set_requires_grad(requires_grad);
 
   if (name) {
-    var.set_name(name);
+    impl::set_name(var, name);
   }
 
   if (jit::tracer::isTracing() && data && data != Py_None && THPVariable_Check(data)) {
@@ -90,11 +89,11 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
 
 PyTypeObject THPLegacyVariableType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._LegacyVariableBase",        /* tp_name */
-  0,                                     /* tp_basicsize */
-  0,                                     /* tp_itemsize */
+  "torch._C._LegacyVariableBase",              /* tp_name */
+  0,                                           /* tp_basicsize */
+  0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -108,12 +107,12 @@ PyTypeObject THPLegacyVariableType = {
   nullptr,                                     /* tp_getattro */
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  nullptr,                               /* tp_doc */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
   nullptr,                                     /* tp_methods */
@@ -123,10 +122,10 @@ PyTypeObject THPLegacyVariableType = {
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPVariable_pynew                      /* tp_new */
+  THPVariable_pynew                            /* tp_new */
 };
 
 void init_legacy_variable(PyObject *module) {
