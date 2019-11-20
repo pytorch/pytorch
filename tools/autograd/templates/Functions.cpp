@@ -93,7 +93,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   Tensor self_scaled;
   Tensor scale_v;
   if (p == 0.0) {
-    return zeros_like(self);
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
     return self.sign() * grad;
   } else if (p == 2.0) {
@@ -136,7 +136,7 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
   double exponent = exponent_.toDouble();
   if (exponent == 0.0) {
-    return zeros_like(self);
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return grad * exponent * self.pow(exponent - 1);
   }
@@ -241,7 +241,7 @@ Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& resu
   if (zero_idx.numel() == 0) {
     return (grad * result) / input;
   } else if (zero_idx.size(0) > 1) {
-    return zeros_like(input);
+    return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input);
   }
@@ -608,7 +608,7 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
 }
 
 Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  auto grad_input = zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   grad_input.masked_fill_(input == value, grad);
   return grad_input;
 }
