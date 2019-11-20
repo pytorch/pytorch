@@ -37,7 +37,7 @@ class Linear(nnq.Linear):
     def forward(self, x):
         # Note that we can handle self.bias == None case.
         Y = torch.ops.quantized.linear_dynamic(
-            x, self._packed_params)
+            x, self._packed_params._packed_params)
         return Y.to(x.dtype)
 
     def _get_name(self):
