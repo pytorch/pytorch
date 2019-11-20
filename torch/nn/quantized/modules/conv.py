@@ -16,6 +16,59 @@ from torch.nn.modules.utils import _pair, _triple
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
+
+class ConvPackedParams(torch.nn.Module):
+    def __init__(self):
+        super(ConvPackedParams, self).__init__()
+        wq = torch._empty_affine_quantized([1, 1, 1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
+        self.stride = [1, 1]
+        self.padding = [0, 0]
+        self.dilation = [1, 1]
+        self.groups = 1
+        self.set_weight_bias(wq, None)
+
+    @torch.jit.export
+    def set_conv_params(self, stride, padding, dilation, groups):
+        # type: (List[int], List[int], List[int], int) -> None
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+
+    @torch.jit.export
+    def set_weight_bias(self, weight, bias):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride, self.padding, self.dilation, self.groups)
+
+    @torch.jit.export
+    def _weight_bias(self):
+        return torch.ops.quantized.conv2d_unpack(self._packed_params)
+
+    def forward(self, x):
+        return x
+
+    @torch.jit.export
+    def __getstate__(self):
+        qweight, bias = self._weight_bias()
+        return (qweight,
+                bias,
+                self.stride,
+                self.padding,
+                self.dilation,
+                self.groups,
+                self.training)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        self.stride = state[2]
+        self.padding = state[3]
+        self.dilation = state[4]
+        self.groups = state[5]
+        self.set_weight_bias(state[0],
+                             state[1])
+        self.training = state[6]
+
+
 class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -45,7 +98,9 @@ class _ConvNd(nn.Module):
         bias_float = (
             torch.zeros(out_channels, dtype=torch.float) if bias else None)
 
-        self.set_weight_bias(qweight, bias_float)
+        self._packed_params = ConvPackedParams()
+        self._packed_params.set_conv_params(list(stride), list(padding), list(dilation), groups)
+        self._packed_params.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -61,79 +116,6 @@ class _ConvNd(nn.Module):
         if self.bias() is None:
             s += ', bias=False'
         return s.format(**self.__dict__)
-
-    # ===== Serialization methods =====
-    # The special consideration here is that we have to unpack the weights into
-    # their regular QTensor form for serialization. Packed weights should not
-    # live outside the process in which they were created, rather they should be
-    # derived from the QTensor weight.
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
-        (w, b) = self._weight_bias()
-        destination[prefix + 'weight'] = w
-        destination[prefix + 'scale'] = torch.tensor(self.scale)
-        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        destination[prefix + 'bias'] = b
-
-    @torch.jit.export
-    def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError(
-                'torch.save() is not currently supported for quantized modules.'
-                ' See https://github.com/pytorch/pytorch/issues/24045.'
-                ' Please use state_dict or torch.jit serialization.')
-        (w, b) = self._weight_bias()
-        return (
-            self.in_channels,
-            self.out_channels,
-            self.kernel_size,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.transposed,
-            self.output_padding,
-            self.groups,
-            self.padding_mode,
-            w,
-            b,
-            self.scale,
-            self.zero_point,
-            self.training
-        )
-
-    # ===== Deserialization methods =====
-    # Counterpart to the serialization methods, we must pack the serialized
-    # QTensor weight into its packed format for use by the FBGEMM ops.
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        self.set_weight_bias(
-            state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
-        state_dict.pop(prefix + 'weight')
-        state_dict.pop(prefix + 'bias')
-        self.scale = float(state_dict[prefix + 'scale'])
-        state_dict.pop(prefix + 'scale')
-        self.zero_point = int(state_dict[prefix + 'zero_point'])
-        state_dict.pop(prefix + 'zero_point')
-        super(_ConvNd, self)._load_from_state_dict(
-            state_dict, prefix, local_metadata, False, missing_keys,
-            unexpected_keys, error_msgs)
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        self.in_channels = state[0]
-        self.out_channels = state[1]
-        self.kernel_size = state[2]
-        self.stride = state[3]
-        self.padding = state[4]
-        self.dilation = state[5]
-        self.transposed = state[6]
-        self.output_padding = state[7]
-        self.groups = state[8]
-        self.padding_mode = state[9]
-        self.set_weight_bias(state[10], state[11])
-        self.scale = state[12]
-        self.zero_point = state[13]
-        self.training = state[14]
 
 
 class Conv2d(_ConvNd):
@@ -191,19 +173,16 @@ class Conv2d(_ConvNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.conv2d_prepack(
-            w, b, self.stride, self.padding, self.dilation, self.groups)
+        self._packed_params.set_weight_bias(w, b)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv2d_unpack(self._packed_params)
+        return self._packed_params._weight_bias()
 
     def weight(self):
-        (w, _) = torch.ops.quantized.conv2d_unpack(self._packed_params)
-        return w
+        return self._packed_params._weight_bias()[0]
 
     def bias(self):
-        (_, b) = torch.ops.quantized.conv2d_unpack(self._packed_params)
-        return b
+        return self._packed_params._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -211,7 +190,7 @@ class Conv2d(_ConvNd):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return ops.quantized.conv2d(
-            input, self._packed_params, self.stride, self.padding,
+            input, self._packed_params._packed_params, self.stride, self.padding,
             self.dilation, self.groups, self.scale, self.zero_point)
 
     @classmethod
@@ -317,19 +296,16 @@ class Conv3d(_ConvNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.conv3d_prepack(
-            w, b, self.stride, self.padding, self.dilation, self.groups)
+        self._packed_params.set_weight_bias(w, b)
 
     def _weight_bias(self):
-        return torch.ops.quantized.conv3d_unpack(self._packed_params)
+        return self._packed_params._weight_bias()
 
     def weight(self):
-        (w, _) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return w
+        return self._packed_params._weight_bias()[0]
 
     def bias(self):
-        (_, b) = torch.ops.quantized.conv3d_unpack(self._packed_params)
-        return b
+        return self._packed_params._weight_bias()[1]
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -337,7 +313,7 @@ class Conv3d(_ConvNd):
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, D, H, W)`!")
         return ops.quantized.conv3d(
-            input, self._packed_params, self.stride, self.padding,
+            input, self._packed_params._packed_params, self.stride, self.padding,
             self.dilation, self.groups, self.scale, self.zero_point)
 
     @classmethod
