@@ -415,6 +415,18 @@ Tensor ones_like(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+  if (options.device() == at::kCPU) {
+    // This is a fast track to skip device dispatch for making scalar tensor on CPU.
+    // See https://github.com/pytorch/pytorch/pull/29915 for more detailed perf
+    // difference.
+    // In the future when we remove the overhead of device dispatch, we'll happily
+    // revert this to following:
+    //   auto result = at::empty({}, options);
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    auto result = empty_cpu({}, options);
+    at::native::fill_(result, s);
+    return result;
+  }
   return at::empty({}, options).fill_(s);
 }
 

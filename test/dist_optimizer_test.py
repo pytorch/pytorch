@@ -2,14 +2,13 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import unittest
 
-from dist_utils import dist_init
+from dist_utils import INIT_METHOD_TEMPLATE, dist_init
 from torch import optim
 from torch.distributed.optim import DistributedOptimizer
 import torch
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import threading
-from rpc_agent_test_fixture import RpcAgentTestFixture
 
 
 class MyModule:
@@ -84,7 +83,17 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed optim does not support python2"
 )
-class DistOptimizerTest(RpcAgentTestFixture):
+class DistOptimizerTest(object):
+
+    @property
+    def world_size(self):
+        return 4
+
+    @property
+    def init_method(self):
+        return INIT_METHOD_TEMPLATE.format(
+            file_name=self.file_name, rank=self.rank, world_size=self.world_size
+        )
 
     @dist_init()
     def test_dist_optim_exception(self):
