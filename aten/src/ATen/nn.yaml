@@ -110,15 +110,6 @@
     output: 'false'
     grad_input: 'false'
 
-# Private functions. These also exist in TH, but we want the backwards functions
-# to implement derivatives.
-
-- name: _thnn_sigmoid(Tensor self)
-  cname: Sigmoid
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_tanh(Tensor self)
   cname: Tanh
   scalar_check:
