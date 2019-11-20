@@ -1,8 +1,8 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <c10/util/C++17.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
@@ -150,7 +150,7 @@ Message RequestCallbackImpl::processRpc(
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
       // Attach 'recv' autograd function.
-      DistAutogradContext* autogradContext = addRecvRpcBackward(
+      auto autogradContext = addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(),
           rpcWithAutograd.tensors(),
           rpcWithAutograd.fromWorkerId());
@@ -180,13 +180,13 @@ Message RequestCallbackImpl::processRpc(
       const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
 
       // Retrieve the appropriate autograd context.
-      auto& autogradContext =
+      auto autogradContext =
           DistAutogradContainer::getInstance().retrieveContext(
               autogradMetadata.autogradContextId);
 
       // Lookup the appropriate 'send' function to enqueue.
       std::shared_ptr<SendRpcBackward> sendFunction =
-          autogradContext.retrieveSendFunction(
+          autogradContext->retrieveSendFunction(
               autogradMetadata.autogradMessageId);
 
       // Attach the gradients to the send function.

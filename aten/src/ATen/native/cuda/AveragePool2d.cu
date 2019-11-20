@@ -487,7 +487,7 @@ Tensor avg_pool2d_backward_cuda(
   bool count_include_pad,
   c10::optional<int64_t> divisor_override)
 {
-  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   avg_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
