@@ -29,6 +29,7 @@ def merge_dicts(*dicts):
 
 common_args = parse_kwargs("""
     input (Tensor): the input tensor.
+    generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     out (Tensor, optional): the output tensor.
 """)
 
@@ -705,6 +706,7 @@ point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
+    {generator}
     {out}
 
 Example::
@@ -821,6 +823,26 @@ Example::
     >>> res = torch.bmm(input, mat2)
     >>> res.size()
     torch.Size([10, 3, 5])
+""".format(**common_args))
+
+add_docstr(torch.bitwise_xor,
+           r"""
+bitwise_xor(input, other, out=None) -> Tensor
+
+Computes the bitwise XOR of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical XOR.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_xor(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-2, -2,  0], dtype=torch.int8)
+    >>> torch.bitwise_xor(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ True, False, False])
 """.format(**common_args))
 
 add_docstr(torch.stack,
@@ -2390,6 +2412,22 @@ Example::
     tensor(1.9073e-06)
 """.format(**common_args))
 
+add_docstr(torch.isfinite,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
+
+    Example::
+
+        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([True,  False,  True,  False,  False])
+""")
+
 add_docstr(torch.isnan,
            r"""
 Returns a new tensor with boolean elements representing if each element is `NaN` or not.
@@ -3534,7 +3572,7 @@ Example::
 
 add_docstr(torch.multinomial,
            r"""
-multinomial(input, num_samples, replacement=False, out=None) -> LongTensor
+multinomial(input, num_samples, replacement=False, *, generator=None, out=None) -> LongTensor
 
 Returns a tensor where each row contains :attr:`num_samples` indices sampled
 from the multinomial probability distribution located in the corresponding row
@@ -3567,6 +3605,7 @@ Args:
     input (Tensor): the input tensor containing probabilities
     num_samples (int): number of samples to draw
     replacement (bool, optional): whether to draw with replacement or not
+    {generator}
     {out}
 
 Example::
@@ -3774,7 +3813,7 @@ Example::
 
 add_docstr(torch.normal,
            r"""
-.. function:: normal(mean, std, out=None) -> Tensor
+.. function:: normal(mean, std, *, generator=None, out=None) -> Tensor
 
 Returns a tensor of random numbers drawn from separate normal distributions
 whose mean and standard deviation are given.
@@ -3794,6 +3833,7 @@ total number of elements in each tensor need to be the same.
 Args:
     mean (Tensor): the tensor of per-element means
     std (Tensor): the tensor of per-element standard deviations
+    {generator}
     {out}
 
 Example::
@@ -4224,7 +4264,7 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint(low=0, high, size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -4239,6 +4279,7 @@ Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -6353,12 +6394,12 @@ Please look at `Moore-Penrose inverse`_ for more details
     See :meth:`~torch.svd` for more details.
 
 Arguments:
-    input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
+    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
     rcond (float): A floating point value to determine the cutoff for small singular values.
                    Default: 1e-15
 
 Returns:
-    The pseudo-inverse of :attr:`input` of dimensions :math:`n \times m`
+    The pseudo-inverse of :attr:`input` of dimensions :math:`(*, n, m)`
 
 Example::
 
@@ -6373,6 +6414,17 @@ Example::
             [-0.7124, -0.1631, -0.2272],
             [ 0.1356,  0.3933, -0.5023],
             [-0.0308, -0.1725, -0.5216]])
+    >>> # Batched pinverse example
+    >>> a = torch.randn(2,6,3)
+    >>> b = torch.pinverse(a)
+    >>> torch.matmul(b, a)
+    tensor([[[ 1.0000e+00,  1.6391e-07, -1.1548e-07],
+            [ 8.3121e-08,  1.0000e+00, -2.7567e-07],
+            [ 3.5390e-08,  1.4901e-08,  1.0000e+00]],
+
+            [[ 1.0000e+00, -8.9407e-08,  2.9802e-08],
+            [-2.2352e-07,  1.0000e+00,  1.1921e-07],
+            [ 0.0000e+00,  8.9407e-08,  1.0000e+00]]])
 
 .. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
 

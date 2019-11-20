@@ -3,11 +3,15 @@
 namespace c10d {
 
 ProcessGroupRoundRobin::ProcessGroupRoundRobin(
+    int rank,
+    int size,
     std::vector<std::shared_ptr<ProcessGroup>> processGroups)
-    : ProcessGroup(
-          processGroups.front()->getRank(),
-          processGroups.front()->getSize()),
-      processGroups_(std::move(processGroups)) {
+    : ProcessGroup(rank, size), processGroups_(std::move(processGroups)) {
+  TORCH_CHECK(processGroups_.size() >= 1);
+  for (const auto& processGroup : processGroups_) {
+    TORCH_CHECK(processGroup->getRank() == rank_);
+    TORCH_CHECK(processGroup->getSize() == size_);
+  }
   iterator_ = processGroups_.begin();
 }
 
@@ -43,6 +47,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allgather(
     const AllgatherOptions& opts) {
   return next()->allgather(outputs, inputs, opts);
 };
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& outputTensorLists,
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
+  return next()->allgather(outputTensorLists, inputTensors, opts);
+}
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::gather(
     std::vector<std::vector<at::Tensor>>& outputs,

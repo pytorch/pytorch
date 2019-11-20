@@ -5,8 +5,9 @@
 #include <math.h>
 
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
@@ -63,7 +64,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
   TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
-  Tensor result = at::empty_like(input);
+  Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto strides = input.strides();
 
   // case1: shared weight for all channels
@@ -176,9 +177,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
   int64_t weight_num = weight.numel();
   auto strides = input.strides();
   auto dims = input.dim();
-  Tensor input_grad = at::empty_like(input);
-  Tensor weight_grad = at::empty_like(weight);
-  Tensor weight_grad_collector = at::empty_like(input);
+  Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // case1: shared parameter for all channels
   if (weight_num == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_backward_cuda", [&] {
@@ -269,7 +270,7 @@ void hardshrink_backward_cuda_kernel(const Tensor& self, Tensor& out_tensor, sca
 }
 
 Tensor hardshrink_cuda(const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self);
+  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "hardshrink_cuda", [&] {
     hardshrink_cuda_kernel<scalar_t>(self, out_tensor, lambd.to<scalar_t>());
   });
@@ -277,7 +278,7 @@ Tensor hardshrink_cuda(const Tensor & self, Scalar lambd) {
 }
 
 Tensor hardshrink_backward_cuda(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(grad);
+  auto out_tensor = at::empty_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "hardshrink_backward_cuda", [&] {
     hardshrink_backward_cuda_kernel<scalar_t>(self, out_tensor, lambd.to<scalar_t>(), grad);
   });
@@ -299,44 +300,47 @@ static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar valu
 
 namespace {
 
-template <typename T>
-void GeluCUDAKernelImplInternal(const Tensor& X, Tensor* Y) {
-  at::cuda::CUDA_tensor_apply2<T, T>(X, *Y, [] __device__(const T& x, T& y) {
-    y = x * c10::cuda::compat::normcdf(x);
+void GeluCUDAKernelImpl(TensorIterator& it) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(it.dtype(), "GeluCUDAKernelImpl", [&]() {
+    using T_ACC = acc_type<scalar_t, true>;
+    gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+      return static_cast<T_ACC>(x) *
+          c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+    });
   });
 }
 
-void GeluCUDAKernelImpl(const Tensor& X, Tensor* Y) {
-  AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GeluCUDAKernelImpl", [&]() {
-    GeluCUDAKernelImplInternal<scalar_t>(X, Y);
-  });
-}
-
-template <typename T>
-void GeluBackwardCUDAKernelImplInternal(
-    const Tensor& dY,
-    const Tensor& X,
-    Tensor* dX) {
-  constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);
-  at::cuda::CUDA_tensor_apply3<T, T, T>(
-      dY, X, *dX, [] __device__(const T& dy, const T& x, T& dx) {
-        dx = dy *
-            (c10::cuda::compat::normcdf(x) +
-             x * kAlpha * c10::cuda::compat::exp(-T(0.5) * x * x));
-      });
-}
-
-void GeluBackwardCUDAKernelImpl(
-    const Tensor& dY,
-    const Tensor& X,
-    Tensor* dX) {
-  AT_DISPATCH_FLOATING_TYPES(
-      X.scalar_type(), "GeluBackwardCUDAKernelImpl", [&]() {
-        GeluBackwardCUDAKernelImplInternal<scalar_t>(dY, X, dX);
+void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
+        using T_ACC = acc_type<scalar_t, true>;
+        gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+          constexpr T_ACC kBeta = M_2_SQRTPI * M_SQRT1_2 * T_ACC(0.5);
+          const T_ACC cdf = c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+          const T_ACC pdf =
+              c10::cuda::compat::exp(
+                  T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
+              kBeta;
+          return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
+        });
       });
 }
 
 } // namespace
+
+Tensor gelu_cuda(const Tensor& self) {
+  Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto it = TensorIterator::unary_op(Y, self);
+  GeluKernel(kCUDA, it);
+  return Y;
+}
+
+Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
+  Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto it = TensorIterator::binary_op(dX, grad, self);
+  GeluBackwardKernel(kCUDA, it);
+  return dX;
+}
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluCUDAKernelImpl);

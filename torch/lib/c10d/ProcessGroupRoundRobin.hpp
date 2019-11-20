@@ -19,6 +19,8 @@ namespace c10d {
 class ProcessGroupRoundRobin final : public ProcessGroup {
  public:
   explicit ProcessGroupRoundRobin(
+      int rank,
+      int size,
       std::vector<std::shared_ptr<ProcessGroup>> processGroups);
 
   ~ProcessGroupRoundRobin() override;
@@ -43,6 +45,11 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> gather(

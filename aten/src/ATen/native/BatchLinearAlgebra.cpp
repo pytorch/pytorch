@@ -430,7 +430,7 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
 
 Tensor inverse(const Tensor &self) {
   if (self.size(-1) == 0) {
-    return at::empty_like(self);
+    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
   return at::_inverse_helper(self);
@@ -549,7 +549,7 @@ Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
 
 Tensor cholesky(const Tensor &self, bool upper) {
   if (self.size(-1) == 0) {
-    return at::empty_like(self);
+    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
 
@@ -582,13 +582,14 @@ static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
   auto self_matrix_stride = matrixStride(self);
   auto pivots_matrix_stride = pivots.size(-1);
   auto batch_size = batchCount(self);
+  auto m = self.size(-2);
   auto n = self.size(-1);
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
     int* infos_working_ptr = &infos_data[i];
-    lapackLu<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
+    lapackLu<scalar_t>(m, n, self_working_ptr, m, pivots_working_ptr, infos_working_ptr);
   }
 #endif
 }
@@ -598,16 +599,18 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
-  squareCheckInputs(self);
+  auto m = self.size(-2);
+  auto n = self.size(-1);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
+  req_size.back() = std::min(m, n);
   auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 
   Tensor self_working_copy;
   if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self);
+    self_working_copy = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_cpu", [&]{
@@ -616,157 +619,12 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
   }
   if (check_errors) {
     if (self.dim() > 2) {
-      batchCheckErrors(infos_tensor, "lu");
+      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
     } else {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
+      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
     }
   }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <typename scalar_t, bool upper>
-static void apply_triu_tril_single(
-    scalar_t* result, scalar_t* self, bool inplace,
-    int64_t k, int64_t n, int64_t m,
-    int64_t res_row_stride, int64_t res_col_stride,
-    int64_t self_row_stride, int64_t self_col_stride) {
-
-  constexpr int64_t zero = 0;
-
-  if (upper) {
-    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        for (int64_t j = 0; j < std::min(m, i + k); j++) {
-          result[i * res_row_stride + j * res_col_stride] = 0;
-        }
-        if (!inplace) {  // copy the rest of the self if not inplace
-          for (int64_t j = std::max(zero, i + k); j < m; j++) {
-            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
-          }
-        }
-      }
-    });
-  } else {
-    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
-          result[i * res_row_stride + j * res_col_stride] = 0;
-        }
-        if (!inplace) {  // copy the rest of the self if not inplace
-          for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
-            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
-          }
-        }
-      }
-    });
-  }
-}
-
-template <typename scalar_t, bool upper>
-void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k) {
-  auto n = self.size(-2);
-  auto m = self.size(-1);
-  auto self_data = self.data_ptr<scalar_t>();
-  auto self_stride = (self.dim() > 2 && self.stride(-3) > 0) ? self.stride(-3) : 1;
-  auto batchsize = batchCountTrilTriu(result);
-  auto self_row_stride = self.stride(-2);
-  auto self_column_stride = self.stride(-1);
-
-  auto result_data = result.data_ptr<scalar_t>();
-  int64_t result_stride, result_row_stride, result_column_stride;
-  if (result_data != self_data) {
-    result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;
-    result_row_stride = result.stride(-2);
-    result_column_stride = result.stride(-1);
-  } else {
-    result_stride = self_stride;
-    result_row_stride = self_row_stride;
-    result_column_stride = self_column_stride;
-  }
-
-  at::parallel_for(0, batchsize, 0, [&](int64_t start, int64_t end) {
-    for (auto b = start; b < end; b++) {
-      scalar_t* self_batch = &self_data[b * self_stride];
-      scalar_t* result_batch = &result_data[b * result_stride];
-      apply_triu_tril_single<scalar_t, upper>(
-          result_batch, self_batch, inplace, k, n, m,
-          result_row_stride, result_column_stride, self_row_stride, self_column_stride);
-    }
-  });
-}
-
-Tensor tril(const Tensor& self, int64_t k) {
-  Tensor result = at::empty({0}, self.options());
-  at::tril_out(result, self, k);
-  return result;
-}
-
-Tensor& tril_cpu_(Tensor &self, int64_t k) {
-  if (self.numel() == 0) {
-    return self;
-  }
-  bool inplace;
-  Tensor self_c;
-  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
-  Tensor result = inplace ? self : at::empty_like(self);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(result, self_c, inplace, k);
-  });
-  if (!inplace) self.copy_(result);
-  return self;
-}
-
-Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
-  if (self.numel() == 0) {
-    return result;
-  }
-  Tensor self_c;
-  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(result, self_c, false, k);
-  });
-  return result;
-}
-
-Tensor triu(const Tensor& self, int64_t k) {
-  Tensor result = at::empty({0}, self.options());
-  at::triu_out(result, self, k);
-  return result;
-}
-
-Tensor& triu_cpu_(Tensor &self, int64_t k) {
-  if (self.numel() == 0) {
-    return self;
-  }
-  bool inplace;
-  Tensor self_c;
-  std::tie(inplace, self_c) = checkTrilTriuBatchContiguous(self, true);
-  Tensor result = inplace ? self : at::empty_like(self);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(result, self_c, inplace, k);
-  });
-  if (!inplace) self.copy_(result);
-  return self;
-}
-
-Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
-  if (self.numel() == 0) {
-    return result;
-  }
-  Tensor self_c;
-  std::tie(std::ignore, self_c) = checkTrilTriuBatchContiguous(self, false);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(result, self_c, false, k);
-  });
-  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1034,7 +892,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
   auto eigvals = at::empty(self_sizes, self.options());
 
   if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self));
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   }
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
@@ -1233,7 +1091,7 @@ Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Ten
   std::vector<int64_t> infos(batchCount(self), 0);
 
   if (self.numel() == 0 || LU_data.numel() == 0) {
-    return at::zeros_like(self);
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);

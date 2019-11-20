@@ -1,26 +1,37 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import numbers
 import sys
 
-from .backend_registry import *  # noqa: F401
+import torch
+import torch.distributed as dist
+
+from . import backend_registry
 
 
-if sys.version_info >= (3, 0):
-    from . import api
-    from .api import _init_rpc
+def is_available():
+    return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
+
+
+if is_available() and not torch._C._rpc_init():
+    raise RuntimeError("Failed to initialize torch.distributed.rpc")
+
+
+if is_available():
+    from .api import _init_rpc_backend
     from .api import *  # noqa: F401
     import torch.distributed.autograd
 
-    def init_model_parallel(
-        self_name,
-        backend=RpcBackend.PROCESS_GROUP,
+    def init_rpc(
+        name,
+        backend=backend_registry.BackendType.PROCESS_GROUP,
         init_method=None,
-        self_rank=-1,
-        worker_name_to_id=None,
-        num_send_recv_threads=4,
+        rank=-1,
+        world_size=None,
+        rpc_agent_options=None,
     ):
         r"""
-        Initializes model parallel primitives such as the local rpc agent
+        Initializes RPC primitives such as the local RPC agent
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current
@@ -34,23 +45,30 @@ if sys.version_info >= (3, 0):
                         Currently, process group backend is the only
                         available backend implementation. (default:
                         ``RpcBackend.PROCESS_GROUP``).
-            self_name (str): a globally unique name of this node. (e.g.,
+            name (str): a globally unique name of this node. (e.g.,
                         ``Trainer3``, ``ParameterServer2``, ``Master``,
                         ``Worker1``) Name can only contain number, alphabet,
                         underscore, and/or dash, and must be shorter than
                         128 characters.
-            self_rank (int): a globally unique id/rank of this node.
             init_method(str): backend specific init arguments.
-            num_send_recv_threads(int): Number of threads for send/recv work.
+            rank (int): a globally unique id/rank of this node.
+            world_size (int): The number of workers in the group.
+            rpc_agent_options (RpcAgentOptions): The options passed to RpcAgent
+                consturctor.
         """
-        # Initialize RPC.
-        _init_rpc(
-            backend,
-            init_method,
-            self_name,
-            self_rank,
-            worker_name_to_id,
-            num_send_recv_threads,
+        # Rendezvous.
+        rendezvous_iterator = torch.distributed.rendezvous(
+            init_method, rank=rank, world_size=world_size
         )
-        # Initialize Autograd.
-        torch.distributed.autograd._init(api._agent.get_worker_info().id)
+        store, _, _ = next(rendezvous_iterator)
+
+        # Initialize autograd before RPC since _init_rpc_backend guarantees all
+        # processes sync via the store. If we initialize autograd after RPC,
+        # there could be a race where some nodes might have initialized autograd
+        # and others might not have. As a result, a node calling
+        # torch.distributed.autograd.backward() would run into errors since
+        # other nodes might not have been initialized.
+        torch.distributed.autograd._init(rank)
+
+        # Initialize RPC.
+        _init_rpc_backend(backend, store, name, rank, world_size, rpc_agent_options)

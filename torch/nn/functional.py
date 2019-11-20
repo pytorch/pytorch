@@ -1117,7 +1117,7 @@ def gelu(input):
     r"""gelu(input) -> Tensor
 
     Applies element-wise the function
-    :math:`\text{GeLU}(x) = x * \Phi(x)`
+    :math:`\text{GELU}(x) = x * \Phi(x)`
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
@@ -1279,14 +1279,14 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
-    gumbels = -torch.empty_like(logits).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()  # ~Gumbel(0,1)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
     if hard:
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
@@ -1846,8 +1846,17 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         if target.size()[1:] != input.size()[2:]:
             raise ValueError('Expected target size {}, got {}'.format(
                 out_size, target.size()))
-        input = input.contiguous().view(n, c, 1, -1)
-        target = target.contiguous().view(n, 1, -1)
+        input = input.contiguous()
+        target = target.contiguous()
+        # support empty batches, see #15870
+        if input.numel() > 0:
+            input = input.view(n, c, 1, -1)
+        else:
+            input = input.view(n, c, 0, 0)
+        if target.numel() > 0:
+            target = target.view(n, 1, -1)
+        else:
+            target = target.view(n, 0, 0)
         reduction_enum = _Reduction.get_enum(reduction)
         if reduction != 'none':
             ret = torch._C._nn.nll_loss2d(

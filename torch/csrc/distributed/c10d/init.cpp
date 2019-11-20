@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10d/FileStore.hpp>
+#include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -195,6 +196,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
       .def(py::init<const std::string&, int>());
 
+  shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store)
+      .def(py::init<>());
+
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, int, bool>());
 
@@ -315,6 +319,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "allgather_coalesced",
+              &::c10d::ProcessGroup::allgather_coalesced,
+              py::arg("output_lists"),
+              py::arg("input_list"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "gather",
               &::c10d::ProcessGroup::gather,
               py::arg("output_tensors"),
@@ -420,7 +432,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
         if (processGroups.size() < 2) {
           throw std::invalid_argument("Specify at least 1 process group");
         }
+        const auto& processGroup = processGroups.front();
         return std::make_shared<::c10d::ProcessGroupRoundRobin>(
+            processGroup->getRank(),
+            processGroup->getSize(),
             std::move(processGroups));
       },
       py::arg("process_groups"),
@@ -530,11 +545,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(
           "result",
           [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
-            auto tensors = work.result();
-            for (auto& tensor : tensors) {
-              tensor = autograd::make_variable(tensor);
-            }
-            return tensors;
+            return work.result();
           })
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
