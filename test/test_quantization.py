@@ -512,6 +512,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         prepare_dynamic(model, qconfig_dict)
         test_only_eval_fn(model, self.calib_data)
         convert_dynamic(model)
+
         def checkQuantized(model):
             self.checkDynamicQuantizedLinear(model.sub1.fc)
             self.checkDynamicQuantizedLinear(model.fc3)
