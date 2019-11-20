@@ -434,9 +434,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
         }
         const auto& first = processGroups.front();
         return std::make_shared<::c10d::ProcessGroupRoundRobin>(
-            first->getRank(),
-            first->getSize(),
-            std::move(processGroups));
+            first->getRank(), first->getSize(), std::move(processGroups));
       },
       py::arg("process_groups"),
       py::call_guard<py::gil_scoped_release>());
