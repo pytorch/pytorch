@@ -42,7 +42,14 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
     for (int64_t j = 0; j < n_categories; j++) {
       val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
-      TORCH_CHECK(std::isfinite(val), "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
+// NB: std::isfinite doesn't bode well with clang for half datatypes,
+// so we manually cast it to a double and perform the check.
+#if defined(__clang__)
+      TORCH_CHECK(std::isfinite(static_cast<double>(val)),
+#else
+      TORCH_CHECK(std::isfinite(val),
+                  "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
+#endif
 
       sum += val;
       if (val == 0) {
