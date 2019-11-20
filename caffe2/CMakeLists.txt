@@ -443,6 +443,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/object.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
@@ -455,6 +456,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
     )
 
   if (NOT INTERN_BUILD_MOBILE)
@@ -490,8 +492,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     if (USE_DISTRIBUTED)
       list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
@@ -564,6 +566,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/normalization.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/instancenorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/distance.cpp
@@ -581,11 +584,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/embedding.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/instancenorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/linear.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/padding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
@@ -982,7 +985,7 @@ install(TARGETS torch EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}
 caffe2_interface_library(torch torch_library)
 list(APPEND Caffe2_MAIN_LIBS torch_library)
 if (USE_TBB)
-  list(APPEND Caffe2_MAIN_LIB tbb)
+  list(APPEND Caffe2_MAIN_LIBS tbb)
 endif()
 
 # Install PDB files for MSVC builds

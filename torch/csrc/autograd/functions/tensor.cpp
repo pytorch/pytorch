@@ -19,7 +19,7 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   auto& grad = grads[0];
   variable_list grad_inputs(2);
   if (should_compute_output(0)) {
-    grad_inputs[0] = at::zeros_like(grad, at::MemoryFormat::Contiguous);
+    grad_inputs[0] = at::zeros_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (should_compute_output(1)) {
     at::DeviceGuard device_guard(src_device);
@@ -50,7 +50,7 @@ CopySlices::CopySlices(
   add_input_metadata(base_var);
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
-  add_next_edge(base_var.gradient_edge());
+  add_next_edge(impl::gradient_edge(base_var));
   for (size_t i = 1; i < num_outputs; i++) {
     add_next_edge(fn->next_edge(i));
   }
