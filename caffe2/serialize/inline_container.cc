@@ -190,6 +190,17 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
   return result;
 }
 
+std::vector<std::string> PyTorchStreamReader::getAllRecords() {
+  mz_uint num_files = mz_zip_reader_get_num_files(ar_.get());
+  std::vector<std::string> out;
+  char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+  for (size_t i = 0; i < num_files; i++) {
+    mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
+    out.push_back(buf);
+  }
+  return out;
+}
+
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
