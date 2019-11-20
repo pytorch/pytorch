@@ -286,6 +286,57 @@ cd docs
 make doctest
 ```
 
+## Profiling with `py-spy`
+
+Evaluating the performance impact of code changes in PyTorch can be complicated,
+particularly if code changes happen in compiled code. One simple way to profile
+both Python and C++ code in PyTorch is to use
+[`py-spy`](https://github.com/benfred/py-spy), a sampling profiler for Python
+that has the ability to profile native code and Python code in the same session.
+
+`py-spy` can be installed via `pip`:
+
+```bash
+$ pip install py-spy
+```
+
+To use `py-spy`, first write a Python test script that exercises the
+functionality you would like to profile. For example, this script profiles
+`torch.add`:
+
+```python
+import torch
+
+t1 = torch.tensor([[1, 1], [1, 1.]])
+t2 = torch.tensor([[0, 0], [0, 0.]])
+
+for _ in range(1000000):
+    torch.add(t1, t2)
+```
+
+Since the `torch.add` operation happens in microseconds, we repeat it a large
+number of times to get good statistics. The most straightforward way to use
+`py-spy` with such a script is to generate a [flame
+graph](http://www.brendangregg.com/flamegraphs.html):
+
+```bash
+$ py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
+```
+
+This will output a file named `profile.svg` containing a flame graph you can
+view in a web browser or SVG viewer. Individual stack frame entries in the graph
+can be selected interactively with your mouse to zoom in on a particular part of
+the program execution timeline. The `--native` command-line option tells
+`py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
+for C++ code it may be necessary to compile PyTorch in debug mode by prepending
+your `setup.py develop` call to compile PyTorch with `DEBUG=1`. Depending on
+your operating system it may also be necessary to run `py-spy` with root
+privileges.
+
+`py-spy` can also work in an `htop`-like "live profiling" mode and can be
+tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
+details.
+
 ## Managing Multiple Build Trees
 
 One downside to using `python setup.py develop` is that your development
