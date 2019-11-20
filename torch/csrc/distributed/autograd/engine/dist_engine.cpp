@@ -49,7 +49,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
 
     // Compute the root edges and generate the appropriate gradients.
     rootEdges.push_back(torch::autograd::impl::gradient_edge(root));
-    grads.push_back(at::ones_like(root, at::MemoryFormat::Contiguous));
+    grads.push_back(at::ones_like(root, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   }
 
   // Validate rootEdges and grads.
