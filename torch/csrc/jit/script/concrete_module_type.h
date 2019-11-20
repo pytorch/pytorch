@@ -178,8 +178,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
  public:
   explicit ConcreteModuleType(ConcreteModuleTypeBuilder data);
 
-  static std::shared_ptr<ConcreteModuleType> fromInterface(
-      InterfaceTypePtr interface);
+  static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
 
   TypePtr getJitType() const;
   py::object getPyClass() const;
