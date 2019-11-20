@@ -132,16 +132,6 @@ TH_API void THNN_(RReLU_updateGradInput)(
           bool train,
           bool inplace);
 
-TH_API void THNN_(Sigmoid_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output);
-TH_API void THNN_(Sigmoid_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *output);
-
 TH_API void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
           THTensor *input, THTensor *output,
