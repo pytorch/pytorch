@@ -13,7 +13,7 @@ def register_quantized_ops(domain, version):
     quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
-            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'clamp', 'avg_pool2d', 'slice']
+            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'slice', 'clamp']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -125,15 +125,8 @@ def upsample_nearest2d(g, input, output_size):
         from torch.onnx.symbolic_opset9 import upsample_nearest2d
         return upsample_nearest2d(g, input, output_size)
 
-    # FIXME hard-coded input sizes, as we cannot get input size of quantized tensor
-    input_sizes = [24, 32]
-    dim = 4
-    scales = [1. if i < 2 else
-                       float(output_size[-(dim - i)]) / float(input_sizes[-(dim - i)])
-                       for i in range(0, dim)]
     kwargs = {
-        "width_scale_f": scales[2],
-        "height_scale_f": scales[3],
+        "output_size_i": output_size,
         "Y_scale_f": input.node()["Y_scale"],
         "Y_zero_point_i": input.node()["Y_zero_point"],
     }
@@ -188,6 +181,7 @@ def clamp(g, input, min, max):
     }
     return g.op("_caffe2::Clip", input, **kwargs)
 
+
 @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
 def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
     if input not in sym_help._quantized_ops:
@@ -215,9 +209,16 @@ def slice(g, input, dim, start, end, step):
 
     start = sym_help._parse_arg(start, 'i')
     end = sym_help._parse_arg(end, 'i')
+    dim = sym_help._parse_arg(dim, 'i')
+
+    start_list = [0] * 4
+    end_list = [-1] * 4
+    start_list[dim] = start
+    end_list[dim] = end
+
     kwargs = {
-        "starts_i": start,
-        "ends_i": end,
+        "starts_i": start_list,
+        "ends_i": end_list,
         "Y_scale_f": input.node()["Y_scale"],
         "Y_zero_point_i": input.node()["Y_zero_point"],
     }

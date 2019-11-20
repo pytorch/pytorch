@@ -4,6 +4,7 @@ import numpy as np
 import unittest
 import torch.onnx
 import io
+import torch.nn as nn
 
 import onnx
 import caffe2.python.onnx.backend as c2
@@ -129,6 +130,20 @@ class TestQuantizedOps(unittest.TestCase):
 
         # Permute pytorch output to NHWC
         np.testing.assert_almost_equal(outputs.permute(0, 2, 3, 1).numpy(), caffe_res, decimal=3)
+
+    def test_upsample(self):
+        class QUpsampleModule(torch.nn.Module):
+            def __init__(self):
+                super(QUpsampleModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode='nearest')
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        self.generic_test(QUpsampleModule(), (x,), input_names=["x"])
 
     def test_quantized_ts(self):
         torch.backends.quantized.engine = "qnnpack"
