@@ -1710,12 +1710,13 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-std::vector<Value*> inlineCallTo(
-    Node* to_replace,
-    Graph& callee) {
+std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
-  auto new_outputs =
-      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  auto new_outputs = insertGraph(
+      *to_replace->owningGraph(),
+      *(callee->optimized_graph()),
+      to_replace->inputs());
+
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
