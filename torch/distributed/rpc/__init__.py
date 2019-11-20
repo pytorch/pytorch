@@ -1,11 +1,12 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import numbers
 import sys
-import torch
 
+import torch
+import torch.distributed as dist
 
 from . import backend_registry
-from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 
 
 def is_available():
@@ -22,13 +23,12 @@ if is_available():
     import torch.distributed.autograd
 
     def init_rpc(
-        self_name,
+        name,
         backend=backend_registry.BackendType.PROCESS_GROUP,
         init_method=None,
-        self_rank=-1,
-        worker_name_to_id=None,
-        num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-        rpc_timeout=DEFAULT_RPC_TIMEOUT,
+        rank=-1,
+        world_size=None,
+        rpc_agent_options=None,
     ):
         r"""
         Initializes RPC primitives such as the local RPC agent
@@ -44,21 +44,20 @@ if is_available():
                         Currently, process group backend is the only
                         available backend implementation. (default:
                         ``RpcBackend.PROCESS_GROUP``).
-            self_name (str): a globally unique name of this node. (e.g.,
+            name (str): a globally unique name of this node. (e.g.,
                         ``Trainer3``, ``ParameterServer2``, ``Master``,
                         ``Worker1``) Name can only contain number, alphabet,
                         underscore, and/or dash, and must be shorter than
                         128 characters.
-            self_rank (int): a globally unique id/rank of this node.
             init_method(str): backend specific init arguments.
-            num_send_recv_threads(int): Number of threads for send/recv work.
-            rpc_timeout (datetime.timedelta): Timeout for RPCs. Defaults to 60 seconds.
-                If 0, no timeout is enforced.
+            rank (int): a globally unique id/rank of this node.
+            world_size (int): The number of workers in the group.
+            rpc_agent_options (RpcAgentOptions): The options passed to RpcAgent
+                consturctor.
         """
         # Rendezvous.
-        world_size = len(worker_name_to_id)
         rendezvous_iterator = torch.distributed.rendezvous(
-            init_method, rank=self_rank, world_size=world_size
+            init_method, rank=rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
 
@@ -68,15 +67,7 @@ if is_available():
         # and others might not have. As a result, a node calling
         # torch.distributed.autograd.backward() would run into errors since
         # other nodes might not have been initialized.
-        torch.distributed.autograd._init(worker_name_to_id[self_name])
+        torch.distributed.autograd._init(rank)
 
         # Initialize RPC.
-        _init_rpc_backend(
-            backend,
-            store,
-            self_name,
-            self_rank,
-            worker_name_to_id,
-            num_send_recv_threads,
-            rpc_timeout,
-        )
+        _init_rpc_backend(backend, store, name, rank, world_size, rpc_agent_options)

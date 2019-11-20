@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import sys
 import time
 import unittest
 
@@ -7,7 +8,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+import dist_utils
+from dist_utils import dist_init
+from rpc_agent_test_fixture import RpcAgentTestFixture
 
 import threading
 
@@ -159,7 +162,7 @@ class ExecMode(Enum):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
-class DistAutogradTest(object):
+class DistAutogradTest(RpcAgentTestFixture):
 
     def _initialize_pg(self):
         # This is for tests using `dist.barrier`.
@@ -192,21 +195,13 @@ class DistAutogradTest(object):
         if hasattr(self, 'dst_rank'):
             self.dst_rank = (self.dst_rank + 1) % self.world_size
             if self.dst_rank == self.rank:
-                self._next_rank()
+                return self._next_rank()
         else:
             self.dst_rank = (self.rank + 1) % self.world_size
         return self.dst_rank
 
     def _check_rpc_done(self, rank_distance):
         _check_rpc_done(rank_distance)
-
-    @property
-    def world_size(self):
-        return 4
-
-    @property
-    def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
     @dist_init
     def test_autograd_context(self):
@@ -1030,7 +1025,6 @@ class DistAutogradTest(object):
         # Verify thread is still alive (indicating backward hasn't completed yet).
         self.assertTrue(t.is_alive())
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28928")
     @dist_init
     def test_backward_autograd_engine_error(self):
         with dist_autograd.context() as context_id:
@@ -1055,7 +1049,7 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
@@ -1226,7 +1220,7 @@ class DistAutogradTest(object):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent " +
                      "does not report errors on node failures")
     @dist_init(clean_shutdown=False)
@@ -1291,6 +1285,83 @@ class DistAutogradTest(object):
             grads = dist_autograd.get_gradients(context_id)
             self.assertEqual(t1.grad, grads[t1])
             self.assertEqual(t2.grad, grads[t2])
+
+
+    _test_clean_context_backward_context_id = None
+
+    class MyBackwardFunc(Function):
+        @staticmethod
+        def forward(ctx, input):
+            return input
+
+        @staticmethod
+        @once_differentiable
+        def backward(ctx, input):
+            assert(DistAutogradTest._test_clean_context_backward_context_id is not None)
+
+            # Release the context to simulate error (use barrier before releasing
+            # context to ensure all nodes execute the backward function).
+            dist.barrier()
+            dist_autograd._release_context(DistAutogradTest._test_clean_context_backward_context_id)
+
+            # Verify all contexts are cleaned up.
+            assert(_all_contexts_cleaned_up())
+
+            return input
+
+    @dist_init
+    def test_clean_context_during_backward(self):
+        '''
+        This test simulates the situation where the 'backward' call might throw
+        an exception locally which would lead to the autograd context being
+        cleaned up if we're using the context manager. As a result, the autograd
+        context might be cleaned up while some threads are still using the
+        autograd context.
+
+        It is fine for the 'backward' call to throw an exception in this test,
+        but the process should not crash.
+        '''
+        self._initialize_pg()
+
+        context = dist_autograd._new_context()
+        context_id = context._context_id()
+        DistAutogradTest._test_clean_context_backward_context_id = context_id
+
+        # Send the context id to all nodes.
+        for i in range(0, self.world_size):
+            if i != self.rank:
+                rank_distance = (i - self.rank + self.world_size) % self.world_size
+                rpc.rpc_sync("worker{}".format(i), _set_rpc_done, args=(context_id, rank_distance))
+
+        dist.barrier()
+
+        # Verify all context ids have been received.
+        self.assertEqual(self.world_size - 1, len(known_context_ids))
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        for i in range(0, 100):
+            dst = self._next_rank()
+            t1 = rpc.rpc_sync("worker{}".format(dst), torch.add, args=(t1, t1))
+
+        # Call MyBackwardFunc as the first op of the backward pass to
+        # ensure we release the context early in the backward pass.
+        t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
+        self.assertEqual(100, len(context._send_functions()))
+
+        with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id"):
+            dist_autograd.backward([t1.sum()])
+
+        # HACK: Killing workers since otherwise the autograd engine gets stuck on
+        # other nodes. The proper fix would be addressing:
+        # https://github.com/pytorch/pytorch/issues/27643, which would inform
+        # other nodes about the failure.
+        # The autograd engine gets stuck on other nodes since they're waiting to
+        # receive gradients from the node that received an error (and as a
+        # result it didn't execute the rest of the graph).
+        dist.barrier()
+        rpc.wait_all_workers()
+        sys.exit(0)
+
 
 if __name__ == '__main__':
     unittest.main()
