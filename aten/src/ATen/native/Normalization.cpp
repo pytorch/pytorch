@@ -393,8 +393,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
           if (train) {
             // when in training mode
             // Q(X) = X - E[x] ; i.e. input centered to zero mean
-            // Y = Q(X) / σ    ; i.e. BN output before weight and bias
-            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
+            // Y = Q(X) / sigma    ; i.e. BN output before weight and bias
+            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / sigma * w
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
@@ -531,6 +531,9 @@ Tensor batch_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
+  if (input.numel()==0){
+    return input; //return input instead of new empty tensor, because new empty tensor breaks the gradient chain
+  }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }
