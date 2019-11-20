@@ -598,9 +598,9 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   if (need_weights) {
     // average attention weights over heads
     attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
-    return {attn_output, attn_output_weights.sum(/*dim=*/1) / num_heads};
+    return std::make_tuple(attn_output, attn_output_weights.sum(/*dim=*/1) / num_heads);
   } else {
-    return {attn_output, Tensor()};
+    return std::make_tuple(attn_output, Tensor());
   }
 }
 
