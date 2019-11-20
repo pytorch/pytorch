@@ -166,4 +166,24 @@ TEST_F(NNUtilsTest, ConvertParameters) {
   for (int i = 0; i < zero_parameters.size(); ++i) {
     ASSERT_TRUE(zero_parameters[i].allclose(parameters[i]));
   }
+
+  {
+    auto conv1 = nn::Conv2d(3, 10, 5);
+    auto fc1 = nn::Linear(10, 20);
+    auto model = nn::Sequential(conv1, fc1);
+
+    auto vec = parameters_to_vector(model.parameters());
+    ASSERT_EQ(vec.size(0), 980);
+  }
+  {
+    auto conv1 = nn::Conv2d(3, 10, 5);
+    auto fc1 = nn::Linear(10, 20);
+    auto model = nn::Sequential(conv1, fc1);
+
+    auto vec = torch::arange(0., 980);
+    vector_to_parameters(vec, model.parameters());
+
+    auto sample = model.parameters()[0][0][0][0];
+    ASSERT_TRUE(torch.equal(sample.data(), vec.data().slice(0, 0, 5)));
+  }
 }
