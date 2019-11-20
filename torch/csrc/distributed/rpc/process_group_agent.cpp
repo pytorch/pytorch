@@ -186,12 +186,10 @@ void ProcessGroupAgent::join() {
   //    feed it a message or kill the thread.
   // 2. A GLOO process cannot send message to itself. (there is an ongoing
   //    effort to fix this problem).
-  rpcRunning_.store(false);
 
   sync();
   // This is needed in case no futures were created, otherwise the future
   // timeout watchdog would sleep forever.
-
   futureTimeoutCV_.notify_one();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
@@ -203,6 +201,7 @@ void ProcessGroupAgent::join() {
       SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
   listenerThread_.join();
+  rpcRunning_.store(false);
   futureTimeoutThread_.join();
   PythonRpcHandler::getInstance().cleanup();
 }
