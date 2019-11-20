@@ -15630,7 +15630,9 @@ a")
                 ('bool_list', [True, True, False, True], List[bool]),
                 ('float_list', [1., 2., 3., 4.], List[float]),
                 ('str_list', ['hello', 'bye'], List[str]),
-                ('none', None, Optional[int]),)
+                ('none', None, Optional[int]),
+                ('a_device', torch.device('cpu'), torch.device),
+                ('another_device', torch.device('cuda:1'), torch.device))
 
     def test_attribute_serialization(self):
         tester = self

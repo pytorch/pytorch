@@ -494,6 +494,15 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.back() = IValue();
         });
       } else if (module_name == "torch") {
+        if (class_name == "device") {
+          globals_.emplace_back([this] {
+            auto device_string = stack_.back().toTuple()->elements().at(0);
+            stack_.pop_back();
+            stack_.emplace_back(c10::Device(device_string.toStringRef()));
+          });
+          stack_.emplace_back(int64_t(globals_.size() - 1));
+          return opcode;
+        }
         // Try to manually resolve several global enums
         // NOTE: this does not put a global into the global table,
         // like the other branches here because no REDUCE or BUILD will
