@@ -48,6 +48,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(DeviceObjType)          \
   _(FunctionType)           \
   _(ClassType)              \
+  _(PythonObjType)          \
   _(CapsuleType)            \
   _(InterfaceType)
 
@@ -1158,6 +1159,27 @@ struct CAFFE2_API CapsuleType : public Type {
 private:
   CapsuleType()
   : Type(TypeKind::CapsuleType) {}
+};
+
+struct PythonObjType;
+using PythonObjTypePtr = std::shared_ptr<PythonObjType>;
+// This type represents a Python Object Type
+struct CAFFE2_API PythonObjType : public Type {
+  static PythonObjTypePtr create() {
+    return PythonObjTypePtr(new PythonObjType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "PythonObjType";
+  }
+  static const TypeKind Kind = TypeKind::PythonObjType;
+  // global singleton
+  static PythonObjTypePtr get();
+private:
+  PythonObjType()
+  : Type(TypeKind::PythonObjType) {}
 };
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);

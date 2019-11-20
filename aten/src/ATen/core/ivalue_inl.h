@@ -82,6 +82,14 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
 }
+inline c10::intrusive_ptr<ivalue::PythonObject> IValue::toPythonObject() && {
+  TORCH_INTERNAL_ASSERT(isPythonObject(), "Expected PythonObject but got", tagKind());
+  return moveToIntrusivePtr<ivalue::PythonObject>();
+}
+inline c10::intrusive_ptr<ivalue::PythonObject> IValue::toPythonObject() const & {
+  TORCH_INTERNAL_ASSERT(isPythonObject(), "Expected PythonObject but got", tagKind());
+  return toIntrusivePtr<ivalue::PythonObject>();
+}
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
@@ -182,6 +190,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 };
 
 struct Object;
+struct PythonObject;
 }
 
 // Future
@@ -388,6 +397,21 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   void resizeObject(size_t slot);
   StrongTypePtr type_;
   std::vector<IValue> slots_;
+};
+
+// ivalue Holder that hold a PyObject*
+struct C10_EXPORT ivalue::PythonObject final : c10::intrusive_ptr_target {
+ public:
+  static c10::intrusive_ptr<PythonObject> create(PyObject* py_obj) {
+    return c10::make_intrusive<PythonObject>(py_obj);
+  }
+  PyObject* getPyObject() {
+    return py_obj_;
+  }
+
+  PythonObject(PyObject* py_obj): py_obj_(py_obj) {}
+ private:
+    PyObject* py_obj_;
 };
 
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
@@ -746,6 +770,10 @@ inline IValue::IValue(c10::nullopt_t): IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(c10::intrusive_ptr<ivalue::PythonObject> v)
+: tag(Tag::PythonObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)

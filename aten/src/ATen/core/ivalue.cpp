@@ -60,6 +60,8 @@ TypePtr IValue::type() const {
       return DeviceObjType::get();
     case Tag::Object:
       return toObjectRef().type();
+    case Tag::PythonObject:
+      return PythonObjType::get();
     case Tag::Uninitialized:
       return AnyType::get();
     case Tag::Capsule:
