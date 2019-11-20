@@ -19,7 +19,11 @@ Extending :mod:`torch` with a :class:`Tensor`-like type
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note:: This functionality is inspired by the NumPy ``__array_function__``
-          protocol.
+          protocol. See `the NumPy documentation
+          <https://docs.scipy.org/doc/numpy/user/basics.dispatch.html#basics-dispatch>`_
+          and `NEP-0018
+          <https://numpy.org/neps/nep-0018-array-function-protocol.html>`_ for
+          more details.
 
 To make this concrete, let's begin with a simple example that illustrates the
 API dispatch mechanism. We'll create a custom :class:`Tensor`-like type that
