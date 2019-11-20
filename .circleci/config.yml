@@ -1339,7 +1339,6 @@ jobs:
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"
-
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
             chmod +x ~/Downloads/conda.sh
@@ -1380,7 +1379,7 @@ jobs:
               echo 'xcodebuild failed!'
               exit 1
             fi
-        - run:
+      - run:
           name: Run Simulator Tests
           no_output_timeout: "2h"
           command: |
@@ -1401,8 +1400,7 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             ruby setup.rb
             fastlane scan
-
-
+            
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
