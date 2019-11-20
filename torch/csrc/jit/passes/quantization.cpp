@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
 #include <algorithm>
@@ -194,8 +195,7 @@ Node* InsertObserversHelper::insertObserverFor(
     return nullptr;
   }
 
-  script::Module observer_module(
-      "Module", std::make_shared<script::CompilationUnit>());
+  script::Module observer_module;
   if (isWeightOfConvOrLinear(v)) {
     TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
@@ -209,25 +209,26 @@ Node* InsertObserversHelper::insertObserverFor(
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
-  // Get handle of observer module
-  Node* observer_instance = g->create(c10::prim::GetAttr);
-  // self._observer_v
-  observer_instance->addInput(g->inputs()[0]);
-  observer_instance->s_(c10::attr::name, observer_name);
-  observer_instance->output()->setDebugName(observer_name);
-  observer_instance->output()->setType(observer.type());
-  observer_instance->insertAfter(v->node());
 
-  // Create forward method call
-  Node* call = g->create(c10::prim::CallMethod);
-  TORCH_INTERNAL_ASSERT(call != nullptr, "Failed to create forward call node");
-  call->s_(c10::attr::name, "forward");
-  call->addInput(observer_instance->output());
-  call->addInput(v);
-  call->output()->setType(v->type());
-  call->output()->setDebugName(v->debugName() + ".observed");
-  call->insertAfter(observer_instance);
-  return call;
+  // Get handle of observer module
+  Node* observer_instance =
+      g->createGetAttr(g->inputs()[0], observer_name)->insertAfter(v->node());
+  observer_instance->output()->setDebugName(observer_name);
+
+  {
+    WithInsertPoint guard(observer_instance->next());
+    // Match arguments to types of observer's arguments
+    script::MatchedSchema forward_matched_schema = script::matchSchema(
+        observer.get_method("forward").function().getSchema(),
+        v->node()->sourceRange(),
+        *g,
+        {observer_instance->output(), v},
+        {});
+    // Insert call to observer's forward
+    Node* call = g->insertMethodCall("forward", forward_matched_schema)->node();
+    call->output()->setDebugName(v->debugName() + ".observed");
+    return call;
+  }
 }
 
 void InsertObserversHelper::findIntermediateValuesInPattern(
@@ -350,8 +351,7 @@ void InsertObserversHelper::insertObservers(
         // the child module.
         auto module_instance = n->inputs()[0];
         auto module_method_name = n->s(attr::name);
-        script::Module callee_module(
-            "Module", std::make_shared<script::CompilationUnit>());
+        script::Module callee_module;
         if (module_instance->node()->kind() == prim::GetAttr) {
           auto child_module_name = module_instance->node()->s(attr::name);
           callee_module = module.attr(child_module_name).toModule();
