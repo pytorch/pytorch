@@ -16,7 +16,7 @@ graph {
     }
   }
   node {
-    input: "x"
+    input: "0"
     input: "3"
     output: "4"
     op_type: "Reshape"
@@ -35,7 +35,7 @@ graph {
     }
   }
   node {
-    input: "y"
+    input: "1"
     input: "5"
     output: "6"
     op_type: "Reshape"
@@ -54,7 +54,7 @@ graph {
     }
   }
   node {
-    input: "z"
+    input: "2"
     input: "7"
     output: "8"
     op_type: "Reshape"
@@ -199,7 +199,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1
@@ -212,7 +212,7 @@ graph {
     }
   }
   input {
-    name: "y"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
@@ -225,7 +225,7 @@ graph {
     }
   }
   input {
-    name: "z"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
