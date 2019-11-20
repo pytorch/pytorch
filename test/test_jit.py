@@ -3620,14 +3620,9 @@ class TestFrontend(JitTestCase):
 
 class TestScript(JitTestCase):
     def test_nested_bailouts(self):
-        @torch.jit.ignore
-        def nomnom(x):
-            pass
-
         @torch.jit.script
         def fct_loop(x):
             for i in range(3):
-                nomnom(i)
                 x = torch.cat((x, x), 0)
             return x
 
