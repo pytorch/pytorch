@@ -276,11 +276,10 @@ void ProcessGroupAgent::start() {
 }
 
 void ProcessGroupAgent::shutdown() {
-  if (!rpcRunning_.load()) {
+  if (!rpcRunning_.exchange(false)) {
     return;
   }
   LOG(INFO) << "Stopping ProcessGroupAgent.";
-  rpcRunning_.store(false);
   {
     std::unique_lock<std::mutex> lock(recvWorkMutex_);
     if (recvWork_) {

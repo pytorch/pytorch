@@ -352,7 +352,7 @@ ProcessGroupGloo::SendWork::SendWork(
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
 bool ProcessGroupGloo::SendWork::wait() {
-  bool sendCompleted;
+  bool sendCompleted = false;
   std::unique_lock<std::mutex> lock(mutex_);
   try {
     sendCompleted = buffer_->waitSend();
@@ -382,7 +382,7 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
 }
 
 bool ProcessGroupGloo::RecvWork::wait() {
-  bool recvCompleted;
+  bool recvCompleted = false;
   std::unique_lock<std::mutex> lock(mutex_);
   try {
     recvCompleted = buffer_->waitRecv(&srcRank_);
