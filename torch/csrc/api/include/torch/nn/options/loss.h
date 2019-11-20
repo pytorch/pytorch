@@ -34,7 +34,7 @@ struct TORCH_API KLDivLossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(KLDivLoss, KLDivFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(KLDivLoss, KLDivLossFuncOptions)
 
 // ============================================================================
 
@@ -64,7 +64,7 @@ struct TORCH_API BCELossOptions {
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCELoss, BinaryCrossEntropyFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(BCELoss, BCELossFuncOptions)
 
 // ============================================================================
 
