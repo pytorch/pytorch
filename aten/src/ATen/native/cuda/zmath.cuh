@@ -9,38 +9,19 @@ namespace c10 {
   template <typename T>
   struct is_complex_t<thrust::complex<T>> : public std::true_type {};
 
-  #ifdef C10_HOST_DEVICE
-  #define ERROR_UNSUPPORTED_CAST assert(false);
-  #else
-  #define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
-  #endif
-
-//  // Specialization of fetch_and_cast in c10/util/TypeCast.h for thrust::complex types
-//  #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<thrust::complex<T>>(*(const type *)ptr);
-//  template<typename T>
-//  C10_HOST_DEVICE inline thrust::complex<T> fetch_and_cast(const ScalarType src_type, const void *ptr) {
-//    switch (src_type) {
-//      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
-//      default:
-//        ERROR_UNSUPPORTED_CAST
-//    }
-//    return thrust::complex<T>(0); // just to avoid compiler warning
-//  }
-
-  // Specialization of cast_and_store in c10/util/TypeCast.h for thrust::complex types
-  #define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type>(value); return;
-  template<typename T>
-  C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, thrust::complex<T> value) {
-    switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
-      default:;
+  template <typename dest_t_value_t, typename src_t_value_t>
+  struct static_cast_with_inter_type<thrust::complex<dest_t_value_t>, std::complex<src_t_value_t>> {
+    C10_HOST_DEVICE static inline thrust::complex<dest_t_value_t> apply(std::complex<src_t_value_t> src) {
+      return thrust::complex<dest_t_value_t>(src.real(), src.imag());
     }
-    ERROR_UNSUPPORTED_CAST
-  }
+  };
 
-//  #undef FETCH_AND_CAST_CASE
-  #undef CAST_AND_STORE_CASE
-  #undef ERROR_UNSUPPORTED_CAST
+  template <typename dest_t_value_t, typename src_t_value_t>
+  struct static_cast_with_inter_type<std::complex<dest_t_value_t>, thrust::complex<src_t_value_t>> {
+    C10_HOST_DEVICE static inline std::complex<dest_t_value_t> apply(thrust::complex<src_t_value_t> src) {
+      return reinterpret_cast<std::complex<dest_t_value_t>&>(src);
+    }
+  };
 }
 
 

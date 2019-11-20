@@ -190,48 +190,36 @@
   supports_named_tensor: True
 
 - func: angle(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
   supports_named_tensor: True
-  named_guard: False
 
 - func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
   supports_named_tensor: True
-  dispatch:
-    CPU: _angle_out_cpu
 
 - func: real(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
-  named_guard: False
   supports_named_tensor: True
 
 - func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
   supports_named_tensor: True
-  dispatch:
-    CPU: _real_out_cpu
 
 - func: imag(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
-  named_guard: False
   supports_named_tensor: True
 
 - func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
   supports_named_tensor: True
-  dispatch:
-    CPU: _imag_out_cpu
 
 - func: conj(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
-  named_guard: False
   supports_named_tensor: True
 
 - func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
   supports_named_tensor: True
-  dispatch:
-    CPU: _conj_out_cpu
 
 - func: acos(Tensor self) -> Tensor
   use_c10_dispatcher: full
