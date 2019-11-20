@@ -9,7 +9,7 @@ class _LocalOptimizer:
     # Ideally we would only need to share a lock for instances of
     # _LocalOptimizer that deal with the same parameters. We are
     # making a simplifying assumption here that if there is more
-    # than one instancde of _LocalOptimizer per worker, they will
+    # than one instance of _LocalOptimizer per worker, they will
     # be optimizing the same parameters (e.g. each data parallel
     # trainer will create its own instance of _LocalOptimizer but
     # they will all optimize the same parameters on each worker)
