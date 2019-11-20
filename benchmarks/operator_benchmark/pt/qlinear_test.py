@@ -5,8 +5,10 @@ from __future__ import unicode_literals
 
 
 import operator_benchmark as op_bench
+
 import torch
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 
 
 """
@@ -35,7 +37,7 @@ qlinear_configs = op_bench.config_list(
 )
 
 
-class QLinearBenchmark(op_bench.TorchBenchmarkBase):
+class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT):
         scale = 1.0 / 255
         zero_point = 0
@@ -45,17 +47,31 @@ class QLinearBenchmark(op_bench.TorchBenchmarkBase):
         qW = torch.quantize_per_tensor(W, scale=scale, zero_point=0, dtype=torch.qint8)
 
         self.input = qX
-        self.qlinear = nnq.Linear(IN, OUT)
+
+        # Assume that the `self.qlinear` is set in the child
         self.qlinear.weight = qW
         self.qlinear.scale = scale
         self.qlinear.zero_point = zero_point
-        self.set_module_name("QLinear")
 
     def forward(self):
         return self.qlinear(self.input)
 
+class QLinearBenchmark(QLinearBenchmarkBase):
+    def init(self, N, IN, OUT):
+        self.qlinear = nnq.Linear(IN, OUT)
+        self.set_module_name("QLinear")
+        super(QLinearBenchmark, self).init(N, IN, OUT)
+
+
+class QDynamicLinearBenchmark(QLinearBenchmarkBase):
+    def init(self, N, IN, OUT):
+        self.qlinear = nnqd.Linear(IN, OUT)
+        self.set_module_name("QDynamicLinear")
+        super(QDynamicLinearBenchmark, self).init(N, IN, OUT)
+
 
 op_bench.generate_pt_test(qlinear_configs, QLinearBenchmark)
+op_bench.generate_pt_test(qlinear_configs, QDynamicLinearBenchmark)
 
 
 if __name__ == "__main__":
