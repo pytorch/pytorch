@@ -198,8 +198,12 @@ std::vector<at::Tensor> scatter(
           "(expected ", device_index, ")");
       cuda_guard.reset_stream(*(*streams)[chunk]);
     }
-    chunks[chunk] = chunks[chunk].contiguous().to(
-        {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);
+    chunks[chunk] =
+        chunks[chunk].to(
+            {at::DeviceType::CUDA, device_index},
+            /*non_blocking=*/true,
+            /*copy=*/false,
+            /*memory_format=*/at::MemoryFormat::Preserve);
   }
   return chunks;
 }
@@ -214,6 +218,7 @@ at::Tensor gather(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
+  bool all_channels_last = true;
   for (const auto& tensor : tensors) {
     TORCH_CHECK(
         tensor.is_cuda(), "Gather expects all inputs to have CUDA type");
@@ -226,13 +231,21 @@ at::Tensor gather(
           tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
+    all_channels_last = all_channels_last &&
+        tensor.suggest_memory_format() == MemoryFormat::ChannelsLast;
   }
   expected_size[dim] = total_size;
   at::Device device(at::DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
     device = at::Device(at::DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
-  result = at::empty(expected_size, first.options().device(device));
+
+  auto memory_format = MemoryFormat::Contiguous;
+  if (all_channels_last) {
+    memory_format = MemoryFormat::ChannelsLast;
+  }
+  result =
+      at::empty(expected_size, first.options().device(device), memory_format);
 
   int64_t chunk_start = 0;
   for (const auto& tensor : tensors) {
