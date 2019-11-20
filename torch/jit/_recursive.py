@@ -115,11 +115,11 @@ def infer_concrete_type_builder(nn_module):
         attr_type = infer_type(name, item)
         if attr_type is not None:
             # if the type can be inferred, it should be a module interface type
-            concrete_type_builder.add_module_interface(name, attr_type)
+            sub_concrete_type = torch._C.ConcreteModuleType.from_interface(attr_type)
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
             sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
-            concrete_type_builder.add_module(name, sub_concrete_type)
+        concrete_type_builder.add_module(name, sub_concrete_type)
 
         added_names.add(name)
 

@@ -66,10 +66,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
       const TypePtr& type,
       py::object pyFunction);
 
-  // add a submodule to the ConcreteModuleType can either be ConcreteModuleType
-  // that get constructed recursively, or InterfaceType (Module)
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
-  void addModuleInterface(std::string name, const TypePtr& type);
 
   void addOverload(
       std::string methodName,
@@ -130,22 +127,18 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   struct ModuleInfo {
     ModuleInfo(std::string name, std::shared_ptr<ConcreteModuleType> meta)
-        : name_(std::move(name)), meta_(std::move(meta)), type_(nullptr) {}
+        : name_(std::move(name)), meta_(std::move(meta)) {}
 
-    ModuleInfo(std::string name, const TypePtr& type)
-        : name_(std::move(name)), meta_(nullptr), type_(type) {}
-    TypePtr getJitType() const;
-    std::string name_;
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs);
 
-    // Module Info contains either an ConcreateModuleType or a type (which is
-    // a Module Interface), these two are union relationship.
+    std::string name_;
     std::shared_ptr<ConcreteModuleType> meta_;
-    TypePtr type_;
   };
 
  private:
+  ConcreteModuleTypeBuilder() {}
   ClassTypePtr createTypeFromThis() const;
+
   // If true, this type will never compare equally to anything else. This is
   // used if we want to ensure that this type is not shared (for example, if it
   // came from a traced module)
@@ -185,7 +178,10 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
  public:
   explicit ConcreteModuleType(ConcreteModuleTypeBuilder data);
 
-  ClassTypePtr getJitType() const;
+  static std::shared_ptr<ConcreteModuleType> fromInterface(
+      InterfaceTypePtr interface);
+
+  TypePtr getJitType() const;
   py::object getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
   c10::optional<py::object> findConstant(const std::string& name) const;
@@ -219,9 +215,11 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void dump() const;
 
  private:
+  ConcreteModuleType() {}
+
   // The JIT type derived from this ConcreteModuleType.
   ConcreteModuleTypeBuilder data_;
-  ClassTypePtr jitType_;
+  TypePtr jitType_;
 };
 
 } // namespace script
