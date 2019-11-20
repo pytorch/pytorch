@@ -202,6 +202,7 @@ void ProcessGroupAgent::join() {
   threadPool_.waitWorkComplete();
   listenerThread_.join();
   rpcRunning_.store(false);
+  futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
   PythonRpcHandler::getInstance().cleanup();
 }
