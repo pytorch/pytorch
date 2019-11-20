@@ -140,6 +140,12 @@ bool valueNeedsToBeQuantized(Value* v) {
   return false;
 }
 
+static bool isObserverNode(const Node* node, const std::string& observer_name) {
+    return (node->kind() == prim::CallMethod && node->s(attr::name) == "forward" &&
+        node->inputs()[0]->node()->kind() == prim::GetAttr &&
+        node->inputs()[0]->node()->s(attr::name) == observer_name);
+}
+
 class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
@@ -413,10 +419,11 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-Node* insertQuantDeQuantCall(
+void insertQuantDeQuantCall(
     Value* v,
     const IValue& qparams,
-    const IValue& scalar_type) {
+    const IValue& scalar_type,
+    const std::string& observer_name) {
   Graph* g = v->node()->owningGraph();
   auto tp = qparams.toTuple();
   at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
@@ -444,13 +451,30 @@ Node* insertQuantDeQuantCall(
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
 
-  Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
-  dequant->output()->setDebugName(v->debugName() + ".dequant");
-
+  // Insert all the dequants first
+  Node* observer_node = nullptr;
+  while (!v->uses().empty()) {
+    Node* cur = v->uses()[0].user;
+    if (isObserverNode(cur, observer_name)) {
+      // temprorialy remove observer use and restore later
+      observer_node = cur;
+      v->replaceFirstUseWith(quant->output());
+    } else if (cur != quant) {
+      Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
+      dequant->output()->setDebugName(v->debugName() + ".dequant." + std::to_string(v->uses().size()));
+      v->replaceFirstUseWith(dequant->output());
+      g->insertNode(dequant);
+    } else {
+      // temprorialy remove quant use and restore later
+      v->replaceFirstUseWith(quant->output());
+    }
+  }
+  // restore the quant input and observer input
+  if (observer_node) {
+    observer_node->replaceInputWith(quant->output(), v);
+  }
+  quant->replaceInputWith(quant->output(), v);
   g->insertNode(quant);
-  g->insertNode(dequant);
-
-  return dequant;
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -488,7 +512,6 @@ class QuantizeHelper {
   std::vector<Value*> values_to_quantize_;
   std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
 };
-
 
 void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   auto observer_name = findObserverName(v);
