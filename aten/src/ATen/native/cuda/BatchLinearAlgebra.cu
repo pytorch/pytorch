@@ -957,7 +957,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
 
   Tensor self_working_copy;
   if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self, at::MemoryFormat::Contiguous);
+    self_working_copy = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_cuda", [&]{
@@ -1251,7 +1251,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
                               : at::empty(self_sizes, self.options().device(at::kCPU));
 
   if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self, at::MemoryFormat::Contiguous));
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   }
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
@@ -1464,7 +1464,7 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
 
   if (self.numel() == 0 || LU_data.numel() == 0) {
-    return at::zeros_like(self, at::MemoryFormat::Contiguous);
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);
