@@ -119,7 +119,7 @@ struct MeanOps {
   factor_t factor;
 
   inline C10_DEVICE acc_t reduce(acc_t a, data_t b, int64_t /*idx*/) const {
-    return combine(a, b);
+    return combine(a, (acc_t)b);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -127,7 +127,7 @@ struct MeanOps {
   }
 
   inline C10_DEVICE out_t project(acc_t a) const {
-    return a * factor;
+    return (out_t)(a * factor);
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -197,7 +197,7 @@ struct NormOps {
   }
 
   inline C10_DEVICE out_t project(acc_t a) const {
-    return compat_pow(a, acc_t(1.0)/norm_);
+    return (out_t)(compat_pow(a, acc_t(1.0)/norm_));
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -221,7 +221,7 @@ struct NormZeroOps {
   }
 
   inline C10_DEVICE out_t project(acc_t a) const {
-    return a;
+    return (out_t)a;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -242,7 +242,7 @@ struct NormOneOps {
   }
 
   inline C10_DEVICE out_t project(acc_t a) const {
-    return a;
+    return (out_t)a;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
