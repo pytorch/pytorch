@@ -450,13 +450,12 @@ class TestTypePromotion(TestCase):
             # floating point values.
             return 5e-2
         if dtype == torch.half:
-            return 5e-3
+            return 1e-3
         return 1e-5
 
     def _test_sparse_op(self, op_name, inplace, dtype1, dtype2, device, coalesced):
         suffix = '_' if inplace else ''
-        # uncomment for debugging:
-        # print("testing", "  coalesced" if coalesced else "uncoalesced", op_name + (suffix + ' ')[0], "with", dtype1, "and", dtype2)
+        err = "{} {}({}, {})".format("  coalesced" if coalesced else "uncoalesced", op_name + suffix, dtype1, dtype2)
 
         def op(t1, t2):
             return getattr(t1, op_name + suffix)(t2)
@@ -484,7 +483,7 @@ class TestTypePromotion(TestCase):
         if not div:
             sparse = op(s1, s2)
             self.assertEqual(sparse.dtype, e.dtype)
-            self.assertEqual(e, sparse.to_dense(), prec=precision)
+            self.assertEqual(e, sparse.to_dense(), prec=precision, message=err)
         else:
             # sparse division only supports division by a scalar
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
@@ -494,7 +493,7 @@ class TestTypePromotion(TestCase):
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
-            self.assertEqual(e, dense_sparse, prec=precision)
+            self.assertEqual(e, dense_sparse, prec=precision, message=err)
         else:
             # sparse division only supports division by a scalar
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
@@ -515,7 +514,7 @@ class TestTypePromotion(TestCase):
             sparse = op(s1, scalar)
             dense_scalar = op(d1, scalar)
             self.assertEqual(sparse.dtype, dense_scalar.dtype)
-            self.assertEqual(dense_scalar, sparse.to_dense(), prec=precision)
+            self.assertEqual(dense_scalar, sparse.to_dense(), prec=precision, message=err)
         else:
             # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
             # "mul_cpu" / "div_cpu" not implemented for 'Half'

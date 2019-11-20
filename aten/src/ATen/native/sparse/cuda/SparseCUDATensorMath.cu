@@ -307,7 +307,6 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
   if (is_same_tensor(r, dense_buffer)) {
     TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
-    //r = r_.contiguous();
   } else {
     r.resize_as_(dense);
     r.copy_(dense_buffer);
@@ -318,9 +317,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   int64_t nDimI = sparse.sparse_dim();
 
   if (values.numel() == 0) {
-    return r_.copy_(dense_buffer);
+    return r_;
   }
-
 
   if (sparse.is_coalesced()) {
     // TODO benchmark to decide whether to remove this special case
@@ -444,6 +442,8 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
     SparseTensor promoted = at::empty({0}, r_.options().dtype(commonDtype));
     promoted.resize_as_(src);
     alias_into_sparse(promoted, r_indices_, r_values_);
+    // performs the addition under the common dtype.
+    promoted = promoted.coalesce();
     r_values_ = promoted._values().to(r_.scalar_type());
     r_indices_ = promoted._indices();
   } else {
