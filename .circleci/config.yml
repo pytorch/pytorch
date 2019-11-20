@@ -1362,7 +1362,7 @@ jobs:
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
-          name: Build Test
+          name: Test
           no_output_timeout: "30m"
           command: |
             set -e
@@ -1380,7 +1380,7 @@ jobs:
               exit 1
             fi
       - run:
-          name: Run Simulator Tests
+          name: Simulator Tests
           no_output_timeout: "2h"
           command: |
             set -e
@@ -1393,8 +1393,7 @@ jobs:
             source ~/anaconda/bin/deactivate
             #build pytorch from source
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-            MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
-            ccmake build
+            MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
             #run unit test
             source ~/anaconda/bin/activate
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
