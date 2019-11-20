@@ -125,6 +125,124 @@ TEST_F(ModulesTest, Conv3d) {
   ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
+TEST_F(ModulesTest, ConvTranspose1d) {
+  ConvTranspose1d model(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false));
+  model->weight.set_data(torch::arange(18.).view({2, 3, 3}));
+  auto x = torch::arange(20.).reshape({2, 2, 5});
+  auto y = model(x);
+  auto expected = torch::tensor({{{  45.,  104.,  179.,  212.,  245.,  188.,  107.},
+                                  {  60.,  140.,  242.,  293.,  344.,  260.,  146.},
+                                  {  75.,  176.,  305.,  374.,  443.,  332.,  185.}},
+                                 {{ 135.,  304.,  509.,  542.,  575.,  428.,  237.},
+                                  { 210.,  460.,  752.,  803.,  854.,  620.,  336.},
+                                  { 285.,  616.,  995., 1064., 1133.,  812.,  435.}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
+}
+
+TEST_F(ModulesTest, ConvTranspose2dEven) {
+  ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
+  model->weight.set_data(torch::arange(54.).view({2, 3, 3, 3}));
+  auto x = torch::arange(50.).view({1, 2, 5, 5});
+  auto y = model(x);
+  auto expected = torch::tensor({{{{  675.,  1402.,  2183.,  2270.,  2357.,  1634.,   849.},
+                                   { 1560.,  3240.,  5044.,  5236.,  5428.,  3760.,  1952.},
+                                   { 2685.,  5574.,  8673.,  8988.,  9303.,  6438.,  3339.},
+                                   { 3180.,  6594., 10248., 10563., 10878.,  7518.,  3894.},
+                                   { 3675.,  7614., 11823., 12138., 12453.,  8598.,  4449.},
+                                   { 2820.,  5832.,  9040.,  9268.,  9496.,  6544.,  3380.},
+                                   { 1605.,  3314.,  5129.,  5252.,  5375.,  3698.,  1907.}},
+                                  {{  900.,  1870.,  2912.,  3053.,  3194.,  2210.,  1146.},
+                                   { 2100.,  4356.,  6772.,  7072.,  7372.,  5092.,  2636.},
+                                   { 3630.,  7518., 11670., 12147., 12624.,  8706.,  4500.},
+                                   { 4395.,  9078., 14055., 14532., 15009., 10326.,  5325.},
+                                   { 5160., 10638., 16440., 16917., 17394., 11946.,  6150.},
+                                   { 3900.,  8028., 12388., 12724., 13060.,  8956.,  4604.},
+                                   { 2190.,  4502.,  6938.,  7115.,  7292.,  4994.,  2564.}},
+                                  {{ 1125.,  2338.,  3641.,  3836.,  4031.,  2786.,  1443.},
+                                   { 2640.,  5472.,  8500.,  8908.,  9316.,  6424.,  3320.},
+                                   { 4575.,  9462., 14667., 15306., 15945., 10974.,  5661.},
+                                   { 5610., 11562., 17862., 18501., 19140., 13134.,  6756.},
+                                   { 6645., 13662., 21057., 21696., 22335., 15294.,  7851.},
+                                   { 4980., 10224., 15736., 16180., 16624., 11368.,  5828.},
+                                   { 2775.,  5690.,  8747.,  8978.,  9209.,  6290.,  3221.}}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
+}
+
+TEST_F(ModulesTest, ConvTranspose2dUneven) {
+  ConvTranspose2d model(ConvTranspose2dOptions(3, 2, {3, 2}).stride({1, 1}).bias(false));
+  model->weight.set_data(torch::arange(36.).view({2, 3, 3, 2}));
+  auto x = torch::arange(40.).view({1, 2, 5, 4});
+  auto y = model(x);
+  auto expected = torch::tensor({{{{ 360.,  758.,  796.,  834.,  440.},
+                                   { 832., 1752., 1836., 1920., 1012.},
+                                   {1432., 3014., 3152., 3290., 1732.},
+                                   {1696., 3566., 3704., 3842., 2020.},
+                                   {1960., 4118., 4256., 4394., 2308.},
+                                   {1504., 3152., 3252., 3352., 1756.},
+                                   { 856., 1790., 1844., 1898.,  992.}},
+                                  {{ 480., 1010., 1072., 1134.,  596.},
+                                   {1120., 2352., 2484., 2616., 1372.},
+                                   {1936., 4058., 4268., 4478., 2344.},
+                                   {2344., 4898., 5108., 5318., 2776.},
+                                   {2752., 5738., 5948., 6158., 3208.},
+                                   {2080., 4328., 4476., 4624., 2404.},
+                                   {1168., 2426., 2504., 2582., 1340.}},
+                                  {{ 600., 1262., 1348., 1434.,  752.},
+                                   {1408., 2952., 3132., 3312., 1732.},
+                                   {2440., 5102., 5384., 5666., 2956.},
+                                   {2992., 6230., 6512., 6794., 3532.},
+                                   {3544., 7358., 7640., 7922., 4108.},
+                                   {2656., 5504., 5700., 5896., 3052.},
+                                   {1480., 3062., 3164., 3266., 1688.}}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
+}
+
+TEST_F(ModulesTest, ConvTranspose3d) {
+  ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
+  model->weight.set_data(torch::arange(32.).reshape({2, 2, 2, 2, 2}));
+  auto x = torch::arange(16.).reshape({1, 2, 2, 2, 2});
+  auto y = model(x);
+  auto expected = torch::tensor({{{{{ 128.,  280.,  154.},
+                                    { 304.,  664.,  364.},
+                                    { 184.,  400.,  218.}},
+                                   {{ 352.,  768.,  420.},
+                                    { 832., 1808.,  984.},
+                                    { 496., 1072.,  580.}},
+                                   {{ 256.,  552.,  298.},
+                                    { 592., 1272.,  684.},
+                                    { 344.,  736.,  394.}}},
+                                  {{{ 192.,  424.,  234.},
+                                    { 464., 1016.,  556.},
+                                    { 280.,  608.,  330.}},
+                                   {{ 544., 1184.,  644.},
+                                    {1280., 2768., 1496.},
+                                    { 752., 1616.,  868.}},
+                                   {{ 384.,  824.,  442.},
+                                    { 880., 1880., 1004.},
+                                    { 504., 1072.,  570.}}}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(model->weight.grad().numel() == 2 * 2 * 2 * 2 * 2);
+}
+
 TEST_F(ModulesTest, MaxPool1d) {
   MaxPool1d model(MaxPool1dOptions(3).stride(2));
   auto x = torch::ones({1, 1, 5}, torch::requires_grad());
@@ -1069,6 +1187,43 @@ TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
   auto input = torch::zeros({{1, 2}}, torch::kLong);
   input[0] = torch::tensor({1, 0});
   ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
+}
+
+TEST_F(ModulesTest, AlphaDropout) {
+  AlphaDropout alpha_dropout(0.5);
+  torch::Tensor x = torch::ones(100, torch::requires_grad());
+  torch::Tensor y = alpha_dropout(x);
+
+  y.backward(torch::ones_like(y));
+
+  ASSERT_EQ(y.ndimension(), 1);
+  ASSERT_EQ(y.size(0), 100);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 40); // Probably
+
+  alpha_dropout->eval();
+  y = alpha_dropout(x);
+
+  ASSERT_EQ(y.sum().item<float>(), 100);
+}
+
+TEST_F(ModulesTest, FeatureAlphaDropout) {
+  FeatureAlphaDropout feature_alpha_dropout(0.5);
+  torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
+  torch::Tensor y = feature_alpha_dropout(x);
+
+  y.backward(torch::ones_like(y));
+
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 10);
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 40); // Probably
+
+  feature_alpha_dropout->eval();
+  y = feature_alpha_dropout(x);
+
+  ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
 TEST_F(ModulesTest, Dropout) {
@@ -2762,6 +2917,53 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   }
 }
 
+TEST_F(ModulesTest, PrettyPrintConvTranspose) {
+  ASSERT_EQ(
+      c10::str(ConvTranspose1d(3, 4, 5)),
+      "torch::nn::ConvTranspose1d(3, 4, kernel_size=5, stride=1)");
+
+  ASSERT_EQ(
+      c10::str(ConvTranspose2d(3, 4, 5)),
+      "torch::nn::ConvTranspose2d(3, 4, kernel_size=[5, 5], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(ConvTranspose2d(ConvTranspose2dOptions(3, 4, 5).stride(2))),
+      "torch::nn::ConvTranspose2d(3, 4, kernel_size=[5, 5], stride=[2, 2])");
+  {
+    const auto options =
+        ConvTranspose2dOptions(3, 4, std::vector<int64_t>{5, 6}).stride({1, 2});
+    ASSERT_EQ(
+        c10::str(ConvTranspose2d(options)),
+        "torch::nn::ConvTranspose2d(3, 4, kernel_size=[5, 6], stride=[1, 2])");
+  }
+
+  ASSERT_EQ(
+      c10::str(ConvTranspose3d(4, 4, std::vector<int64_t>{5, 6, 7})),
+      "torch::nn::ConvTranspose3d(4, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1])");
+  {
+    const auto options =
+        ConvTranspose3dOptions(4, 4, std::vector<int64_t>{5, 6, 7})
+          .stride({1, 2, 3})
+          .padding(1)
+          .dilation(0)
+          .groups(2)
+          .bias(false)
+          .padding_mode(torch::kCircular);
+    ASSERT_EQ(
+        c10::str(
+          ConvTranspose3d(options)),
+          "torch::nn::ConvTranspose3d("
+          "4, "
+          "4, "
+          "kernel_size=[5, 6, 7], "
+          "stride=[1, 2, 3], "
+          "padding=[1, 1, 1], "
+          "dilation=[0, 0, 0], "
+          "groups=2, "
+          "bias=false, "
+          "padding_mode=kCircular)");
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().size({2, 4, 4}))),
@@ -3376,4 +3578,22 @@ TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {
     "torch::nn::CrossMapLRN2d(4, alpha=0.0001, beta=0.75, k=1)");
   ASSERT_EQ(c10::str(CrossMapLRN2d(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10))),
     "torch::nn::CrossMapLRN2d(3, alpha=1e-05, beta=0.1, k=10)");
+}
+
+TEST_F(ModulesTest, PrettyPrintAlphaDropout) {
+  ASSERT_EQ(c10::str(AlphaDropout()),
+    "torch::nn::AlphaDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(AlphaDropout(AlphaDropoutOptions(0.2))),
+    "torch::nn::AlphaDropout(p=0.2, inplace=false)");
+  ASSERT_EQ(c10::str(AlphaDropout(AlphaDropoutOptions(0.2).inplace(true))),
+    "torch::nn::AlphaDropout(p=0.2, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
+  ASSERT_EQ(c10::str(FeatureAlphaDropout()),
+    "torch::nn::FeatureAlphaDropout(p=0.5, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2))),
+    "torch::nn::FeatureAlphaDropout(p=0.2, inplace=false)");
+  ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2).inplace(true))),
+    "torch::nn::FeatureAlphaDropout(p=0.2, inplace=true)");
 }

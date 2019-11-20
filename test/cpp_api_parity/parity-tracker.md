@@ -12,9 +12,9 @@ torch.nn.ParameterDict|No|No
 torch.nn.Conv1d|Yes|No
 torch.nn.Conv2d|Yes|No
 torch.nn.Conv3d|Yes|No
-torch.nn.ConvTranspose1d|No|No
-torch.nn.ConvTranspose2d|No|No
-torch.nn.ConvTranspose3d|No|No
+torch.nn.ConvTranspose1d|Yes|No
+torch.nn.ConvTranspose2d|Yes|No
+torch.nn.ConvTranspose3d|Yes|No
 torch.nn.Unfold|Yes|No
 torch.nn.Fold|Yes|No
 torch.nn.MaxPool1d|Yes|No
@@ -99,7 +99,8 @@ torch.nn.Flatten|Yes|No
 torch.nn.Dropout|Yes|No
 torch.nn.Dropout2d|Yes|No
 torch.nn.Dropout3d|Yes|No
-torch.nn.AlphaDropout|No|No
+torch.nn.AlphaDropout|Yes|No
+torch.nn.FeatureAlphaDropout|Yes|No
 torch.nn.Embedding|Yes|No
 torch.nn.EmbeddingBag|Yes|No
 torch.nn.CosineSimilarity|Yes|No
