@@ -36,7 +36,7 @@ def main():
 
     parser.add_argument(
         '--operator_range',
-        help='Filter tests based on operator_range(e.g. a-c)',
+        help='Filter tests based on operator_range(e.g. a-c or b,c-d)',
         default=None)
 
     parser.add_argument(

@@ -86,6 +86,11 @@ c10::OperatorOptions atenOperatorOptions() {
   return result;
 }
 
+int (*DUMMY_OPERATION)(Stack&) = [](Stack& stack) -> int {
+  TORCH_CHECK(false, "Operator has been stripped in the custom build.")
+  return 0;
+};
+
 RegisterOperators reg(
     {Operator(
          "aten::get_device(Tensor self) -> int",
