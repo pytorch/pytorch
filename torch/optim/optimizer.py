@@ -50,6 +50,8 @@ class Optimizer(object):
         for param_group in param_groups:
             self.add_param_group(param_group)
 
+        self.reset_state()
+
     def __getstate__(self):
         return {
             'defaults': self.defaults,
@@ -70,6 +72,9 @@ class Optimizer(object):
                     format_string += '    {0}: {1}\n'.format(key, group[key])
         format_string += ')'
         return format_string
+
+    def reset_state(self):
+        pass
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
@@ -164,18 +169,45 @@ class Optimizer(object):
                     p.grad.detach_()
                     p.grad.zero_()
 
-    def step(self, closure):
-        r"""Performs a single optimization step (parameter update).
+    @torch.no_grad()
+    def step(self, closure=None):
+        """Performs a single optimization step (parameter update).
 
         Arguments:
-            closure (callable): A closure that reevaluates the model and
-                returns the loss. Optional for most optimizers.
+            closure (callable, optional): A closure that reevaluates the model
+            and returns the loss. Optional for most optimizers.
 
         .. note::
             Unless otherwise specified, this function should not modify the
             ``.grad`` field of the parameters.
         """
-        raise NotImplementedError
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            lr = group['lr']
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                if p.grad.is_sparse:
+                    update = self.get_sparse_direction(p, **group)
+                else:
+                    update = self.get_direction(p, **group)
+
+                p.add_(-lr, update)
+
+        return loss
+
+    def get_direction(self, p, **kwargs):
+        msg = "{} does not implement an update for dense gradients"
+        raise NotImplementedError(msg.format(self.__class__.__name__))
+
+    def get_sparse_direction(self, p, **kwargs):
+        msg = "{} does not implement an update for sparse gradients"
+        raise NotImplementedError(msg.format(self.__class__.__name__))
 
     def add_param_group(self, param_group):
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.

@@ -25,6 +25,16 @@ class Rprop(Optimizer):
         defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes)
         super(Rprop, self).__init__(params, defaults)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            lr = group['lr']
+            for p in group['parameters']:
+                state = self.state[p]
+                state['step'] = 0
+                state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                state['step_size'] = p.new().resize_as_(p).fill_(lr)
+
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -34,22 +44,17 @@ class Rprop(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data
+                grad = p.grad
                 if grad.is_sparse:
                     raise RuntimeError('Rprop does not support sparse gradients')
                 state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['prev'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-                    state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
 
                 etaminus, etaplus = group['etas']
                 step_size_min, step_size_max = group['step_sizes']
@@ -71,7 +76,7 @@ class Rprop(Optimizer):
                 grad[sign.eq(etaminus)] = 0
 
                 # update parameters
-                p.data.addcmul_(-1, grad.sign(), step_size)
+                p.addcmul_(-1, grad.sign(), step_size)
 
                 state['prev'].copy_(grad)
 

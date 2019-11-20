@@ -36,12 +36,15 @@ class Adagrad(Optimizer):
         defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
+        self.reset_state(initial_accumulator_value)
 
+    def reset_state(self):
         for group in self.param_groups:
+            init_acc = group['initial_accumulator_value']
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = torch.full_like(p.data, initial_accumulator_value, memory_format=torch.preserve_format)
+                state['sum'] = torch.full_like(p, init_acc, memory_format=torch.preserve_format)
 
     def share_memory(self):
         for group in self.param_groups:
@@ -49,52 +52,39 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['sum'].share_memory_()
 
-    def step(self, closure=None):
-        """Performs a single optimization step.
+    def get_direction(self, p, lr_decay=0, weight_decay=0, eps=1e-10, **_):
+        grad = p.grad
+        state = self.state[p]
 
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            loss = closure()
+        if weight_decay > 0:
+            grad = grad.add(weight_decay, p)
 
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
+        c = 1 + state['step'] * lr_decay
+        state['step'] += 1
+        state['sum'].addcmul_(1, grad, grad)
+        std = state['sum'].sqrt().add_(eps)
+        return grad.div_(std) / c
 
-                grad = p.grad.data
-                state = self.state[p]
+    def get_sparse_direction(self, p, lr_decay=0, weight_decay=0, eps=1e-10, **_):
+        if weight_decay > 0:
+            raise RuntimeError("weight_decay option is not compatible with sparse gradients")
 
-                state['step'] += 1
+        grad = p.grad.coalesce()  # the update is non-linear so indices must be unique
+        state = self.state[p]
 
-                if group['weight_decay'] != 0:
-                    if p.grad.data.is_sparse:
-                        raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                    grad = grad.add(group['weight_decay'], p.data)
+        grad_indices = grad._indices()
+        grad_values = grad._values()
+        size = grad.size()
 
-                clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
+        def make_sparse(values):
+            constructor = grad.new
+            if grad_indices.dim() == 0 or values.dim() == 0:
+                return constructor().resize_as_(grad)
+            return constructor(grad_indices, values, size)
 
-                if grad.is_sparse:
-                    grad = grad.coalesce()  # the update is non-linear so indices must be unique
-                    grad_indices = grad._indices()
-                    grad_values = grad._values()
-                    size = grad.size()
-
-                    def make_sparse(values):
-                        constructor = grad.new
-                        if grad_indices.dim() == 0 or values.dim() == 0:
-                            return constructor().resize_as_(grad)
-                        return constructor(grad_indices, values, size)
-                    state['sum'].add_(make_sparse(grad_values.pow(2)))
-                    std = state['sum'].sparse_mask(grad)
-                    std_values = std._values().sqrt_().add_(group['eps'])
-                    p.data.add_(-clr, make_sparse(grad_values / std_values))
-                else:
-                    state['sum'].addcmul_(1, grad, grad)
-                    std = state['sum'].sqrt().add_(group['eps'])
-                    p.data.addcdiv_(-clr, grad, std)
-
-        return loss
+        c = 1 + state['step'] * lr_decay
+        state['step'] += 1
+        state['sum'].add_(make_sparse(grad_values.pow(2)))
+        std = state['sum'].sparse_mask(grad)
+        std_values = std._values().sqrt_().add_(eps)
+        return make_sparse(grad_values / std_values) / c

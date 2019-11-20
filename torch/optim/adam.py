@@ -46,64 +46,80 @@ class Adam(Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            loss = closure()
-
+    def reset_parameters(self):
         for group in self.param_groups:
+            amsgrad = group['amsgrad']
             for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad.data
-                if grad.is_sparse:
-                    raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                amsgrad = group['amsgrad']
-
                 state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-                    if amsgrad:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-
-                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                state['step'] = 0
+                # Exponential moving average of gradient values
+                state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                # Exponential moving average of squared gradient values
+                state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                 if amsgrad:
-                    max_exp_avg_sq = state['max_exp_avg_sq']
-                beta1, beta2 = group['betas']
+                    # Maintains max of all exp. moving avg. of sq. grad. values
+                    state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                state['step'] += 1
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
+    def get_direction(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
+        grad = p.grad
+        state = self.state[p]
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+        beta1, beta2 = betas
+        state['step'] += 1
+        bias_corr1 = 1 - beta1 ** state['step']
+        bias_corr2 = 1 - beta2 ** state['step']
 
-                # Decay the first and second moment running average coefficient
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
-                if amsgrad:
-                    # Maintains the maximum of all 2nd moment running avg. till now
-                    torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
-                    # Use the max. for normalizing running avg. of gradient
-                    denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
-                else:
-                    denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
+        if weight_decay > 0:
+            grad = grad.add(weight_decay, p)
 
-                step_size = group['lr'] / bias_correction1
+        exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+        exp_avg.mul_(beta1).add_(1 - beta1, grad)
+        _var = exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
 
-                p.data.addcdiv_(-step_size, exp_avg, denom)
+        if amsgrad:
+            max_exp_avg_sq = state['max_exp_avg_sq']
+            _var = torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
 
-        return loss
+        mean = exp_avg / bias_corr1
+        var = _var / bias_corr2
+        return mean.div_(var.sqrt_().add_(eps))
+
+    def get_sparse_direction(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
+        if amsgrad:
+            raise NotImplementedError("AMSGrad not implemented for sparse gradients")
+        if weight_decay > 0:
+            raise RuntimeError("weight_decay option is not compatible with sparse gradients")
+
+        grad = p.grad.coalesce()  # the update is non-linear so indices must be unique
+        state = self.state[p]
+
+        grad_indices = grad._indices()
+        grad_values = grad._values()
+        size = grad.size()
+
+        def make_sparse(values):
+            constructor = grad.new
+            if grad_indices.dim() == 0 or values.dim() == 0:
+                return constructor().resize_as_(grad)
+            return constructor(grad_indices, values, size)
+
+        state['step'] += 1
+        beta1, beta2 = betas
+        bias_corr1 = 1 - beta1 ** state['step']
+        bias_corr2 = 1 - beta2 ** state['step']
+
+        # Decay the first and second moment running average coefficient
+        #      old <- b * old + (1 - b) * new
+        # <==> old += (1 - b) * (new - old)
+        exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+        old_exp_avg_values = exp_avg.sparse_mask(grad)._values()
+        exp_avg_update_values = grad_values.sub(old_exp_avg_values).mul_(1 - beta1)
+        exp_avg.add_(make_sparse(exp_avg_update_values))
+        old_exp_avg_sq_values = exp_avg_sq.sparse_mask(grad)._values()
+        exp_avg_sq_update_values = grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
+        exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
+
+        # Dense addition again is intended, avoiding another sparse_mask
+        mean = exp_avg_update_values.add_(old_exp_avg_values) / bias_corr1
+        var = exp_avg_sq_update_values.add_(old_exp_avg_sq_values) / bias_corr2
+        return make_sparse(mean.div_(var.sqrt_().add_(eps)))

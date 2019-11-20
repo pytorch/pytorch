@@ -68,41 +68,25 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            loss = closure()
-
+    def reset_state(self):
         for group in self.param_groups:
-            weight_decay = group['weight_decay']
-            momentum = group['momentum']
-            dampening = group['dampening']
-            nesterov = group['nesterov']
+            if group['momentum'] > 0:
+                for p in group['parameters']:
+                    self.state[p]['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                d_p = p.grad.data
-                if weight_decay != 0:
-                    d_p = d_p.add(weight_decay, p.data)
-                if momentum != 0:
-                    param_state = self.state[p]
-                    if 'momentum_buffer' not in param_state:
-                        buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
-                    else:
-                        buf = param_state['momentum_buffer']
-                        buf.mul_(momentum).add_(1 - dampening, d_p)
-                    if nesterov:
-                        d_p = d_p.add(momentum, buf)
-                    else:
-                        d_p = buf
+    def get_direction(self, p, momentum=0, dampening=0, weight_decay=0, nesterov=False, **_):
+        update = p.grad
 
-                p.data.add_(-group['lr'], d_p)
+        if weight_decay > 0:
+            update = update.add(weight_decay, p)
 
-        return loss
+        if momentum > 0:
+            state = self.state[p]
+            buf = state['momentum_buffer']
+            buf.mul_(momentum).add_(1 - dampening, update)
+            if nesterov:
+                update = update.add(momentum, buf)
+            else:
+                update = buf
+
+        return update

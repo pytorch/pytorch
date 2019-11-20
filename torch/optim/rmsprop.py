@@ -52,6 +52,20 @@ class RMSprop(Optimizer):
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            momentum = group['momentum']
+            centered = group['centered']
+            for p in group['parameters']:
+                state = self.state[p]
+                state['step'] = 0
+                state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                if momentum > 0:
+                    state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                if centered:
+                    state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -61,25 +75,17 @@ class RMSprop(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                grad = p.grad.data
+                grad = p.grad
                 if grad.is_sparse:
                     raise RuntimeError('RMSprop does not support sparse gradients')
                 state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-                    if group['momentum'] > 0:
-                        state['momentum_buffer'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-                    if group['centered']:
-                        state['grad_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
 
                 square_avg = state['square_avg']
                 alpha = group['alpha']
@@ -87,7 +93,7 @@ class RMSprop(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad = grad.add(group['weight_decay'], p)
 
                 square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
 
@@ -101,8 +107,8 @@ class RMSprop(Optimizer):
                 if group['momentum'] > 0:
                     buf = state['momentum_buffer']
                     buf.mul_(group['momentum']).addcdiv_(grad, avg)
-                    p.data.add_(-group['lr'], buf)
+                    p.add_(-group['lr'], buf)
                 else:
-                    p.data.addcdiv_(-group['lr'], grad, avg)
+                    p.addcdiv_(-group['lr'], grad, avg)
 
         return loss
