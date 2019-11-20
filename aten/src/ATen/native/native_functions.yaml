@@ -6483,3 +6483,9 @@
   dispatch:
     CPU: im2col_backward_cpu
     CUDA: im2col_backward_cuda
+
+- func: isfinite(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+  supports_named_tensor: True

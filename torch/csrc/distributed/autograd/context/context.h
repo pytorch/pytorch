@@ -121,6 +121,8 @@ class TORCH_API DistAutogradContext {
   mutable std::mutex lock_;
 };
 
+using ContextPtr = std::shared_ptr<DistAutogradContext>;
+
 } // namespace autograd
 } // namespace distributed
 } // namespace torch

@@ -149,7 +149,7 @@ Message RequestCallbackImpl::processRpc(
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
       // Attach 'recv' autograd function.
-      DistAutogradContext* autogradContext = addRecvRpcBackward(
+      auto autogradContext = addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(),
           rpcWithAutograd.tensors(),
           rpcWithAutograd.fromWorkerId());
@@ -179,13 +179,13 @@ Message RequestCallbackImpl::processRpc(
       const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
 
       // Retrieve the appropriate autograd context.
-      auto& autogradContext =
+      auto autogradContext =
           DistAutogradContainer::getInstance().retrieveContext(
               autogradMetadata.autogradContextId);
 
       // Lookup the appropriate 'send' function to enqueue.
       std::shared_ptr<SendRpcBackward> sendFunction =
-          autogradContext.retrieveSendFunction(
+          autogradContext->retrieveSendFunction(
               autogradMetadata.autogradMessageId);
 
       // Attach the gradients to the send function.
