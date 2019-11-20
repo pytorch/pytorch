@@ -273,31 +273,35 @@ Adding a ``__torch_function__`` implementation to ``ScalarTensor`` makes it
 possible for the above operation to succeed. Let's re-do our implementation,
 this time adding a ``__torch_function__`` implementation::
 
-  >>> HANDLED_FUNCTIONS = {}
-  >>> class ScalarTensor(object):
-  ...  def __init__(self, N, value):
-  ...      self._N = N
-  ...      self._value = value
-  ...
-  ...  def __repr__(self):
-  ...      return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
-  ...
-  ...  def tensor(self):
-  ...      return self._value * torch.eye(self._N)
-  ...
-  ...  def __torch_function__(self, func, args=(), kwargs=None):
-  ...      if kwargs is None:
-  ...          kwargs = {}
-  ...      if func not in HANDLED_FUNCTIONS:
-  ...          return NotImplemented
-  ...      return HANDLED_FUNCTIONS[func](*args, **kwargs)
+  HANDLED_FUNCTIONS = {}
+  class ScalarTensor(object):
+      def __init__(self, N, value):
+          self._N = N
+          self._value = value
+
+      def __repr__(self):
+          return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+
+      def tensor(self):
+          return self._value * torch.eye(self._N)
+
+      def __torch_function__(self, func, args=(), kwargs=None):
+          if kwargs is None:
+              kwargs = {}
+          if func not in HANDLED_FUNCTIONS:
+              return NotImplemented
+          return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
 The `__torch_function__` method takes three arguments: ``func``, a reference to
 the torch API function that is being overrided, ``args``, the tuple of arguments
 passed to the function, and ``kwargs``, the dict of keyword arguments passed to
 the function. It uses a global dispatch stable named ``HANDLED_FUNCTIONS`` to
 store custom implementations. The keys of this dictionary are functions in the
-``torch`` namepsace and the values are implementations for ``ScalarTensor``.
+``torch`` namespace and the values are implementations for ``ScalarTensor``.
+
+.. note:: Using a global dispatch table is not a mandated part of the
+          ``__torch_function__`` API, it is just a useful design pattern for
+          structuring your override implementations.
 
 This class definition isn't quite enough to make ``torch.mean`` do the right
 thing when we pass it a ``ScalarTensor`` -- we also need to define an
