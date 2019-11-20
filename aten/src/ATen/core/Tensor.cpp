@@ -38,18 +38,18 @@ std::string Tensor::toString() const {
   return type().toString();
 }
 
-Tensor Tensor::variable_data() const noexcept {
+Tensor Tensor::variable_data() const {
   return impl::GetVariableHooks()->variable_data(*this);
 }
 
-Tensor Tensor::tensor_data() const noexcept {
+Tensor Tensor::tensor_data() const {
   return impl::GetVariableHooks()->tensor_data(*this);
 }
 
 // View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-bool Tensor::is_view() const noexcept {
+bool Tensor::is_view() const {
   return impl::GetVariableHooks()->is_view(*this);
 }
 
@@ -57,7 +57,7 @@ const Tensor& Tensor::base() const {
   return impl::GetVariableHooks()->base(*this);
 }
 
-const std::string& Tensor::name() const noexcept {
+const std::string& Tensor::name() const {
   return impl::GetVariableHooks()->name(*this);
 }
 
