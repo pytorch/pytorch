@@ -197,6 +197,36 @@ using MaxUnpool3dFuncOptions = MaxUnpoolFuncOptions<3>;
 
 // ============================================================================
 
+/// Options for a `D`-dimensional fractional maxpool functional and module.
+template <size_t D>
+struct FractionalMaxPoolOptions {
+  FractionalMaxPoolOptions(ExpandingArray<D> kernel_size)
+      : kernel_size_(kernel_size) {}
+
+  /// the size of the window to take a max over
+  TORCH_ARG(ExpandingArray<D>, kernel_size);
+
+  /// the target output size of the image
+  TORCH_ARG(c10::optional<ExpandingArray<D>>, output_size) = c10::nullopt;
+
+  /// If one wants to have an output size as a ratio of the input size, this option can be given.
+  /// This has to be a number or tuple in the range (0, 1)
+  TORCH_ARG(c10::optional<ExpandingArray<D>>, output_ratio) = c10::nullopt;
+
+  TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
+};
+
+/// `FractionalMaxPoolOptions` specialized for 2-D maxpool.
+using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
+
+/// `FractionalMaxPoolOptions` specialized for 3-D maxpool.
+using FractionalMaxPool3dOptions = FractionalMaxPoolOptions<3>;
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool2d, FractionalMaxPool2dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool3d, FractionalMaxPool3dFuncOptions)
+
+// ============================================================================
+
 /// Options for a `D`-dimensional lppool functional and module.
 template <size_t D>
 struct LPPoolOptions {
