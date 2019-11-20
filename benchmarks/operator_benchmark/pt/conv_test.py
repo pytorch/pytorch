@@ -44,7 +44,7 @@ conv_1d_configs_long = op_bench.cross_product_configs(
 class Conv1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, L, device):
         self.input = torch.rand(N, in_c, L, device=device)
-        self.conv1d = nn.Conv1d(in_c, out_c, kernel, stride=stride)
+        self.conv1d = nn.Conv1d(in_c, out_c, kernel, stride=stride).to(device=device)
         self.set_module_name('Conv1d')
 
     def forward(self):
@@ -54,7 +54,7 @@ class Conv1dBenchmark(op_bench.TorchBenchmarkBase):
 class ConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, L, device):
         self.input = torch.rand(N, in_c, L, device=device)
-        self.convtranspose1d = nn.ConvTranspose1d(in_c, out_c, kernel, stride=stride)
+        self.convtranspose1d = nn.ConvTranspose1d(in_c, out_c, kernel, stride=stride).to(device=device)
         self.set_module_name('ConvTranspose1d')
 
     def forward(self):
@@ -87,13 +87,13 @@ conv_2d_configs_short = op_bench.config_list(
 )
 
 conv_2d_configs_long = op_bench.cross_product_configs(
-    in_c=[128, 512],
-    out_c=[128, 512],
+    in_c=[128, 256],
+    out_c=[128, 256],
     kernel=[3],
     stride=[1, 2],
-    N=[8],
-    H=[64],
-    W=[64],
+    N=[4],
+    H=[32],
+    W=[32],
     device=['cpu', 'cuda'],
     tags=["long"]
 )
@@ -102,7 +102,7 @@ conv_2d_configs_long = op_bench.cross_product_configs(
 class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, H, W, device):
         self.input = torch.rand(N, in_c, H, W, device=device)
-        self.conv2d = nn.Conv2d(in_c, out_c, kernel, stride=stride)
+        self.conv2d = nn.Conv2d(in_c, out_c, kernel, stride=stride).to(device=device)
         self.set_module_name('Conv2d')
 
     def forward(self):
@@ -112,7 +112,7 @@ class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
 class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, H, W, device):
         self.input = torch.rand(N, in_c, H, W, device=device)
-        self.convtranspose2d = nn.ConvTranspose2d(in_c, out_c, kernel, stride=stride)
+        self.convtranspose2d = nn.ConvTranspose2d(in_c, out_c, kernel, stride=stride).to(device=device)
         self.set_module_name('ConvTranspose2d')
 
     def forward(self):
@@ -147,7 +147,7 @@ conv_3d_configs_short = op_bench.config_list(
 class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, D, H, W, device):
         self.input = torch.rand(N, in_c, D, H, W, device=device)
-        self.conv3d = nn.Conv3d(in_c, out_c, kernel, stride=stride)
+        self.conv3d = nn.Conv3d(in_c, out_c, kernel, stride=stride).to(device=device)
         self.set_module_name('Conv3d')
 
     def forward(self):
@@ -157,7 +157,7 @@ class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
 class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, D, H, W, device):
         self.input = torch.rand(N, in_c, D, H, W, device=device)
-        self.convtranspose3d = nn.ConvTranspose3d(in_c, out_c, kernel, stride=stride)
+        self.convtranspose3d = nn.ConvTranspose3d(in_c, out_c, kernel, stride=stride).to(device=device)
         self.set_module_name('ConvTranspose3d')
 
     def forward(self):
