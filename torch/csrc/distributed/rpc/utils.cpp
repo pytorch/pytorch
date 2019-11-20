@@ -152,15 +152,15 @@ parseWireSections(const void* data, size_t data_size) {
       break;
     }
     size_t sz = c10::stoll(std::string(size_ptr, ptr - size_ptr));
-    header_ents.push_back({name, sz});
+    header_ents.emplace_back(std::make_pair(name, sz));
     ++ptr; // past the '\n'
   }
   ++ptr; // past the final \n
 
   std::unordered_map<std::string, std::pair<const char*, size_t>> out;
-  for (size_t i = 0; i < header_ents.size(); ++i) {
-    out[header_ents[i].first] = {ptr, header_ents[i].second};
-    ptr += header_ents[i].second;
+  for (const auto& header_ent : header_ents) {
+    out[header_ent.first] = {ptr, header_ent.second};
+    ptr += header_ent.second;
   }
   if (!ok || ptr != endp) {
     throw std::runtime_error("failed bounds");
@@ -259,9 +259,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
         throw std::runtime_error("Couldn't find file " + fname);
       }
       const auto& idat = it->second;
-      void* ptr = malloc(idat.second);
-      DataPtr dptr(ptr, ptr, [](void* p) { free(p); }, DeviceType::CPU);
-      memcpy(ptr, idat.first, idat.second);
+      auto dptr = at::getCPUAllocator()->allocate(idat.second);
+      memcpy(dptr.get(), idat.first, idat.second);
       return dptr;
     };
 
