@@ -164,7 +164,7 @@ class BenchmarkRunner(object):
     def __init__(self, args):
         # TODO: consider time-bound constraints as well.
         self.args = args
-        self.iters = 200
+        self.iters = 100
         self.has_explicit_iteration_count = False
         self.multiplier = 2
         self.predefined_minimum_secs = 1
@@ -172,6 +172,7 @@ class BenchmarkRunner(object):
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
+        self.operator_range = benchmark_utils.get_operator_range(args.operator_range)
         # 100 is the default warmup iterations
         if self.args.warmup_iterations == -1:
             self.args.warmup_iterations = 100
@@ -249,7 +250,7 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        cuda_sync = True if 'cuda' in test_case.test_config.test_name else False 
+        cuda_sync = True if 'cuda' in test_case.test_config.test_name else False
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
@@ -313,6 +314,11 @@ class BenchmarkRunner(object):
     def _check_keep(self, test_flag, cmd_flag):
         return (cmd_flag is None or test_flag == cmd_flag)
 
+    def _check_operator_first_char(self, test_flag, cmd_flag):
+        if cmd_flag is None or test_flag[:1].lower in cmd_flag:
+            return True
+        return False
+
     def _check_keep_list(self, test_flag, cmd_flag_list):
         if (cmd_flag_list is None or
                 any(test_flag == cmd_flag for cmd_flag in cmd_flag_list)):
@@ -333,10 +339,11 @@ class BenchmarkRunner(object):
         if (self._check_keep(op_test_config.test_name, self.args.test_name) and
             self._check_keep_list(test_case.op_bench.module_name(), operators) and
             self._check_keep_list(test_case.framework, frameworks) and
+            self._check_operator_first_char(test_case.op_bench.module_name(), self.operator_range) and
                 (self.args.tag_filter == 'all' or
                     self._check_keep(op_test_config.tag, self.args.tag_filter)) and
                 (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only) and
-                (self.args.device == 'None' or 'device' not in op_test_config.test_name or 
+                (self.args.device == 'None' or 'device' not in test_case.test_config.input_config or
                     self.args.device in op_test_config.test_name)):
             return True
 

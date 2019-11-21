@@ -64,15 +64,12 @@ TESTS = [
     'function_schema',
 ]
 
-# skip < 3.3 because mock is added in 3.3 and is used in rpc_fork and rpc_spawn
+# skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
 # skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
-        'rpc_fork',
         'rpc_spawn',
-        'dist_autograd_fork',
         'dist_autograd_spawn',
-        'dist_optimizer_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -83,18 +80,20 @@ if PY36:
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
     'dist_autograd_spawn',
-    'dist_optimizer_spawn',
 ]
 
 ROCM_BLACKLIST = [
     'cpp_extensions',
     'distributed',
     'multiprocessing',
+    'rpc_fork',
     'rpc_spawn',
+    'dist_autograd_fork',
     'dist_autograd_spawn',
-    'dist_optimizer_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
@@ -103,15 +102,18 @@ DISTRIBUTED_TESTS_CONFIG = {}
 if dist.is_available():
     if dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
-            'WORLD_SIZE': '3'
+            'WORLD_SIZE': '3',
+            'TEST_REPORT_SOURCE_OVERRIDE': 'dist-mpi'
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
-            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
+            'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
-            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
+            'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
