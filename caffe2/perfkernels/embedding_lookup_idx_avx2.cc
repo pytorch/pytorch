@@ -27,7 +27,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
   int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -48,9 +48,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -151,7 +149,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     }
   } else if (block_size == 64) {
     // unrolling 8 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -164,9 +162,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -231,7 +227,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     }
   } else if (block_size == 32) {
     // unrolling 4 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -240,9 +236,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -289,16 +283,14 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     }
   } else if (block_size == 16) {
     // unrolling 2 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -336,7 +328,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     }
   } else {
     // generic code
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
@@ -348,9 +340,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int end_offset = offsets[rangeIndex + 1];
       int length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -398,7 +388,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       }
     }
   }
-  return dataInd == index_size;
+  return true;
 }
 bool EmbeddingLookupIdx_int32_t_float_float_false__avx2_fma(
     const int64_t block_size,
@@ -469,7 +459,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
   int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -490,9 +480,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -593,7 +581,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
     }
   } else if (block_size == 64) {
     // unrolling 8 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -606,9 +594,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -673,7 +659,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
     }
   } else if (block_size == 32) {
     // unrolling 4 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -682,9 +668,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -731,16 +715,14 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
     }
   } else if (block_size == 16) {
     // unrolling 2 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -778,7 +760,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
     }
   } else {
     // generic code
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
@@ -790,9 +772,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int end_offset = offsets[rangeIndex + 1];
       int length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -840,7 +820,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       }
     }
   }
-  return dataInd == index_size;
+  return true;
 }
 bool EmbeddingLookupIdx_int64_t_float_float_false__avx2_fma(
     const int64_t block_size,
@@ -911,7 +891,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
   int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -932,9 +912,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -1095,7 +1073,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     }
   } else if (block_size == 64) {
     // unrolling 8 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -1108,9 +1086,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -1205,7 +1181,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     }
   } else if (block_size == 32) {
     // unrolling 4 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -1214,9 +1190,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -1278,16 +1252,14 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     }
   } else if (block_size == 16) {
     // unrolling 2 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -1334,7 +1306,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
   } else {
     // generic code
     alignas(64) at::Half vtmp1[8] = {0};
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
@@ -1346,9 +1318,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int end_offset = offsets[rangeIndex + 1];
       int length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -1402,7 +1372,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       }
     }
   }
-  return dataInd == index_size;
+  return true;
 }
 bool EmbeddingLookupIdx_int32_t_half_float_false__avx2_fma(
     const int64_t block_size,
@@ -1473,7 +1443,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
   int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -1494,9 +1464,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -1657,7 +1625,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
     }
   } else if (block_size == 64) {
     // unrolling 8 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -1670,9 +1638,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -1767,7 +1733,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
     }
   } else if (block_size == 32) {
     // unrolling 4 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -1776,9 +1742,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -1840,16 +1804,14 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
     }
   } else if (block_size == 16) {
     // unrolling 2 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -1896,7 +1858,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
   } else {
     // generic code
     alignas(64) at::Half vtmp1[8] = {0};
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
@@ -1908,9 +1870,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int end_offset = offsets[rangeIndex + 1];
       int length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -1964,7 +1924,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       }
     }
   }
-  return dataInd == index_size;
+  return true;
 }
 bool EmbeddingLookupIdx_int64_t_half_float_false__avx2_fma(
     const int64_t block_size,
@@ -2035,7 +1995,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
   int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -2056,9 +2016,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -2221,7 +2179,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
     }
   } else if (block_size == 64) {
     // unrolling 8 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -2234,9 +2192,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -2334,7 +2290,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
     }
   } else if (block_size == 32) {
     // unrolling 4 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -2343,9 +2299,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -2411,16 +2365,14 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
     }
   } else if (block_size == 16) {
     // unrolling 2 times
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -2470,7 +2422,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
     }
   } else {
     // generic code
-    for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
@@ -2482,9 +2434,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int end_offset = offsets[rangeIndex + 1];
       int length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int idx = indices[dataInd];
@@ -2539,7 +2489,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       }
     }
   }
-  return dataInd == index_size;
+  return true;
 }
 bool EmbeddingLookupIdx_int32_t_uint8_t_float_false__avx2_fma(
     const int64_t block_size,
@@ -2610,7 +2560,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
   int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -2631,9 +2581,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -2796,7 +2744,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
     }
   } else if (block_size == 64) {
     // unrolling 8 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -2809,9 +2757,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -2909,7 +2855,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
     }
   } else if (block_size == 32) {
     // unrolling 4 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
@@ -2918,9 +2864,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -2986,16 +2930,14 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
     }
   } else if (block_size == 16) {
     // unrolling 2 times
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -3045,7 +2987,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
     }
   } else {
     // generic code
-    for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
+    for (int64_t rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
@@ -3057,9 +2999,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       if (dataInd != offsets[rangeIndex]) {
         return false;
       }
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int end_offset = offsets[rangeIndex + 1];
       int length = end_offset - offsets[rangeIndex];
       for (int64_t start = dataInd; dataInd < end_offset; ++dataInd) {
         const int64_t idx = indices[dataInd];
@@ -3114,7 +3054,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       }
     }
   }
-  return dataInd == index_size;
+  return true;
 }
 bool EmbeddingLookupIdx_int64_t_uint8_t_float_false__avx2_fma(
     const int64_t block_size,

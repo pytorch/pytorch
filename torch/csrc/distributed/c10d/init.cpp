@@ -528,11 +528,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(
           "result",
           [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
-            auto tensors = work.result();
-            for (auto& tensor : tensors) {
-              tensor = autograd::make_variable(tensor);
-            }
-            return tensors;
+            return work.result();
           })
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(

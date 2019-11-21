@@ -68,13 +68,13 @@ class DynamicHistogram {
 
  private:
   /// Dynamic histogram is implemented by the series of static histograms
-  /// histograms_[i+1] is a new histogram "expanded" from histograms_[i] when
+  /// and expands from the old histogram to new histogram when
   /// we see a new extremum.
   /// An invariant: the beginning of the first bin of histograms_[i] exactly
   /// matches with the beginning of a bin in histograms_[i+1]. The end of the
   /// last bin of histograms_[i] exactly matches with the end of a bin in
   /// histograms_[i+1].
-  std::vector<Histogram> histograms_;
+  std::unique_ptr<Histogram> histogram_;
   int nbins_;
   float min_, max_;
 

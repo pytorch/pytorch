@@ -1486,7 +1486,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False,
-                  per_sample_weights=None):
+                  per_sample_weights=None, new_offsets=False):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor]) -> Tensor
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
@@ -1636,7 +1636,8 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         scale_grad_by_freq,
         mode_enum,
         sparse,
-        per_sample_weights)
+        per_sample_weights,
+        new_offsets)
     return ret
 
 

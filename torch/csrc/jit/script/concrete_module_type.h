@@ -112,6 +112,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   friend bool operator==(
       const ConcreteModuleType& lhs,
       const ConcreteModuleType& rhs) {
+    if (lhs.jitType_ == rhs.jitType_) {
+      // If the computed types are the same, these modules can (obviously) share
+      // a type.
+      return true;
+    }
+
     if (lhs.isPoisoned_ || rhs.isPoisoned_) {
       return false;
     }
@@ -225,7 +231,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   // If true, this type will never compare equally to anything else. This is
   // used if we want to ensure that this type is not shared (for example, if it
   // came from a traced module)
-  bool isPoisoned_;
+  bool isPoisoned_ = false;
 
   // The value of any constants defined by the module.
   std::unordered_map<std::string, Constant> constants_;

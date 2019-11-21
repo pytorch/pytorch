@@ -19,7 +19,6 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
-  ArgumentSpecCreator arg_spec_creator_;
 };
 
 } // namespace jit

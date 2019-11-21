@@ -13,13 +13,13 @@ void Tensor::enforce_invariants() {
   // supported by ATen
   scalar_type();
   if (defined()) {
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         impl_->dtype_initialized(),
         "Partially-initialized tensor not supported by at::Tensor");
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         !impl_->is_sparse(),
         "Sparse Tensors are supported by at::Tensor, but invariant checking isn't implemented.  Please file a bug.");
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         impl_->storage_initialized(),
         "Partially-initialized tensor not supported by at::Tensor");
   }

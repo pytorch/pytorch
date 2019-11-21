@@ -18,6 +18,11 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   if (!source_) {
     return;
   }
+  // Retrieve original SourceRange, if present.
+  if (auto orig_source_range = findSourceRangeThatGenerated()) {
+    orig_source_range->highlight(out);
+    out << "Serialized ";
+  }
   const std::string& str = source_->text();
   if (size() == str.size()) {
     // this is just the entire file, not a subset, so print it out.
@@ -70,11 +75,6 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   out << line_substr;
   if (!line_substr.empty() && line_substr.back() != '\n')
     out << "\n";
-  // Retrieve original SourceRange, if present.
-  if (auto orig_source_range = findSourceRangeThatGenerated()) {
-    out << "Compiled from code ";
-    orig_source_range->highlight(out);
-  }
 }
 
 } // namespace jit

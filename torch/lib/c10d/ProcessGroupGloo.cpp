@@ -1017,7 +1017,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
-      outputs.push_back(output.clone());
+      if (output.is_sparse()) {
+        outputs.push_back(output.clone());
+      } else {
+        outputs.push_back(output.clone(at::MemoryFormat::Contiguous));
+      }
     }
   }
 

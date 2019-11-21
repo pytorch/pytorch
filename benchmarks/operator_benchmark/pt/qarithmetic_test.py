@@ -10,7 +10,8 @@ import operator_benchmark as op_bench
 qarithmetic_binary_configs = op_bench.cross_product_configs(
     N=(2, 8, 64, 512),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
-    contig=(False, True),
+    # contig=(False, True),  # TODO: Reenable this after #29435
+    contig=(True,),
     tags=('short',)
 )
 

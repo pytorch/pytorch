@@ -1,8 +1,8 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <c10/util/C++17.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
@@ -96,7 +96,18 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
-      ctx.addForkOfOwner(rrefId, forkId);
+
+      if (rrefId != forkId) {
+        // Caller is a user and callee is the owner, add fork
+        //
+        // NB: rrefId == forkId is true if and only if calling remote to self.
+        // In that case both the caller and the callee will access the
+        // OwnerRRef. Hence, on the callee side (here), it should not call
+        // addForkOfOwner as it is not a fork. To allow callee to distinguish
+        // when this request is sent to self, the caller will set forkId using
+        // rrefId (OwnerRRef does not have a forkId anyway).
+        ctx.addForkOfOwner(rrefId, forkId);
+      }
       return RemoteRet(rrefId, forkId).toMessage();
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {

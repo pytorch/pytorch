@@ -352,7 +352,7 @@ class TORCH_API MaxUnpool1dImpl : public MaxUnpoolImpl<1, MaxUnpool1dImpl> {
  public:
   using MaxUnpoolImpl<1, MaxUnpool1dImpl>::MaxUnpoolImpl;
   Tensor forward(const Tensor& input, const Tensor& indices,
-                 const c10::optional<IntArrayRef>& output_size = c10::nullopt);
+                 const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt);
 };
 
 /// A `ModuleHolder` subclass for `MaxUnpool1dImpl`.
@@ -370,7 +370,7 @@ class TORCH_API MaxUnpool2dImpl : public MaxUnpoolImpl<2, MaxUnpool2dImpl> {
  public:
   using MaxUnpoolImpl<2, MaxUnpool2dImpl>::MaxUnpoolImpl;
   Tensor forward(const Tensor& input, const Tensor& indices,
-                 const c10::optional<IntArrayRef>& output_size = c10::nullopt);
+                 const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt);
 };
 
 /// A `ModuleHolder` subclass for `MaxUnpool2dImpl`.
@@ -388,7 +388,7 @@ class TORCH_API MaxUnpool3dImpl : public MaxUnpoolImpl<3, MaxUnpool3dImpl> {
  public:
   using MaxUnpoolImpl<3, MaxUnpool3dImpl>::MaxUnpoolImpl;
   Tensor forward(const Tensor& input, const Tensor& indices,
-                 const c10::optional<IntArrayRef>& output_size = c10::nullopt);
+                 const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt);
 };
 
 /// A `ModuleHolder` subclass for `MaxUnpool3dImpl`.
@@ -403,7 +403,7 @@ TORCH_MODULE(MaxUnpool3d);
 template <size_t D, typename Derived>
 class TORCH_API LPPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
-  LPPoolImpl(float norm_type, ExpandingArray<D> kernel_size)
+  LPPoolImpl(double norm_type, ExpandingArray<D> kernel_size)
       : LPPoolImpl(LPPoolOptions<D>(norm_type, kernel_size)) {}
   explicit LPPoolImpl(const LPPoolOptions<D>& options_);
 

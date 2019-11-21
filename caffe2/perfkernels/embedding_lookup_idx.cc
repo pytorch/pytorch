@@ -29,13 +29,13 @@ static bool EmbeddingLookupGenericSlowIdx(
     bool normalize_by_lengths,
     OutType* out) {
   int64_t current = 0;
-  for (int m = 0; m < output_size; ++m) {
+  for (int m = 0; m < output_size - 1; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current != offsets[m]) {
       return false;
     }
     int64_t start_offset = offsets[m];
-    int64_t end_offset = (m == output_size - 1 ? index_size : offsets[m + 1]);
+    int64_t end_offset = offsets[m + 1];
     int64_t length = end_offset - start_offset;
     for (int i = start_offset; i < end_offset; ++i) {
       int64_t idx = indices[current];
@@ -185,10 +185,8 @@ static bool EmbeddingLookupGenericSlowIdx(
       return;                                                                                         \
     }                                                                                                 \
     int64_t current = 0;                                                                              \
-    for (int m = 0; m < output_size; ++m) {                                                           \
-      for (int64_t i = offsets[m];                                                                    \
-           i < (m == output_size - 1 ? index_size : offsets[m + 1]);                                  \
-           ++i) {                                                                                     \
+    for (int m = 0; m < output_size - 1; ++m) {                                                       \
+      for (int64_t i = offsets[m]; i < offsets[m + 1]; ++i) {                                         \
         CAFFE_ENFORCE_LT(current, index_size);                                                        \
         IndexType idx = indices[current];                                                             \
         CAFFE_ENFORCE(                                                                                \
@@ -202,11 +200,6 @@ static bool EmbeddingLookupGenericSlowIdx(
         ++current;                                                                                    \
       }                                                                                               \
     }                                                                                                 \
-    CAFFE_ENFORCE_EQ(                                                                                 \
-        current,                                                                                      \
-        index_size,                                                                                   \
-        "Your input seems to be incorrect: the sum of lengths values should be "                      \
-        "the size of the indices tensor, but it appears not.");                                       \
   }
 
 EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false);

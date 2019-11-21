@@ -7,7 +7,7 @@ circular dependency problems
 import inspect
 import weakref
 import warnings
-import torch._C
+import torch
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
@@ -217,6 +217,8 @@ class FunctionModifiers(object):
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
     DEFAULT = "default (compile if called from a exported function / forward)"
+    COPY_TO_SCRIPT_WRAPPER = \
+        "if this method is not scripted, copy the python method onto the scripted model"
 
 
 def export(fn):
@@ -382,12 +384,12 @@ def ignore(drop=False, **kwargs):
     drop_on_export = kwargs.pop("drop_on_export", None)
     if drop_on_export:
         warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
         drop = drop_on_export
     elif drop:
         warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
     def decorator(fn):
         if drop:
@@ -397,6 +399,10 @@ def ignore(drop=False, **kwargs):
         return fn
     return decorator
 
+
+def _copy_to_script_wrapper(fn):
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+    return fn
 
 def module_has_exports(mod):
     for name in dir(mod):
@@ -670,7 +676,7 @@ for i in range(2, 7):
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch.jit.ScriptFunction):
+    if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
     name = obj.__name__

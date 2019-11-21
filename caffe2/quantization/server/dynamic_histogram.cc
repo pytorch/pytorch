@@ -85,6 +85,48 @@ void Histogram::Finalize() {
   per_thread_histogram_.clear();
 }
 
+void RemapHistograms(Histogram& src_hist, Histogram& dst_hist) {
+  auto src_bins = *(src_hist.GetHistogram());
+  float src_bin_width = (src_hist.Max() - src_hist.Min()) / src_bins.size();
+  float dst_bin_width =
+      (dst_hist.Max() - dst_hist.Min()) / dst_hist.GetHistogram()->size();
+  for (int i = 0; i < src_bins.size(); ++i) {
+    if (src_bins[i] == 0) {
+      continue;
+    }
+    float src_bin_begin = src_hist.Min() + src_bin_width * i;
+    float src_bin_end = src_bin_begin + src_bin_width;
+
+    // dst_bin corresponds to the beginning of the src_bin
+    // dst_bin2 corresponds to the end of the src_bin
+    int dst_bin = dst_bin_width == 0
+        ? 0
+        : (src_bin_begin - dst_hist.Min()) / dst_bin_width;
+    float dst_bin_begin = dst_hist.Min() + dst_bin_width * dst_bin;
+    float dst_bin_end = dst_bin_begin + dst_bin_width;
+    int dst_bin2 =
+        dst_bin_width == 0 ? 0 : (src_bin_end - dst_hist.Min()) / dst_bin_width;
+    // 1 src_bin is mapped to at most 2 dst bin
+    assert(dst_bin2 <= dst_bin + 2);
+
+    // dst_bin_cnt is the count from src_bin that should go to dst_bin
+    // The remainder should go to dst_bin2
+    // rint is the fastest way to round
+    // (https://stackoverflow.com/questions/485525/round-for-float-in-c/5849630)
+    uint64_t dst_bin_cnt = (src_bin_width == 0 || dst_bin_width == 0)
+        ? src_bins[i]
+        : std::min(
+              static_cast<uint64_t>(rint(
+                  (dst_bin_end - src_bin_begin) / src_bin_width * src_bins[i])),
+              src_bins[i]);
+
+    dst_hist.Add(dst_bin_begin + dst_bin_width / 2, dst_bin_cnt);
+    if (dst_bin_cnt < src_bins[i]) {
+      dst_hist.Add(dst_bin_end + dst_bin_width / 2, src_bins[i] - dst_bin_cnt);
+    }
+  }
+}
+
 static const int OVER_BINNING_FACTOR = 4;
 
 DynamicHistogram::DynamicHistogram(int nbins)
@@ -98,38 +140,36 @@ void DynamicHistogram::Add(float f) {
   min_ = std::min(min_, f);
   max_ = std::max(max_, f);
 
-  if (histograms_.empty()) {
-    histograms_.emplace_back(nbins_ * OVER_BINNING_FACTOR, f, f);
-  } else {
-    Histogram& curr_hist = histograms_.back();
-    if (f < curr_hist.Min() || f > curr_hist.Max()) {
-      float old_spread = curr_hist.Max() - curr_hist.Min();
-      if (f < curr_hist.Min()) {
-        float new_min;
-        if (old_spread == 0) {
-          new_min = f;
-        } else {
-          new_min = curr_hist.Min() -
-              ceil((curr_hist.Min() - f) / old_spread) * old_spread;
-        }
-        histograms_.emplace_back(
-            curr_hist.GetHistogram()->size(), new_min, curr_hist.Max());
+  if (histogram_ == nullptr) {
+    histogram_ = caffe2::make_unique<Histogram>(
+        nbins_ * OVER_BINNING_FACTOR, min_, max_);
+    histogram_->Add(f);
+    return;
+  }
+  Histogram curr_hist = *histogram_;
+  float new_min = curr_hist.Min(), new_max = curr_hist.Max();
+  if (f < curr_hist.Min() || f > curr_hist.Max()) {
+    float old_spread = curr_hist.Max() - curr_hist.Min();
+    if (f < curr_hist.Min()) {
+      if (old_spread == 0) {
+        new_min = f;
       } else {
-        float new_max;
-        if (old_spread == 0) {
-          new_max = f;
-        } else {
-          new_max = curr_hist.Max() +
-              ceil((f - curr_hist.Max()) / old_spread) * old_spread;
-        }
-        histograms_.emplace_back(
-            curr_hist.GetHistogram()->size(), curr_hist.Min(), new_max);
+        new_min = curr_hist.Min() -
+            ceil((curr_hist.Min() - f) / old_spread) * old_spread;
+      }
+    } else {
+      if (old_spread == 0) {
+        new_max = f;
+      } else {
+        new_max = curr_hist.Max() +
+            ceil((f - curr_hist.Max()) / old_spread) * old_spread;
       }
     }
+    histogram_.reset(
+        new Histogram(curr_hist.GetHistogram()->size(), new_min, new_max));
+    RemapHistograms(curr_hist, *histogram_);
   }
-
-  Histogram& new_hist = histograms_.back();
-  new_hist.Add(f);
+  histogram_->Add(f);
 }
 
 void DynamicHistogram::Add(const float* f, int len) {
@@ -144,37 +184,39 @@ void DynamicHistogram::Add(const float* f, int len) {
   min_ = minimum;
   max_ = maximum;
 
-  if (histograms_.empty()) {
-    histograms_.emplace_back(nbins_ * OVER_BINNING_FACTOR, min_, max_);
-  } else {
-    Histogram& curr_hist = histograms_.back();
-    if (min_ < curr_hist.Min() || max_ > curr_hist.Max()) {
-      float old_spread = curr_hist.Max() - curr_hist.Min();
-      float new_min = curr_hist.Min(), new_max = curr_hist.Max();
-      if (min_ < curr_hist.Min()) {
-        if (old_spread == 0.0f) {
-          new_min = min_;
-        } else {
-          new_min = curr_hist.Min() -
-              ceil((curr_hist.Min() - min_) / old_spread) * old_spread;
-        }
+  if (histogram_ == nullptr) {
+    histogram_ = caffe2::make_unique<Histogram>(
+        nbins_ * OVER_BINNING_FACTOR, min_, max_);
+    histogram_->Add(f, len);
+    return;
+  }
+  Histogram curr_hist = *histogram_;
+  float new_min = curr_hist.Min(), new_max = curr_hist.Max();
+  if (min_ < curr_hist.Min() || max_ > curr_hist.Max()) {
+    float old_spread = curr_hist.Max() - curr_hist.Min();
+    if (min_ < curr_hist.Min()) {
+      if (old_spread == 0.0f) {
+        new_min = min_;
+      } else {
+        new_min = curr_hist.Min() -
+            ceil((curr_hist.Min() - min_) / old_spread) * old_spread;
       }
-      if (max_ > curr_hist.Max()) {
-        old_spread = curr_hist.Max() - new_min;
-        if (old_spread == 0.0f) {
-          new_max = max_;
-        } else {
-          new_max = curr_hist.Max() +
-              ceil((max_ - curr_hist.Max()) / old_spread) * old_spread;
-        }
-      }
-      histograms_.emplace_back(
-          curr_hist.GetHistogram()->size(), new_min, new_max);
     }
+    if (max_ > curr_hist.Max()) {
+      old_spread = curr_hist.Max() - new_min;
+      if (old_spread == 0.0f) {
+        new_max = max_;
+      } else {
+        new_max = curr_hist.Max() +
+            ceil((max_ - curr_hist.Max()) / old_spread) * old_spread;
+      }
+    }
+    histogram_.reset(
+        new Histogram(curr_hist.GetHistogram()->size(), new_min, new_max));
+    RemapHistograms(curr_hist, *histogram_);
   }
 
-  Histogram& new_hist = histograms_.back();
-  new_hist.Add(f, len);
+  histogram_->Add(f, len);
 }
 
 const Histogram* DynamicHistogram::Finalize() {
@@ -183,49 +225,10 @@ const Histogram* DynamicHistogram::Finalize() {
   }
 
   final_histogram_.reset(new Histogram(nbins_, min_, max_));
-  float dst_bin_width = (max_ - min_) / nbins_;
-
-  for (Histogram& hist : histograms_) {
-    hist.Finalize();
-
-    const std::vector<uint64_t>& bins = *hist.GetHistogram();
-    float src_bin_width = (hist.Max() - hist.Min()) / bins.size();
-
-    for (int i = 0; i < bins.size(); ++i) {
-      if (bins[i] == 0) {
-        continue;
-      }
-      float src_bin_begin = hist.Min() + src_bin_width * i;
-      float src_bin_end = src_bin_begin + src_bin_width;
-      // dst_bin corresponds to the beginning of the src_bin
-      // dst_bin2 corresponds to the end of the src_bin
-      int dst_bin =
-          dst_bin_width == 0 ? 0 : (src_bin_begin - min_) / dst_bin_width;
-      float dst_bin_begin = min_ + dst_bin_width * dst_bin;
-      float dst_bin_end = dst_bin_begin + dst_bin_width;
-      int dst_bin2 =
-          dst_bin_width == 0 ? 0 : (src_bin_end - min_) / dst_bin_width;
-      // 1 src_bin is mapped to at most 2 dst bin
-      assert(dst_bin2 <= dst_bin + 2);
-
-      // dst_bin_cnt is the count from src_bin that should go to dst_bin
-      // The remainder should go to dst_bin2
-      // rint is the fastest way to round
-      // (https://stackoverflow.com/questions/485525/round-for-float-in-c/5849630)
-      uint64_t dst_bin_cnt = (src_bin_width == 0 || dst_bin_width == 0)
-          ? bins[i]
-          : std::min(
-                static_cast<uint64_t>(rint(
-                    (dst_bin_end - src_bin_begin) / src_bin_width * bins[i])),
-                bins[i]);
-
-      final_histogram_->Add(dst_bin_begin + dst_bin_width / 2, dst_bin_cnt);
-      if (dst_bin_cnt < bins[i]) {
-        final_histogram_->Add(
-            dst_bin_end + dst_bin_width / 2, bins[i] - dst_bin_cnt);
-      }
-    }
-  } // for each histogram with different scales
+  if (histogram_.get()) {
+    histogram_->Finalize();
+    RemapHistograms(*histogram_, *final_histogram_);
+  }
 
   return final_histogram_.get();
 }

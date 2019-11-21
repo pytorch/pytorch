@@ -253,7 +253,7 @@ class EmbeddingBag(Module):
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 mode='mean', sparse=False, _weight=None):
+                 mode='mean', sparse=False, _weight=None, new_offsets=False):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -269,6 +269,7 @@ class EmbeddingBag(Module):
             self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse
+        self.new_offsets = new_offsets
 
     def reset_parameters(self):
         init.normal_(self.weight)
@@ -278,7 +279,7 @@ class EmbeddingBag(Module):
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,
-                               per_sample_weights)
+                               per_sample_weights, self.new_offsets)
 
     def extra_repr(self):
         s = '{num_embeddings}, {embedding_dim}'

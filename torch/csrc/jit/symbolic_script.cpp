@@ -1167,18 +1167,18 @@ const std::vector<std::string> functions = {
             # for cpu backend, where fusions are disabled, a different lowering that is more efficient
             # in the absence of fusion is used
             p1m = 1. - p
-            if use_cuda:
-                mask = torch.rand_like(input) < p1m
-                res = mask.type_as(input) * input * (1./p1m)
+            if train:
+                if use_cuda:
+                    mask = torch.rand_like(input) < p1m
+                    res = mask.type_as(input) * input * (1./p1m)
+                else:
+                    mask = torch.empty_like(input)
+                    mask.bernoulli_(p1m)
+                    res = mask * input / p1m
             else:
-                mask = torch.empty_like(input)
-                mask.bernoulli_(p1m)
-                res = mask * input / p1m
-
-            if not train:
                 p1m = 1.
                 res = input
-                mask = torch.ones_like(input)
+                mask = torch.empty_like(input)
 
             def backward(grad_output):
                 use_cuda = grad_output.is_cuda

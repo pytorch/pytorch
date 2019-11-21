@@ -136,7 +136,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
-      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1));
+      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 

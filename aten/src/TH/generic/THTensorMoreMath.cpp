@@ -6,9 +6,7 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
 #include <ATen/core/EnableNamedTensor.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
@@ -17,7 +15,7 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
 
 #if !defined(TH_REAL_IS_BFLOAT16)
 
-int THTensor_(equal)(THTensor *ta, THTensor* tb)
+static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
 {
   std::atomic<int> equal{1};
   if(!THTensor_(isSameSizeAs)(ta, tb))
@@ -52,6 +50,16 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
                      })
   }
   return equal.load();
+}
+
+int THTensor_(equal)(THTensor *ta, THTensor* tb) {
+#ifdef BUILD_NAMEDTENSOR
+  if (!at::namedinference::are_names_equal(ta, tb)) {
+    return 0;
+  }
+  at::NoNamesGuard guard;
+#endif
+  return THTensor_(equalImpl)(ta, tb);
 }
 
 // Helper function to be used in a reduction operation.

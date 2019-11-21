@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 
 namespace torch {

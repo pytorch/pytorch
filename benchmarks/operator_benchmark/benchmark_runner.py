@@ -25,7 +25,7 @@ def main():
 
     parser.add_argument(
         '--tag_filter',
-        help='tag_filter can be used to run the benchmarks which matches the tag',
+        help='tag_filter can be used to run the shapes which matches the tag. (all is used to run all the shapes)',
         default='short')
 
     # This option is used to filter test cases to run.

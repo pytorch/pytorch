@@ -3,7 +3,7 @@
 #include <mutex>
 #include <unordered_map>
 
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace torch {
 namespace distributed {
