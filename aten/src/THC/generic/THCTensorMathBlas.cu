@@ -252,7 +252,7 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *v
 
     THCTensor_(freeCopyTo)(state, cr, r_);
   }
-#elif defined(THC_REAL_IS_HALF)  || defined(THC_REAL_IS_BFLOAT16)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   // currently no Hger/SgerEx in Cublas.
   THCTensor *vec2T = THCTensor_(newWithTensor)(state, vec2);
   THCTensor_(resize2d)(state, vec2T, vec2_size, 1);
