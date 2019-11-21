@@ -41,7 +41,19 @@ class RemovableHandle(object):
 
 #pragma once
 
-/// A handle which provides the capability to remove a hook.
-struct RemovableHandle {
+namespace torch {
+namespace utils {
+namespace hooks {
 
-}
+/// A handle which provides the capability to remove a hook.
+class RemovableHandle {
+ public:
+  // yf225 TODO: let's use a std::weak_ptr to mimick Python version behavior
+  explicit RemovableHandle() {}
+ private:
+  static int64_t next_id;
+};
+
+} // namespace hooks
+} // namespace utils
+} // namespace torch
