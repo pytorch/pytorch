@@ -231,7 +231,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     }
     L.expect('.');
     auto class_tok = L.expect(TK_IDENT);
-    value = classCU()->get_type(
+    value = getCustomClass(
         std::string("__torch__.torch.classes.") + class_tok.text());
     if (!value) {
       throw ErrorReport(class_tok.range)

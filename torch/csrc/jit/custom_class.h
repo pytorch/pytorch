@@ -1,15 +1,19 @@
 #pragma once
 
-#include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-
-#include <vector>
+#include <ATen/core/jit_type.h>
 
 namespace torch {
 namespace jit {
 
-TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
-TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
+at::TypePtr getCustomClass(const std::string& name);
+
+using GetCustomClassFnType = at::TypePtr (*)(const std::string&);
+// Use this to set the function for retrieving custom classes
+//
+// This is necessary because the custom classes implementation
+// is not in ATen core, but the schema type parser is, which
+// can resolve custom classes as type expressions.
+void setGetCustomClassFn(GetCustomClassFnType fn);
 
 } // namespace jit
 } // namespace torch

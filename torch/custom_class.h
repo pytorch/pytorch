@@ -21,6 +21,9 @@
 namespace torch {
 namespace jit {
 
+TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
+TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
+
 namespace detail {
 template <class R, class...>
 struct types {
