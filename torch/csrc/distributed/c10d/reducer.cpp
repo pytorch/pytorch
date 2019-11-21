@@ -173,7 +173,7 @@ Reducer::Reducer(
       options = options.device(replicas_[i][0].device());
       options = options.dtype(at::kInt);
       local_used_maps_[i] =
-          at::empty({static_cast<long>(variable_count)}, options);
+          at::zeros({static_cast<long>(variable_count)}, options);
     }
   }
 }
@@ -255,6 +255,11 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(VariableIndex index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  // Since it gets here, this param has been used for this iteration. We want
+  // to mark it in local_used_maps_. During no_sync session, the same var can
+  // be set multiple times, which is OK as does not affect correctness. As long
+  // as it is used once during no_sync session, it is marked as used.
+  local_used_maps_[index.replica_index][index.variable_index] = 1;
 
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
@@ -267,11 +272,8 @@ void Reducer::autograd_hook(VariableIndex index) {
   // output, they won't be part of the autograd graph, and won't receive
   // gradients. These parameters are discovered in the `prepare_for_backward`
   // function and their indexes stored in the `unused_parameters_` vector.
-  if (!has_marked_unused_parameters_) {
+  if (!has_marked_unused_parameters_ && !unused_parameters_.empty()) {
     has_marked_unused_parameters_ = true;
-
-    // Allreduce locally used param maps to get the global consensus
-    local_used_work_ = process_group_->allreduce(local_used_maps_);
 
     for (const auto& unused_index : unused_parameters_) {
       mark_variable_ready(unused_index);
@@ -549,10 +551,6 @@ void Reducer::prepare_for_backward(
     bucket.pending = bucket.replicas.size();
   }
 
-  for (auto& local_used : local_used_maps_) {
-    local_used.fill_(1);
-  }
-
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
   unused_parameters_.clear();
@@ -594,10 +592,7 @@ void Reducer::prepare_for_backward(
       continue;
     }
 
-    // Mark locally unused parameters for this iteration
-    const auto& var_idx = it.second;
-    unused_parameters_.push_back(var_idx);
-    local_used_maps_[var_idx.replica_index][var_idx.variable_index] = 0;
+    unused_parameters_.push_back(it.second);
   }
 }
 
@@ -656,8 +651,11 @@ void Reducer::finalize_backward() {
   // Check that all buckets were completed and had their work kicked off.
   TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
 
-  // Wait for asynchronous reduction to complete and unflatten contents.
+  // Allreduce locally used param maps to get the global consensus
+  local_used_work_ = process_group_->allreduce(local_used_maps_);
   local_used_work_->wait();
+
+  // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
     TORCH_INTERNAL_ASSERT(bucket.work);
     bucket.work->wait();
@@ -666,6 +664,11 @@ void Reducer::finalize_backward() {
     } else {
       finalize_bucket_dense(bucket);
     }
+  }
+
+  // Reset unused parameter accounting.
+  for (auto& local_used : local_used_maps_) {
+    local_used.fill_(0);
   }
 }
 
