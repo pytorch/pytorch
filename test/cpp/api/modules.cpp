@@ -508,7 +508,7 @@ TEST_F(ModulesTest, Identity) {
   s.backward();
 
   ASSERT_TRUE(torch::equal(output, expected));
-  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input, torch::MemoryFormat::Preserve)));
 }
 
 TEST_F(ModulesTest, Flatten) {
@@ -520,7 +520,7 @@ TEST_F(ModulesTest, Flatten) {
 
   s.backward();
   ASSERT_TRUE(torch::equal(output, expected));
-  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input, torch::MemoryFormat::Preserve)));
 
   // Testing with optional arguments start_dim and end_dim
   Flatten flatten_optional_dims(FlattenOptions().start_dim(2).end_dim(3));
@@ -538,7 +538,7 @@ TEST_F(ModulesTest, Flatten) {
   s = output.sum();
   s.backward();
   ASSERT_TRUE(torch::equal(output, expected));
-  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input, torch::MemoryFormat::Preserve)));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
@@ -1198,7 +1198,7 @@ TEST_F(ModulesTest, SimpleContainer) {
   x = l2(x).clamp_min(0);
   x = l3(x).clamp_min(0);
 
-  x.backward(torch::ones_like(x));
+  x.backward(torch::ones_like(x, torch::MemoryFormat::Preserve));
   ASSERT_EQ(x.ndimension(), 2);
   ASSERT_EQ(x.size(0), 1000);
   ASSERT_EQ(x.size(1), 100);
@@ -1261,7 +1261,7 @@ TEST_F(ModulesTest, AlphaDropout) {
   torch::Tensor x = torch::ones(100, torch::requires_grad());
   torch::Tensor y = alpha_dropout(x);
 
-  y.backward(torch::ones_like(y));
+  y.backward(torch::ones_like(y, torch::MemoryFormat::Preserve));
 
   ASSERT_EQ(y.ndimension(), 1);
   ASSERT_EQ(y.size(0), 100);
@@ -1279,7 +1279,7 @@ TEST_F(ModulesTest, FeatureAlphaDropout) {
   torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
   torch::Tensor y = feature_alpha_dropout(x);
 
-  y.backward(torch::ones_like(y));
+  y.backward(torch::ones_like(y, torch::MemoryFormat::Preserve));
 
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(y.size(0), 10);
@@ -1298,7 +1298,7 @@ TEST_F(ModulesTest, Dropout) {
   torch::Tensor x = torch::ones(100, torch::requires_grad());
   torch::Tensor y = dropout(x);
 
-  y.backward(torch::ones_like(y));
+  y.backward(torch::ones_like(y, torch::MemoryFormat::Preserve));
   ASSERT_EQ(y.ndimension(), 1);
   ASSERT_EQ(y.size(0), 100);
   ASSERT_LT(y.sum().item<float>(), 130); // Probably
@@ -1314,7 +1314,7 @@ TEST_F(ModulesTest, Dropout2d) {
   torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
   torch::Tensor y = dropout(x);
 
-  y.backward(torch::ones_like(y));
+  y.backward(torch::ones_like(y, torch::MemoryFormat::Preserve));
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 10);
@@ -1331,7 +1331,7 @@ TEST_F(ModulesTest, Dropout3d) {
   torch::Tensor x = torch::ones({4, 5, 5}, torch::requires_grad());
   torch::Tensor y = dropout(x);
 
-  y.backward(torch::ones_like(y));
+  y.backward(torch::ones_like(y, torch::MemoryFormat::Preserve));
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.size(0), 4);
   ASSERT_EQ(y.size(1), 5);
@@ -1349,7 +1349,7 @@ TEST_F(ModulesTest, FeatureDropout) {
   torch::Tensor x = torch::ones({10, 10}, torch::requires_grad());
   torch::Tensor y = dropout(x);
 
-  y.backward(torch::ones_like(y));
+  y.backward(torch::ones_like(y, torch::MemoryFormat::Preserve));
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 10);
@@ -1619,7 +1619,7 @@ TEST_F(ModulesTest, BatchNorm2d) {
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
-  
+
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
@@ -1709,7 +1709,7 @@ TEST_F(ModulesTest, BatchNorm3d) {
   ASSERT_TRUE(output.allclose(expected));
   auto s = output.sum();
   s.backward();
-  
+
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
@@ -2125,7 +2125,7 @@ TEST_F(ModulesTest, TripletMarginLoss) {
 
 TEST_F(ModulesTest, NLLLoss) {
   NLLLoss loss;
-  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315}, 
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
                               {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::dtype(torch::kFloat).requires_grad(true));
@@ -2251,8 +2251,8 @@ TEST_F(ModulesTest, ELU) {
 
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-    auto y_exp = torch::max(torch::zeros_like(x), x) +
-                 torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
+    auto y_exp = torch::max(torch::zeros_like(x, torch::MemoryFormat::Preserve), x) +
+                 torch::min(torch::zeros_like(x, torch::MemoryFormat::Preserve), alpha * (torch::exp(x) - 1.0));
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 }
@@ -2263,7 +2263,7 @@ TEST_F(ModulesTest, SELU) {
   auto output = model->forward(input);
   const double scale = 1.0507009873554804934193349852946;
   const double alpha = 1.6732632423543772848170429916717;
-  auto zero = torch::zeros_like(input);
+  auto zero = torch::zeros_like(input, torch::MemoryFormat::Preserve);
   auto expected = scale *
       (torch::max(zero, input) +
        torch::min(zero, alpha * (torch::exp(input) - 1)));
@@ -2361,7 +2361,7 @@ TEST_F(ModulesTest, LogSigmoid) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-  auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
+  auto y_exp = torch::log(torch::ones_like(x, torch::MemoryFormat::Preserve)/(torch::ones_like(x, torch::MemoryFormat::Preserve) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
@@ -2493,7 +2493,7 @@ TEST_F(ModulesTest, RReLU) {
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto z = ((x >= 0) * (x == y) +
         (x < 0) * (y >= x * upper) * (y <= lower * x)) * 1.0;
-      ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+      ASSERT_TRUE(torch::allclose(z, torch::ones_like(z, torch::MemoryFormat::Preserve)));
     }
   }
 }
@@ -2512,8 +2512,8 @@ TEST_F(ModulesTest, CELU) {
 
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-    auto y_exp = torch::max(torch::zeros_like(x), x) +
-        torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+    auto y_exp = torch::max(torch::zeros_like(x, torch::MemoryFormat::Preserve), x) +
+        torch::min(torch::zeros_like(x, torch::MemoryFormat::Preserve), alpha * (torch::exp(x / alpha) - 1.0));
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 }
@@ -3341,10 +3341,10 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
   auto crossmaplrn2d = CrossMapLRN2d(3);
   auto output = crossmaplrn2d(input);
   output.sum().backward();
-  
+
   ASSERT_TRUE(input.grad().allclose(grad_expected));
   ASSERT_TRUE(output.allclose(expected));
-  
+
   /// size change
   crossmaplrn2d = CrossMapLRN2d(CrossMapLRN2dOptions(4).alpha(1e-4).beta(0.75).k(1));
   output = crossmaplrn2d(input);
