@@ -4,7 +4,6 @@ import numpy as np
 import unittest
 import torch.onnx
 import io
-import torch.nn as nn
 
 import onnx
 import caffe2.python.onnx.backend as c2
@@ -27,7 +26,7 @@ class TestQuantizedOps(unittest.TestCase):
         onnx_model = onnx.load(f)
         if permute:
             caffe_res = c2.run_model(onnx_model, dict(zip(input_names, (X_nhwc,))))[0]
-            np.testing.assert_almost_equal(pytorch_res.permute(0,2,3,1).numpy(), caffe_res, decimal=3)
+            np.testing.assert_almost_equal(pytorch_res.permute(0, 2, 3, 1).numpy(), caffe_res, decimal=3)
         else:
             caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
             np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=3)
