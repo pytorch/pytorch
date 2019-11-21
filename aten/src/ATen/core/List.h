@@ -428,8 +428,9 @@ public:
   // See [unsafe set type] for why this exists.
   void unsafeSetElementType(TypePtr t);
 
+  template <typename = typename std::enable_if<std::is_same<T, StorageT>::value, void>::type>
   operator ArrayRef<T>() const {
-    return ArrayRef<T>(begin(), end());
+    return ArrayRef<T>(impl_->list);
   }
 
 private:
