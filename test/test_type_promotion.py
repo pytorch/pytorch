@@ -443,7 +443,7 @@ class TestTypePromotion(TestCase):
             t = s.to_dense()
         return (t, s)
 
-    def _sparse_precision(self, dtype, coalesced):
+    def _get_precision(self, dtype, coalesced):
         if dtype == torch.half and not coalesced:
             # very low precision for uncoalesced float16 sparse tensors since
             # ops like (s1 + s2).to_dense() will add four low-precision
@@ -475,7 +475,7 @@ class TestTypePromotion(TestCase):
             return
 
         expected = op(dense1.clone(), dense2)
-        precision = self._sparse_precision(expected.dtype, coalesced)
+        precision = self._get_precision(expected.dtype, coalesced)
         test_tensors = [expected, dense1, sparse1, dense2, sparse2]
         e, d1, s1, d2, s2 = [x.clone() for x in test_tensors] if inplace else test_tensors
 
