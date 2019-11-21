@@ -20,12 +20,8 @@ def _backend_type_repr(self):
 
 
 # Create an enum type, `BackendType`, with empty members.
-BackendType = enum.Enum(
-    value="BackendType",
-    names={},
-    __repr__=_backend_type_repr
-)
-
+BackendType = enum.Enum(value="BackendType", names={})
+BackendType.__repr__ = _backend_type_repr
 
 def register_backend(
     backend_name, construct_rpc_agent_options_handler, init_backend_handler
@@ -55,11 +51,8 @@ def register_backend(
         },
         **existing_enum_dict
     )
-    BackendType = enum.Enum(
-        value="BackendType",
-        names=extended_enum_dict,
-        __repr__=_backend_type_repr
-    )
+    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
+    BackendType.__repr__ = _backend_type_repr
     return BackendType[backend_name]
 
 
