@@ -36,10 +36,8 @@ class TORCH_API OptimizerParamState {
  public:
   virtual std::unique_ptr<OptimizerParamState> clone() const;
 public:
-  virtual void serialize(serialize::InputArchive& archive,
-    const std::string& key);
-  virtual void serialize(serialize::OutputArchive& archive,
-    const std::string& key);
+  virtual void serialize(serialize::InputArchive& archive);
+  virtual void serialize(serialize::OutputArchive& archive);
 };
 
 template <typename Derived>

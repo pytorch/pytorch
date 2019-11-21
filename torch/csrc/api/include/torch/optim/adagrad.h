@@ -83,6 +83,7 @@ class TORCH_API Adagrad : public Optimizer {
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
     //_TORCH_OPTIM_SERIALIZE(state); add a serialize function
+  }
 };
 } // namespace optim
 } // namespace torch
