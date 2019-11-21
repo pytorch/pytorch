@@ -210,7 +210,7 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
 }
 
-c10::optional<py::object> ConcreteModuleType::getConstant(
+c10::optional<py::object> ConcreteModuleType::findConstant(
     const std::string& name) const {
   auto it = data_.constants_.find(name);
   if (it != data_.constants_.end()) {

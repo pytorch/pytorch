@@ -176,15 +176,14 @@ def remote(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_info("worker1")
-        >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
+        >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
         >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -253,7 +252,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -286,15 +285,14 @@ def rpc_async(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_id("worker1")
-        >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
+        >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> fut2 = rpc.rpc_async("worker1", min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
         >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
