@@ -27,7 +27,7 @@ inline torch::Tensor parameters_to_vector(const std::vector<torch::Tensor>& para
 }
 
 // Convert one vector to the parameters
-inline void vector_to_parameters(const torch::Tensor& vec, std::vector<torch::Tensor>& parameters) {
+inline void vector_to_parameters(const torch::Tensor& vec, std::vector<torch::Tensor> parameters) {
   // Flag for the device where the parameter is located
   c10::optional<int64_t> param_device;
 
