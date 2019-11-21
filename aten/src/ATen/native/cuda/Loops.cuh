@@ -107,6 +107,9 @@ template <typename traits, typename func_t, typename index_t, size_t... INDEX>
 C10_HOST_DEVICE typename traits::result_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
             c10::guts::index_sequence<INDEX...>) {
+  // Shut up unused parameter warning when parameter pack is empty
+  (void)strides;
+  (void)i;
   return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
 }
 
@@ -121,6 +124,9 @@ template <typename traits, typename func_t, typename index_t, size_t... I>
 C10_HOST_DEVICE typename traits::result_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
             c10::guts::index_sequence<I...>) {
+  // Shut up unused parameter warning when parameter pack is empty
+  (void)strides;
+  (void)i;
   return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
 }
 
