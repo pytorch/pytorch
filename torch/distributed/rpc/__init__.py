@@ -50,12 +50,17 @@ if is_available():
                         ``Worker1``) Name can only contain number, alphabet,
                         underscore, and/or dash, and must be shorter than
                         128 characters.
-            init_method(str): backend specific init arguments.
+            init_method(str): URL specifying how to initialize the
+                                     RPC backend. Default is "env://" if no
+                                     ``init_method`` is specified.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
             rpc_backend_options (RpcBackendOptions): The options passed to RpcAgent
                 consturctor.
         """
+        if init_method is None:
+            init_method = "env://"
+
         # Rendezvous.
         rendezvous_iterator = torch.distributed.rendezvous(
             init_method, rank=rank, world_size=world_size
