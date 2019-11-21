@@ -33,6 +33,11 @@ android {
             }
             jniLibs.srcDirs = ['src/main/jniLibs']
         }
+        androidTest {
+            java {
+                exclude 'org/pytorch/PytorchHostTests.java'
+            }
+        }
     }
     externalNativeBuild {
         cmake {
