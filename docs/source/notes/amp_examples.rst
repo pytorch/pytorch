@@ -12,14 +12,15 @@ Automatic Mixed Precision Examples
 Gradient Scaling
 ^^^^^^^^^^^^^^^^
 
-Gradient scaling helps ensure convergence when training with mixed precision,
+Gradient scaling helps prevent gradient underflow when training with mixed precision,
 as explained :ref:`here<gradient-scaling>`.
 
-The following code snippets show how :class:`torch.cuda.amp.AmpScaler` can be used to
-perform dynamic gradient scaling automatically.
+Instances of :class:`torch.cuda.amp.AmpScaler` help perform the steps of
+gradient scaling conveniently, as shown in the following code snippets.
 
-Working with a Single Optimizer
--------------------------------
+
+Typical Use
+-----------
 
 ::
 
@@ -34,20 +35,22 @@ Working with a Single Optimizer
         # Scale the loss, and call backward() on the scaled loss to create scaled gradients.
         scaler.scale(loss).backward()
 
-        # Carry out a scaling-safe step.  scaler.step() unscales the optimizer's gradients
-        # and skips optimizer.step() if the gradients contain infs or NaNs.
+        # scaler.step() first unscales the gradients of the optimizer's assigned params.
+        # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+        # otherwise, optimizer.step() is skipped.
         scaler.step(optimizer)
 
         # Update the scale for next iteration.
         scaler.update()
 
+.. _working-with-unscaled-gradients:
 
 Working with Unscaled Gradients
 -------------------------------
 
-Gradients resulting from ``scaler.scale(loss).backward()`` are scaled.  If you wish to modify or inspect
-these gradients between ``backward()`` and ``scaler.step(optimizer)``,  you should unscale them first.
-For example, gradient clipping manipulates a set of gradients such that their global norm
+All gradients produced by ``scaler.scale(loss).backward()`` are scaled.  If you wish to modify or inspect
+the parameters' ``.grad`` attributes between ``backward()`` and ``scaler.step(optimizer)``,  you should
+unscale them first.  For example, gradient clipping manipulates a set of gradients such that their global norm
 (see :func:`torch.nn.utils.clip_grad_norm_`) or maximum magnitude (see :func:`torch.nn.utils.clip_grad_value_`)
 is :math:`<=` some user-imposed threshold.  If you attempted to clip _without_ unscaling, the gradients' norm/maximum
 magnitude would also be scaled, so your requested threshold (which was meant to be the threshold for _unscaled_ gradients)
@@ -71,23 +74,27 @@ Calling ``scaler.unscale(optimizer)`` before clipping enables you to clip unscal
         loss = loss_fn(output, target)
         scaler.scale(loss).backward()
 
-        # Unscale the gradients owned by optimizer in-place
+        # Unscale the gradients of optimizer's assigned params in-place
         scaler.unscale(optimizer)
 
-        # Since the optimizer's owned gradients are unscaled, clip as usual:
+        # Since the gradients of optimizer's assigned params are unscaled, clip as usual:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
+        # optimizer's gradients are already unscaled, so scaler.step does not unscale them,
+        # although it still skips optimizer.step() if the gradients contain infs or NaNs.
         scaler.step(optimizer)
+
+        # Update the scale for next iteration.
         scaler.update()
 
-``scaler`` records that ``scaler.unscale(optimizer)`` has been called for this optimizer
+``scaler`` records that ``scaler.unscale(optimizer)`` was already called for this optimizer
 this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale gradients before
-calling ``optimizer.step()``.
+(internally) calling ``optimizer.step()``.
 
 .. warning::
-    If you (optionally) choose to unscale gradients prior to stepping, ``scaler.unscale(optimizer)``
-    should only be invoked once per optimizer per step, and only after all gradients for that optimizer's
-    owned parameters have been accumulated.
+    :meth:`unscale` should only be called once per optimizer per :meth:`step` call,
+    and only after all gradients for that optimizer's assigned parameters have been accumulated.
+    Calling unscale twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
 
 Working with Scaled Gradients
 -----------------------------
@@ -98,30 +105,19 @@ For some operations, you may need to work with scaled gradients in a setting whe
 Gradient penalty
 """"""""""""""""
 
-A gradient penalty loss term requires manipulating scaled gradients.
-The gradient penalty example below demonstrates
+A gradient penalty implementation typically creates gradients out-of-place using
+:func:`torch.autograd.grad`, combines them to create the penalty scalar,
+and adds the penalty scalar to the loss.
 
-* creating scaled out-of-place gradients with :func:`torch.autograd.grad`, and
-* correct interaction of gradient scaling with double-backward.
+Here's an ordinary example of an L2 penalty without gradient scaling::
 
-Here's how that looks for a simple L2 penalty::
-
-    scaler = AmpScaler()
-    ...
     for input, target in data:
         optimizer.zero_grad()
         output = model(input)
         loss = loss_fn(output, target)
 
-        # We should scale outputs for the out-of-place backward pass
-        grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
-
-        # In general, the penalty term may depend nonlinearly on grad_params, so to be safe,
-        # manually unscale them before computing the penalty.  The unscale should be out-of-place
-        # and autograd-exposed.  For these reasons, and because grad_params are not owned by any optimizer,
-        # calling scaler.unscale(optimizer) here is unsuitable, and we use ordinary ops instead:
-        inv_scale = 1./scaler.get_scale()
-        grad_params = [p*inv_scale for p in grad_params]
+        # Create some gradients out-of-place
+        grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
 
         # Compute the penalty term and add it to the loss
         grad_norm = 0
@@ -130,18 +126,53 @@ Here's how that looks for a simple L2 penalty::
         grad_norm = grad_norm.sqrt()
         loss = loss + grad_norm
 
-        # The usual scaling for backward will now accumulate leaf gradients that are appropriately scaled.
+        loss.backward()
+        optimizer.step()
+
+To implement a gradient penalty _with_ gradient scaling, the loss passed to
+:func:`torch.autograd.grad` should be scaled.  The resulting out-of-place gradients
+will therefore be scaled, and should be unscaled before being combined to create the
+penalty scalar.
+
+Here's how that looks for the same L2 penalty::
+
+    scaler = AmpScaler()
+    ...
+    for input, target in data:
+        optimizer.zero_grad()
+        output = model(input)
+        loss = loss_fn(output, target)
+
+        # Scale the loss for the out-of-place backward pass, resulting in scaled grad_params
+        scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
+
+        # Unscale grad_params before computing the penalty.  grad_params are not owned
+        # by any optimizer, so use ordinary ops instead of scaler.unscale:
+        inv_scale = 1./scaler.get_scale()
+        grad_params = [p*inv_scale for p in scaled_grad_params]
+
+        # Compute the penalty term and add it to the loss
+        grad_norm = 0
+        for grad in grad_params:
+            grad_norm += grad.pow(2).sum()
+        grad_norm = grad_norm.sqrt()
+        loss = loss + grad_norm
+
+        # Apply scaling to the backward call as usual.  This accumulates leaf gradients that are appropriately scaled.
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
 
-Working with Multiple Optimizers, Models, and Losses
-----------------------------------------------------
+Working with Multiple Losses and Optimizers
+-------------------------------------------
 
-Working with multiple optimizers is just like working with a single optimizer.
-It's important, however, that ``scaler.update()`` only be called after all
-optimizers used this iteration have been stepped::
+If your network has multiple losses, you must call ``scaler.scale`` on each of them individually.
+If your network has multiple optimizers, you may call ``scaler.unscale`` on any of them individually,
+and you must call ``scaler.step`` on each of them individually.
+
+However, ``scaler.update()`` should only be called once,
+after all optimizers used in this iteration have been stepped::
 
     scaler = torch.cuda.amp.AmpScaler()
     ...
@@ -156,10 +187,17 @@ optimizers used this iteration have been stepped::
         scaler.scale(loss0).backward(retain_graph=True)
         scaler.scale(loss1).backward()
 
-        # You can choose which optimizers receive explicit unscaling
+        # You can choose which optimizers receive explicit unscaling, if you
+        # want to inspect or modify the gradients of the params they own.
         scaler.unscale(optimizer0)
 
         scaler.step(optimizer0)
         scaler.step(optimizer1)
 
         scaler.update()
+
+Each optimizer independently checks its gradients for infs/NaNs, and therefore makes an independent decision
+whether or not to skip the step.  This may result in one optimizer skipping the step
+while the other one does not.  Since step skipping occurs rarely (every several hundred iterations)
+this should not impede convergence.  If you observe poor convergence after adding gradient scaling
+to a multiple-optimizer model, please file an issue.

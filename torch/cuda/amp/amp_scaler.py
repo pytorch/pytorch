@@ -22,9 +22,14 @@ class _MultiDeviceReplicator(object):
 
 class AmpScaler(object):
     """
-    :class:`AmpScaler` performs dynamic gradient scaling.
+    An instance ``scaler`` of :class:`AmpScaler` provides convenience functions for all
+    aspects of gradient scaling:
 
-    Here's how that looks in a simple example::
+    * ``scaler.scale(loss)`` multiplies a given loss by ``scaler``'s current scale factor.
+    * ``scaler.step(optimizer)`` safely unscales gradients and calls ``optimizer.step()``.
+    * ``scaler.update()`` updates ``scaler``'s scale factor.
+
+    Here's how that looks::
 
         # Create an AmpScaler instance.
         scaler = AmpScaler()
@@ -37,22 +42,27 @@ class AmpScaler(object):
             # Scale the loss, and call backward() on the scaled loss to create scaled gradients.
             scaler.scale(loss).backward()
 
-            # Carry out a scaling-safe step.  scaler.step() unscales the optimizer's gradients
-            # and skips optimizer.step() if the gradients contain infs or NaNs.
+            # scaler.step() first unscales the gradients of the optimizer's assigned params.
+            # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+            # otherwise, optimizer.step() is skipped.
             scaler.step(optimizer)
 
             # Update the scale for next iteration.
             scaler.update()
 
-    See the :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases.
+    See the :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases like
+    gradient clipping, gradient penalty, and multiple losses/optimizers.
 
-    ``scaler`` maintains the scale factor internally.  To leverage ``float16``'s full dynamic range,
-    ``scaler`` attempts to use the largest scale factor it can without incurring overflow.
-    It does so by checking the gradients for infs and NaNs during every :meth:`step` or separate :meth:`unscale`.
-    If no infs/NaNs are found, :meth:`step` runs the underlying ``optimizer.step()`` as usual and
-    :meth:`update` multiplies the scale factor by the growth factor.  If infs/NaNs are found, :meth:`step` skips the
-    underlying ``optimizer.step()`` (so the params themselves remain uncorrupted) and multiplies the scale factor by
-    the backoff factor.
+    ``scaler`` dynamically estimates the scale factor each iteration.  To minimize gradient underflow,
+    a large scale factor should be used.  However, ``torch.float16`` values can "overflow" (become inf or NaN) if
+    the scale factor is too large.  Therefore, the optimal scale factor is the largest factor that can be used
+    without incurring inf or NaN gradient values.
+    ``scaler`` approximates the optimal scale factor over time by checking the gradients for infs and NaNs during every
+    ``scaler.step(optimizer)`` (or optional separate ``scaler.unscale(optimizer)``).
+    If no infs/NaNs are found, ``scaler.step(optimizer)`` runs the underlying ``optimizer.step()`` as usual and
+    ``scaler.update()`` multiplies the scale factor by ``growth_factor``.  If infs/NaNs are found,
+    ``scaler.step(optimizer)`` skips the underlying ``optimizer.step()`` (so the params themselves remain uncorrupted)
+    and multiplies the scale factor by ``backoff_factor``.
 
     The scale factor often causes infs/NaNs to appear in gradients for the first few iterations as its
     value calibrates.  ``scaler.step`` will skip the underlying ``optimizer.step()`` for these
@@ -61,9 +71,9 @@ class AmpScaler(object):
     Arguments:
         init_scale (float, optional, default=2.**24):  Initial scale factor.
         growth_factor (float, optional, default=1.001):  Factor by which the scale is multiplied during
-            :meth:`update` if no inf/NaN gradients were found this iteration.
+            :meth:`update` if no inf/NaN gradients were found this iteration.  The default value is recommended.
         backoff_factor (float, optional, default=0.5):  Factor by which the scale is multiplied during
-            :meth:`update` if inf/NaN gradients were found this iteration.
+            :meth:`update` if inf/NaN gradients were found this iteration.  The default value is recommended.
         enabled (bool,optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply
             invokes the underlying ``optimizer.step()``, and other methods become no-ops.
     """
@@ -74,6 +84,9 @@ class AmpScaler(object):
                  enabled=True):
         self._enabled = enabled
         if enabled:
+            assert growth_factor > 1.0, "The growth factor must be > 1.0.  Using the default value is recommended."
+            assert backoff_factor < 1.0, "The backoff factor must be < 1.0.  Using the default value is recommended."
+
             self._init_scale = init_scale
             # self._scale will be lazily initialized during the first call to scaler.scale(loss or outputs)
             self._scale = None
@@ -89,9 +102,6 @@ class AmpScaler(object):
     def scale(self, outputs):
         """
         Multiplies ('scales') a tensor or list of tensors by the scale factor.
-
-        These tensors are typically the outputs of a network. When ``backward()``
-        is called on scaled outputs the resulting gradients will also be scaled.
 
         Arguments:
             outputs (Tensor or iterable of Tensors):  Outputs to scale.
@@ -127,7 +137,7 @@ class AmpScaler(object):
 
         return apply_scale(outputs)
 
-    def _unscale_grads(self, optimizer, inv_scale, found_inf, allow_fp16=False):
+    def _unscale_grads(self, optimizer, inv_scale, found_inf, allow_fp16):
         per_device_inv_scale = _MultiDeviceReplicator(inv_scale)
         per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
@@ -135,8 +145,7 @@ class AmpScaler(object):
             for param in group["params"]:
                 if param.grad is not None:
                     if (not allow_fp16) and param.grad.dtype == torch.float16:
-                        raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for "
-                                         "infs/nans without unscaling, use optimizer.check_infs() instead.")
+                        raise ValueError("Attempting to unscale FP16 gradients.")
                     else:
                         torch._amp_non_finite_check_and_unscale_(param.grad,
                                                                  per_device_found_inf.get(param.grad.device),
@@ -146,13 +155,12 @@ class AmpScaler(object):
 
     def unscale(self, optimizer):
         """
-        Divides ('unscales') the optimizer's gradient tensors by the scale factor.
+        Divides ("unscales") the optimizer's gradient tensors by the scale factor.
 
-        If :meth:`unscale` is not called explicitly then gradients will be
-        automatically unscaled during :meth:`step`.
-
-        :meth:`unscale` can be called explicitly to manipulate a network's
-        gradients after backward and before :meth:`step`.
+        :meth:`unscale` is optional, serving cases where you need to
+        :ref:`modify or inspect gradients<working-with-unscaled-gradients>`
+        between the backward pass(es) and :meth:`step`.
+        If :meth:`unscale` is not called explicitly,  gradients will be unscaled  automatically during :meth:`step`.
 
         Simple example, using :meth:`unscale` to enable clipping of unscaled gradients::
 
@@ -163,8 +171,6 @@ class AmpScaler(object):
             scaler.step(optimizer)
             scaler.update()
 
-        If this instance of :class:`AmpScaler` is not enabled, :meth:`unscale` is a no-op.
-
         Arguments:
             optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
@@ -172,9 +178,9 @@ class AmpScaler(object):
             :meth:`unscale` does not incur a CPU-GPU sync.
 
         .. warning::
-            :meth:`unscale` should only be called once per optimizer per step,
-            and only after all gradients for that optimizer's owned parameters
-            have been accumulated.
+            :meth:`unscale` should only be called once per optimizer per :meth:`step` call,
+            and only after all gradients for that optimizer's assigned parameters have been accumulated.
+            Calling unscale twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
         """
         if not self._enabled:
             return
@@ -190,17 +196,17 @@ class AmpScaler(object):
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
-        optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, inv_scale, found_inf)
+        optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, inv_scale, found_inf, False)
         optimizer_state["unscaled"] = True
 
     def step(self, optimizer, *args, **kwargs):
         """
-        Carry out a scaling-safe ``optimizer.step()``.  "Scaling-safe" means two things:
+        :meth:`step` carries out the following two operations:
 
-        1.  , :meth:`step` invokes :meth:`unscale` for ``optimizer`` before calling ``optimizer.step()``
-            (unless :meth:`unscale` was explicitly called for ``optimizer`` earlier in the iteration).
-            This ensures ``optimizer.step()`` is carried out using unscaled gradients.
-        2.  If inf/NaN gradients are found, :meth:`step` skips ``optimizer.step()`` to avoid corrupting the params.
+        1.  Internally invokes ``unscale(optimizer)`` (unless ``unscale`` was explicitly called for ``optimizer``
+            earlier in the iteration).  As part of the ``unscale``, gradients are checked for infs/NaNs.
+        2.  If no inf/NaN gradients are found, invokes ``optimizer.step()`` using the unscaled
+            gradients.  Otherwise, ``optimizer.step()`` is skipped to avoid corrupting the params.
 
         ``*args`` and ``**kwargs`` are forwarded to ``optimizer.step()``.
 
@@ -224,7 +230,7 @@ class AmpScaler(object):
         assert self._scale is not None, self._scale_not_initialized_error("step")
 
         if (hasattr(optimizer, "_step_supports_amp_scaling") and optimizer._step_supports_amp_scaling):
-            # This optimizer has customized scaling-safe step logic, so we call it directly.
+            # This optimizer has customized scale-handling logic, so we call it directly.
             # The contract with custom optimizers is that their step methods should accept an additional,
             # optional amp_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
             # it can query its own state, invoke unscale on its own gradients for convenience, etc.
@@ -386,7 +392,7 @@ class AmpScaler(object):
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
-            self._unscale_grads(optimizer, dummy_inv_scale, found_inf, allow_fp16=True)
+            self._unscale_grads(optimizer, dummy_inv_scale, found_inf, True)
 
         return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]
 

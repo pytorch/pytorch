@@ -20,12 +20,18 @@ range of ``float32``. Networks running in mixed precision try to match each oper
 Gradient Scaling
 ^^^^^^^^^^^^^^^^
 
-When training a network with mixed precision, gradient magnitudes may become too small to represent
-in ``torch.float16`` regions of the backward pass.  "Gradient scaling" multiplies outputs by
-a scale factor ``S`` and invokes a backward pass on the scaled outputs.  Gradients flowing
-backward through the network are then scaled by ``S``, which prevents such underflow.
-Scaled leaf gradients are unscaled (divided by ``S``) before being used to step the parameters.
-Unscaling at the leaves will not incur underflow because the leaves are ``torch.float32``.
+When training a network with mixed precision, if the forward pass for a particular op has
+``torch.float16`` inputs, the backward pass for that op will produce ``torch.float16`` gradients.
+Gradient values with small magnitudes may not be representable in ``torch.float16``.
+These values will flush to zero ("underflow"), so the update for the corresponding parameters will be lost.
+
+To prevent underflow, "gradient scaling" multiplies the network's loss(es) by a scale factor and
+invokes a backward pass on the scaled loss(es).  Gradients flowing backward through the network are
+then scaled by the same factor.  In other words, gradient values have a larger magnitude,
+so they don't flush to zero.
+
+The parameters' gradients (``.grad`` attributes) should be unscaled before the optimizer uses them
+to update the parameters, so the scale factor does not interfere with the learning rate.
 
 .. autoclass:: AmpScaler
     :members:
