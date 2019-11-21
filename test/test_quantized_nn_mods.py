@@ -746,7 +746,7 @@ class ModuleAPITest(QuantizationTestCase):
            use_bias=st.booleans(),
            use_fused=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm")))
+           qengine=st.sampled_from(("fbgemm",)))
     def test_conv3d_api(
         self, batch_size, in_channels_per_group, D, H, W,
         out_channels_per_group, groups, kernel_d, kernel_h, kernel_w,
