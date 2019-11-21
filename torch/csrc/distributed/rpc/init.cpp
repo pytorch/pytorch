@@ -34,9 +34,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(rpc_module).cast<py::module>();
 
-  auto rpcAgentOptions =
+  auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout);
+          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
+          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -123,7 +124,7 @@ Otherwise, throws an exception.
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
-      module, "ProcessGroupRpcBackendOptions", rpcAgentOptions)
+      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
       .def(py::init<>())
       .def_readwrite(
           "num_send_recv_threads",

@@ -15,6 +15,7 @@ namespace rpc {
 struct RpcBackendOptions {
   RpcBackendOptions() noexcept = default;
   std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
 };
 
 // A globally unique ID to identify an RpcAgent
