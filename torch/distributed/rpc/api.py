@@ -14,7 +14,7 @@ import torch.distributed as dist
 
 
 _agent = None
-
+_ignore_rref_leak = True
 
 def _require_initialized(func):
     @functools.wraps(func)
@@ -56,7 +56,7 @@ def wait_all_workers():
     if _agent:
         _agent.join()
         _agent = None
-        _destroy_rref_context()
+        _destroy_rref_context(_ignore_rref_leak)
         # clean up python rpc handler in wait_all_workers(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python

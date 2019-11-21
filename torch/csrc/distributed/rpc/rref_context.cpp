@@ -7,13 +7,23 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+std::mutex RRefContext::destroyedMutex_;
+bool RRefContext::destroyed_ = false;
+
 RRefContext& RRefContext::getInstance() {
-  static RRefContext context(RpcAgent::getDefaultRpcAgent());
-  return context;
+  // Leaky singleton to avoid module destructor races.
+  static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
+  return *context;
 }
 
-void RRefContext::destroyInstance() {
-  RRefContext::getInstance().checkRRefLeaks();
+void RRefContext::destroyInstance(bool ignoreRRefLeak) {
+  {
+    std::lock_guard<std::mutex> lock(RRefContext::destroyedMutex_);
+    RRefContext::destroyed_ = true;
+  }
+  if (!ignoreRRefLeak) {
+    RRefContext::getInstance().checkRRefLeaks();
+  }
 }
 
 void RRefContext::handleException(const Message& message) {
@@ -94,6 +104,19 @@ template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
     worker_id_t ownerId,
     const RRefId& rrefId,
     const ForkId& forkId);
+
+void RRefContext::delUser(
+    const worker_id_t owner, const RRefId& rrefId, const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(destroyedMutex_);
+  if (!destroyed_) {
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(owner),
+        RRefUserDelete(rrefId, forkId).toMessage());
+
+    fm->addCallback(
+        [](const Message& message) { RRefContext::handleException(message); });
+  }
+}
 
 template <typename T>
 std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {

@@ -1090,6 +1090,51 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
+    def _test_rref_leak(self, ignore_leak=False):
+        rpc.init_rpc(
+            name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
+        )
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+
+        rref = rpc.remote(
+            "worker{}".format((self.rank + 1) % self.world_size),
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )
+
+        if ignore_leak:
+            import torch.distributed.rpc.api as api
+            api._ignore_rref_leak = True
+            rpc.wait_all_workers()
+        else:
+            with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+                rpc.wait_all_workers()
+
+    @dist_init(setup_rpc=False)
+    def test_rref_leak(self):
+        self._test_rref_leak()
+
+    @dist_init(setup_rpc=False)
+    def test_ignore_rref_leak(self):
+        self._test_rref_leak(ignore_leak=True)
+
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)

@@ -16,7 +16,7 @@ namespace rpc {
 class RRefContext {
  public:
   static RRefContext& getInstance();
-  static void destroyInstance();
+  static void destroyInstance(bool ignoreRRefLeak = true);
 
   static void handleException(const Message& message);
 
@@ -111,6 +111,9 @@ class RRefContext {
   void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
+  void delUser(
+      const worker_id_t owner, const RRefId& rrefId, const ForkId& forkId);
+
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
@@ -157,6 +160,9 @@ class RRefContext {
   //     owner learns about the forked child.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
       pendingChildren_;
+
+  static std::mutex destroyedMutex_;
+  static bool destroyed_;
 };
 
 } // namespace rpc
