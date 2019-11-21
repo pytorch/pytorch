@@ -265,8 +265,19 @@ struct SourceImporterImpl : public Resolver,
   }
 
   IValue importConstant(const Expr& rhs, const TypePtr& type) {
-    std::cout << "rhs " << rhs << std::endl;
     switch (rhs.kind()) {
+      case TK_TRUE: {
+        type->expect<c10::BoolType>();
+        return true;
+      }
+      case TK_FALSE: {
+        type->expect<c10::BoolType>();
+        return false;
+      }
+      case TK_NONE: {
+        type->expect<c10::NoneType>();
+        return IValue();
+      }
       case TK_CONST: {
         const auto v = Const(rhs);
         if (v.isFloatingPoint()) {
@@ -276,7 +287,8 @@ struct SourceImporterImpl : public Resolver,
           type->expect<c10::IntType>();
           return v.asIntegral();
         } else {
-          throw ErrorReport(rhs.range()) << " is not recognized as a valid constant.";
+          throw ErrorReport(rhs.range()) <<
+            " is not recognized as a valid constant: " << rhs;
         }
       }
       case TK_TUPLE_LITERAL: {
@@ -293,8 +305,22 @@ struct SourceImporterImpl : public Resolver,
         auto str = StringLiteral(rhs);
         return str.text();
       }
+      case TK_APPLY: {
+        // matching torch.device('cpu')
+        auto apply = Apply(rhs);
+        auto callee = Select(apply.callee());
+        auto value = Var(callee.value());
+        auto selector = Ident(callee.selector());
+        TORCH_INTERNAL_ASSERT(value.name().name() == "torch");
+        TORCH_INTERNAL_ASSERT(selector.name() == "device");
+        auto inputs = List<StringLiteral>(apply.inputs());
+        TORCH_INTERNAL_ASSERT(inputs.size() == 1);
+        auto device_str = StringLiteral(inputs[0]).text();
+        return c10::Device(device_str);
+      }
       default:
-        throw ErrorReport(rhs.range()) << " is not recognized as a valid constant";
+        throw ErrorReport(rhs.range()) <<
+          " is not recognized as a valid constant: " << rhs;
     }
   }
 
