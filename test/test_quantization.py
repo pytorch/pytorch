@@ -752,15 +752,19 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         qconfig_dict = {
             '': default_qconfig
         }
-        model_script = quantize_script(
-            torch.jit.script(linear_model),
-            qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
-            inplace=False)
-        result_eager = model_eager(self.calib_data[0][0])
-        result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
-        self.assertEqual(result_eager, result_script)
+        for trace in [True, False]:
+            model_script = torch.jit.trace(linear_model, self.calib_data[0][0]) \
+                if trace else torch.jit.script(linear_model)
+
+            model_script = quantize_script(
+                model_script,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            result_eager = model_eager(self.calib_data[0][0])
+            result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
+            self.assertEqual(result_eager, result_script)
 
     def test_observer_with_ignored_function(self):
         r"""Test observers with ignored fucntion and make sure it works in
@@ -768,6 +772,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         """
         # eager mode
         annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+<<<<<<< HEAD
         for qconfig in [
                 QConfig(
                     activation=default_observer,
@@ -791,15 +796,19 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             qconfig_dict = {
                 '': qconfig
             }
-            model_script = quantize_script(
-                torch.jit.script(linear_model),
-                qconfig_dict,
-                test_only_eval_fn,
-                [self.calib_data],
-                inplace=False)
-            result_eager = model_eager(self.calib_data[0][0])
-            result_script = get_forward(model_script._c)(self.calib_data[0][0])
-            self.assertEqual(result_eager, result_script)
+            for trace in [True, False]:
+                model_script = torch.jit.trace(linear_model, self.calib_data[0][0]) \
+                if trace else torch.jit.script(linear_model)
+
+                model_script = quantize_script(
+                    model_script,
+                    qconfig_dict,
+                    test_only_eval_fn,
+                    [self.calib_data],
+                    inplace=False)
+                result_eager = model_eager(self.calib_data[0][0])
+                result_script = get_forward(model_script._c)(self.calib_data[0][0])
+                self.assertEqual(result_eager, result_script)
 
     @_tmp_donotuse_dont_inline_everything
     def test_conv(self):
@@ -807,25 +816,31 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         eager mode and graph mode
         """
         # eager mode
-        conv_model = AnnotatedConvModel().eval()
-        conv_model_to_script = ConvModel().eval()
+        annotated_conv_model = AnnotatedConvModel().eval()
+        conv_model = ConvModel().eval()
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
-        conv_model_to_script.conv.weight = torch.nn.Parameter(conv_model.conv.weight.detach())
-        model_eager = quantize(conv_model, default_eval_fn,
+        conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
+        model_eager = quantize(annotated_conv_model, default_eval_fn,
                                self.img_data)
         qconfig_dict = {
             '': default_qconfig
         }
-        model_script = quantize_script(
-            torch.jit.script(conv_model_to_script),
-            qconfig_dict,
-            default_eval_fn,
-            [self.img_data],
-            inplace=False)
-        result_eager = model_eager(self.img_data[0][0])
-        result_script = model_script(self.img_data[0][0])
-        self.assertEqual(result_eager, result_script)
+        for trace in [True, False]:
+            model_script = torch.jit.trace(conv_model, self.img_data[0][0]) if trace \
+                else  torch.jit.script(conv_model)
+            print(trace)
+            model_script._c.dump(True, False, False)
+
+            model_script = quantize_script(
+                model_script,
+                qconfig_dict,
+                default_eval_fn,
+                [self.img_data],
+                inplace=False)
+            result_eager = model_eager(self.img_data[0][0])
+            result_script = model_script(self.img_data[0][0])
+            self.assertEqual(result_eager, result_script)
 
     @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
     def test_conv_bn(self):
