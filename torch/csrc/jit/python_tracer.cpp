@@ -104,8 +104,7 @@ Node* preRecordPythonTrace(
     n->addInput(getValueTrace(input));
   }
 
-  // NB: Order matters. This must append after inputs but before outputs.
-  graph->appendNode(n);
+  graph->insertNode(n);
 
   return n;
 }

@@ -39,6 +39,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Deserialize a string into a py::object
   py::object deserialize(const SerializedPyObj& serializedObj);
 
+  // Check if obj is RemoteException, then throw it
+  void handleException(const py::object& obj);
+
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
   // See similar issues reported https://github.com/pybind/pybind11/issues/1598
@@ -71,6 +74,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to `torch.distributed.rpc.internal.serialize`.
   py::object pySerialize_;
+
+  // Ref to 'torch.distributed.rpc.internal._handle_exception'
+  py::object pyHandleException_;
 };
 
 } // namespace rpc

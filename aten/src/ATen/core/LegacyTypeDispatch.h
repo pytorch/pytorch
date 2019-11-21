@@ -89,10 +89,4 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   c10::impl::ExcludeTensorTypeIdGuard guard_;
 };
 
-namespace impl {
-inline bool variable_excluded_from_dispatch() {
-  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
-}
-}
-
 } // namespace at
