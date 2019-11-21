@@ -46,8 +46,9 @@ android {
         } else {
             pickFirst '**/libfbjni.so'
         }
-        if (nativeLibsDoNotStrip) {
+        if (nativeLibsDoNotStrip.toBoolean()) {
             doNotStrip "**/*.so"
+            logger.warn('WARNING: nativeLibsDoNotStrip==true; debug symbols included')
         }
     }
 

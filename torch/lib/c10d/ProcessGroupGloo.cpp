@@ -351,10 +351,11 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-void ProcessGroupGloo::SendWork::wait() {
+bool ProcessGroupGloo::SendWork::wait() {
+  bool sendCompleted = false;
   std::unique_lock<std::mutex> lock(mutex_);
   try {
-    buffer_->waitSend();
+    sendCompleted = buffer_->waitSend();
   } catch (...) {
     exception_ = std::current_exception();
   }
@@ -363,6 +364,11 @@ void ProcessGroupGloo::SendWork::wait() {
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+  return sendCompleted;
+}
+
+void ProcessGroupGloo::SendWork::abort() {
+  buffer_->abortWaitSend();
 }
 
 ProcessGroupGloo::RecvWork::RecvWork(
@@ -375,10 +381,11 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
   return srcRank_;
 }
 
-void ProcessGroupGloo::RecvWork::wait() {
+bool ProcessGroupGloo::RecvWork::wait() {
+  bool recvCompleted = false;
   std::unique_lock<std::mutex> lock(mutex_);
   try {
-    buffer_->waitRecv(&srcRank_);
+    recvCompleted = buffer_->waitRecv(&srcRank_);
   } catch (...) {
     exception_ = std::current_exception();
   }
@@ -387,6 +394,11 @@ void ProcessGroupGloo::RecvWork::wait() {
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+  return recvCompleted;
+}
+
+void ProcessGroupGloo::RecvWork::abort() {
+  buffer_->abortWaitRecv();
 }
 
 ProcessGroupGloo::Options::Options()
