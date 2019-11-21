@@ -14,7 +14,7 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-void AdagradParamState::serialize(serialize::InputArchive& archive) {
+void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
     c10::IValue step_, sum_;
     archive.read("step", step_);
     archive.read("sum", sum_);
@@ -22,10 +22,11 @@ void AdagradParamState::serialize(serialize::InputArchive& archive) {
     this->sum(sum_.toTensor());
 }
 
-void AdagradParamState::serialize(serialize::OutputArchive& archive) {
+void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) {
     archive.write("step", IValue(this->step()));
     archive.write("sum", IValue(this->sum()));
 }
+
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {
@@ -36,8 +37,8 @@ void Adagrad::step() {
       }
       auto grad = p.grad().data();
       // TODO: assert that `state_[p.unsafeGetTensorImpl()]` exists and is not a null pointer, before dereferencing it
-      TORCH_CHECK(state_[p.unsafeGetTensorImpl()] != NULL, "state found NULL for the Tensor ", p);
-      auto& state = static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
+      TORCH_CHECK(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != NULL, "state found NULL for the Tensor ", p);
+      auto& state = static_cast<AdagradParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
       state.step(state.step() + 1);

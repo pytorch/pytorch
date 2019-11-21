@@ -35,9 +35,10 @@ namespace optim {
 class TORCH_API OptimizerParamState {
  public:
   virtual std::unique_ptr<OptimizerParamState> clone() const;
+  virtual void serialize(torch::serialize::InputArchive& archive) {};
+  virtual void serialize(torch::serialize::OutputArchive& archive) {};
 public:
-  virtual void serialize(serialize::InputArchive& archive);
-  virtual void serialize(serialize::OutputArchive& archive);
+  virtual ~OptimizerParamState() = default;
 };
 
 template <typename Derived>
@@ -45,11 +46,16 @@ class TORCH_API OptimizerCloneableParamState : public OptimizerParamState {
   std::unique_ptr<OptimizerParamState> clone() const override {
     return c10::guts::make_unique<Derived>(static_cast<const Derived&>(*this));
   }
+  // virtual void serialize(torch::serialize::InputArchive& archive);
+  // virtual void serialize(torch::serialize::OutputArchive& archive);
+  //clang error if serialize functions are defined in OptimizerParamState -
+  //possibly because virtual functions can also be defined in second degree classes?
 };
 
 class TORCH_API OptimizerOptions {
  public:
   virtual std::unique_ptr<OptimizerOptions> clone() const;
+  virtual ~OptimizerOptions() = default;
 };
 
 template <typename Derived>
@@ -195,7 +201,7 @@ class TORCH_API OptimizerBase {
   //to do-description
   std::unique_ptr<OptimizerOptions> defaults_;
   std::vector<OptimizerParamGroup> param_groups_;
-  ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>> state_;
+  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.

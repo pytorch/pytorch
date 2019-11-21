@@ -25,14 +25,18 @@ struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOption
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(double, initial_accumulator_value) = 0;
   TORCH_ARG(double, eps) = 1e-10;
+public:
+  ~AdagradOptions() = default;
 };
 
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
   TORCH_ARG(torch::Tensor, sum);
   TORCH_ARG(int64_t, step);
+  void serialize(torch::serialize::InputArchive& archive);
+  void serialize(torch::serialize::OutputArchive& archive);
 
-  void serialize(serialize::InputArchive& archive);
-  void serialize(serialize::OutputArchive& archive);
+public:
+  ~AdagradParamState() = default;
 };
 
 class TORCH_API Adagrad : public Optimizer {
@@ -50,7 +54,7 @@ class TORCH_API Adagrad : public Optimizer {
         auto state = c10::guts::make_unique<AdagradParamState>();
         state->step(0);
         state->sum(torch::full_like(p.data(), defaults.initial_accumulator_value()));
-        state_[p.unsafeGetTensorImpl()] = std::move(state);
+        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
     }
   }
@@ -85,5 +89,6 @@ class TORCH_API Adagrad : public Optimizer {
     //_TORCH_OPTIM_SERIALIZE(state); add a serialize function
   }
 };
+
 } // namespace optim
 } // namespace torch
