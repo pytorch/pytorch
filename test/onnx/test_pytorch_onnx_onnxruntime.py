@@ -1685,6 +1685,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     # This test checks output scalar type in the ONNX graph should not be null
     # https://github.com/pytorch/pytorch/issues/28607
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_trace_script(self):
         @torch.jit.script
         def center_slice_helper(input, h_offset):

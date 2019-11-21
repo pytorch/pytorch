@@ -207,14 +207,11 @@ void BlockToONNX(
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        if (auto value = old->type()->cast<TensorType>()) {
-          // Check if Tensor has scalartype when overwriting type
-          if (value->scalarType().has_value()) {
-            outputs[i]->setType(old->type());
-          }
-        }
-        else
+        auto old_tensor_type = old->type()->cast<TensorType>();
+        if (old_tensor_type == nullptr || old_tensor_type->scalarType().has_value()) {
+          // Check if Tensor has scalartype when overwriting output type
           outputs[i]->setType(old->type());
+        }
 
         // Copy over source location and scope information to all nodes
         // created by the symbolic
