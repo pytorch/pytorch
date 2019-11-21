@@ -7,7 +7,8 @@ linear_packed_params = None
 conv_packed_params = None
 if 'fbgemm' in torch.backends.quantized.supported_engines:
     linear_packed_params = torch.jit.script(torch.nn.quantized.modules.linear.LinearPackedParams())._c
-    conv_packed_params = torch.jit.script(torch.nn.quantized.modules.conv.ConvPackedParams())._c
+    # TODO: conv3d
+    conv_packed_params = torch.jit.script(torch.nn.quantized.modules.conv.ConvPackedParams(spatial_dim=2))._c
 
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):

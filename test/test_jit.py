@@ -1522,7 +1522,8 @@ graph(%input, %weight):
                 m._c = torch._C._jit_pass_insert_quant_dequant(m._c, 'forward', False)
                 torch._C._jit_pass_insert_prepack_unpack(m._c)
                 linear_packed_params = torch.jit.script(LinearPackedParams())._c
-                conv_packed_params = torch.jit.script(ConvPackedParams())._c
+                # TODO: conv3d
+                conv_packed_params = torch.jit.script(ConvPackedParams(spatial_dim=2))._c
                 torch._C._jit_pass_fold_prepack(m._c,
                                                 linear_packed_params,
                                                 conv_packed_params)
