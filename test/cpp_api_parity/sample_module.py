@@ -81,7 +81,7 @@ struct C10_EXPORT SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImp
     buffer = register_buffer("buffer", torch::ones({4, 5}));
   }
   torch::Tensor forward(torch::Tensor x) {
-    return x + param * 2 + (submodule ? submodule->forward(x) : torch::zeros_like(x));
+    return x + param * 2 + (submodule ? submodule->forward(x) : torch::zeros_like(x, torch::MemoryFormat::Preserve));
   }
   SampleModuleOptions options;
   torch::Tensor param;

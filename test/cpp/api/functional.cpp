@@ -773,8 +773,8 @@ TEST_F(FunctionalTest, ELU) {
     for (const auto alpha : {0.0, 0.42, 1.0, 4.2, 42.42}) {
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
-      auto y_exp = torch::max(torch::zeros_like(x), x) +
-                torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
+      auto y_exp = torch::max(torch::zeros_like(x, torch::MemoryFormat::Preserve), x) +
+                torch::min(torch::zeros_like(x, torch::MemoryFormat::Preserve), alpha * (torch::exp(x) - 1.0));
       auto y = F::elu(x, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
@@ -795,9 +795,9 @@ TEST_F(FunctionalTest, SELU) {
     for (const auto inplace : {false, true}) {
       auto input = torch::randn({5, 5});
       auto expected = scale *
-          (torch::max(torch::zeros_like(input), input) +
+          (torch::max(torch::zeros_like(input, torch::MemoryFormat::Preserve), input) +
            torch::min(
-               torch::zeros_like(input), alpha * (torch::exp(input) - 1)));
+               torch::zeros_like(input, torch::MemoryFormat::Preserve), alpha * (torch::exp(input) - 1)));
       auto output = F::selu(input, inplace);
 
       ASSERT_TRUE(output.allclose(expected));
@@ -952,7 +952,7 @@ TEST_F(FunctionalTest, LogSigmoid) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-  auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
+  auto y_exp = torch::log(torch::ones_like(x, torch::MemoryFormat::Preserve)/(torch::ones_like(x, torch::MemoryFormat::Preserve) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
@@ -1021,7 +1021,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
     logits.requires_grad();
     auto probs = logits.softmax(-1);
 
-    auto counts = torch::zeros_like(logits);
+    auto counts = torch::zeros_like(logits, torch::MemoryFormat::Preserve);
     torch::Tensor y_draw;
     for (auto i=0; i<num_draws; i++) {
         y_draw = F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true));
@@ -1338,7 +1338,7 @@ TEST_F(FunctionalTest, RReLU) {
 
         ASSERT_EQ(y.ndimension(), 3);
         ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-        ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+        ASSERT_TRUE(torch::allclose(z, torch::ones_like(z, torch::MemoryFormat::Preserve)));
         if (inplace) {
           ASSERT_TRUE(torch::allclose(x, y));
         }
@@ -1361,7 +1361,7 @@ TEST_F(FunctionalTest, RReLUDefaultOptions) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-  ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+  ASSERT_TRUE(torch::allclose(z, torch::ones_like(z, torch::MemoryFormat::Preserve)));
 }
 
 TEST_F(FunctionalTest, CELU) {
@@ -1370,8 +1370,8 @@ TEST_F(FunctionalTest, CELU) {
     for (const auto alpha : {0.42, 1.0, 4.2, 42.42}) {
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
-      auto y_exp = torch::max(torch::zeros_like(x), x) +
-        torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+      auto y_exp = torch::max(torch::zeros_like(x, torch::MemoryFormat::Preserve), x) +
+        torch::min(torch::zeros_like(x, torch::MemoryFormat::Preserve), alpha * (torch::exp(x / alpha) - 1.0));
       auto y = F::celu(x, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
@@ -1390,8 +1390,8 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   const auto alpha = 1.0;
   auto x = torch::linspace(-10.0, 10.0, size * size * size);
   x.resize_({size, size, size});
-  auto y_exp = torch::max(torch::zeros_like(x), x) +
-    torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+  auto y_exp = torch::max(torch::zeros_like(x, torch::MemoryFormat::Preserve), x) +
+    torch::min(torch::zeros_like(x, torch::MemoryFormat::Preserve), alpha * (torch::exp(x / alpha) - 1.0));
   auto y = F::celu(x);
 
   ASSERT_EQ(y.ndimension(), 3);

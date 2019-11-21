@@ -343,7 +343,7 @@ class TestCppExtension(common.TestCase):
         }
 
         torch::Tensor cos_add(torch::Tensor x, torch::Tensor y) {
-          auto output = torch::zeros_like(x);
+          auto output = torch::zeros_like(x, torch::MemoryFormat::Preserve);
           const int threads = 1024;
           const int blocks = (output.numel() + threads - 1) / threads;
           cos_add_kernel<<<blocks, threads>>>(x.data<float>(), y.data<float>(), output.data<float>(), output.numel());
