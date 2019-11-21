@@ -172,7 +172,7 @@ TEST_F(NNUtilsTest, ConvertParameters) {
     auto fc1 = Linear(10, 20);
     auto model = Sequential(conv1, fc1);
 
-    auto vec = parameters_to_vector(model.parameters());
+    auto vec = parameters_to_vector(model->parameters());
     ASSERT_EQ(vec.size(0), 980);
   }
   {
@@ -181,9 +181,9 @@ TEST_F(NNUtilsTest, ConvertParameters) {
     auto model = Sequential(conv1, fc1);
 
     auto vec = torch::arange(0., 980);
-    vector_to_parameters(vec, model.parameters());
+    vector_to_parameters(vec, model->parameters());
 
-    auto sample = model.parameters()[0][0][0][0];
+    auto sample = model->parameters()[0][0][0][0];
     ASSERT_TRUE(torch.equal(sample.data(), vec.data().slice(0, 0, 5)));
   }
 }
