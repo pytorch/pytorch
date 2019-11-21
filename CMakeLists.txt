@@ -205,6 +205,8 @@ cmake_dependent_option(
   "MSVC" OFF)
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+set(SELECTED_OP_LIST "" CACHE STRING
+    "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk

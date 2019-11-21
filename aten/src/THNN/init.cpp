@@ -85,9 +85,6 @@
 #include <THNN/generic/RReLU.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/Sigmoid.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SoftPlus.c>
 #include <TH/THGenerateFloatTypes.h>
 
