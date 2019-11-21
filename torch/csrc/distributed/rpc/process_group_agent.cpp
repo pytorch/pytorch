@@ -193,16 +193,7 @@ void ProcessGroupAgent::join() {
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
-  // int dst = (pg_->getRank() + 1) % pg_->getSize();
-  // enqueueSend(
-  //     SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
-  // listenerThread_.join();
-  // rpcRunning_.store(false);
-  // // This is needed in case no futures were created, otherwise the future
-  // // timeout watchdog would sleep forever.
-  // futureTimeoutCV_.notify_one();
-  // futureTimeoutThread_.join();
   PythonRpcHandler::getInstance().cleanup();
 }
 
