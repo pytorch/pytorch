@@ -15,6 +15,7 @@ from torch.distributed.rpc import RRef
 from common_utils import load_tests
 import dist_utils
 from dist_utils import dist_init
+from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from rpc_agent_test_fixture import RpcAgentTestFixture
 
@@ -376,6 +377,7 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_agent_options=self.rpc_agent_options,
             )
         rpc.wait_all_workers()
+        rpc.shutdown()
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
@@ -541,6 +543,7 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
         rpc.wait_all_workers()
+        rpc.shutdown()
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
             rpc.rpc_sync(
@@ -1165,6 +1168,7 @@ class RpcTest(RpcAgentTestFixture):
         set_timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, set_timeout)
         rpc.wait_all_workers()
+        rpc.shutdown()
 
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -1216,3 +1220,11 @@ class RpcTest(RpcAgentTestFixture):
             return "expected result"
 
         self.assertEqual(test_func(self), "expected result")
+
+    def test_use_rpc_pickler(self):
+        class TestPickler():
+            pass
+        test_pickler = TestPickler()
+        with _use_rpc_pickler(test_pickler):
+            self.assertTrue(torch.distributed.rpc.api._default_pickler is test_pickler)
+        self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)

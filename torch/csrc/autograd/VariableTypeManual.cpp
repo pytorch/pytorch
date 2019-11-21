@@ -261,7 +261,7 @@ Tensor detach(const Tensor & self) {
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
   }
-  return std::move(result);
+  return result;
 }
 
 Tensor & detach_(Tensor & self) {
