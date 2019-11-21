@@ -16,7 +16,7 @@ ScriptCall::ScriptCall(
 ScriptCall::ScriptCall(
     const c10::QualifiedName& qualifiedName,
     std::vector<at::IValue>&& args)
-    : qualifiedName_(std::move(qualifiedName)), stack_(args) {}
+    : qualifiedName_(qualifiedName), stack_(args) {}
 
 bool ScriptCall::hasOp() const {
   if (op_) {
@@ -76,7 +76,7 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     TORCH_CHECK(
         !hasOp(),
         "It is TorchScript function call, operator should not be set.");
-    ivalues.emplace_back(std::move((*qualifiedName_).qualifiedName()));
+    ivalues.emplace_back((*qualifiedName_).qualifiedName());
   } else {
     AT_ERROR(
         "Either builtin operator or TorchScript function name should be set.");
@@ -101,9 +101,6 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     return c10::guts::make_unique<ScriptCall>(op, std::move(ivalues));
   } else {
     ivalues.pop_back();
-    std::cout << "deserialize ivalues, ivalues size: " << ivalues.size()
-              << ", t1: " << ivalues.at(0).toTensor().numel()
-              << ", t2: " << ivalues.at(1).toTensor().numel() << "\n";
     return c10::guts::make_unique<ScriptCall>(
         c10::QualifiedName(qualifiedName), std::move(ivalues));
   }

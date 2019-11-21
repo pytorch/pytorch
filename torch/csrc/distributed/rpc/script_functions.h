@@ -15,7 +15,7 @@ namespace rpc {
 //                  "moduleName::fnName", e.g, "dist_autograd_test::my_py_add"
 //   stack: a bags of IValue args passed to fnName
 // It returns IValue that is c10::intrusive_ptr<ivalue::Future>
-c10::IValue rpcTorchscriptCall(
+TORCH_API c10::IValue rpcTorchscriptCall(
     const std::string& dst,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack);
