@@ -27,6 +27,8 @@ script:
 
 after_success:
   - codecov #运行codecov
+  - cd Tests/
+  - bash <(curl -s https://codecov.io/bash) -c -F unittest
 
 matrix:
     fast_finish: true
