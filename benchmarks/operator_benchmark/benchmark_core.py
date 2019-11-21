@@ -315,7 +315,7 @@ class BenchmarkRunner(object):
         return (cmd_flag is None or test_flag == cmd_flag)
 
     def _check_operator_first_char(self, test_flag, cmd_flag):
-        if cmd_flag is None or test_flag[:1].lower in cmd_flag:
+        if cmd_flag is None or test_flag[:1].lower() in cmd_flag:
             return True
         return False
 
