@@ -1658,7 +1658,7 @@ class _TestTorchMixin(object):
 
         # Test Rounding Errors
         line = torch.zeros(size=(1, 49))
-        self.assertWarnsRegex(lambda: torch.arange(-1, 1, 2 / 49, dtype=torch.float32, out=line),
+        self.assertWarnsRegex(lambda: torch.arange(-1, 1, 2. / 49, dtype=torch.float32, out=line),
                               'resized',
                               'The out tensor will be resized')
         self.assertEqual(line.shape, [50])
