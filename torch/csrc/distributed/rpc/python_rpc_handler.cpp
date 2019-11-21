@@ -82,7 +82,7 @@ py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
 }
 
 void PythonRpcHandler::handleException(const py::object& obj) {
-  AutoGIL ag;
+  pybind11::gil_scoped_acquire ag;
   pyHandleException_(obj);
 }
 
