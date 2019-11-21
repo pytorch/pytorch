@@ -28,7 +28,7 @@ if is_available():
         init_method=None,
         rank=-1,
         world_size=None,
-        rpc_agent_options=None,
+        rpc_backend_options=None,
     ):
         r"""
         Initializes RPC primitives such as the local RPC agent
@@ -53,7 +53,7 @@ if is_available():
             init_method(str): backend specific init arguments.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
-            rpc_agent_options (RpcAgentOptions): The options passed to RpcAgent
+            rpc_backend_options (RpcBackendOptions): The options passed to RpcAgent
                 consturctor.
         """
         # Rendezvous.
@@ -71,4 +71,4 @@ if is_available():
         torch.distributed.autograd._init(rank)
 
         # Initialize RPC.
-        _init_rpc_backend(backend, store, name, rank, world_size, rpc_agent_options)
+        _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)

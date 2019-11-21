@@ -13,8 +13,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct ProcessGroupRpcAgentOptions : public RpcAgentOptions {
-  ProcessGroupRpcAgentOptions() noexcept = default;
+struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
+  ProcessGroupRpcBackendOptions() noexcept = default;
   int numSendRecvThreads;
 };
 

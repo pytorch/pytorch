@@ -11,7 +11,7 @@ from . import constants as rpc_constants
 
 
 BackendValue = collections.namedtuple(
-    "BackendValue", ["construct_rpc_agent_options_handler", "init_backend_handler"]
+    "BackendValue", ["construct_rpc_backend_options_handler", "init_backend_handler"]
 )
 
 # Create an enum type, `BackendType`, with empty members.
@@ -19,15 +19,15 @@ BackendType = enum.Enum(value="BackendType", names={})
 
 
 def register_backend(
-    backend_name, construct_rpc_agent_options_handler, init_backend_handler
+    backend_name, construct_rpc_backend_options_handler, init_backend_handler
 ):
     """Registers a new RPC backend.
 
     Arguments:
         backend_name (str): backend string to identify the handler.
-        construct_rpc_agent_options_handler (function):
+        construct_rpc_backend_options_handler (function):
             Handler that is invoked when
-            rpc_backend.construct_rpc_agent_options(**dict) is called.
+            rpc_backend.construct_rpc_backend_options(**dict) is called.
         init_backend_handler (function): Handler that is invoked when the
             `_init_rpc_backend()` function is called with a backend.
              This returns the agent.
@@ -40,7 +40,7 @@ def register_backend(
     extended_enum_dict = dict(
         {
             backend_name: BackendValue(
-                construct_rpc_agent_options_handler=construct_rpc_agent_options_handler,
+                construct_rpc_backend_options_handler=construct_rpc_backend_options_handler,
                 init_backend_handler=init_backend_handler,
             )
         },
@@ -50,32 +50,32 @@ def register_backend(
     return BackendType[backend_name]
 
 
-def construct_rpc_agent_options(
+def construct_rpc_backend_options(
     backend, rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT, **kwargs
 ):
     if not isinstance(rpc_timeout, datetime.timedelta):
         raise RuntimeError("`rpc_timeout` must be a `datetime.timedelta`.")
 
-    return backend.value.construct_rpc_agent_options_handler(rpc_timeout, **kwargs)
+    return backend.value.construct_rpc_backend_options_handler(rpc_timeout, **kwargs)
 
 
 def init_backend(backend, *args, **kwargs):
     return backend.value.init_backend_handler(*args, **kwargs)
 
 
-def _process_group_construct_rpc_agent_options_handler(
+def _process_group_construct_rpc_backend_options_handler(
     rpc_timeout, num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS, **kwargs
 ):
-    from . import ProcessGroupRpcAgentOptions
+    from . import ProcessGroupRpcBackendOptions
 
-    rpc_agent_options = ProcessGroupRpcAgentOptions()
-    rpc_agent_options.rpc_timeout = rpc_timeout
-    rpc_agent_options.num_send_recv_threads = num_send_recv_threads
-    return rpc_agent_options
+    rpc_backend_options = ProcessGroupRpcBackendOptions()
+    rpc_backend_options.rpc_timeout = rpc_timeout
+    rpc_backend_options.num_send_recv_threads = num_send_recv_threads
+    return rpc_backend_options
 
 
 def _process_group_init_backend_handler(
-    store, name, rank, world_size, rpc_agent_options
+    store, name, rank, world_size, rpc_backend_options
 ):
     from . import ProcessGroupAgent
 
@@ -109,8 +109,8 @@ def _process_group_init_backend_handler(
         return ProcessGroupAgent(
             name,
             group,
-            rpc_agent_options.num_send_recv_threads,
-            rpc_agent_options.rpc_timeout,
+            rpc_backend_options.num_send_recv_threads,
+            rpc_backend_options.rpc_timeout,
         )
     except Exception as ex:
         dist.destroy_process_group()
@@ -119,6 +119,6 @@ def _process_group_init_backend_handler(
 
 register_backend(
     "PROCESS_GROUP",
-    _process_group_construct_rpc_agent_options_handler,
+    _process_group_construct_rpc_backend_options_handler,
     _process_group_init_backend_handler,
 )
