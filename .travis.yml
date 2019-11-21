@@ -1,10 +1,4 @@
-language: python
-python: "3.6"
 
-notifications:      # 邮箱通知
-  email: false
-
-sudo: false #有定制化开发环境需要，默认false，不开启容器，编译效率高
 
 before_install: 
   - pip install codecov 
