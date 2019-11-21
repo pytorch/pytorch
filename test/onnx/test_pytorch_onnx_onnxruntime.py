@@ -1628,7 +1628,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class CenterCrop(torch.nn.Module):
             def forward(self, input):
-                return center_slice_helper(input, torch.tensor(x.shape[1] - 1))
+                return center_slice_helper(input, torch.tensor(input.shape[1] - 1))
 
         x = torch.randn(3, 4)
         self.run_test(CenterCrop(), x)
