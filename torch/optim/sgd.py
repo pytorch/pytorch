@@ -68,6 +68,7 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -88,9 +89,9 @@ class SGD(Optimizer):
             for p in group['params']:
                 if p.grad is None:
                     continue
-                d_p = p.grad.data
+                d_p = p.grad
                 if weight_decay != 0:
-                    d_p = d_p.add(weight_decay, p.data)
+                    d_p = d_p.add(weight_decay, p)
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
@@ -103,6 +104,6 @@ class SGD(Optimizer):
                     else:
                         d_p = buf
 
-                p.data.add_(-group['lr'], d_p)
+                p.add_(-group['lr'], d_p)
 
         return loss

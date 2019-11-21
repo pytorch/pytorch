@@ -256,21 +256,23 @@ class LBFGS(Optimizer):
             views.append(view)
         return torch.cat(views, 0)
 
+    @torch.no_grad()
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
-            p.data.add_(step_size, update[offset:offset + numel].view_as(p.data))
+            p.add_(step_size, update[offset:offset + numel].view_as(p))
             offset += numel
         assert offset == self._numel()
 
     def _clone_param(self):
         return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
+    @torch.no_grad()
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
-            p.data.copy_(pdata)
+            p.copy_(pdata)
 
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
