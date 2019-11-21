@@ -174,5 +174,5 @@ opset_import {
 }
 opset_import {
   domain: "org.pytorch._caffe2"
-  version: 0
+  version: 1
 }

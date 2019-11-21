@@ -70,6 +70,14 @@ void validateBlock(
             "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
             getNodeStackTraceString(node));
       }
+      bool is_aten_enabled = operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
+      if (node->kind().is_aten() && !is_aten_enabled) {
+        FAIL_EXPORT(
+            "Couldn't export operator " + node->kind().toDisplayString() +
+            "\n\nDefined at:\n" + getNodeStackTraceString(node));
+      }
     }
 #undef FAIL_EXPORT
   }
@@ -308,11 +316,10 @@ void EncoderBase::EncodeBlock(
       std::string domain;
       if (node->kind().is_aten() || node->kind().is_caffe2())
         domain = node->kind().domainString();
-	    else
-//	    Custom namespace and domain
-	      domain = node->kind().ns().toUnqualString();
-	    p_n->set_domain(domain);
-	    domains_.insert(domain);
+      else    //  Custom namespace and domain
+        domain = node->kind().ns().toUnqualString();
+      p_n->set_domain(domain);
+      domains_.insert(domain);
     }
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
@@ -480,8 +487,8 @@ GraphEncoder::GraphEncoder(
 
   EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes, keep_initializers_as_inputs);
 
-	for (const std::string& domain : domains_) {
-		auto* opset = model_proto_.add_opset_import();
+  for (const std::string& domain : domains_) {
+    auto* opset = model_proto_.add_opset_import();
     opset->set_domain(domain);
 //    Check if the domain version is registered. If not, set version to 1 for default
     if (registered_domain_version.find(domain) == registered_domain_version.end())
