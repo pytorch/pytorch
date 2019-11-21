@@ -305,7 +305,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker1",
             backend=backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -333,7 +332,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -356,7 +354,6 @@ class RpcTest(RpcAgentTestFixture):
             rpc.init_rpc(
                 name="worker{}".format(self.rank),
                 backend=self.rpc_backend,
-                init_method=self.init_method,
                 rank=self.rank,
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
@@ -512,7 +509,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1102,7 +1098,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=rpc_backend_options,
