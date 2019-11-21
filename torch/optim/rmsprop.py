@@ -76,11 +76,11 @@ class RMSprop(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p)
+                    state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     if group['momentum'] > 0:
-                        state['momentum_buffer'] = torch.zeros_like(p)
+                        state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     if group['centered']:
-                        state['grad_avg'] = torch.zeros_like(p)
+                        state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 square_avg = state['square_avg']
                 alpha = group['alpha']
