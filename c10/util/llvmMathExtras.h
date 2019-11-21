@@ -388,12 +388,22 @@
    return UINT64_MAX >> (64 - N);
  }
 
+ // Ignore the false warning "Arithmetic overflow" for MSVC
+ #ifdef _MSC_VER
+ # pragma warning(push)
+ # pragma warning(disable : 4146)
+ #endif
+
  /// Gets the minimum value for a N-bit signed integer.
  inline int64_t minIntN(int64_t N) {
    assert(N > 0 && N <= 64 && "integer width out of range");
 
-   return -(UINT64_C(1)<<(N-1));
+   return -(UINT64_C(1) << (N - 1));
  }
+
+ #ifdef _MSC_VER
+ # pragma warning(pop)
+ #endif
 
  /// Gets the maximum value for a N-bit signed integer.
  inline int64_t maxIntN(int64_t N) {

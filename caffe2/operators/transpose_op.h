@@ -11,7 +11,7 @@
 namespace caffe2 {
 
 template <class Context>
-class TransposeOp final : public Operator<Context> {
+class TransposeOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
@@ -36,11 +36,9 @@ class TransposeOp final : public Operator<Context> {
         this, Input(0));
   }
 
- private:
+ protected:
   template <typename T>
-  bool DoRunWithType() {
-    const auto& X = Input(0);
-
+  void TransposeImpl(const Tensor& X, Tensor* Y) {
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -53,7 +51,7 @@ class TransposeOp final : public Operator<Context> {
     for (int i = 0; i < ndim; ++i) {
       Y_dims[i] = X_dims[axes_[i]];
     }
-    auto* Y = Output(0, Y_dims, at::dtype<T>());
+    Y->Resize(Y_dims);
     math::Transpose<std::int64_t, T, Context>(
         X_dims.size(),
         X_dims.data(),
@@ -61,6 +59,12 @@ class TransposeOp final : public Operator<Context> {
         X.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
+  }
+
+ private:
+  template <typename T>
+  bool DoRunWithType() {
+    TransposeImpl<T>(Input(0), Output(0));
     return true;
   }
 

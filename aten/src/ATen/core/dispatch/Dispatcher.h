@@ -11,58 +11,6 @@ namespace c10 {
 class CAFFE2_API OperatorHandle;
 
 /**
- * This class represents an operator kernel, i.e. an operator *after* it was
- * dispatched to a certain device. You can use it to call the kernel.
- *
- * You can keep this OpKernel instance around to avoid future dispatch
- * when you know it'd dispatch to the same kernel anyhow.
- *
- * Also, keeping around the OpKernel instance will keep around a local cache
- * that is used by some kernels to get better performance when they're called
- * multiple times (mostly Caffe2 kernels do that).
- *
- * OpKernel is only threadsafe if the kernel is threadsafe. There are no mutexes
- * protecting the kernel cache, so if the kernel uses the cache and doesn't have
- * mutexes for it, it will likely not be threadsafe.
- */
-class CAFFE2_API OpKernel final {
-public:
-  OpKernel(OpKernel&&) noexcept = default;
-  OpKernel& operator=(OpKernel&&) noexcept = default;
-  OpKernel(const OpKernel&) = delete;
-  OpKernel& operator=(const OpKernel&) = delete;
-
-  /**
-   * Call the operator kernel with the given arguments.
-   */
-  void call(Stack* stack) const {
-    // TODO Make boxed kernels mandatory and remove this check
-    TORCH_CHECK(nullptr != kernel_, "Tried to call OpKernel::call() for a kernel that doesn't have an boxed version.");
-
-    return (*kernel_)(stack, cache_.get());
-  }
-
-  template<class Result, class... Args>
-  Result callUnboxed(Args... args) const {
-    // TODO Should we box and call the boxed kernel instead of failing?
-    TORCH_CHECK(nullptr != unboxed_kernel_, "Tried to call OpKernel::callUnboxed() for a kernel that doesn't have an unboxed version.");
-
-    using OpSignature = Result (c10::KernelCache*, Args...);
-    OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_kernel_);
-    return (*kernel)(cache_.get(), std::forward<Args>(args)...);
-  }
-
-private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, void* unboxed_kernel)
-  : kernel_(kernel), cache_(cache_creator()), unboxed_kernel_(unboxed_kernel) {}
-  friend class Dispatcher;
-
-  KernelFunction* kernel_; // can be nullptr, not all kernels have this
-  std::unique_ptr<c10::KernelCache> cache_;
-  void* unboxed_kernel_; // can be nullptr, not all kernels have this
-};
-
-/**
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
  * the dispatcher.
@@ -114,7 +62,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -130,7 +78,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for an operator.
@@ -140,26 +88,23 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
-
-  RegistrationHandleRAII registerUnboxedAutogradKernel(const OperatorHandle& op, void* unboxed_autograd_kernel);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
   /**
-   * Perform a dynamic dispatch and get the kernel for an operator.
+   * Register a fallback kernel for a backend.
+   * If an operator is called but there is no concrete kernel for the dispatch
+   * key of the given operator arguments, it will check if there is such a
+   * fallback kernel for the given dispatch key and, if yes, call that one.
    */
-  OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
+  RegistrationHandleRAII registerBackendFallbackKernel(TensorTypeId dispatch_key, KernelFunction kernel);
 
-  /**
-   * Perform a dynamic dispatch and get the kernel for an operator.
-   */
-  // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
-  // the (unboxed?) arguments the operator is to be called with.
-  OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
+  template<class Return, class... Args>
+  Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
-  // TODO Remove callUnboxedAutogradKernel() and instead figure out in a generic
-  // callKernel() wrapper if the autograd or the regular kernel need to be called.
-  template<class Result, class... Args>
-  Result callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const;
+  template<class Return, class... Args>
+  Return callUnboxedOnly(const OperatorHandle& op, Args... args) const;
+
+  void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -175,9 +120,18 @@ private:
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterBackendFallbackKernel_(TensorTypeId dispatchKey);
+
+  static const KernelFunction& dispatch_(const DispatchTable& dispatchTable, const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels, c10::optional<TensorTypeId> dispatch_key);
+
+  template<class Return, class... Args>
+  Return doCallUnboxed(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const;
+  template<class Return, class... Args>
+  Return doCallUnboxedOnly(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const;
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+  LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>> backendFallbackKernels_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -210,41 +164,98 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
-class CAFFE2_API SchemaRegistrationHandleRAII final {
-public:
-  const OperatorHandle& opHandle() const {
-    return opHandle_;
+namespace detail {
+template<class... Args> inline void unused_arg_(const Args&...) {}
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
+    // TODO This should be a nested lambda instead of a separate function call, but that triggers an internal
+    // compiler error on GCC5. Change this once we don't need gcc 5 anymore.
+    return doCallUnboxed<Return, Args...>(dispatchTable, backendFallbackKernels_, std::forward<Args>(args)...);
+  });
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::doCallUnboxed(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
+    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
+    const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
+    return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+  });
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
+    // TODO This should be a nested lambda instead of a separate function call, but that triggers an internal
+    // compiler error on GCC5. Change this once we don't need gcc 5 anymore.
+    return doCallUnboxedOnly<Return, Args...>(dispatchTable, backendFallbackKernels_, std::forward<Args>(args)...);
+  });
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::doCallUnboxedOnly(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
+    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
+    const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
+    return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+  });
+}
+
+inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) {
+    return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) {
+      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+      const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
+      kernel.callBoxed(stack);
+    });
+  });
+}
+
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels, c10::optional<TensorTypeId> dispatchKey) {
+  if (C10_LIKELY(dispatchKey.has_value())) {
+    const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
+
+    if (nullptr != backendKernel) {
+      return *backendKernel;
+    }
+
+    auto backendFallbackKernel = backendFallbackKernels.find(*dispatchKey);
+    if (backendFallbackKernel != backendFallbackKernels.end()) {
+      return backendFallbackKernel->second;
+    }
   }
 
-private:
-  friend class Dispatcher;
-  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle)
-    : opHandle_(std::move(opHandle)), registrationHandle_(std::move(registrationHandle)) {}
+  const KernelFunction* catchallKernel = dispatchTable.lookupCatchallKernel();
+  if (C10_LIKELY(nullptr != catchallKernel)) {
+    return *catchallKernel;
+  }
 
-  OperatorHandle opHandle_;
-  RegistrationHandleRAII registrationHandle_;
-};
+  if (!dispatchKey.has_value() || *dispatchKey == TensorTypeId::UndefinedTensorId) {
+    TORCH_CHECK(false,
+          "There were no tensor arguments to this function (e.g., you passed an "
+          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
+          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          "Available functions are ", dispatchTable.listAllDispatchKeys())
+  }
 
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
-}
-
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(dispatchKey);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, kernel.unboxed_kernel_func);
-}
-
-template<class Result, class... Args>
-inline Result Dispatcher::callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const {
-  void* unboxed_autograd_kernel = op.operatorIterator_->op.lookupUnboxedAutogradKernel();
-  TORCH_CHECK(nullptr != unboxed_autograd_kernel, "Tried to call Dispatcher::callUnboxedAutogradKernel() for operator ", toString(op.schema()), " that doesn't have an autograd kernel.");
-
-  using OpSignature = Result (Args...);
-  OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_autograd_kernel);
-  return (*kernel)(std::forward<Args>(args)...);
+  const std::string dispatchKeyStr = toString(*dispatchKey);
+  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
+          " from the '", dispatchKeyStr, "' backend. '",
+          dispatchTable.operatorName(), "' is only available for these backends: ",
+          dispatchTable.listAllDispatchKeys(), ".");
 }
 
 } // namespace c10
+

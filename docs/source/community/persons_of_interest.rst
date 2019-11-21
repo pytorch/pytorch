@@ -63,8 +63,7 @@ Distributed
 
 -  Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  Shen Li (`mrshenli <https://github.com/mrshenli>`__)
-..
- -  (proposed) Pritam Damania
+-  (proposed) Pritam Damania
    (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 
 Multiprocessing and DataLoaders

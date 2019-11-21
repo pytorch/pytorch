@@ -49,7 +49,8 @@ class TCPStore : public Store {
       const std::string& masterAddr,
       PortType masterPort,
       int numWorkers,
-      bool isServer = false);
+      bool isServer = false,
+      const std::chrono::milliseconds& timeout = kDefaultTimeout);
 
   virtual ~TCPStore();
 

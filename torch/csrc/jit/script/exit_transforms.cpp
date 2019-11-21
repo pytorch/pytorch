@@ -415,7 +415,8 @@ struct ExitTransformer {
           exit_pair = transformIf(node);
         } break;
         case prim::Function: {
-          exit_pair = transformExits(node->blocks().at(0));
+          // exits of closure declaration stay local to the closure
+          transformExits(node->blocks().at(0));
         } break;
         case prim::Loop: {
           exit_pair = transformLoop(node);

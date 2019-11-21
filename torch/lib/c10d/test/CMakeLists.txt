@@ -14,6 +14,7 @@ function(c10d_add_test test_src)
 endfunction()
 
 c10d_add_test(FileStoreTest.cpp c10d)
+c10d_add_test(HashStoreTest.cpp c10d)
 c10d_add_test(TCPStoreTest.cpp c10d)
 
 if(USE_CUDA)
@@ -23,6 +24,8 @@ if(USE_CUDA)
   endif()
   if(USE_C10D_NCCL)
     c10d_add_test(ProcessGroupNCCLTest.cpp c10d c10d_cuda_test)
+    c10d_add_test(ProcessGroupNCCLErrorsTest.cpp c10d c10d_cuda_test
+        gtest_main)
   endif()
 else()
   if(USE_C10D_GLOO)

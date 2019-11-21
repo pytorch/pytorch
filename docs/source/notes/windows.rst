@@ -157,7 +157,7 @@ be solved before we officially release it. You can build it by yourself.
 Import error
 ^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     from torch._C import *
 
@@ -188,7 +188,7 @@ uses MKL instead of OpenBLAS. You may type in the following command.
 Another possible cause may be you are using GPU version without NVIDIA
 graphics cards. Please replace your GPU package with the CPU one.
 
-.. code-block:: py3tb
+.. code-block:: python
 
     from torch._C import *
 
@@ -210,7 +210,7 @@ Usage (multiprocessing)
 Multiprocessing error without if-clause protection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     RuntimeError:
            An attempt has been made to start a new process before the
@@ -247,7 +247,7 @@ your code into the following structure.
 Multiprocessing error "Broken pipe"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
     ForkingPickler(file, protocol).dump(obj)
 
@@ -261,7 +261,7 @@ can debug your code by reducing the ``num_worker`` of
 Multiprocessing error "driver shut down"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+::
 
     Couldn’t open shared file mapping: <torch_14808_1591070686>, error code: <1455> at torch\lib\TH\THAllocator.c:154
 
@@ -275,7 +275,7 @@ update the TDR settings according to this `post
 CUDA IPC operations
 ^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: py3tb
+.. code-block:: python
 
    THCudaCheck FAIL file=torch\csrc\generic\StorageSharing.cpp line=252 error=63 : OS call failed or operation not supported on this OS
 

@@ -26,6 +26,7 @@ namespace jit {
 namespace script {
 
 struct Def;
+struct ClassDef;
 struct SugaredValue;
 struct Resolver;
 
@@ -103,6 +104,12 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self);
 
+  void define_interface(
+      const c10::QualifiedName& qualifiedName,
+      const ClassDef& classDef,
+      ResolverPtr rcb,
+      bool is_module = false);
+
   Function* create_function(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
@@ -154,12 +161,12 @@ struct TORCH_API CompilationUnit {
     // of invalidating their methods. NamedTuples are fine though, since they
     // don't have methods.
     TORCH_CHECK(
-        0 == classDict_.count(*namedType->qualified_name_obj()),
+        0 == classDict_.count(*namedType->name()),
         "class '",
-        namedType->qualname(),
+        namedType->name()->qualifiedName(),
         "' already defined.");
     classes_.push_back(std::move(namedType));
-    classDict_[*classes_.back()->qualified_name_obj()] = classes_.size() - 1;
+    classDict_[*classes_.back()->name()] = classes_.size() - 1;
   };
 
   c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
@@ -170,9 +177,17 @@ struct TORCH_API CompilationUnit {
     return type->cast<c10::ClassType>();
   }
 
+  c10::InterfaceTypePtr get_interface(const c10::QualifiedName& name) const {
+    auto type = get_type(name);
+    if (!type) {
+      return nullptr;
+    }
+    return type->cast<c10::InterfaceType>();
+  }
+
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
-      if (cls->qualname() == name.qualifiedName()) {
+      if (cls->name()->qualifiedName() == name.qualifiedName()) {
         return cls->expect<TupleType>();
       }
     }

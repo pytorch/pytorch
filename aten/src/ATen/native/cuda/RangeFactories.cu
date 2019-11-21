@@ -57,7 +57,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       LinspaceOp<scalar_t> linspace_method(scalar_start, step);
-      thrust::device_ptr<scalar_t> data_(r.data<scalar_t>());
+      thrust::device_ptr<scalar_t> data_(r.data_ptr<scalar_t>());
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
       auto policy = thrust::cuda::par.on(stream);
       thrust::tabulate(policy, data_, data_ + steps, linspace_method);
@@ -90,7 +90,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       LogspaceOp<scalar_t> logspace_method(scalar_start, step, scalar_base);
-      thrust::device_ptr<scalar_t> data_(r.data<scalar_t>());
+      thrust::device_ptr<scalar_t> data_(r.data_ptr<scalar_t>());
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
       auto policy = thrust::cuda::par.on(stream);
       thrust::tabulate(policy, data_, data_ + steps, logspace_method);
@@ -125,7 +125,7 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     LinspaceOp<scalar_t, accscalar_t> linspace_method(xstart, xstep);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     auto policy = thrust::cuda::par.on(stream);
-    thrust::device_ptr<scalar_t> data_ptr(r.data<scalar_t>());
+    thrust::device_ptr<scalar_t> data_ptr(r.data_ptr<scalar_t>());
     thrust::tabulate(policy, data_ptr, data_ptr + size, linspace_method);
 
     if (!result.is_contiguous()) {
@@ -178,7 +178,7 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     LinspaceOp<scalar_t, accscalar_t> linspace_method(xstart, xstep);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     auto policy = thrust::cuda::par.on(stream);
-    thrust::device_ptr<scalar_t> data_ptr(r.data<scalar_t>());
+    thrust::device_ptr<scalar_t> data_ptr(r.data_ptr<scalar_t>());
     thrust::tabulate(policy, data_ptr, data_ptr + size, linspace_method);
 
     if (!result.is_contiguous()) {

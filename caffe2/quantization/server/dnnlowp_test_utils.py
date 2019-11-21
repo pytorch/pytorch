@@ -14,6 +14,8 @@ from hypothesis import assume
 def check_quantized_results_close(outputs, ref=None, symmetric=False, atol_scale=0.53):
     if ref is None:
         ref = outputs[0][0]
+    if ref.size == 0:
+        return
     ref_min = min(np.min(ref), 0)
     ref_max = max(np.max(ref), 0)
     if symmetric:
@@ -219,7 +221,8 @@ def generate_convnd_inputs(
     )
     X = X.astype(np.float32)
     if (
-        depthwise_convolution
+        batch_size != 0
+        and depthwise_convolution
         and groupwise_quantization
         and not preserve_activation_sparsity
     ):
@@ -271,7 +274,8 @@ def generate_convnd_inputs(
         # input channel 0 is all X_min to avoid overflow from vpmaddubsw when
         # multiplied with W_min and W_max
         X[..., 0] = X_min
-        X[(0,) * (X.ndim - 1) + (1,)] = X_max
+        if batch_size != 0:
+            X[(0,) * (X.ndim - 1) + (1,)] = X_max
 
     if preserve_weight_sparsity:
         W_min = -128

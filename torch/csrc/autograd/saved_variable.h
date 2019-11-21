@@ -19,7 +19,7 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;
-  SavedVariable(const Variable& variable, bool is_output);
+  SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view=false);
   SavedVariable(SavedVariable&&) = default;
   SavedVariable& operator=(SavedVariable&&) = default;
 
@@ -44,6 +44,9 @@ class TORCH_API SavedVariable {
   // it would create a circular reference. In that case, the grad_fn must be
   // passed in to the unpack function when reconstructing the Variable.
   std::shared_ptr<Node> grad_fn_;
+  // Weak version of grad_fn_ that prevents leaks in rebase_history() for
+  // inplace views.
+  std::weak_ptr<Node> weak_grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;
 
@@ -52,5 +55,6 @@ class TORCH_API SavedVariable {
   bool was_default_constructed_ = true;
   bool requires_grad_ = false;
   bool has_grad_fn_ = false;
+  bool is_inplace_view_ = false;
 };
 }} // namespace torch::autograd

@@ -217,7 +217,7 @@ void TestToCFloat() {
   ASSERT_EQ_RESOLVED(c.size(1), 11);
 
   Tensor e = rand({});
-  ASSERT_EQ_RESOLVED(*e.data<float>(), e.sum().item<float>());
+  ASSERT_EQ_RESOLVED(*e.data_ptr<float>(), e.sum().item<float>());
 }
 void TestToString() {
   Tensor b = ones({3, 7}) * .0000001f;
@@ -272,7 +272,7 @@ void TestIndexingMixedDevice(DeprecatedTypeProperties& type) {
 void TestDispatch() {
   Tensor tensor = randn({20, 20});
   Tensor other = randn({20, 20});
-  auto result = tensor.m(relu).m(mse_loss, other, Reduction::Mean);
+  auto result = tensor.m(relu).m(mse_loss, other, at::Reduction::Mean);
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
 }
 
@@ -292,6 +292,13 @@ void TestView(DeprecatedTypeProperties& type) {
   tensor.resize_({6, 2});
   ASSERT_TRUE(tensor.sizes().equals({6, 2}));
   ASSERT_TRUE(viewed.sizes().equals({3, 4}));
+}
+
+void TestIntArrayRefExpansion(DeprecatedTypeProperties& type) {
+  max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+  max_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+  avg_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1);
+  avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
 }
 
 void test(DeprecatedTypeProperties& type) {
@@ -322,6 +329,7 @@ void test(DeprecatedTypeProperties& type) {
   TestDispatch();
   TestNegativeDim(type);
   TestView(type);
+  TestIntArrayRefExpansion(type);
 }
 
 TEST(BasicTest, BasicTestCPU) {

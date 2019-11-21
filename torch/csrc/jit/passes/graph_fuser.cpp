@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 #include <queue>
 #include <unordered_map>
@@ -28,7 +27,7 @@ namespace {
 //      or all tensor inputs have the same scalar type and
 //         output is identified in PropagateInputShapes
 //    - Output and all tensor inputs should be on the same device
-//    - Produces contiguous outputs
+//    - Produces dense non-overlapping outputs
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 bool isSimpleMap(Node* node) {
@@ -67,7 +66,6 @@ bool isSimpleMap(Node* node) {
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
       "aten::pow(Scalar self, Tensor exponent) -> Tensor",
-      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -80,6 +78,7 @@ bool isSimpleMap(Node* node) {
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
@@ -178,7 +177,7 @@ struct GraphFuser {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    auto device = ProfiledTensorType::create(v->type())->device();
+    auto device = v->type()->expect<TensorType>()->device();
     if (!device) {
       return true;
     }
@@ -576,11 +575,21 @@ struct GraphFuser {
     return ++consumer->reverseIterator();
   }
 
+  at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
+    AT_ASSERT(inputs.size() > 0);
+    auto* g = inputs[0]->owningGraph();
+    auto* input_list =
+        g->insertNode(g->createList(TensorType::get(), inputs))->output();
+    auto* output_list = g->insert(aten::broadcast_tensors, {input_list});
+    auto* unpack_node = g->insertNode(
+        g->create(prim::ListUnpack, {output_list}, inputs.size()));
+    return unpack_node->outputs();
+  }
+
   void insertExplicitBroadcast(Node* node) {
     WithInsertPoint insert_guard{node};
     auto tensors = tensorInputs(node);
-    auto new_tensors =
-        SymbolicVariable::broadcast_tensors(fmap<SymbolicVariable>(tensors));
+    auto new_tensors = broadcast_tensors(tensors);
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();

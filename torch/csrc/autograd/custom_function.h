@@ -15,6 +15,8 @@ TORCH_API variable_list _wrap_outputs(
   const at::ArrayRef<Variable> raw_outputs,
   const std::shared_ptr<Node> &cdata);
 
+TORCH_API void check_variable_result(const Variable& original,
+  const Variable& result, std::string hook_name);
 
 // Get the return type of the forward function of the custom Function class X
 template<typename X, typename... Args>
@@ -121,7 +123,7 @@ struct TORCH_API VariableInfo {
 
   Variable zeros(at::OptionalDeviceGuard& device_guard) const;
 
-  at::Backend backend = at::Backend::Undefined;
+  at::Layout layout = at::Layout::Strided;
   at::Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
@@ -260,8 +262,8 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got " ;
-    msg += std::to_string(num_outputs) + ")";
+    msg += c10::to_string(num_forward_inputs) + ", got " ;
+    msg += c10::to_string(num_outputs) + ")";
     throw std::runtime_error(msg);
   }
 
@@ -272,7 +274,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       if (outputs[i].defined()) {
         std::string msg("function ");
         msg += name() + " returned a gradient different that is defined at position ";
-        msg += std::to_string(i + 1) + ", but the corresponding forward input was not a Variable";
+        msg += c10::to_string(i + 1) + ", but the corresponding forward input was not a Variable";
         throw std::runtime_error(msg);
       }
       continue;

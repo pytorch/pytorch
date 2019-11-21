@@ -1002,4 +1002,23 @@ TEST(Int8, Slice) {
   EXPECT_EQ(YQ.scale, XQ->scale);
   EXPECT_EQ(YQ.zero_point, XQ->zero_point);
 }
+
+TEST(Int8, DISABLED_Transpose) {
+  auto XQ = q({1, 50, 25, 16});
+  auto xop = CreateOperatorDef(
+      "Int8Transpose",
+      "",
+      {"XQ"},
+      {"YQ"},
+      {MakeArgument("axes", vector<int64_t>{0, 3, 1, 2}),
+       MakeArgument<float>("Y_scale", XQ->scale),
+       MakeArgument<int32_t>("Y_zero_point", XQ->zero_point)});
+  Workspace ws;
+  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+  ws.RunOperatorOnce(xop);
+  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(YQ.t.sizes(), (vector<int64_t>{1, 16, 50, 25}));
+  EXPECT_EQ(YQ.scale, XQ->scale);
+  EXPECT_EQ(YQ.zero_point, XQ->zero_point);
+}
 } // namespace caffe2

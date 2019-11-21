@@ -175,7 +175,7 @@ struct SchemaParser {
         } else if ("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {
-          return static_cast<int64_t>(Reduction::Mean);
+          return static_cast<int64_t>(at::Reduction::Mean);
         } else if ("contiguous_format" == text) {
           return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
         } else {
