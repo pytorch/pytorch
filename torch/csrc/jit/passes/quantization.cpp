@@ -25,8 +25,9 @@ struct PatternInfo {
   std::unordered_map<std::string, Value*> vmap;
 
   static PatternInfo parse_from_str(std::string pattern_string) {
-    PatternInfo rv{
-        std::move(pattern_string), at::guts::make_unique<Graph>(), {}};
+    PatternInfo rv{std::move(pattern_string),
+                   at::guts::make_unique<Graph>(),
+                   decltype(vmap){}};
     script::parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
   }
