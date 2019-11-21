@@ -13,7 +13,7 @@ def register_quantized_ops(domain, version):
     quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
-            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor']
+            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -123,3 +123,19 @@ def dequantize(g, input):
 @parse_args('v', 't', 't', 't', 't', 't', 't', 't')
 def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
     return input
+
+@parse_args('v', 'is')
+def upsample_nearest2d(g, input, output_size):
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import upsample_nearest2d
+        return upsample_nearest2d(g, input, output_size)
+
+    kwargs = {
+        "output_size_i": output_size,
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+
+    output = g.op("_caffe2::Int8ResizeNearest", input, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
