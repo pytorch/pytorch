@@ -5,6 +5,10 @@
 #   DEBUG
 #     build with -O0 and -g (debug symbols)
 #
+#   VERBOSE
+#     run ninja/make verbosely, printing out each compile command as it
+#     compiles commands
+#
 #   REL_WITH_DEB_INFO
 #     build with optimizations and -g (debug symbols)
 #
