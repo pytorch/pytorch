@@ -939,13 +939,13 @@ graph(%self, %x):
 void FoldQuantizeCallIntoBuffer(
     script::Module& module,
     const std::string& method_name) {
-  const PatternInfo& pattern = PatternInfo::parse_from_str(R"(
+  static const PatternInfo& pattern = PatternInfo::parse_from_str(R"(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
    %weight_quant = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
    return (%weight_quant) )");
-  const Graph& pattern_graph = *pattern.pattern_graph;
-  const auto& vmap = pattern.vmap;
+  static const Graph& pattern_graph = *pattern.pattern_graph;
+  static const auto& vmap = pattern.vmap;
 
   auto method = module.get_method(method_name);
   auto graph = method.graph();
