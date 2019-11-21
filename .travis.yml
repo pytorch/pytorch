@@ -1,11 +1,19 @@
-language: node_js
-node_js:
-  - "7"
-install:
-  - npm i
-  - npm i -g codecov
-script:
-  - npm run coverage
+language: python
+python: "3.6"
+
+notifications:      # 邮箱通知
+  email: false
+
+sudo: false #有定制化开发环境需要，默认false，不开启容器，编译效率高
+
+before_install: 
+  - pip install codecov 
+  - pip install coverage
+
+install: true
+
+script: 
+  - coverage run main.py
   - node_modules/.bin/nyc report --reporter=text-lcov > coverage.lcov
   - codecov
 cache:
