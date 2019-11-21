@@ -13225,7 +13225,7 @@ class TestTorchDeviceType(TestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
-    def test_max_min_binary_op_nan(self, device, dtype):
+    def test_min_max_binary_op_nan(self, device, dtype):
         a = torch.rand(1000, dtype=dtype, device=device)
         b = torch.rand(1000, dtype=dtype, device=device)
 
