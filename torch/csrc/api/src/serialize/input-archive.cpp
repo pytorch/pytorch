@@ -147,5 +147,16 @@ void InputArchive::load_from(
   module_ = torch::jit::load(std::move(adapter), std::move(device));
 }
 
+std::vector<std::string> InputArchive::keys() {
+  std::vector<std::string> all_keys;
+  all_keys.reserve(module_.named_attributes(/*recurse=*/false).size());
+
+  for (const torch::jit::script::NameValue& s : module_.named_attributes(/*recurse=*/false)) {
+    all_keys.push_back(s.name);
+  }
+
+  return all_keys;
+}
+
 } // namespace serialize
 } // namespace torch
