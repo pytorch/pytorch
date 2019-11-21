@@ -147,7 +147,11 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
     }
     for arg, arg_type in type_mapping.items():
         if not isinstance(arg, arg_type):
-            raise RuntimeError("Argument {} must be of type {} but got type {}".format(arg, arg_type, type(arg)))
+            raise RuntimeError(
+                "Argument {} must be of type {} but got type {}".format(
+                    arg, arg_type, type(arg)
+                )
+            )
 
 
 @_require_initialized
