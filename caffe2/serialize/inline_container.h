@@ -156,6 +156,7 @@ class CAFFE2_API PyTorchStreamWriter final {
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
   std::string archive_name_plus_slash_;
+  std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
   bool finalized_ = false;

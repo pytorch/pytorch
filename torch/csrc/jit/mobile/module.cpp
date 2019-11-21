@@ -19,7 +19,7 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
-c10::IValue Module::run_method(const std::string& method_name, Stack& stack) {
+c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   auto m = find_method(method_name);
   stack.insert(stack.begin(), object_);
   m->run(stack);

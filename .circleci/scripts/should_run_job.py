@@ -65,6 +65,10 @@ default_set = set([
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
 
+    # GraphExecutor config jobs
+    'pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test',
+    'pytorch-linux-xenial-py3.6-gcc5.4-ge_config_legacy-test',
+
     # Other checks
     'pytorch-short-perf-test-gpu',
     'pytorch-python-doc-push',
