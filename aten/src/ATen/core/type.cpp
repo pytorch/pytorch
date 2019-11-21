@@ -171,6 +171,21 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return OptionalType::create(t1);
   }
 
+  // if t1 is Optional[T] and t2 is T, return Optional[T] and vice versa
+  if (t1->kind() == TypeKind::OptionalType && t2->kind() != TypeKind::OptionalType) {
+    auto unified = unifyTypes(t1->expect<OptionalType>()->getElementType(), t2);
+    if (!unified) {
+      return c10::nullopt;
+    }
+    return OptionalType::create(*unified);
+  } else if (t2->kind() == TypeKind::OptionalType && t1->kind() != TypeKind::OptionalType) {
+    auto unified = unifyTypes(t2->expect<OptionalType>()->getElementType(), t1);
+    if (!unified) {
+      return c10::nullopt;
+    }
+    return OptionalType::create(*unified);
+  }
+
   //types which contain other types
   if (t1->cast<ListType>() && t2->cast<ListType>()) {
     // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
