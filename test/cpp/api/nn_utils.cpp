@@ -184,6 +184,6 @@ TEST_F(NNUtilsTest, ConvertParameters) {
     utils::vector_to_parameters(vec, model->parameters());
 
     auto sample = model->parameters()[0][0][0][0];
-    ASSERT_TRUE(torch.equal(sample.data(), vec.data().slice(0, 0, 5)));
+    ASSERT_TRUE(torch::equal(sample.data(), vec.data().slice(0, 0, 5)));
   }
 }
