@@ -477,7 +477,11 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
+#ifdef USE_STATIC_DISPATCH
+  ExecutionPlan plan(graph);
+#else
   ExecutionPlan plan = getPlanFor(stack);
+#endif
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
