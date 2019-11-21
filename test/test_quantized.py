@@ -1167,12 +1167,12 @@ class TestDynamicQuantizedLinear(TestCase):
         ).to(dtype=torch.float)
 
         W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
-        W_q = torch.quantize_linear(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+        W_q = torch.quantize_per_tensor(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
 
         # Observe X_fp32 and determine X_scale and X_zero_point, this should match
         # internals of dynamic linear.
         X_scale, X_zp = _calculate_dynamic_qparams(X_fp32, torch.quint8)
-        X_q = torch.quantize_linear(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+        X_q = torch.quantize_per_tensor(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
 
         W_int8, col_offsets, W_scale, W_zp = torch.fbgemm_linear_quantize_weight(W_q.dequantize())
         W_prepack = torch.fbgemm_pack_quantized_matrix(W_int8.clone(), W_int8.size(1), W_int8.size(0))
