@@ -948,6 +948,8 @@ graph(%self, %scale, %zero_point, %dtype):
         zero_point_node->kind() == prim::Constant &&
         dtype_node->kind() == prim::Constant;
   };
+  std::unordered_set<Node*> quantize_nodes_to_delete;
+  std::unordered_set<Node*> getattr_nodes_to_delete;
   for (const auto& match : matches) {
     if (!filter(match, vmap)) {
       continue;
@@ -962,15 +964,34 @@ graph(%self, %scale, %zero_point, %dtype):
     module.register_buffer(
         "_quantized_weight",
         at::quantize_per_tensor(float_weight, scale, zero_point, dtype));
+
+    // Replace the GetAttr[weight]->quantize_per_tensor sequence
+    // with a simple GetAttr[_quantized_weight] node.
+    Value* orig_weight = match_vmap.at(vmap.at("weight"));
+    Value* orig_self = match_vmap.at(vmap.at("self"));
+    Value* orig_weight_quant = match_vmap.at(vmap.at("weight_quant"));
+
+    WithInsertPoint insert_guard(orig_weight->node());
+    Value* new_weight_quant =
+        graph->insertGetAttr(orig_self, "_quantized_weight");
+    new_weight_quant->node()->setSourceRange(
+        orig_weight_quant->node()->sourceRange());
+    orig_weight_quant->replaceAllUsesWith(new_weight_quant);
+
+    quantize_nodes_to_delete.insert(orig_weight_quant->node());
+    getattr_nodes_to_delete.insert(orig_weight->node());
   }
 
-  std::string replacement = R"(
-graph(%self, %scale, %zero_point, %dtype):
-    %weight_quant = prim::GetAttr[name="_quantized_weight"](%self)
-    return (%weight_quant) )";
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph, filter);
+  // We need to delete the `quantize_per_tensor` nodes first,
+  // since they will have a Use of the corresponding `weight`
+  // value. Once we've deleted the quantize nodes, we can delete
+  // the original `GetAttr` nodes.
+  for (Node* n : quantize_nodes_to_delete) {
+    n->destroy();
+  }
+  for (Node* n : getattr_nodes_to_delete) {
+    n->destroy();
+  }
 }
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
