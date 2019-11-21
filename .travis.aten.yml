@@ -23,6 +23,10 @@ script:
     - ../tools/run_tests.sh .
     - cd ..
     - tools/test_install.sh $(pwd)/install $(pwd)
+    - coverage run main.py
+
+after_success:
+  - codecov #运行codecov
 
 matrix:
     fast_finish: true
