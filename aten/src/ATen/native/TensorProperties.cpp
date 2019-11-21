@@ -77,15 +77,14 @@ Tensor contiguous(const Tensor & self) {
 }
 
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
-  // Possibly that contiguous tensor is not strided in memory_format.
-  // so later `suggest_memory_layout` does not reflect the memory layout update.
-  // The alternative to making a copy here is to duplicate `TensorImpl`
-  // inside self and restride it, wrap that with another `Tensor` and return it;
-  // I'm concerned that now we have two TensorImpl sharing the same storage,
-  // which would potentially invalidate each other's `version_counter_`.
-  // Let's just make a copy here for now.
-  if (self.is_contiguous(memory_format) && self.suggest_memory_format() == memory_format) {
-    return self;
+  if (self.is_contiguous(memory_format)) {
+    if (self.suggest_memory_format() == memory_format) {
+      return self;
+    } else {
+      // It's only stride that we want to update, there's no need for copy
+      auto other = self.as_strided(self.sizes(), get_channels_last_strides(self.sizes()));
+      return other;
+    }
   }
   TORCH_CHECK(
       memory_format != MemoryFormat::Preserve,

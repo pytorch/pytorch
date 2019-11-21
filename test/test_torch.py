@@ -5692,6 +5692,20 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         alias.fill_(7)
         self.assertEqual(x, alias)
 
+        x = torch.randn(4, 1, 8, 8)
+        alias = x.contiguous(memory_format=torch.channels_last)
+        alias.fill_(7)
+        self.assertEqual(x.stride(), (64, 64, 8, 1))
+        self.assertEqual(alias.stride(), (64, 1, 8, 1))
+        self.assertEqual(x, alias)
+
+        x = torch.randn(4, 8, 1, 1)
+        alias = x.contiguous(memory_format=torch.channels_last)
+        alias.fill_(7)
+        self.assertEqual(x.stride(), (8, 1, 1, 1))
+        self.assertEqual(alias.stride(), (8, 1, 8, 8))
+        self.assertEqual(x, alias)
+
     def test_memory_format_empty(self):
         with self.assertRaises(RuntimeError):
             x = torch.empty((3, 3), memory_format=torch.channels_last)
