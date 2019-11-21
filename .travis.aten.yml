@@ -35,6 +35,7 @@ matrix:
 after_success:
   - cd Tests/
   - bash <(curl -s https://codecov.io/bash) -t 8faabb77-d745-44bc-be18-b906de8e2928
+  - codecov -f "coverage.xml"
 
 
 
