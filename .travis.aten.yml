@@ -22,7 +22,7 @@ script:
     - ../tools/run_tests.sh .
     - cd ..
     - tools/test_install.sh $(pwd)/install $(pwd)
-    - coverage run main.py
+    
 
 after_success:
   - bash <(curl -s https://codecov.io/bash) -c -F unittest
