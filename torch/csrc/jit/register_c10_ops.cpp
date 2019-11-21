@@ -158,7 +158,8 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                 reinterpret_cast<ListType*>(type.get())->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
-              tracer::addOutput(node, stdd::vector<at::Tensor>(iter->toTensorList()));
+              // UGH, why are we converting this to a vector
+              tracer::addOutput(node, c10::impl::toVector(iter->toTensorList()));
             } else {
               throw std::runtime_error(
                   "unsupported ouptut list type: " + elem_type->str());
