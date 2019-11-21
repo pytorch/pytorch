@@ -88,11 +88,6 @@ def add(g, input_a, input_b, scale, zero_point):
     sym_help._quantized_ops.add(output)
     return output
 
-def upsample_nearest_2d(g, input, size, scale_factor, mode, align_corners):
-    output = g.op("_caffe2::Int8ResizeNearest", input, scale_factor, scale_factor)
-    sym_help._quantized_ops.add(output)
-    return output
-
 @parse_args('v')
 def relu(g, input):
     if input not in sym_help._quantized_ops:
@@ -124,11 +119,11 @@ def dequantize(g, input):
 def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
     return input
 
-@parse_args('v', 'is')
-def upsample_nearest2d(g, input, output_size):
+@parse_args('v', 'is', 'none')
+def upsample_nearest2d(g, input, output_size, align_corners=None):
     if input not in sym_help._quantized_ops:
-        from torch.onnx.symbolic_opset9 import upsample_nearest2d
-        return upsample_nearest2d(g, input, output_size)
+        from torch.onnx.symbolic_opset9 import upsample_nearest2d as upsample_nearest2d_impl
+        return upsample_nearest2d_impl(g, input, output_size, align_corners)
 
     kwargs = {
         "output_size_i": output_size,
