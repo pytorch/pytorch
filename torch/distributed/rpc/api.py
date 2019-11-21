@@ -74,6 +74,12 @@ def _init_rpc_backend(
 ):
     from . import RpcAgentOptions
 
+    if not rpc_agent_options:
+        # default construct a set of RPC agent options.
+        rpc_agent_options = rpc.backend_registry.construct_rpc_agent_options(
+            backend
+        )
+
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
