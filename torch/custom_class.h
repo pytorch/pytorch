@@ -9,6 +9,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
+#include <torch/csrc/jit/custom_class.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/tracer.h>
@@ -19,9 +20,6 @@
 
 namespace torch {
 namespace jit {
-
-TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
-TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
 
 namespace detail {
 template <class R, class...>
