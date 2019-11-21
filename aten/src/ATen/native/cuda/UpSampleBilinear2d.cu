@@ -30,8 +30,8 @@ __global__ void upsample_bilinear2d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor<scalar_t, 4> idata,
-    PackedTensorAccessor<scalar_t, 4> odata) {
+    const PackedTensorAccessor64<scalar_t, 4> idata,
+    PackedTensorAccessor64<scalar_t, 4> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
