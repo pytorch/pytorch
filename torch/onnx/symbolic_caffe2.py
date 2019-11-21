@@ -119,12 +119,12 @@ def add(g, input_a, input_b, scale, zero_point):
     sym_help._quantized_ops.add(output)
     return output
 
-@parse_args('v', 'is')
 def upsample_nearest2d(g, input, output_size):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import upsample_nearest2d
         return upsample_nearest2d(g, input, output_size)
 
+    output_size = sym_help._parse_arg(output_size, 'is')
     kwargs = {
         "output_size_i": output_size,
         "Y_scale_f": input.node()["Y_scale"],
