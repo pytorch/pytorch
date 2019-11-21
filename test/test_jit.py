@@ -49,7 +49,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import quantize
 from common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from common_quantization import ConvModel, AnnotatedConvModel
-from common_quantization import test_only_eval_fn
+from common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 
 # Testing utils
@@ -736,20 +736,33 @@ class TestJit(JitTestCase):
 
     def test_script_autograd_grad(self):
         def test_simple_grad(x, y):
-            # type: (Tensor, Tensor) -> List[Tensor]
+            # type: (Tensor, Tensor) -> List[Optional[Tensor]]
             z = x + 2 * y + x * y
             return torch.autograd.grad((z.sum(), ), (x, y))
 
         def test_simple_grad_with_grad_outputs(x, y):
-            # type: (Tensor, Tensor) -> List[Tensor]
+            # type: (Tensor, Tensor) -> List[Optional[Tensor]]
             z = x + 2 * y + x * y
             grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
             return torch.autograd.grad((z, ), (x, y), grad_outputs)
+
+        def test_one_output_not_requires_grad(x, y):
+            # type: (Tensor, Tensor) -> List[Optional[Tensor]]
+            z = 2 * y + y
+            return torch.autograd.grad((z.sum(),), (x, y), allow_unused=True)
+
+        def test_retain_graph(x, y):
+            # type: (Tensor, Tensor) -> None
+            z = x + 2 * y + x * y
+            torch.autograd.grad((z.sum(), ), (x, y), retain_graph=True)
+            torch.autograd.grad((z.sum(), ), (x, y))
 
         x = torch.randn(2, 2, requires_grad=True)
         y = torch.randn(2, 2, requires_grad=True)
         self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_one_output_not_requires_grad, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_retain_graph, (x, y), inputs_requires_grad=True)
 
     def test_script_backward(self):
         def checkBackwardScript(fn, inputs):
@@ -965,20 +978,20 @@ graph(%x : Tensor,
         assert len([x for x, _ in m._modules._c.items()
                     if x.startswith('_observer_')]) == 0, \
             'Expected to have 0 observer submodules'
-        FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
-                   .check('ClassType<Conv2d> = prim::GetAttr[name="conv"](%self)') \
+        FileCheck().check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('Conv2d = prim::GetAttr[name="conv"](%self)') \
                    .check_next('Tensor = prim::CallMethod[name="forward"]') \
-                   .check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .run(str(get_forward_graph(m._c)))
         assert len([x for x, _ in m.conv._modules._c.items()
                     if x.startswith('_observer_')]) == 3, \
             'Expected to have 3 observer submodules'
-        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+        FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                   .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
                    .check('Tensor = aten::conv2d') \
-                   .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
                    .run(str(m._c.getattr("conv")._get_method('conv2d_forward').graph))
 
@@ -1002,16 +1015,16 @@ graph(%x : Tensor,
                 return self.sub(self.conv(x))
 
         def check_observed(s):
-            FileCheck().check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+            FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
                        .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                       .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check('Observer = prim::GetAttr[name="_observer_') \
                        .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                       .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check('Observer = prim::GetAttr[name="_observer_') \
                        .check_next('prim::CallMethod[name="forward"](%_observer_') \
                        .run(str(s))
 
         def check_not_observed(s):
-            FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+            FileCheck().check_not('Observer = prim::GetAttr[name="_observer_') \
                        .check_not('prim::CallMethod[name="forward"](%_observer_') \
                        .run(str(s))
 
@@ -1078,12 +1091,12 @@ graph(%x : Tensor,
             assert len([x for x, _ in m._modules._c.items()
                         if x.startswith('_observer_')]) == num_observers, \
                 'Expected to have ' + str(num_observers) + ' observer submodules'
-            c = FileCheck().check('ClassType<Conv2d> = prim::GetAttr[name="conv"]') \
+            c = FileCheck().check('Conv2d = prim::GetAttr[name="conv"]') \
                            .check_next('prim::CallMethod[name="forward"]') \
-                           .check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                           .check_not('Observer = prim::GetAttr[name="_observer_') \
                            .check(relu_call)
             if num_observers == 1:
-                c = c.check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                c = c.check('Observer = prim::GetAttr[name="_observer_') \
                      .check_next('prim::CallMethod[name="forward"](%_observer_')
             c.run(str(get_forward_graph(m._c)))
             # TODO: add checks for conv and relu later, graph looks correct but this pr
@@ -1496,7 +1509,7 @@ graph(%input, %weight):
                 m = M()
                 copy_weights(name, m, ref_m)
                 ref_m.qconfig = qconfig
-                ref_m = quantize(ref_m, test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
+                ref_m = quantize(ref_m, _test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
                 ref_res = ref_m(data)
                 # script mode
                 m = torch.jit.script(m)
@@ -12970,7 +12983,7 @@ a")
 
         sm = SM()
 
-        self.assertExpected(str(sm.forward.schema))
+        self.assertExpectedStripMangled(str(sm.forward.schema))
 
     def test_annotated_script_fn_return_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "but is actually of type"):
@@ -13084,7 +13097,7 @@ a")
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script function
     def test_annot_string_mypy_fn(self):
@@ -13097,7 +13110,7 @@ a")
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
             test_str.append(str(cu.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script method
     def test_annot_string_mypy_method(self):
@@ -13118,7 +13131,7 @@ a")
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     # Helper function to eval Python3 code without causing a syntax error for
     # this file under py2
@@ -13150,7 +13163,7 @@ a")
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
             test_str.append(str(fn.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_multiline_annot_ast_py3_fn(self):
@@ -13227,7 +13240,7 @@ a")
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script function
     @unittest.skipIf(not PY35, "Python 3.5 needed")
@@ -13263,7 +13276,7 @@ a")
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
             test_str.append(str(fn.foo.schema))
-        self.assertExpected("\n".join(test_str))
+        self.assertExpectedStripMangled("\n".join(test_str))
 
     def test_method_casts_script(self):
         cast_types = [
