@@ -624,17 +624,19 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   return std::make_tuple(qparams, scalar_type);
 }
 
-// void QuantizeHelper::quantizeTensor(Value* v) {
-//   auto observer_name = findObserverName(v);
-//   if (!observer_name) {
-//     return;
-//   }
-//   auto tp = getQParams(v);
-//   auto qparams = std::get<0>(tp);
-//   auto scalar_type = std::get<1>(tp);
-//   removeObserver(v, observer_name.value());
-//   insertQuantDeQuantCall(v, qparams, scalar_type, observer_name.value());
-// }
+void QuantizeHelper::quantizeTensor(Value* v) {
+  auto observer_name = findObserverName(v);
+  if (!observer_name) {
+    return;
+  }
+  auto tp = getQParams(v);
+  auto qparams = std::get<0>(tp);
+  auto scalar_type = std::get<1>(tp);
+  // NB: v is updated here, since removeObserver replaces
+  // v with the input to the observer call
+  v = removeObserver(v, observer_name.value());
+  insertQuantDeQuantCall(v, qparams, scalar_type, observer_name.value());
+}
 
 c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
     Value* child_instance) {
