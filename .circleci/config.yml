@@ -5504,6 +5504,13 @@ workflows:
               only: postnightly
 
   docker_build:
+    triggers:
+      - schedule:
+          cron: "0 15 * * 7"
+          filters:
+            branches:
+              only:
+                - master
     jobs:
       - docker_build_job:
           name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
