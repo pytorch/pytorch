@@ -82,6 +82,13 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto key_type = parseTypeFromExpr(subscript.subscript_exprs()[0]);
     auto value_type = parseTypeFromExpr(subscript.subscript_exprs()[1]);
     return DictType::create(key_type, value_type);
+  } else if (typeName == "Final"){
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    return parseTypeFromExpr(*subscript.subscript_exprs().begin());
   } else {
     throw ErrorReport(subscript.range())
         << "Unknown type constructor " << typeName;

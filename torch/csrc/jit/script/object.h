@@ -63,7 +63,7 @@ struct TORCH_API Object {
     if (auto r = _ivalue()->type()->findAttributeSlot(name)) {
       return _ivalue()->getSlot(*r);
     }
-    if (auto v = module_object()->type()->getConstant(name)) {
+    if (auto v = _ivalue()->type()->getConstant(name)) {
       return v;
     }
     return or_else;

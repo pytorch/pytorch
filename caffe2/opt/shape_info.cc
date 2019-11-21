@@ -8,10 +8,9 @@ namespace caffe2 {
 ShapeInfo getShapeInfoFromBlob(const Blob* blob) {
   ShapeInfo shape_info;
   shape_info.shape = GetTensorShapeOfBlob(blob);
-  if (!shape_info.shape.unknown_shape()) {
-    shape_info.setDimType(std::vector<TensorBoundShape::DimType>(
-        shape_info.shape.dims_size(), TensorBoundShape_DimType_CONSTANT));
-  }
+  shape_info.dim_type = shape_info.shape.unknown_shape()
+      ? ShapeInfo::DimType::UNKNOWN
+      : ShapeInfo::DimType::CONSTANT;
   if (blob->meta().id() == TypeMeta::Id<int8::Int8TensorCPU>()) {
     shape_info.is_quantized = true;
     LoadInt8TensorInfoOfBlob(
@@ -37,7 +36,7 @@ ShapeInfo getShapeInfoFromBlob(const Blob* blob) {
 }
 
 bool operator==(const ShapeInfo& lhs, const ShapeInfo& rhs) {
-  return lhs.getDimType() == rhs.getDimType() &&
+  return lhs.dim_type == rhs.dim_type &&
       lhs.shape.SerializeAsString() == rhs.shape.SerializeAsString();
 }
 

@@ -12591,17 +12591,24 @@ class TestTorchDeviceType(TestCase):
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
 
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
+                if dtype == torch.half:
+                    return torch.zeros(shape, device=device).uniform_().to(dtype=torch.half)
                 return torch.zeros(shape, device=device, dtype=dtype).uniform_()
             elif len(shape) == 1:
+                if dtype == torch.half:
+                    return torch.zeros((shape + [5]), device=device).uniform_().to(dtype=torch.half)[:, 2]
                 return torch.zeros((shape + [5]), device=device, dtype=dtype).uniform_()[:, 2]
             else:
                 # num dim = 2
                 new_shape = [2, shape[1], 7, 1, shape[0], 1, 10]
-                prob_dist = torch.zeros(new_shape, device=device, dtype=dtype).uniform_()
+                if dtype == torch.half:
+                    prob_dist = torch.zeros(new_shape, device=device).uniform_().to(dtype=torch.half)
+                else:
+                    prob_dist = torch.zeros(new_shape, device=device, dtype=dtype).uniform_()
                 prob_dist = prob_dist.transpose(1, 4)
                 prob_dist = prob_dist[1, :, 5, 0, :, 0, 4]
                 assert not prob_dist.is_contiguous()  # sanity check

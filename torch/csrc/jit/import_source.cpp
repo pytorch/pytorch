@@ -264,6 +264,40 @@ struct SourceImporterImpl : public Resolver,
     }
   }
 
+  IValue importConstant(const Expr& rhs, const TypePtr& type) {
+    std::cout << "rhs " << rhs << std::endl;
+    switch (rhs.kind()) {
+      case TK_CONST: {
+        const auto v = Const(rhs);
+        if (v.isFloatingPoint()) {
+          type->expect<c10::FloatType>();
+          return v.asFloatingPoint();
+        } else if (v.isIntegral()) {
+          type->expect<c10::IntType>();
+          return v.asIntegral();
+        } else {
+          throw ErrorReport(rhs.range()) << " is not recognized as a valid constant.";
+        }
+      }
+      case TK_TUPLE_LITERAL: {
+        auto tuple_type = type->expect<c10::TupleType>();
+        auto tuple = TupleLiteral(rhs);
+        std::vector<IValue> vs;
+        for (size_t i = 0; i < tuple.inputs().size(); ++i) {
+          vs.push_back(importConstant(tuple.inputs()[i], tuple_type->elements()[i]));
+        }
+        return c10::ivalue::Tuple::create(vs);
+      }
+      case TK_STRINGLITERAL: {
+        auto string_type = type->expect<c10::StringType>();
+        auto str = StringLiteral(rhs);
+        return str.text();
+      }
+      default:
+        throw ErrorReport(rhs.range()) << " is not recognized as a valid constant";
+    }
+  }
+
   void importClass(
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
@@ -304,18 +338,16 @@ struct SourceImporterImpl : public Resolver,
               } else if (name == "__annotations__") {
                 // This is to initialize the annotations dict, just ignore.
                 continue;
-              } else if (name == "__constants__") {
-                // This is to initialize the constants dict, just ignore.
-                continue;
               } else {
                 // This is a regular attribute assignment, of the form:
                 //   foo : Tensor
                 if (assign.rhs().present()) {
-                  throw ErrorReport(assign.rhs())
-                      << "Unexpected right-hand found in assignment in class body. "
-                         "This is not yet supported.";
+                  // This is a constant assignemnt, of the form:
+                  // foo : Final[int] = 3
+                  constants.push_back(assign);
+                } else {
+                  attributes.push_back(assign);
                 }
-                attributes.push_back(assign);
               }
             } break;
             case TK_SUBSCRIPT: {
@@ -323,18 +355,10 @@ struct SourceImporterImpl : public Resolver,
               // is not a valid python, identifier. Looks like:
               //    __annotations__["0"] = Tensor
               const auto lhs = Subscript(assign.lhs());
+              TORCH_INTERNAL_ASSERT(
+                  Var(lhs.value()).name().name() == "__annotations__");
               TORCH_INTERNAL_ASSERT(lhs.subscript_exprs().size() == 1);
-              const auto& dict_name = Var(lhs.value()).name().name();
-              if(dict_name == "__annotations__") {
-                attributes.push_back(assign);
-              } else if (dict_name == "__constants__") {
-                constants.push_back(assign);
-              } else {
-                TORCH_INTERNAL_ASSERT(
-                    false,
-                    "Unexpected subscript assignment, only supports assignment of __annotations__ and __constants__ but found:",
-                    dict_name);
-              }
+              attributes.push_back(assign);
             } break;
             default: {
               TORCH_INTERNAL_ASSERT(
@@ -381,11 +405,11 @@ struct SourceImporterImpl : public Resolver,
 
     // Populate class constants
     for (const auto& assign : constants) {
-      TORCH_INTERNAL_ASSERT(assign.lhs().kind() == TK_SUBSCRIPT);
-      const auto name =
-        StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0]).text();
-      auto v = IValue(0);
-      class_type->addConstant(name, v);
+      TORCH_INTERNAL_ASSERT(assign.lhs().kind() == TK_VAR);
+      const auto name = Var(assign.lhs()).name().name();
+      const auto type = type_parser.parseTypeFromExpr(assign.type().get());
+      auto rhs = assign.rhs().get();
+      class_type->addConstant(name, importConstant(rhs, type));
     }
 
     cu_->register_type(class_type);

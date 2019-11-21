@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
 #include <algorithm>
@@ -194,8 +195,7 @@ Node* InsertObserversHelper::insertObserverFor(
     return nullptr;
   }
 
-  script::Module observer_module(
-      "Module", std::make_shared<script::CompilationUnit>());
+  script::Module observer_module;
   if (isWeightOfConvOrLinear(v)) {
     TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
@@ -209,25 +209,32 @@ Node* InsertObserversHelper::insertObserverFor(
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
-  // Get handle of observer module
-  Node* observer_instance = g->create(c10::prim::GetAttr);
-  // self._observer_v
-  observer_instance->addInput(g->inputs()[0]);
-  observer_instance->s_(c10::attr::name, observer_name);
-  observer_instance->output()->setDebugName(observer_name);
-  observer_instance->output()->setType(observer.type());
-  observer_instance->insertAfter(v->node());
 
-  // Create forward method call
-  Node* call = g->create(c10::prim::CallMethod);
-  TORCH_INTERNAL_ASSERT(call != nullptr, "Failed to create forward call node");
-  call->s_(c10::attr::name, "forward");
-  call->addInput(observer_instance->output());
-  call->addInput(v);
-  call->output()->setType(v->type());
-  call->output()->setDebugName(v->debugName() + ".observed");
-  call->insertAfter(observer_instance);
-  return call;
+  // Get handle of observer module
+  Node* observer_instance =
+      g->createGetAttr(g->inputs()[0], observer_name)->insertAfter(v->node());
+  observer_instance->output()->setDebugName(observer_name);
+
+  {
+    WithInsertPoint guard(observer_instance->next());
+    // Match arguments to types of observer's arguments
+    script::MatchedSchema forward_matched_schema = script::matchSchema(
+        observer.get_method("forward").function().getSchema(),
+        v->node()->sourceRange(),
+        *g,
+        {observer_instance->output(), v},
+        {});
+    // Insert call to observer's forward
+    Node* call = g->insertMethodCall("forward", forward_matched_schema)->node();
+    call->output()->copyMetadata(v);
+
+    // Replace v with the output of observer
+    v->replaceAllUsesWith(call->output());
+    // The above also replaced the input to `call`, so switch it back to
+    // the correct value
+    call->replaceInput(1, v);
+    return call;
+  }
 }
 
 void InsertObserversHelper::findIntermediateValuesInPattern(
@@ -350,8 +357,7 @@ void InsertObserversHelper::insertObservers(
         // the child module.
         auto module_instance = n->inputs()[0];
         auto module_method_name = n->s(attr::name);
-        script::Module callee_module(
-            "Module", std::make_shared<script::CompilationUnit>());
+        script::Module callee_module;
         if (module_instance->node()->kind() == prim::GetAttr) {
           auto child_module_name = module_instance->node()->s(attr::name);
           callee_module = module.attr(child_module_name).toModule();
@@ -427,18 +433,16 @@ Node* insertQuantDeQuantCall(
 
 // find the observer for Value `v` and return the name of the observer
 c10::optional<std::string> findObserverName(Value* v) {
-  for (const Use& u : v->uses()) {
-    // Note that here we just check for the name of observer, but the ideally
-    // we should be comparing the type of observer, this is a temporary
-    // work around until data only clone of module.clone is supported.
-    if (u.user->kind() == prim::CallMethod &&
-        u.user->s(attr::name) == "forward") {
-      auto module_instance = u.user->inputs().at(0);
-      if (module_instance->node()->kind() == prim::GetAttr &&
-          module_instance->node()->s(attr::name).find("_observer_") !=
-              std::string::npos) {
-        return module_instance->node()->s(attr::name);
-      }
+  // Note that here we just check for the name of observer, but the ideally
+  // we should be comparing the type of observer, this is a temporary
+  // work around until data only clone of module.clone is supported.
+  Node* n = v->node();
+  if (n->kind() == prim::CallMethod && n->s(attr::name) == "forward") {
+    auto module_instance = n->inputs().at(0);
+    if (module_instance->node()->kind() == prim::GetAttr &&
+        module_instance->node()->s(attr::name).find("_observer_") !=
+            std::string::npos) {
+      return module_instance->node()->s(attr::name);
     }
   }
   return c10::nullopt;
@@ -452,7 +456,11 @@ class QuantizeHelper {
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
   void quantizeTensor(Value* v);
-  void removeObserver(Value* v, const std::string& observer_name);
+  // Remove the observer for value `v`. This function returns
+  // the original value (i.e. before observation), and thus all
+  // uses of the passed-in `v` should be replaced by the caller with
+  // the return value
+  Value* removeObserver(Value* v, const std::string& observer_name);
   void removeModulesAndNodes() {
     // Remove observer modules from last one to first one in order to
     // reduce the time complexity, assuming all the observer modules
@@ -475,23 +483,24 @@ class QuantizeHelper {
   std::vector<Node*> nodes_to_destroy_;
 };
 
-void QuantizeHelper::removeObserver(
+Value* QuantizeHelper::removeObserver(
     Value* v,
     const std::string& observer_name) {
   // remove observer_module
   observer_modules_to_remove_.push_back(observer_name);
-  // remove observer forward call
-  for (const Use& u : v->uses()) {
-    Node* user = u.user;
-    if (user->kind() == prim::CallMethod && user->s(attr::name) == "forward" &&
-        user->inputs()[0]->node()->kind() == prim::GetAttr &&
-        user->inputs()[0]->node()->s(attr::name) == observer_name) {
-      // Observer forward call node
-      nodes_to_destroy_.push_back(user);
-      // GetAttr node for observer module
-      nodes_to_destroy_.push_back(user->inputs()[0]->node());
-    }
-  }
+
+  Node* observer = v->node();
+  TORCH_INTERNAL_ASSERT(
+      observer->kind() == prim::CallMethod &&
+      observer->s(attr::name) == "forward" &&
+      observer->inputs()[0]->node()->kind() == prim::GetAttr &&
+      observer->inputs()[0]->node()->s(attr::name) == observer_name);
+  // Observer forward call node
+  nodes_to_destroy_.push_back(observer);
+  // GetAttr node for observer module
+  nodes_to_destroy_.push_back(observer->inputs()[0]->node());
+  v->replaceAllUsesWith(observer->input(1));
+  return observer->input(1);
 }
 
 void checkCalculateQParamsResult(const IValue& qparams) {
@@ -552,7 +561,9 @@ void QuantizeHelper::quantizeTensor(Value* v) {
   auto tp = getQParams(v);
   auto qparams = std::get<0>(tp);
   auto scalar_type = std::get<1>(tp);
-  removeObserver(v, observer_name.value());
+  // NB: v is updated here, since removeObserver replaces
+  // v with the input to the observer call
+  v = removeObserver(v, observer_name.value());
   Node* dequant;
   dequant = insertQuantDeQuantCall(v, qparams, scalar_type);
   v->replaceAllUsesWith(dequant->output());
