@@ -145,27 +145,6 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
     for arg, arg_type in type_mapping.items():
         if not isinstance(arg, arg_type):
             raise RuntimeError("Argument {} must be of type {} but got type {}".format(arg, arg_type, type(arg)))
-    # if not isinstance(backend, backend_registry.BackendType):
-    #     raise RuntimeError("`backend` must be a `backend_registry.BackendType`.")
-
-    # if not isinstance(store, dist.Store):
-    #     raise RuntimeError("`store` must be a `c10d::Store`. {}".format(store))
-
-    # if not isinstance(name, str):
-    #     raise RuntimeError("`name` must be a string. {}".format(name))
-
-    # if not isinstance(rank, numbers.Integral):
-    #     raise RuntimeError("`rank` must be an integer. {}".format(rank))
-
-    # if not isinstance(world_size, numbers.Integral):
-    #     raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
-
-    # if not isinstance(rpc_backend_options, RpcBackendOptions):
-    #     raise RuntimeError(
-    #         "`rpc_backend_options` must be an `RpcBackendOptions`. {}".format(
-    #             rpc_backend_options
-    #         )
-    #     )
 
 
 @_require_initialized
