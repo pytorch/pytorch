@@ -257,6 +257,9 @@ function(torch_compile_options libname)
         -Wno-missing-field-initializers
         -Wno-write-strings
         -Wno-unknown-pragmas
+        # Bug for visibility of lambdas
+        # https://stackoverflow.com/questions/44390898/gcc-6-x-warning-about-lambda-visibility
+        -Wno-attributes
         # Clang has an unfixed bug leading to spurious missing braces
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces
