@@ -14,6 +14,18 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
+void AdagradParamState::serialize(serialize::InputArchive& archive) {
+    c10::IValue step_, sum_;
+    archive.read("step", step_);
+    archive.read("sum", sum_);
+    this->step(step_.toInt());
+    this->sum(sum_.toTensor());
+}
+
+void AdagradParamState::serialize(serialize::OutputArchive& archive) {
+    archive.write("step", IValue(this->step()));
+    archive.write("sum", IValue(this->sum()));
+}
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 void Adagrad::step() {

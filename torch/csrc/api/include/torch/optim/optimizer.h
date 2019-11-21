@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/serialize/archive.h>
 
 #include <algorithm>
 #include <functional>
@@ -34,6 +35,11 @@ namespace optim {
 class TORCH_API OptimizerParamState {
  public:
   virtual std::unique_ptr<OptimizerParamState> clone() const;
+public:
+  virtual void serialize(serialize::InputArchive& archive,
+    const std::string& key);
+  virtual void serialize(serialize::OutputArchive& archive,
+    const std::string& key);
 };
 
 template <typename Derived>

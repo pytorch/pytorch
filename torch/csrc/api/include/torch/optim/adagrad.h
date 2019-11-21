@@ -30,6 +30,9 @@ struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOption
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
   TORCH_ARG(torch::Tensor, sum);
   TORCH_ARG(int64_t, step);
+
+  void serialize(serialize::InputArchive& archive);
+  void serialize(serialize::OutputArchive& archive);
 };
 
 class TORCH_API Adagrad : public Optimizer {
@@ -80,7 +83,6 @@ class TORCH_API Adagrad : public Optimizer {
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
     //_TORCH_OPTIM_SERIALIZE(state); add a serialize function
-  }
 };
 } // namespace optim
 } // namespace torch
