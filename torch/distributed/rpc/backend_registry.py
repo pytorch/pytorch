@@ -23,6 +23,7 @@ def _backend_type_repr(self):
 BackendType = enum.Enum(value="BackendType", names={})
 BackendType.__repr__ = _backend_type_repr
 
+
 def register_backend(
     backend_name, construct_rpc_agent_options_handler, init_backend_handler
 ):
