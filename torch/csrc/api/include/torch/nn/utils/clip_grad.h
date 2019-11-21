@@ -53,7 +53,7 @@ inline double clip_grad_norm_(
     std::initializer_list<Tensor> parameters,
     double max_norm,
     double norm_type = 2.0) {
-  return clip_grad_norm_(parameters, max_norm, norm_type);
+  return clip_grad_norm_(std::vector<Tensor>(parameters), max_norm, norm_type);
 }
 
 // A wrapper around clip_grad_norm_ that allows us to call the function with a
@@ -84,7 +84,7 @@ inline void clip_grad_value_(
 // A wrapper around clip_grad_value_ that allows us to call the function with a
 // braced-init list of Tensors.
 inline void clip_grad_value_(std::initializer_list<Tensor> parameters, double clip_value) {
-  clip_grad_value_(parameters, clip_value);
+  clip_grad_value_(std::vector<Tensor>(parameters), clip_value);
 }
 
 // A wrapper around clip_grad_value_ that allows us to call the function with a
