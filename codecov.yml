@@ -28,4 +28,4 @@ jobs:
         uses: codecov/codecov-action@v1.0.2
         with:
           token: ${{secrets.CODECOV_TOKEN}}
-          file: ./zhuzhu-project/target/site/jacoco/jacoco.xml
+          file: ./jacoco.xml
