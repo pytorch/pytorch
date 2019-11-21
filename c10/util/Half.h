@@ -450,7 +450,7 @@ typename std::enable_if<std::is_integral<From>::value && !std::is_same<From, boo
     return f > limit::max() ||
         (f < 0 && -static_cast<uint64_t>(f) > limit::max());
   } else {
-    return f < limit::lowest() || f > limit::max();
+    return f < static_cast<From>(limit::lowest()) || f >= static_cast<From>(limit::max());
   }
 }
 
