@@ -495,7 +495,7 @@ GraphEncoder::GraphEncoder(
       opset->set_version(1);
     else
       opset->set_version(registered_domain_version.at(domain));
-	}
+    }
 }
 
 void GraphEncoder::EncodeTensor(
