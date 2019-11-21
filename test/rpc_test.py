@@ -233,6 +233,16 @@ class RpcTest(RpcAgentTestFixture):
             unknown_worker_id = rpc.get_worker_info("WorkerUnknown")
 
     @dist_init
+    def test_get_worker_names(self):
+        n = self.rank + 1
+        peer_rank = n % self.world_size
+        worker_names = rpc.api._agent.get_worker_names()
+        expected_worker_names = {
+            "worker{}".format(rank) for rank in range(self.world_size)
+        }
+        self.assertEqual(worker_names, expected_worker_names)
+
+    @dist_init
     def test_self_add(self):
         self_worker_info = rpc.get_worker_info()
         self_worker_name = "worker{}".format(self.rank)
