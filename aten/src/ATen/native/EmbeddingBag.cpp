@@ -385,11 +385,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
         per_sample_weights,"per_sample_weights", 1);
     checkSameType("embedding_bag", weight_arg, per_input_weights_arg);
     AT_ASSERT(per_sample_weights.dim() == 1);
-    if (new_offsets) {
-      AT_ASSERT(per_sample_weights.numel() + 1 == indices.numel());
-    } else {
-      AT_ASSERT(per_sample_weights.numel() == indices.numel());
-    }
+    AT_ASSERT(per_sample_weights.numel() == indices.numel());
   }
 
   auto bag_size = at::zeros(offsets.sizes(), indices.options());
