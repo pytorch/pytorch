@@ -206,6 +206,9 @@ class EmbeddingBag(Module):
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
                                  Notes for more details regarding sparse gradients. Note: this option is not
                                  supported when ``mode="max"``.
+        new_offsets (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
+                                      is equivalent to the size of `indices`. This matches the CSR format. Note:
+                                      this option is currently only supported when ``mode="sum"``.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
@@ -249,7 +252,7 @@ class EmbeddingBag(Module):
                 [ 1.1306, -2.5798, -1.0044]])
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse']
+                     'scale_grad_by_freq', 'mode', 'sparse', 'new_offsets']
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,

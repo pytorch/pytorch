@@ -9635,6 +9635,7 @@ class TestNNDeviceType(NNTestCase):
             expected = self._embedding_bag_reference_impl(
                 input, reference_weights, offsets, mode, ref_per_sample_weights, new_offsets)
             result = es(input, offsets, per_sample_weights)
+            print("mode: " + str(mode) + "; dtype: " + str(dtype) + "; trainable: " + str(trainable) + "; new_offsets: " + str(new_offsets))
             self.assertEqual(result, expected, prec=dtype2prec[dtype])
 
             grad = torch.randn_like(expected)
