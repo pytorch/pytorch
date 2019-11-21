@@ -60,18 +60,17 @@ class Adam(Optimizer):
                     # Maintains max of all exp. moving avg. of sq. grad. values
                     state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_direction(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
+    def get_update(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
         grad = p.grad
         state = self.state[p]
+
+        if weight_decay > 0:
+            grad = grad.add(weight_decay, p)
 
         beta1, beta2 = betas
         state['step'] += 1
         bias_corr1 = 1 - beta1 ** state['step']
         bias_corr2 = 1 - beta2 ** state['step']
-
-        if weight_decay > 0:
-            grad = grad.add(weight_decay, p)
-
         exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
         exp_avg.mul_(beta1).add_(1 - beta1, grad)
         _var = exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
@@ -84,7 +83,7 @@ class Adam(Optimizer):
         var = _var / bias_corr2
         return mean.div_(var.sqrt_().add_(eps))
 
-    def get_sparse_direction(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
+    def get_sparse_update(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
         if amsgrad:
             raise NotImplementedError("AMSGrad not implemented for sparse gradients")
         if weight_decay > 0:

@@ -41,40 +41,18 @@ class Adadelta(Optimizer):
             state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
             state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
+    def get_update(self, p, rho=0.9, eps=1e-6, weight_decay=0, **_):
+        grad = p.grad
+        state = self.state[p]
 
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
+        if weight_decay > 0:
+            grad = grad.add(weight_decay, p)
 
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('Adadelta does not support sparse gradients')
-                state = self.state[p]
+        state['step'] += 1
 
-                square_avg, acc_delta = state['square_avg'], state['acc_delta']
-                rho, eps = group['rho'], group['eps']
-
-                state['step'] += 1
-
-                if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p)
-
-                square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
-                std = square_avg.add(eps).sqrt_()
-                delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-                p.add_(-group['lr'], delta)
-                acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
-
-        return loss
+        square_avg, acc_delta = state['square_avg'], state['acc_delta']
+        square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
+        std = square_avg.add(eps).sqrt_()
+        delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
+        acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
+        return delta

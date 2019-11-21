@@ -193,19 +193,19 @@ class Optimizer(object):
                     continue
 
                 if p.grad.is_sparse:
-                    update = self.get_sparse_direction(p, **group)
+                    update = self.get_sparse_update(p, **group)
                 else:
-                    update = self.get_direction(p, **group)
+                    update = self.get_update(p, **group)
 
                 p.add_(-lr, update)
 
         return loss
 
-    def get_direction(self, p, **kwargs):
+    def get_update(self, p, **kwargs):
         msg = "{} does not implement an update for dense gradients"
         raise NotImplementedError(msg.format(self.__class__.__name__))
 
-    def get_sparse_direction(self, p, **kwargs):
+    def get_sparse_update(self, p, **kwargs):
         msg = "{} does not implement an update for sparse gradients"
         raise NotImplementedError(msg.format(self.__class__.__name__))
 

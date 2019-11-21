@@ -22,7 +22,8 @@ class Rprop(Optimizer):
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
-        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes)
+        min_step, max_step = step_sizes
+        defaults = dict(lr=lr, etas=etas, step_sizes=(min_step / lr, max_step / lr))
         super(Rprop, self).__init__(params, defaults)
 
     def reset_state(self):
@@ -32,52 +33,25 @@ class Rprop(Optimizer):
                 state = self.state[p]
                 state['step'] = 0
                 state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                state['step_size'] = p.new().resize_as_(p).fill_(lr)
+                state['step_size'] = torch.ones_like(p, memory_format=torch.preserve_format)
 
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
+    def get_update(self, p, etas=(0.5, 1.2), step_sizes=(1e-4, 5000)):
+        grad = p.grad
+        state = self.state[p]
 
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('Rprop does not support sparse gradients')
-                state = self.state[p]
-
-                etaminus, etaplus = group['etas']
-                step_size_min, step_size_max = group['step_sizes']
-                step_size = state['step_size']
-
-                state['step'] += 1
-
-                sign = grad.mul(state['prev']).sign()
-                sign[sign.gt(0)] = etaplus
-                sign[sign.lt(0)] = etaminus
-                sign[sign.eq(0)] = 1
-
-                # update stepsizes with step size updates
-                step_size.mul_(sign).clamp_(step_size_min, step_size_max)
-
-                # for dir<0, dfdx=0
-                # for dir>=0 dfdx=dfdx
-                grad = grad.clone(memory_format=torch.preserve_format)
-                grad[sign.eq(etaminus)] = 0
-
-                # update parameters
-                p.addcmul_(-1, grad.sign(), step_size)
-
-                state['prev'].copy_(grad)
-
-        return loss
+        eta_minus, eta_plus = etas
+        min_step, max_step = step_sizes
+        step_size = state['step_size']
+        state['step'] += 1
+        sign = grad.mul(state['prev']).sign()
+        sign[sign.gt(0)] = eta_plus
+        sign[sign.lt(0)] = eta_minus
+        sign[sign.eq(0)] = 1
+        # update stepsizes with step size updates
+        step_size.mul_(sign).clamp_(min_step, max_step)
+        # for dir<0, dfdx=0
+        # for dir>=0 dfdx=dfdx
+        grad = grad.clone(memory_format=torch.preserve_format)
+        grad[sign.eq(eta_minus)] = 0
+        state['prev'].copy_(grad)
+        return step_size * grad.sign()

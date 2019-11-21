@@ -48,9 +48,9 @@ class OptimizerW(Optimizer):
                     continue
 
                 if p.grad.is_sparse:
-                    update = self.get_sparse_direction(p, **_group)
+                    update = self.get_sparse_update(p, **_group)
                 else:
-                    update = self.get_direction(p, **_group)
+                    update = self.get_update(p, **_group)
 
                 p.mul_(1 - weight_decay * lr).add_(-lr, update)
 
