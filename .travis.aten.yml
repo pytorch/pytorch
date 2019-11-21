@@ -7,8 +7,10 @@ python:
 dist: trusty
 
 before_install:
-    - sudo apt-get install -qq valgrind
-
+  - sudo apt-get install -qq valgrind 
+  - pip install codecov 
+  - pip install coverage
+  
 install:
     - travis_retry pip install pyyaml typing
    
@@ -23,6 +25,9 @@ script:
     - cd ..
     - tools/test_install.sh $(pwd)/install $(pwd)
     - coverage run main.py
+    - coverage run main.py
+    - node_modules/.bin/nyc report --reporter=text-lcov > coverage.lcov
+    - codecov   
     
 matrix:
     fast_finish: true
@@ -36,7 +41,5 @@ after_success:
   - cd Tests/
   - bash <(curl -s https://codecov.io/bash) -t 8faabb77-d745-44bc-be18-b906de8e2928
   - codecov -f "coverage.xml"
-
-
 
 
