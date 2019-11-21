@@ -116,7 +116,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
     auto actual_pow_ = tensor.clone();
     actual_pow_.pow_(pow);
 
-    auto actual_pow_out = torch::empty_like(tensor);
+    auto actual_pow_out = torch::empty_like(tensor, torch::MemoryFormat::Preserve);
     torch::pow_out(actual_pow_out, tensor, pow);
 
     auto actual_torch_pow = torch::pow(tensor, pow);
@@ -151,7 +151,7 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
 
   for (const auto val : vals) {
     const auto actual_pow = torch::pow(val, pow_tensor);
-    auto actual_pow_out1 = torch::empty_like(pow_tensor);
+    auto actual_pow_out1 = torch::empty_like(pow_tensor, torch::MemoryFormat::Preserve);
     const auto actual_pow_out2 =
       torch::pow_out(actual_pow_out1, val, pow_tensor);
 
@@ -190,7 +190,7 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
     auto actual_pow_ = vals_tensor.clone();
     actual_pow_.pow_(pows_tensor);
 
-    auto actual_pow_out = torch::empty_like(vals_tensor);
+    auto actual_pow_out = torch::empty_like(vals_tensor, torch::MemoryFormat::Preserve);
     torch::pow_out(actual_pow_out, vals_tensor, pows_tensor);
 
     auto actual_torch_pow = torch::pow(vals_tensor, pows_tensor);

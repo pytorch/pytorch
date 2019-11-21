@@ -37,7 +37,7 @@ TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
                   .allclose(input));
 
   torch::Tensor sum = output[0].to({torch::kCUDA, 1}) + output[1];
-  sum.backward(torch::ones_like(sum));
+  sum.backward(torch::ones_like(sum, torch::MemoryFormat::Preserve));
 
   ASSERT_TRUE(input.grad().defined());
   ASSERT_TRUE(input.grad().device().is_cpu());
@@ -61,7 +61,7 @@ TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
   ASSERT_TRUE(chunks[0].to({torch::kCUDA, 0}).allclose(a));
   ASSERT_TRUE(chunks[1].allclose(b));
 
-  output.backward(torch::ones_like(output));
+  output.backward(torch::ones_like(output, torch::MemoryFormat::Preserve));
 
   ASSERT_TRUE(a.grad().defined());
   ASSERT_EQ(a.grad().device(), torch::Device(torch::kCUDA, 0));
@@ -266,7 +266,7 @@ TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
       torch::optim::SGD optim(
           model->parameters(), torch::optim::SGDOptions(0.1));
       auto output = model->forward(input);
-      auto loss = torch::mse_loss(output, torch::zeros_like(output));
+      auto loss = torch::mse_loss(output, torch::zeros_like(output, torch::MemoryFormat::Preserve));
       loss.backward();
       optim.step();
 
@@ -274,7 +274,7 @@ TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
       torch::optim::SGD optim_dp(
           model_dp->parameters(), torch::optim::SGDOptions(0.1));
       auto output_dp = parallel::data_parallel(model_dp, input_dp);
-      auto loss_dp = torch::mse_loss(output_dp, torch::zeros_like(output_dp));
+      auto loss_dp = torch::mse_loss(output_dp, torch::zeros_like(output_dp, torch::MemoryFormat::Preserve));
       loss_dp.backward();
       optim_dp.step();
 
