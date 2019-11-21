@@ -33,7 +33,6 @@ matrix:
         script: flake8
         
 after_success:
-  - codecov #运行codecov
   - cd Tests/
   - bash <(curl -s https://codecov.io/bash) -t 8faabb77-d745-44bc-be18-b906de8e2928
 
