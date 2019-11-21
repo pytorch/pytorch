@@ -174,18 +174,18 @@ struct Patch<policy, Ret (Args...), F> {
 namespace {
 // Static registration for kernels that require autocast.
 
-// It's debatable at which level the convolutions should be patched.
+// It's debatable at which level operations should be patched.
 //
-// Option 1:  Patch at the Python-exposed level, to make 100% sure autograd history
-// recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
-//
-// Option 2:  Patch only at the level of explicit calls into cudnn (cudnn_convolution, etc),
-// because those are the code paths that are guaranteed to use Tensor Cores, therefore they're the only ones
-// that should be whitelisted.  One difficulty with this approach is that convolutions (and other ops) are wrapped
+// Option 1:  Patch only at the level of explicit calls into cudnn/cublas (cudnn_convolution, etc),
+// because those are the code paths that are guaranteed to use Tensor Cores, therefore they're the ones that
+// will benefit most from FP16.  One difficulty with this approach is that convolutions (and other ops) are wrapped
 // in several layers of at::* calls.  Several non-explicitly-registered layers (e.g. at::convolution) could be called
 // before we reach cudnn_convolution.  Because they are not explicitly registered, these layers would invoke the
 // boxed fallback, which would exclude AutocastTensorId, so by the time at::cudnn_convolution is actually
 // called, it wouldn't route back through the autocasting logic at all.
+
+// Option 2:  Patch at the Python-exposed level, to make 100% sure autograd history
+// recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
 //
 // I think Option 1 is the right answer for all ops, not just convolutions.
 
