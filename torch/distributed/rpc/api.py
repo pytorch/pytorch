@@ -6,6 +6,7 @@ from . import WorkerInfo
 from . import backend_registry
 from .internal import _internal_rpc_pickler, PythonUDF
 
+import contextlib
 import functools
 import numbers
 import sys
@@ -14,7 +15,30 @@ import torch.distributed as dist
 
 
 _agent = None
+# NB: Ignoring RRef leaks during shutdown. Without this, applications have to
+# make sure there is no references to any RRef in the application code and
+# Python GC has done its job to delete those RRefs. This is could result in bad
+# debugging experiences especially when for large applications. Therefore, by
+# default, we are going to ignore RRef leaks during shutdown. This is usually
+# fine as shutdown means applications have done training and no longer care
+# about states.
+#
+# To enable RRef leak checking, set this _ignore_rref_leak to False
 _ignore_rref_leak = True
+_default_pickler = _internal_rpc_pickler
+
+@contextlib.contextmanager
+def _use_rpc_pickler(rpc_pickler):
+    r"""
+    rpc_pickler: (.internal._InternalRPCPickler) Overrides the default RPC pickler
+    """
+    global _default_pickler
+    _default_pickler = rpc_pickler
+    try:
+        yield
+    finally:
+        _default_pickler = _internal_rpc_pickler
+
 
 def _require_initialized(func):
     @functools.wraps(func)
@@ -176,15 +200,14 @@ def remote(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_info("worker1")
-        >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
+        >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
         >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -197,7 +220,7 @@ def remote(to, func, args=None, kwargs=None):
         return _invoke_remote_builtin(
             _agent, info, qualified_name, *args, **kwargs)
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         return _invoke_remote_python_udf(
             _agent, info, pickled_python_udf, tensors)
@@ -218,7 +241,7 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
             _agent, info, qualified_name, *args, **kwargs
         )
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = _invoke_rpc_python_udf(
             _agent, info, pickled_python_udf, tensors)
@@ -253,7 +276,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -286,15 +309,14 @@ def rpc_async(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_id("worker1")
-        >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
+        >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> fut2 = rpc.rpc_async("worker1", min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
         >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
