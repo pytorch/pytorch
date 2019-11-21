@@ -116,6 +116,10 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 bool TensorImpl::compute_strides_like_channels_last() const {
   if (dim() == 4) {
     int64_t min = 0;
+    // special case for trivial C dimension. default to NCHW.
+    if (stride(1) == 0) {
+      return false;
+    }
     for (auto& d : {1, 3, 2, 0}) {
       if (stride(d) < min) {
         return false;
