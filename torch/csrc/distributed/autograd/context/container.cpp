@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
@@ -69,20 +69,21 @@ int64_t DistAutogradContainer::newAutogradMessageId() {
   return next_autograd_message_id_++;
 }
 
-DistAutogradContext& DistAutogradContainer::getOrCreateContext(
-    int64_t context_id) {
+ContextPtr DistAutogradContainer::getOrCreateContext(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   auto it = autograd_context_.find(context_id);
   if (it != autograd_context_.end()) {
     return it->second;
   }
 
-  auto& context = autograd_context_
-                      .emplace(
-                          std::piecewise_construct,
-                          std::forward_as_tuple(context_id),
-                          std::forward_as_tuple(context_id))
-                      .first->second;
+  auto& context =
+      autograd_context_
+          .emplace(
+              std::piecewise_construct,
+              std::forward_as_tuple(context_id),
+              std::forward_as_tuple(
+                  std::make_shared<DistAutogradContext>(context_id)))
+          .first->second;
   return context;
 }
 
@@ -90,7 +91,7 @@ rpc::worker_id_t DistAutogradContainer::getWorkerId() const {
   return worker_id_;
 }
 
-const DistAutogradContext& DistAutogradContainer::newContext() {
+const ContextPtr DistAutogradContainer::newContext() {
   TORCH_CHECK(
       current_context_id_ == kInvalidContextId,
       "Already have an autograd context id for this thread.");
@@ -99,12 +100,14 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
   // Check for overflow into workerId_ section.
   TORCH_INTERNAL_ASSERT(next_context_id_ < max_id_);
 
-  auto& context = autograd_context_
-                      .emplace(
-                          std::piecewise_construct,
-                          std::forward_as_tuple(next_context_id_),
-                          std::forward_as_tuple(next_context_id_))
-                      .first->second;
+  auto& context =
+      autograd_context_
+          .emplace(
+              std::piecewise_construct,
+              std::forward_as_tuple(next_context_id_),
+              std::forward_as_tuple(
+                  std::make_shared<DistAutogradContext>(next_context_id_)))
+          .first->second;
 
   current_context_id_ = next_context_id_++;
   return context;
@@ -114,7 +117,7 @@ bool DistAutogradContainer::hasValidContext() const {
   return current_context_id_ != kInvalidContextId;
 }
 
-DistAutogradContext& DistAutogradContainer::currentContext() {
+ContextPtr DistAutogradContainer::currentContext() {
   TORCH_CHECK(
       hasValidContext(),
       "Current thread doesn't have a valid autograd context. Please wrap your "
@@ -155,7 +158,7 @@ void DistAutogradContainer::releaseContext(int64_t context_id) {
 void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   // notify other workers to clean up their contexts.
   auto workerIds =
-      autograd_context_.find(context_id)->second.getKnownWorkerIds();
+      autograd_context_.find(context_id)->second->getKnownWorkerIds();
   auto agent = rpc::RpcAgent::getDefaultRpcAgent();
   for (const auto& worker_id : workerIds) {
     agent->send(
@@ -173,8 +176,7 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
   }
 }
 
-DistAutogradContext& DistAutogradContainer::retrieveContext(
-    int64_t context_id) {
+ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   TORCH_CHECK(
       autograd_context_.find(context_id) != autograd_context_.end(),

@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/rpc/request_callback.h>
 
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 
 namespace torch {

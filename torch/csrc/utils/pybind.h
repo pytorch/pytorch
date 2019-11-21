@@ -35,10 +35,6 @@ struct type_caster<at::Tensor> {
 
   static handle
   cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
-    if (!src.is_variable()) {
-      throw std::runtime_error(
-          "Expected tensor's dynamic type to be Variable, not Tensor");
-    }
     return handle(THPVariable_Wrap(torch::autograd::Variable(src)));
   }
 };

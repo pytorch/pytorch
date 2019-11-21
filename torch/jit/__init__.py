@@ -1627,9 +1627,9 @@ if _enabled:
 
         @property
         def original_name(self):
-            if type(self) == self._c.name:
+            if type(self) == str(self._c._type().name()):
                 return ''
-            return self._c.name
+            return str(self._c._type().name())
 
         def define(self, src):
             # We use frames_up=1 to get to the proper surrounding scope. The stack

@@ -162,7 +162,7 @@ public:
     }
 
     const auto& tensorShape = tensor.sizes();
-    std::vector<int64_t> tensorShapeVec;
+    std::vector<jlong> tensorShapeVec;
     for (const auto& s : tensorShape) {
       tensorShapeVec.push_back(s);
     }

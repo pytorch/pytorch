@@ -1,7 +1,7 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 
 #include <c10/util/C++17.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
@@ -191,7 +191,10 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
   return sendMessageWithAutograd(
-      agent, dst, std::move(*pythonCall).toMessage());
+      agent,
+      dst,
+      std::move(*pythonCall).toMessage(),
+      true /*forceGradRecording*/);
 }
 
 PyRRef pyRemotePythonUdf(

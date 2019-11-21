@@ -60,7 +60,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsi
 
 Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
-  auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   batch_norm_elemt_cuda_out(output, self, weight, bias, mean, invstd, epsilon);
   return output;
 }

@@ -8,7 +8,8 @@ from .. import functional as F
 from .. import init
 
 
-class _BatchNorm(Module):
+class _NormBase(Module):
+    """Common base of _InstanceNorm and _BatchNorm"""
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
                      'running_mean', 'running_var', 'num_batches_tracked',
@@ -16,7 +17,7 @@ class _BatchNorm(Module):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
-        super(_BatchNorm, self).__init__()
+        super(_NormBase, self).__init__()
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
@@ -53,10 +54,37 @@ class _BatchNorm(Module):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
+    def extra_repr(self):
+        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
+               'track_running_stats={track_running_stats}'.format(**self.__dict__)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+
+        if (version is None or version < 2) and self.track_running_stats:
+            # at version 2: added num_batches_tracked buffer
+            #               this should have a default value of 0
+            num_batches_tracked_key = prefix + 'num_batches_tracked'
+            if num_batches_tracked_key not in state_dict:
+                state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
+
+        super(_NormBase, self)._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict,
+            missing_keys, unexpected_keys, error_msgs)
+
+
+class _BatchNorm(_NormBase):
+
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+                 track_running_stats=True):
+        super(_BatchNorm, self).__init__(
+            num_features, eps, momentum, affine, track_running_stats)
+
     def forward(self, input):
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum 
+        # exponential_average_factor is set to self.momentum
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -77,25 +105,6 @@ class _BatchNorm(Module):
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats,
             exponential_average_factor, self.eps)
-
-    def extra_repr(self):
-        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
-               'track_running_stats={track_running_stats}'.format(**self.__dict__)
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        version = local_metadata.get('version', None)
-
-        if (version is None or version < 2) and self.track_running_stats:
-            # at version 2: added num_batches_tracked buffer
-            #               this should have a default value of 0
-            num_batches_tracked_key = prefix + 'num_batches_tracked'
-            if num_batches_tracked_key not in state_dict:
-                state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
-
-        super(_BatchNorm, self)._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
 
 
 class BatchNorm1d(_BatchNorm):
@@ -410,8 +419,8 @@ class SyncBatchNorm(_BatchNorm):
         self.ddp_gpu_size = None
 
     def _check_input_dim(self, input):
-        if input.dim() <= 2:
-            raise ValueError('expected at least 3D input (got {}D input)'
+        if input.dim() < 2:
+            raise ValueError('expected at least 2D input (got {}D input)'
                              .format(input.dim()))
 
     def _specify_ddp_gpu_num(self, gpu_size):
@@ -426,7 +435,7 @@ class SyncBatchNorm(_BatchNorm):
 
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum 
+        # exponential_average_factor is set to self.momentum
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -499,7 +508,7 @@ class SyncBatchNorm(_BatchNorm):
             if module.affine:
                 module_output.weight.data = module.weight.data.clone(memory_format=torch.preserve_format).detach()
                 module_output.bias.data = module.bias.data.clone(memory_format=torch.preserve_format).detach()
-                # keep reuqires_grad unchanged
+                # keep requires_grad unchanged
                 module_output.weight.requires_grad = module.weight.requires_grad
                 module_output.bias.requires_grad = module.bias.requires_grad
             module_output.running_mean = module.running_mean
