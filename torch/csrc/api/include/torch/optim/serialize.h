@@ -41,17 +41,17 @@ void serialize(
     const std::string& key,
     std::vector<int64_t>& steps);
 
-// //todo-description
-// void serialize(
-//   serialize::OutputArchive& archive,
-//   const std::string& key,
-//   const ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state);
-//
-// //todo- description
-// void serialize(
-//   serialize::InputArchive& archive,
-//   const std::string& key,
-//   ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state);
+//todo-description
+void serialize(
+  serialize::OutputArchive& archive,
+  const std::string& key,
+  const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state);
+
+//todo- description
+void serialize(
+  serialize::InputArchive& archive,
+  const std::string& key,
+  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state);
 
 /// Utility function to save a vector of buffers.
 template <typename BufferContainer>

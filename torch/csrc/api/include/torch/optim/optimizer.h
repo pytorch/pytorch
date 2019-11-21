@@ -46,10 +46,6 @@ class TORCH_API OptimizerCloneableParamState : public OptimizerParamState {
   std::unique_ptr<OptimizerParamState> clone() const override {
     return c10::guts::make_unique<Derived>(static_cast<const Derived&>(*this));
   }
-  // virtual void serialize(torch::serialize::InputArchive& archive);
-  // virtual void serialize(torch::serialize::OutputArchive& archive);
-  //clang error if serialize functions are defined in OptimizerParamState -
-  //possibly because virtual functions can also be defined in second degree classes?
 };
 
 class TORCH_API OptimizerOptions {
