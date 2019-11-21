@@ -1,7 +1,7 @@
 #pragma once
 
+#include <torch/csrc/ordered_dict.h>
 #include <torch/nn/pimpl.h>
-#include <torch/ordered_dict.h>
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
 

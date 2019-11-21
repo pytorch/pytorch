@@ -2,12 +2,12 @@
 
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
-#include <torch/ordered_dict.h>
 #include <torch/types.h>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/ordered_dict.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
