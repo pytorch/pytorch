@@ -168,7 +168,9 @@ Otherwise, throws an exception.
       "shutdown",
       []() {
         auto agent = RpcAgent::getDefaultRpcAgent();
-        agent->shutdown();
+        if (agent) {
+          agent->shutdown();
+        }
       },
       R"(
       Locally shuts down the running RPC agent, without sending messages to

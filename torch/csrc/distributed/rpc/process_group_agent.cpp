@@ -194,7 +194,7 @@ void ProcessGroupAgent::join() {
   lock.unlock();
   pg_->barrier()->wait();
   threadPool_.waitWorkComplete();
-  PythonRpcHandler::getInstance().cleanup();
+  // PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
@@ -280,7 +280,7 @@ void ProcessGroupAgent::shutdown() {
   listenerThread_.join();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
-  // PythonRpcHandler::getInstance().cleanup();
+  PythonRpcHandler::getInstance().cleanup();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
