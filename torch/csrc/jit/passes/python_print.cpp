@@ -1244,18 +1244,15 @@ struct PythonPrintImpl {
     size_t numConstants = moduleType->numConstants();
     for (size_t i = 0; i < numConstants; i++) {
       const auto& name = moduleType->getConstantName(i);
-      const auto& v = moduleType->getConstant(name);
+      const auto& v = moduleType->getConstant(name).value();
 
       indent();
-      if (i == 0) {
-        // Iniitalize the constants dict if necessary
-        body_ << "__constants__ = []\n";
-        indent();
+      body_ << name << " : " << "Final[" + v.type()->python_str() << "] = ";
+      if (v.isString()) {
+        body_ << "'" << v << "'\n";
+      } else {
+        body_ << v << "\n";
       }
-
-      body_ << "__constants__["
-            << "\"" << name << "\"] = " << v << "\n";
-
     }
   }
 
