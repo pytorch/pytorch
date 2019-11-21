@@ -821,7 +821,9 @@ if (NOT NO_API)
 endif()
 
 
-find_package(OpenMP QUIET)
+if(USE_OPENMP)
+  find_package(OpenMP QUIET)
+endif()
 if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
