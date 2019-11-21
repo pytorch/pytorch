@@ -772,7 +772,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         """
         # eager mode
         annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
-<<<<<<< HEAD
         for qconfig in [
                 QConfig(
                     activation=default_observer,
