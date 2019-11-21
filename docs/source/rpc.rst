@@ -51,8 +51,12 @@ RPC and RRef primitives
 This library provides primitives allowing users to create and modify references
 (RRefs) to remote data as well as remotely execute functions.
 
-.. automodule:: torch.distributed.rpc.api
-    :members:
+.. automodule:: torch.distributed.rpc
+.. autofunction:: rpc_sync
+.. autofunction:: rpc_async
+.. autofunction:: remote
+.. autofunction:: get_worker_info
+.. autofunction:: join_rpc
 
 Distributed Autograd Framework
 ------------------------------

@@ -1133,7 +1133,7 @@ struct Graph {
 
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
-      IValue val,
+      const IValue& val,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 
