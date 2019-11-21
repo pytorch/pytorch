@@ -745,16 +745,17 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %outp
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
-    auto transposed_value = getIValue("transposed", match_vmap, vmap);
-    auto benchmark_value = getIValue("benchmark", match_vmap, vmap);
-    auto deterministic_value = getIValue("deterministic", match_vmap, vmap);
-    auto cudnn_enabled_value = getIValue("cudnn_enabled", match_vmap, vmap);
+    auto transposed_value = getIValue("transposed", match_vmap, vmap).value().toBool();
+    auto benchmark_value = getIValue("benchmark", match_vmap, vmap).value().toBool();
+    auto deterministic_value = getIValue("deterministic", match_vmap, vmap).value().toBool();
+    auto cudnn_enabled_value = getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
 
     if (!transposed_value && !benchmark_value && !deterministic_value && cudnn_enabled_value) {
-      return false;
+      return true;
     }
-    return true;
+    return false;
   };
+
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(conv_with_quant, conv_with_quant_prepack);
   rewriter.runOnGraph(graph, filter);
