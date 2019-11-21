@@ -413,7 +413,7 @@ public abstract class Tensor {
    */
   public long[] getDataAsLongArray() {
     throw new IllegalStateException(
-        "Tensor of type " + getClass().getSimpleName() + " cannot return data as float array.");
+        "Tensor of type " + getClass().getSimpleName() + " cannot return data as long array.");
   }
 
   /**
