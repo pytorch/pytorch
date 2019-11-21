@@ -93,71 +93,71 @@ CAFFE2_API Tensor& propagate_names(
 CAFFE2_API void propagate_names(Tensor& result, const Tensor& src);
 
 // Propagates all names except for those at the excluded_idxs.
-void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
+CAFFE2_API void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
 
 // Used for reduction ops that have a `keepdim` arg.
-void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
+CAFFE2_API void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
 
-void propagate_names_for_expand(Tensor& result, const Tensor& self);
+CAFFE2_API void propagate_names_for_expand(Tensor& result, const Tensor& self);
 
-std::vector<Dimname> compute_cat_outnames(TensorList tensors);
+CAFFE2_API std::vector<Dimname> compute_cat_outnames(TensorList tensors);
 
-std::vector<Dimname> compute_broadcast_outnames(
+CAFFE2_API std::vector<Dimname> compute_broadcast_outnames(
     const Tensor& self,
     const Tensor& other);
 
-std::vector<Dimname> broadcast_to_outnames(
+CAFFE2_API std::vector<Dimname> broadcast_to_outnames(
     const Tensor& tensor,
     const Tensor& reference_tensor,
     const char* op_name);
 
-std::vector<Dimname> compute_matmul_outnames(const Tensor& self, const Tensor& other);
+CAFFE2_API std::vector<Dimname> compute_matmul_outnames(const Tensor& self, const Tensor& other);
 
-std::vector<Dimname> compute_cdist_outnames(const Tensor& self, const Tensor& other);
+CAFFE2_API std::vector<Dimname> compute_cdist_outnames(const Tensor& self, const Tensor& other);
 
-std::vector<Dimname> compute_bmm_outnames(
+CAFFE2_API std::vector<Dimname> compute_bmm_outnames(
     Tensor& result,
     const Tensor& self,
     const Tensor& other);
 
-std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor);
+CAFFE2_API std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor);
 
 // TensorImpl* overloads for Legacy TH/THC code. Use these sparingly.
 
-TensorImpl* propagate_names_if_nonempty(
+CAFFE2_API TensorImpl* propagate_names_if_nonempty(
     TensorImpl* result,
     DimnameList maybe_names,
     bool validate_names = false);
 
-TensorImpl* propagate_names(
+CAFFE2_API TensorImpl* propagate_names(
     TensorImpl* result,
     DimnameList names,
     bool validate_names = false);
 
-void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
+CAFFE2_API void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 // result = m1 @ m2 + bias
-void propagate_names_for_addmm(
+CAFFE2_API void propagate_names_for_addmm(
     TensorImpl* result,
     /*const*/TensorImpl* m1,
     /*const*/TensorImpl* m2,
     /*const*/TensorImpl* bias);
 
-void propagate_names_for_addmv(
+CAFFE2_API void propagate_names_for_addmv(
     TensorImpl* result,
     TensorImpl* mat,
     TensorImpl* vec,
     TensorImpl* bias);
 
-void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
+CAFFE2_API void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
 
-std::vector<Dimname> compute_baddbmm_outnames(
+CAFFE2_API std::vector<Dimname> compute_baddbmm_outnames(
     TensorImpl* result,
     TensorImpl* self,
     TensorImpl* other,
     TensorImpl* bias);
 
-bool are_names_equal(TensorImpl* self, TensorImpl* other);
+CAFFE2_API bool are_names_equal(TensorImpl* self, TensorImpl* other);
 
 } // namespace namedinference
 
