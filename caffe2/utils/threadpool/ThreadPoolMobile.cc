@@ -4,13 +4,17 @@
 
 namespace caffe2 {
 
-pthreadpool_t mobile_threadpool() {
+caffe2::ThreadPool* mobile_threadpool() {
 #ifdef C10_MOBILE
   static std::unique_ptr<caffe2::ThreadPool> thread_pool =
       caffe2::ThreadPool::defaultThreadPool();
-  return reinterpret_cast<pthreadpool_t>(thread_pool.get());
+  return thread_pool.get();
 #else
   return nullptr;
 #endif
+}
+
+pthreadpool_t mobile_pthreadpool() {
+  return reinterpret_cast<pthreadpool_t>(mobile_threadpool());
 }
 } // namespace caffe2

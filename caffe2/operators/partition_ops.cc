@@ -106,10 +106,52 @@ X_0_part_0, X_1_part_0, ..., X_N-1_part_0, X_0_part_1, ..., X_N-1_part_K-1
         "Output Partitions. The number of output tensors has to be a "
         "multiple of the number of input tensors.");
 
+namespace {
+
+class GetGatherByKeyGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  std::vector<OperatorDef> GetGradientDefs() override {
+    ArgumentHelper argsHelper(def_);
+    auto pack_first_input =
+        argsHelper.GetSingleArgument<int>("pack_first_input", 0);
+
+    Argument packArg = MakeArgument<int>("pack_first_input", pack_first_input);
+    if (g_output_[0].IsDense()) {
+      std::vector<std::string> inputs;
+      for (int i = 1; i < g_input_.size(); ++i) {
+        inputs.push_back("_" + GI(i) + "_keys");
+        inputs.push_back(GI(i));
+      }
+      return SingleGradientDef(
+          "Partition",
+          "",
+          std::vector<std::string>{I(0), GO(0)},
+          inputs,
+          std::vector<Argument>{packArg});
+    } else {
+      std::vector<std::string> inputs;
+      for (int i = 1; i < g_input_.size(); ++i) {
+        inputs.push_back("_" + GI_I(i) + "_keys");
+        inputs.push_back(GI_I(i));
+        inputs.push_back(GI_V(i));
+      }
+      return SingleGradientDef(
+          "Partition",
+          "",
+          std::vector<std::string>{I(0), GO_I(0), GO_V(0)},
+          inputs,
+          std::vector<Argument>{packArg});
+    }
+  }
+};
+
+} // namespace
+
 // This should actually have gradient, but for now nothing uses it.
 // Because gradient computation right now is not input/output aware it can't be
 // GRADIENT_NOT_IMPLEMENTEDYET
 NO_GRADIENT(Partition);
 NO_GRADIENT(LengthsPartition);
+REGISTER_GRADIENT(GatherByKey, GetGatherByKeyGradient);
 } // namespace
 } // namespace caffe2

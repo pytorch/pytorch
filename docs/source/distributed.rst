@@ -410,7 +410,7 @@ both python2 and python3.
 Spawn utility
 -------------
 
-The :doc:`torch.multiprocessing` package also provides a ``spawn``
+The :ref:`multiprocessing-doc` package also provides a ``spawn``
 function in :func:`torch.multiprocessing.spawn`. This helper function
 can be used to spawn multiple processes. It works by passing in the
 function that you want to run and spawns N processes to run it. This

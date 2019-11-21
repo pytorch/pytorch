@@ -7,9 +7,6 @@
 
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/csrc/autograd/functions/utils.h>
-#ifdef USE_CUDA
-#include <torch/csrc/cuda/comm.h>
-#endif
 #include <ATen/core/functional.h>
 
 #include <ATen/Device.h>
@@ -272,7 +269,6 @@ Tensor data_parallel(
     return module->forward(std::move(input)).to(*output_device);
   }
 
-#ifdef USE_CUDA
   autograd::Scatter scatter(*devices, /*chunk_sizes=*/nullopt, dim);
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
 
@@ -281,10 +277,6 @@ Tensor data_parallel(
   return autograd::Gather(*output_device, dim)
       .apply(fmap<autograd::Variable>(std::move(outputs)))
       .front();
-#else
-  AT_ERROR("data_parallel not supported without CUDA");
-  return Tensor();
-#endif
 }
 
 } // namespace parallel

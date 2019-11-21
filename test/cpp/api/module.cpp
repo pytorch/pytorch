@@ -1,11 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/module.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/rnn.h>
-#include <torch/nn/modules/sequential.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -115,6 +110,17 @@ TEST_F(ModuleTest, ReplaceModule) {
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
 }
 
+TEST_F(ModuleTest, UnregisterModule) {
+  struct TestModel : public torch::nn::Module {};
+  TestModel model;
+  ASSERT_THROWS_WITH(
+      model.unregister_module("linear"),
+      "No Module with name `linear` is registered");
+  model.register_module("linear", torch::nn::Linear(3, 4));
+  model.unregister_module("linear");
+  ASSERT_TRUE(model.children().empty());
+}
+
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
   struct TestModel : public torch::nn::Module {};
   ASSERT_THROWS_WITH(
@@ -132,6 +138,30 @@ TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
   ASSERT_THROWS_WITH(
       model.register_parameter("p", torch::ones(5)),
       "Parameter 'p' already defined");
+}
+
+TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
+  struct TestModel : public torch::nn::Module {};
+  {
+    TestModel model;
+    model.register_parameter("undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
+    ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
+  }
+  {
+    std::stringstream buffer;
+    CerrRedirect cerr_redirect(buffer.rdbuf());
+
+    TestModel model;
+    model.register_parameter("undefined_tensor", torch::Tensor());
+    ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
+
+    ASSERT_EQ(
+      count_substr_occurrences(
+        buffer.str(),
+        "Ignoring the `requires_grad=true` function parameter"
+      ),
+    1);
+  }
 }
 
 TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
@@ -655,8 +685,8 @@ TEST_F(ModuleTest, ParametersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> parameters = module.parameters();
   ASSERT_EQ(parameters.size(), 2);
-  ASSERT_EQ(parameters[0].data<float>(), module.p1.data<float>());
-  ASSERT_EQ(parameters[1].data<float>(), module.p2.data<float>());
+  ASSERT_EQ(parameters[0].data_ptr<float>(), module.p1.data_ptr<float>());
+  ASSERT_EQ(parameters[1].data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
@@ -665,17 +695,17 @@ TEST_F(ModuleTest, NamedParametersReturnsExpectedTensorsForFlatModel) {
       module.named_parameters();
   ASSERT_EQ(parameters.size(), 2);
   ASSERT_EQ(parameters[0].key(), "p1");
-  ASSERT_EQ(parameters[0]->data<float>(), module.p1.data<float>());
+  ASSERT_EQ(parameters[0]->data_ptr<float>(), module.p1.data_ptr<float>());
   ASSERT_EQ(parameters[1].key(), "p2");
-  ASSERT_EQ(parameters[1]->data<float>(), module.p2.data<float>());
+  ASSERT_EQ(parameters[1]->data_ptr<float>(), module.p2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, BuffersReturnsExpectedTensorsForFlatModel) {
   TestModule module(1);
   std::vector<torch::Tensor> buffers = module.buffers();
   ASSERT_EQ(buffers.size(), 2);
-  ASSERT_EQ(buffers[0].data<float>(), module.b1.data<float>());
-  ASSERT_EQ(buffers[1].data<float>(), module.b2.data<float>());
+  ASSERT_EQ(buffers[0].data_ptr<float>(), module.b1.data_ptr<float>());
+  ASSERT_EQ(buffers[1].data_ptr<float>(), module.b2.data_ptr<float>());
 }
 
 TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
@@ -684,9 +714,9 @@ TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
       module.named_buffers();
   ASSERT_EQ(buffers.size(), 2);
   ASSERT_EQ(buffers[0].key(), "b1");
-  ASSERT_EQ(buffers[0]->data<float>(), module.b1.data<float>());
+  ASSERT_EQ(buffers[0]->data_ptr<float>(), module.b1.data_ptr<float>());
   ASSERT_EQ(buffers[1].key(), "b2");
-  ASSERT_EQ(buffers[1]->data<float>(), module.b2.data<float>());
+  ASSERT_EQ(buffers[1]->data_ptr<float>(), module.b2.data_ptr<float>());
 }
 
 struct TestContainer : torch::nn::Module {

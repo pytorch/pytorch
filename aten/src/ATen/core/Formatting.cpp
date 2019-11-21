@@ -43,7 +43,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     return std::make_tuple(1., 0);
   }
   bool intMode = true;
-  auto self_p = self.data<double>();
+  auto self_p = self.data_ptr<double>();
   for(int64_t i = 0; i < size; i++) {
     auto z = self_p[i];
     if(std::isfinite(z)) {
@@ -165,7 +165,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
     }
     for(int64_t l = 0; l < self.size(0); l++) {
       Tensor row = self.select(0,l);
-      double *row_ptr = row.data<double>();
+      double *row_ptr = row.data_ptr<double>();
       for(int64_t c = firstColumn; c < lastColumn+1; c++) {
         stream << std::setw(sz) << row_ptr[c]/scale;
         if(c == lastColumn) {
@@ -245,7 +245,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
     if(tensor.ndimension() == 0) {
-      stream << defaultfloat << tensor.data<double>()[0] << std::endl;
+      stream << defaultfloat << tensor.data_ptr<double>()[0] << std::endl;
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
@@ -255,7 +255,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         if(scale != 1) {
           printScale(stream, scale);
         }
-        double* tensor_p = tensor.data<double>();
+        double* tensor_p = tensor.data_ptr<double>();
         for(int64_t i = 0; i < tensor.size(0); i++) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }

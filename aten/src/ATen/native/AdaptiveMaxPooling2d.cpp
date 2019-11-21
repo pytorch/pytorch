@@ -174,9 +174,9 @@ void adaptive_max_pool2d_out_cpu_template(
     indices.resize_({sizeD, osizeH, osizeW});
 
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
-      auto input_data = input.data<scalar_t>();
-      auto output_data = output.data<scalar_t>();
-      auto indices_data = indices.data<int64_t>();
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      auto indices_data = indices.data_ptr<int64_t>();
 
       adaptive_max_pool2d_single_out_frame<scalar_t>(input_data, output_data,
                                                      indices_data,
@@ -195,9 +195,9 @@ void adaptive_max_pool2d_out_cpu_template(
     indices.resize_({sizeB, sizeD, osizeH, osizeW});
 
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
-      auto input_data = input.data<scalar_t>();
-      auto output_data = output.data<scalar_t>();
-      auto indices_data = indices.data<int64_t>();
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      auto indices_data = indices.data_ptr<int64_t>();
 
       adaptive_max_pool2d_out_frame<scalar_t>(input_data, output_data,
                                               indices_data,
@@ -309,9 +309,9 @@ Tensor& adaptive_max_pool2d_backward_out_cpu_template(
   {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
       /* get raw pointers */
-      scalar_t *gradInput_data = gradInput.data<scalar_t>();
-      scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-      int64_t *indices_data = indices.data<int64_t>();
+      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+      int64_t *indices_data = indices.data_ptr<int64_t>();
 
       adaptive_max_pool2d_backward_single_out_frame<scalar_t>(gradInput_data,
                                                               gradOutput_data,
@@ -326,9 +326,9 @@ Tensor& adaptive_max_pool2d_backward_out_cpu_template(
   {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
       /* get raw pointers */
-      scalar_t *gradInput_data = gradInput.data<scalar_t>();
-      scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-      int64_t *indices_data = indices.data<int64_t>();
+      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+      int64_t *indices_data = indices.data_ptr<int64_t>();
 
       adaptive_max_pool2d_backward_out_frame<scalar_t>(gradInput_data,
                                                        gradOutput_data,
@@ -394,7 +394,7 @@ Tensor adaptive_max_pool2d_backward_cpu(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool2d_backward_out_cpu_template(
     gradInput,
     gradOutput_,

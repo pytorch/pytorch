@@ -13,6 +13,7 @@ from __future__ import unicode_literals
 import os
 import collections
 from subprocess import Popen, PIPE
+import sys
 import zipfile
 import itertools
 
@@ -887,7 +888,7 @@ class Caffe2Backend(Backend):
 
         cls._dummy_name.reset(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
 
-        success = True
+        errors = []
         for net, model in ( (init_net, init_model), (pred_net, pred_model) ):
             net.device_option.CopyFrom(device_option)
             for node in model.graph.node:
@@ -895,8 +896,9 @@ class Caffe2Backend(Backend):
                     c2ops = cls._onnx_node_to_caffe2_op(
                         init_model, pred_model, node, opset_version)
                 except Exception as e:
-                    success = False
-                    print('ONNX FATAL:', e)
+                    msg = 'Error while processing node: {}. Exception: {}'.format(node, e)
+                    errors.append(msg)
+                    print('ONNX FATAL:', msg, file=sys.stderr)
                     continue
                 init_net.op.extend(c2ops.init_ops)
                 net.op.extend(c2ops.ops)
@@ -906,8 +908,10 @@ class Caffe2Backend(Backend):
             net.external_input.extend(
                 value_info.name for value_info in model.graph.input)
 
-        if not success:
-            raise RuntimeError('ONNX conversion failed')
+        if len(errors) > 0:
+            raise RuntimeError(
+                "ONNX conversion failed, encountered {} errors:\n\n{}".format(
+                    len(errors), "\n\n".join(errors)))
 
         return init_net, pred_net
 

@@ -41,6 +41,7 @@ static const std::unordered_map<int, int> binary_prec = {
 
 static const std::unordered_map<int, int> unary_prec = {
     {TK_NOT, 3},
+    {'~', 3},
     {'-', 9},
     {'*', 9},
 };

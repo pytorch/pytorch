@@ -18,8 +18,10 @@ from caffe2.python import (
 )
 from caffe2.python.layers.layers import (
     AccessedFeatures,
+    almost_equal_schemas,
     get_key,
     IdList,
+    IdScoreList,
     InstantiationContext,
     is_request_only_scalar,
     set_request_only,
@@ -241,6 +243,86 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
+    def testFCWithBootstrap(self):
+        output_dims = 1
+        fc_with_bootstrap = self.model.FCWithBootstrap(
+            self.model.input_feature_schema.float_features,
+            output_dims=output_dims,
+            num_bootstrap=2,
+            max_fc_size=-1
+        )
+        self.model.output_schema = fc_with_bootstrap
+
+
+        self.assertEqual(len(fc_with_bootstrap), 4)
+
+        # must be in this order
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_0/indices") == fc_with_bootstrap[0].field_blobs()[0]
+        )
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_0/preds") == fc_with_bootstrap[1].field_blobs()[0]
+        )
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_1/indices") == fc_with_bootstrap[2].field_blobs()[0]
+        )
+        assert (
+            core.BlobReference("fc_with_bootstrap/bootstrap_iteration_1/preds") == fc_with_bootstrap[3].field_blobs()[0]
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+        predict_net = layer_model_instantiator.generate_predict_net(self.model)
+
+        train_proto = train_net.Proto()
+        eval_proto = predict_net.Proto()
+
+        train_ops = train_proto.op
+        eval_ops = eval_proto.op
+
+        master_train_ops = [
+            "Shape",
+            "GivenTensorInt64Fill",
+            "Gather",
+            "GivenTensorIntFill",
+            "GivenTensorIntFill",
+            "Cast",
+            "Sub",
+            "UniformIntFill",
+            "Gather",
+            "FC",
+            "UniformIntFill",
+            "Gather",
+            "FC",
+        ]
+
+        master_eval_ops = [
+            "Shape",
+            "GivenTensorInt64Fill",
+            "Gather",
+            "GivenTensorIntFill",
+            "GivenTensorIntFill",
+            "Cast",
+            "Sub",
+            "UniformIntFill",
+            "FC",
+            "UniformIntFill",
+            "FC",
+        ]
+
+        assert len(train_ops) == len(master_train_ops)
+        assert len(eval_ops) == len(master_eval_ops)
+
+        assert train_proto.external_input == eval_proto.external_input
+        assert train_proto.external_output == list()
+
+        # make sure all the ops are present and unchanged for train_net and eval_net
+        for idx, op in enumerate(master_train_ops):
+            assert train_ops[idx].type == op
+
+        for idx, op in enumerate(master_eval_ops):
+            assert eval_ops[idx].type == op
+
+
     def testFCwithAxis2(self):
         input_dim = 10
         output_dim = 30
@@ -300,7 +382,6 @@ class TestLayers(LayersTestCase):
         embedding_after_training = workspace.FetchBlob("sparse_lookup/w")
         # Verify row 0's value does not change after reset
         self.assertEquals(embedding_after_training.all(), embedding_after_init.all())
-
 
 
     def testSparseLookupSumPooling(self):
@@ -841,6 +922,24 @@ class TestLayers(LayersTestCase):
         loss = self.model.MarginRankLoss(input_record)
         self.run_train_net_forward_only()
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+    def testBPRLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('pos_prediction', schema.Scalar((np.float32, (1,)))),
+            ('neg_prediction', schema.List(np.float32)),
+        ))
+        pos_items = np.array([0.8, 0.9], dtype=np.float32)
+        neg_lengths = np.array([1, 2], dtype=np.int32)
+        neg_items = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        schema.FeedRecord(
+            input_record,
+            [pos_items, neg_lengths, neg_items]
+        )
+        loss = self.model.BPRLoss(input_record)
+        self.run_train_net_forward_only()
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+        result = workspace.FetchBlob('bpr_loss/output')
+        np.testing.assert_array_almost_equal(np.array(1.24386, dtype=np.float32), result)
 
     def testBatchMSELoss(self):
         input_record = self.new_record(schema.Struct(
@@ -2229,12 +2328,12 @@ class TestLayers(LayersTestCase):
         self.model.FeatureSparseToDense(input_record, input_specs)
 
         expected_accessed_features = {
-            float_features_column: AccessedFeatures(
-                float_features_type, set(float_features_ids)),
-            id_list_features_column: AccessedFeatures(
-                id_list_features_type, set(id_list_features_ids)),
-            id_score_list_features_column: AccessedFeatures(
-                id_score_list_features_type, set(id_score_list_features_ids)),
+            float_features_column: [
+                AccessedFeatures(float_features_type, set(float_features_ids))],
+            id_list_features_column: [
+                AccessedFeatures(id_list_features_type, set(id_list_features_ids))],
+            id_score_list_features_column: [
+                AccessedFeatures(id_score_list_features_type, set(id_score_list_features_ids))],
         }
 
         self.assertEqual(len(self.model.layers), 1)
@@ -2242,3 +2341,96 @@ class TestLayers(LayersTestCase):
             self.model.layers[0].get_accessed_features(),
             expected_accessed_features
         )
+
+    def test_get_key(self):
+        def _is_id_list(input_record):
+            return almost_equal_schemas(input_record, IdList)
+
+
+        def _is_id_score_list(input_record):
+            return almost_equal_schemas(input_record,
+                                        IdScoreList,
+                                        check_field_types=False)
+
+        def old_get_sparse_key_logic(input_record):
+            if _is_id_list(input_record):
+                sparse_key = input_record.items()
+            elif _is_id_score_list(input_record):
+                sparse_key = input_record.keys()
+            else:
+                raise NotImplementedError()
+            return sparse_key
+
+        id_score_list_record = schema.NewRecord(
+            self.model.net,
+            schema.Map(
+                schema.Scalar(
+                    np.int64,
+                    metadata=schema.Metadata(
+                        categorical_limit=1000
+                    ),
+                ),
+                np.float32
+            )
+        )
+
+        self.assertEqual(
+            get_key(id_score_list_record)(),
+            old_get_sparse_key_logic(id_score_list_record)
+        )
+
+        id_list_record = schema.NewRecord(
+            self.model.net,
+            schema.List(
+                schema.Scalar(
+                    np.int64,
+                    metadata=schema.Metadata(categorical_limit=1000)
+                )
+            )
+        )
+
+        self.assertEqual(
+            get_key(id_list_record)(),
+            old_get_sparse_key_logic(id_list_record)
+        )
+
+    def testSparseLookupWithAttentionWeightOnIdScoreList(self):
+        record = schema.NewRecord(
+            self.model.net,
+            schema.Map(
+                schema.Scalar(
+                    np.int64,
+                    metadata=schema.Metadata(categorical_limit=1000),
+                ),
+                np.float32,
+            ),
+        )
+        embedding_dim = 64
+        embedding_after_pooling = self.model.SparseLookup(
+            record, [embedding_dim], "Sum", use_external_weights=True
+        )
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim,))), embedding_after_pooling
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [OpSpec("UniformFill", None, None), OpSpec("ConstantFill", None, None)],
+        )
+        sparse_lookup_op_spec = OpSpec(
+            "SparseLengthsWeightedSum",
+            [
+                init_ops[0].output[0],
+                record.values(),
+                record.keys(),
+                record.lengths(),
+            ],
+            [embedding_after_pooling()],
+        )
+        self.assertNetContainOps(train_net, [sparse_lookup_op_spec])
+
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])

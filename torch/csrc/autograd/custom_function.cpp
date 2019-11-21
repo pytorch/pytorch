@@ -4,7 +4,7 @@
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : backend(tensorTypeIdToBackend(var.type_id()))
+  : layout(var.layout())
   , device(var.device())
   , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
@@ -12,10 +12,8 @@ VariableInfo::VariableInfo(const Variable& var)
 }
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  // NB: This will NOT work if we ever get mixed device gradients
-  device_guard.reset_device(device);
   return at::zeros(size,
-    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
+    at::TensorOptions(scalar_type).device(device).layout(layout));
 }
 
 variable_list _wrap_outputs(const variable_list &input_vars,
@@ -57,21 +55,21 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
       var.grad().reset();
-      var.clear_hooks();
-      if (auto grad_acc_fn = var.try_get_grad_accumulator()) {
+      impl::clear_hooks(var);
+      if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
         grad_acc->variable.reset();
       }
       if (cdata) {
-        var.rebase_history({cdata, output_nr});
+        impl::rebase_history(var, {cdata, output_nr});
       }
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
       var = var.view_as(var);
-      var.set_gradient_edge({cdata, output_nr});
+      impl::set_gradient_edge(var, {cdata, output_nr});
     } else if (cdata) {
-      var.set_gradient_edge({cdata, output_nr});
+      impl::set_gradient_edge(var, {cdata, output_nr});
     }
   };
 
@@ -98,6 +96,33 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   }
 
   return outputs;
+}
+
+void check_variable_result(const Variable& original, const Variable& result, std::string hook_name) {
+  if (original.type() != result.type()) {
+    std::stringstream ss;
+    ss << "hook '" << hook_name << "' has changed the type of value (";
+    ss << "was " << original.toString() << " got ";
+    ss << result.toString() << ")";
+    throw std::runtime_error(ss.str());
+  }
+
+  if (original.is_cuda() != result.is_cuda()) {
+    std::stringstream ss;
+    ss << "hook '" << hook_name << "' has changed the type of value";
+    if (original.is_cuda()) {
+      ss << " (was CUDA tensor got CPU tensor)";
+    } else {
+      ss << " (was CPU tensor got CUDA tensor)";
+    }
+    throw std::runtime_error(ss.str());
+  }
+
+  if (original.sizes().vec() != result.sizes().vec()) {
+    std::stringstream ss;
+    ss << "hook '" << hook_name << "' has changed the size of value";
+    throw std::runtime_error(ss.str());
+  }
 }
 
 void AutogradContext::save_for_backward(variable_list to_save) {

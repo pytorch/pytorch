@@ -86,7 +86,7 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(sparse_lengths_sum_op_cpu),
-        &sparse_lengths_sum_op_cpu>(CPUTensorId()));
+        &sparse_lengths_sum_op_cpu>(TensorTypeId::CPUTensorId));
 
 } // namespace
 
