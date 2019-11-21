@@ -76,8 +76,7 @@ class StudentT(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         y = (value - self.loc) / self.scale
-        Z = (self.scale.log() +
-             0.5 * self.df.log() +
+        Z = (0.5 * self.df.log() +
              0.5 * math.log(math.pi) +
              torch.lgamma(0.5 * self.df) -
              torch.lgamma(0.5 * (self.df + 1.)))
