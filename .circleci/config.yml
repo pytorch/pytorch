@@ -1309,6 +1309,13 @@ jobs:
       - checkout
       - run_brew_for_ios_build
       - run:
+          name: Install XCode Commandline tool
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            xcode-select --install
+            instrument -s -devices
+      - run:
           name: Run Fastlane
           no_output_timeout: "1h"
           command: |
