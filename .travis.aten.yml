@@ -11,8 +11,7 @@ before_install:
 
 install:
     - travis_retry pip install pyyaml typing
-    - pip install codecov 
-    - pip install coverage
+    
 
 script:
     - cd aten
@@ -26,7 +25,7 @@ script:
     - coverage run main.py
 
 after_success:
-  - codecov #运行codecov
+  - bash <(curl -s https://codecov.io/bash) -c -F unittest
 
 matrix:
     fast_finish: true
