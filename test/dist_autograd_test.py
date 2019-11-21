@@ -8,7 +8,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+import dist_utils
+from dist_utils import dist_init
+from rpc_agent_test_fixture import RpcAgentTestFixture
 
 import threading
 
@@ -160,7 +162,7 @@ class ExecMode(Enum):
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
-class DistAutogradTest(object):
+class DistAutogradTest(RpcAgentTestFixture):
 
     def _initialize_pg(self):
         # This is for tests using `dist.barrier`.
@@ -200,14 +202,6 @@ class DistAutogradTest(object):
 
     def _check_rpc_done(self, rank_distance):
         _check_rpc_done(rank_distance)
-
-    @property
-    def world_size(self):
-        return 4
-
-    @property
-    def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
     @dist_init
     def test_autograd_context(self):
@@ -480,6 +474,7 @@ class DistAutogradTest(object):
     def test_graph_for_py_nested_call(self):
         self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29938")
     @dist_init
     def test_graph_for_py_nested_remote_call(self):
         self._test_graph_for_py_nested_call(ExecMode.REMOTE)
@@ -1055,7 +1050,7 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
@@ -1226,7 +1221,7 @@ class DistAutogradTest(object):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent " +
                      "does not report errors on node failures")
     @dist_init(clean_shutdown=False)
@@ -1365,7 +1360,7 @@ class DistAutogradTest(object):
         # receive gradients from the node that received an error (and as a
         # result it didn't execute the rest of the graph).
         dist.barrier()
-        rpc.join_rpc()
+        rpc.wait_all_workers()
         sys.exit(0)
 
 

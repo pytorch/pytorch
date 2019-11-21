@@ -12,14 +12,16 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import RRef
 from common_utils import load_tests
-from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
+import dist_utils
+from dist_utils import dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
+from rpc_agent_test_fixture import RpcAgentTestFixture
 
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
+            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
 
     return decorator
@@ -28,8 +30,14 @@ def requires_process_group_agent(message=""):
 VALUE_FUTURE = concurrent.futures.Future()
 
 
-def stub_start_rpc_backend_handler(
-    store, self_name, self_rank, worker_name_to_id, *args, **kwargs
+def _stub_construct_rpc_agent_options_handler(
+    **kwargs
+):
+    return mock.Mock()  # RpcAgentOptions.
+
+
+def _stub_start_rpc_backend_handler(
+    store, name, rank, world_size, rpc_agent_options
 ):
     return mock.Mock()  # RpcAgent.
 
@@ -210,15 +218,7 @@ load_tests = load_tests
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
-class RpcTest(object):
-    @property
-    def world_size(self):
-        return 4
-
-    @property
-    def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
-
+class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):
         n = self.rank + 1
@@ -288,22 +288,27 @@ class RpcTest(object):
         backend_name = "stub_backend"
 
         backend = rpc.backend_registry.register_backend(
-            backend_name, stub_start_rpc_backend_handler
+            backend_name,
+            _stub_construct_rpc_agent_options_handler,
+            _stub_start_rpc_backend_handler,
         )
 
         with self.assertRaisesRegex(
             RuntimeError, "^RPC backend .+: already registered$"
         ):
-            rpc.backend_registry.register_backend(
-                backend_name, stub_start_rpc_backend_handler
+            backend = rpc.backend_registry.register_backend(
+                backend_name,
+                _stub_construct_rpc_agent_options_handler,
+                _stub_start_rpc_backend_handler,
             )
 
         rpc.init_rpc(
-            self_name="worker1",
+            name="worker1",
             backend=backend,
             init_method=self.init_method,
-            self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -314,22 +319,24 @@ class RpcTest(object):
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
             rpc._init_rpc_backend(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                backend=self.rpc_backend,
                 store=store,
-                self_name="duplicate_name",
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
+                name="duplicate_name",
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
     @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
-            self_name="worker{}".format(self.rank),
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
             init_method=self.init_method,
-            self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
         # This is for the below `dist.barrier`.
@@ -347,13 +354,14 @@ class RpcTest(object):
 
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             rpc.init_rpc(
-                self_name="worker{}".format(self.rank),
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                name="worker{}".format(self.rank),
+                backend=self.rpc_backend,
                 init_method=self.init_method,
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
@@ -362,12 +370,12 @@ class RpcTest(object):
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
             rpc._init_rpc_backend(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                backend=self.rpc_backend,
                 store=store,
-                self_name="abc*",
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                name="abc*",
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         base_file_name = self.file_name
@@ -379,12 +387,12 @@ class RpcTest(object):
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
             rpc._init_rpc_backend(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                backend=self.rpc_backend,
                 store=store,
-                self_name=" ",
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                name=" ",
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         # Use a different file path for FileStore to avoid rendezvous mismatch.
@@ -394,12 +402,12 @@ class RpcTest(object):
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
             rpc._init_rpc_backend(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                backend=self.rpc_backend,
                 store=store,
-                self_name="",
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                name="",
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         # Use a different file path for FileStore to avoid rendezvous mismatch.
@@ -411,18 +419,18 @@ class RpcTest(object):
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
             rpc._init_rpc_backend(
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                backend=self.rpc_backend,
                 store=store,
-                self_name="".join(["a" for i in range(500)]),
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+                name="".join(["a" for i in range(500)]),
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_agent_options=self.rpc_agent_options,
             )
 
         from torch.distributed.rpc.api import _agent
         self.assertEqual(_agent, None)
-        # join_rpc() should not do anything as _agent is None
-        rpc.join_rpc()
+        # wait_all_workers() should not do anything as _agent is None
+        rpc.wait_all_workers()
         # We need this barrier here because although init_process_group is
         # blocking, it does not guarantee that all ranks are done with
         # initialization after the call. We did run into issues with it where
@@ -499,14 +507,15 @@ class RpcTest(object):
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @dist_init(setup_rpc=False)
-    def test_join_rpc(self):
+    def test_wait_all_workers(self):
         # Initialize RPC.
         rpc.init_rpc(
-            self_name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            name="worker%d" % self.rank,
+            backend=self.rpc_backend,
             init_method=self.init_method,
-            self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_agent_options=self.rpc_agent_options,
         )
 
         n = self.rank + 1
@@ -517,7 +526,7 @@ class RpcTest(object):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
             rpc.rpc_sync(
@@ -526,8 +535,8 @@ class RpcTest(object):
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
 
-        # it's safe to call join_rpc() multiple times
-        rpc.join_rpc()
+        # it's safe to call wait_all_workers() multiple times
+        rpc.wait_all_workers()
 
     @dist_init
     def test_expected_src(self):
@@ -922,8 +931,13 @@ class RpcTest(object):
     def test_remote_with_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
+        # check ref to other workers
         rref = rpc.remote("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
+            rref.to_here()
+        # check ref to itself
+        rref = rpc.remote("worker{}".format(self.rank), no_result, args=(10,))
+        with self.assertRaisesRegex(Exception, "TypeError"):
             rref.to_here()
 
     @dist_init
@@ -1079,17 +1093,23 @@ class RpcTest(object):
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
+
+        # A new `RpcAgentOptions` is constructed
+        # when accessing `self.rpc_agent_options`.
+        rpc_agent_options = self.rpc_agent_options
+        rpc_agent_options.rpc_timeout = timeout
+
         rpc.init_rpc(
-            self_name="worker{}".format(self.rank),
-            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
             init_method=self.init_method,
-            self_rank=self.rank,
-            worker_name_to_id=self.worker_name_to_id,
-            rpc_timeout=timeout
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_agent_options=rpc_agent_options,
         )
         set_timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, set_timeout)
-        rpc.join_rpc()
+        rpc.wait_all_workers()
 
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -1126,7 +1146,7 @@ class RpcTest(object):
         def test_func():
             return "expected result"
 
-        if TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
+        if dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):

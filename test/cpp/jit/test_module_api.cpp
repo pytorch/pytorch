@@ -22,14 +22,14 @@ void testModuleCloneInstance() {
   Module m2 = m.clone();
   Module m3 = m.clone_instance();
   // Make sure copy works
-  ASSERT_TRUE(m2.attr(attr_name).toInt(), 2);
-  ASSERT_TRUE(m3.attr(attr_name).toInt(), 2);
+  ASSERT_EQ(m2.attr(attr_name).toInt(), 2);
+  ASSERT_EQ(m3.attr(attr_name).toInt(), 2);
 
   // clone will copy both type and data, therefore we'll have a
   // different type
-  ASSERT_FALSE(m.type() == m2.type());
+  ASSERT_NE(m.type(), m2.type());
   // clone_instance only copies data, type is shared
-  ASSERT_TRUE(m.type() == m3.type());
+  ASSERT_EQ(m.type(), m3.type());
 
   // change value of copied instance
   m3.register_attribute(attr_name,
@@ -37,8 +37,8 @@ void testModuleCloneInstance() {
                         IValue(3),
                         false);
   // Verify value of original instance doesn't change
-  ASSERT_TRUE(m2.attr(attr_name).toInt() == 2);
-  ASSERT_TRUE(m3.attr(attr_name).toInt() == 3);
+  ASSERT_EQ(m2.attr(attr_name).toInt(), 2);
+  ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
 } // namespace jit
