@@ -40,9 +40,16 @@ TEST(TensorIndexingTest, TensorIndex) {
   ASSERT_THROWS_WITH(
     TensorIndex(".."),
     "Expected \"...\" to represent an ellipsis index, but got \"..\"");
-  ASSERT_THROWS_WITH(
-    TensorIndex({1}),
-    "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got 1 element(s)");
+
+  // NOTE: Some compilers such as Clang 5 and MSVC always treat `TensorIndex({1})` the same as
+  // `TensorIndex(1)`. Therefore, we should only run this test on compilers that treat
+  // `TensorIndex({1})` as `TensorIndex(std::initializer_list<c10::optional<int64_t>>({1}))`.
+  if (TensorIndex({1}).is_slice()) {
+    ASSERT_THROWS_WITH(
+      TensorIndex({1}),
+      "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got 1 element(s)");
+  }
+
   ASSERT_THROWS_WITH(
     TensorIndex({1, 2, 3, 4}),
     "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got 4 element(s)");
