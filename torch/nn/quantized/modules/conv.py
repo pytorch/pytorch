@@ -18,13 +18,15 @@ from torch.nn.utils import fuse_conv_bn_weights
 
 
 class ConvPackedParams(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, spatial_dim):
         super(ConvPackedParams, self).__init__()
-        wq = torch._empty_affine_quantized([1, 1, 1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
-        self.stride = [1, 1]
-        self.padding = [0, 0]
-        self.dilation = [1, 1]
+        shape = [1] * (4 if spatial_dim == 2 else 5)
+        wq = torch._empty_affine_quantized(shape, scale=1.0, zero_point=0, dtype=torch.qint8)
+        self.stride = [1] * (2 if spatial_dim == 2 else 3)
+        self.padding = [0] * (2 if spatial_dim == 2 else 3)
+        self.dilation = [1] * (2 if spatial_dim == 2 else 3)
         self.groups = 1
+        self.spatial_dim = spatial_dim
         self.set_weight_bias(wq, None)
 
     @torch.jit.export
@@ -38,11 +40,23 @@ class ConvPackedParams(torch.nn.Module):
     @torch.jit.export
     def set_weight_bias(self, weight, bias):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride, self.padding, self.dilation, self.groups)
+        if self.spatial_dim == 2:
+            self._packed_params = torch.ops.quantized.conv2d_prepack(
+                weight, bias, self.stride, self.padding, self.dilation, self.groups)
+        elif self.spatial_dim == 3:
+            self._packed_params = torch.ops.quantized.conv3d_prepack(
+                weight, bias, self.stride, self.padding, self.dilation, self.groups)
+        else:
+            raise RuntimeError('Unsupported spatial dimension!')
 
     @torch.jit.export
     def _weight_bias(self):
-        return torch.ops.quantized.conv2d_unpack(self._packed_params)
+        if self.spatial_dim == 2:
+            return torch.ops.quantized.conv2d_unpack(self._packed_params)
+        elif self.spatial_dim == 3:
+            return torch.ops.quantized.conv3d_unpack(self._packed_params)
+        else:
+            raise RuntimeError('Unsupported spatial dimension!')
 
     def forward(self, x):
         return x
@@ -52,6 +66,7 @@ class ConvPackedParams(torch.nn.Module):
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'bias'] = b
+        destination[prefix + 'spatial_dim'] = self.spatial_dim
 
     @torch.jit.export
     def __getstate__(self):
@@ -67,12 +82,15 @@ class ConvPackedParams(torch.nn.Module):
                 self.padding,
                 self.dilation,
                 self.groups,
-                self.training)
+                self.training,
+                self.spatial_dim)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        self.spatial_dim = state_dict[prefix + 'spatial_dim']
         self.set_weight_bias(
             state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
+        state_dict.pop(prefix + 'spatial_dim')
         state_dict.pop(prefix + 'weight')
         state_dict.pop(prefix + 'bias')
         super(ConvPackedParams, self)._load_from_state_dict(
@@ -85,6 +103,7 @@ class ConvPackedParams(torch.nn.Module):
         self.padding = state[3]
         self.dilation = state[4]
         self.groups = state[5]
+        self.spatial_dim = state[7]  # NB needs to be before set_weight_bias
         self.set_weight_bias(state[0],
                              state[1])
         self.training = state[6]
@@ -93,7 +112,7 @@ class ConvPackedParams(torch.nn.Module):
 class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', spatial_dim=2):
         super(_ConvNd, self).__init__()
         if padding_mode != 'zeros':
             raise NotImplementedError(
@@ -119,7 +138,7 @@ class _ConvNd(nn.Module):
         bias_float = (
             torch.zeros(out_channels, dtype=torch.float) if bias else None)
 
-        self._packed_params = ConvPackedParams()
+        self._packed_params = ConvPackedParams(spatial_dim=spatial_dim)
         self._packed_params.set_conv_params(list(stride), list(padding), list(dilation), groups)
         self._packed_params.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
@@ -209,7 +228,7 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode, spatial_dim=2)
 
     def _get_name(self):
         return 'QuantizedConv2d'
@@ -332,7 +351,7 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode, spatial_dim=3)
 
     def _get_name(self):
         return 'QuantizedConv3d'
