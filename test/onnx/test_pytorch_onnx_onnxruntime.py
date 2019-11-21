@@ -144,8 +144,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    # TODO: enable test for opset 11 when hardtanh is removed from the opset 11 blacklist
-    @skipIfUnsupportedOpsetVersion([11])
     def test_mobilenet(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
