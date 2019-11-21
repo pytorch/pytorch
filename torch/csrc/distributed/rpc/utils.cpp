@@ -1,11 +1,12 @@
 #include <torch/csrc/distributed/rpc/utils.h>
+
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
-#include <torch/csrc/distributed/rpc/python_udf_call.h>
-#include <torch/csrc/distributed/rpc/python_udf_resp.h>
+#include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
@@ -21,7 +22,7 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
       return ScriptCall::fromMessage(request);
     }
     case MessageType::PYTHON_CALL: {
-      return PythonUDFCall::fromMessage(request);
+      return PythonCall::fromMessage(request);
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       return ScriptRemoteCall::fromMessage(request);
@@ -66,7 +67,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
       return ScriptResp::fromMessage(response);
     }
     case MessageType::PYTHON_RET: {
-      return PythonUDFResp::fromMessage(response);
+      return PythonResp::fromMessage(response);
     }
     case MessageType::REMOTE_RET: {
       return RemoteRet::fromMessage(response);

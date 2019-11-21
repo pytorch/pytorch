@@ -97,15 +97,6 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const Tenso
   return torch::arange(start, end, step, options);
 }
 
-static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
-  for (Scalar& s : l) {
-    if (!s.isIntegral(true)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -121,7 +112,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
     if (r.isNone(1)) {
       auto end = r.scalar(0);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(2) && allIntegral({end}) ? at::ScalarType::Long : r.scalartype(2);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(2);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(4))
@@ -141,7 +132,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       auto end = r.scalar(1);
       auto step = r.scalar(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(4) && allIntegral({start, end, step}) ? at::ScalarType::Long : r.scalartype(4);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(4);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(6))
@@ -245,10 +236,8 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;
@@ -274,25 +263,6 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.generator(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   } else if (r.idx == 1) {
-    if (r.isNone(2)) {
-      auto high = r.toInt64(0);
-      auto size = r.intlist(1);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(3, at::ScalarType::Long);
-      auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(6));
-      return wrap(dispatch_randint(high, size, options));
-    } else {
-      check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
-                             r.layout(4), r.isNone(4),
-                             r.device(5), r.isNone(5));
-      return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.tensor(2)).set_requires_grad(r.toBool(6)));
-    }
-  } else if (r.idx == 2) {
     if (r.isNone(4)) {
       auto low = r.toInt64(0);
       auto high = r.toInt64(1);
@@ -313,26 +283,6 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
                              r.device(7), r.isNone(7));
       return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.generator(3), r.tensor(4)).set_requires_grad(r.toBool(8)));
     }
-  } else if (r.idx == 3) {
-    if (r.isNone(3)) {
-      auto low = r.toInt64(0);
-      auto high = r.toInt64(1);
-      auto size = r.intlist(2);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
-      auto device = r.device(6);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(7));
-      return wrap(dispatch_randint(low, high, size, options));
-    } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.isNone(5),
-                             r.device(6), r.isNone(6));
-      return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
-    }
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -350,8 +300,7 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.from_numpy", jit::tracer::WARN_CONSTRUCTOR);
-  auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
+  return THPVariable_Wrap(torch::utils::tensor_from_numpy(arg));
   END_HANDLE_TH_ERRORS
 }
 
@@ -489,7 +438,7 @@ static PyTypeObject THPVariableFunctions = {
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
-  0,                                     /* tp_print */
+  0,                                     /* tp_vectorcall_offset */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */

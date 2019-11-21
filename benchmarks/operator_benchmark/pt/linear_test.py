@@ -15,10 +15,10 @@ linear_configs_short = op_bench.config_list(
     attr_names=["N", "IN", "OUT"],
     attrs=[
         [4, 256, 128],
-        [16, 1024, 256],
+        [16, 512, 256],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"]
 )
@@ -28,7 +28,7 @@ linear_configs_long = op_bench.cross_product_configs(
     N=[32, 64],
     IN=[128, 512],
     OUT=[64, 128],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
@@ -36,7 +36,7 @@ linear_configs_long = op_bench.cross_product_configs(
 class LinearBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT, device):
         self.input_one = torch.rand(N, IN, device=device)
-        self.linear = nn.Linear(IN, OUT)
+        self.linear = nn.Linear(IN, OUT).to(device=device)
         self.set_module_name("linear")
 
     def forward(self):

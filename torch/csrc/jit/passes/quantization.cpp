@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
 #include <algorithm>
@@ -17,6 +18,27 @@
 namespace torch {
 namespace jit {
 namespace {
+
+struct PatternsAndModules {
+  bool is_conv;
+  bool is_per_channel;
+  std::string pattern;
+  script::Module packed_params_module;
+};
+
+static Value* getValue(
+    const std::string& name,
+    const std::unordered_map<const Value*, Value*>& match_vmap,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return match_vmap.at(vmap.at(name));
+}
+
+static c10::optional<IValue> getIValue(
+    const std::string& name,
+    const std::unordered_map<const Value*, Value*>& match_vmap,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return toIValue(getValue(name, match_vmap, vmap));
+}
 
 void fillQConfigMap(
     const script::Module& module,
@@ -30,21 +52,23 @@ void fillQConfigMap(
   } else {
     qconfig = parent_qconfig;
   }
-  map[module.module_object()] = qconfig;
+  map[module._ivalue()] = qconfig;
 
-  for (const script::NameModule& s : module.get_modules()) {
+  for (const script::NameModule& s : module.named_children()) {
     std::string child_key;
     if (key == "") {
       child_key = s.name;
     } else {
       child_key = key + "." + s.name;
     }
-    fillQConfigMap(
-        s.module.module_object(), qconfig_dict, map, child_key, qconfig);
+    fillQConfigMap(s.value._ivalue(), qconfig_dict, map, child_key, qconfig);
   }
 }
 
-std::string getFuncName(const c10::QualifiedName& qname) {
+std::string getFuncName(Value* func_value) {
+  auto func_node = func_value->node();
+  auto func = func_node->output()->type()->expect<FunctionType>()->function();
+  const auto& qname = func->qualname();
   const auto& name = qname.qualifiedName();
   auto rdot_idx = name.rfind('.');
   if (rdot_idx != std::string::npos) {
@@ -71,9 +95,7 @@ bool nodeQuantizable(Node* n) {
       std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
   if (n->kind() == prim::CallFunction) {
-    auto func_node = n->inputs()[0]->node();
-    auto func = func_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
         std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
         call_funcs.end();
@@ -98,16 +120,6 @@ bool valueNeedsToBeQuantized(Value* v) {
   return false;
 }
 
-Value* insertScalarType(Node* ins_node, at::ScalarType t) {
-  TORCH_INTERNAL_ASSERT(t != at::ScalarType::Undefined);
-  WithInsertPoint ins(ins_node);
-  // ScalarType inserted before ins_node node which is
-  // beginning of the quant-dequant pattern
-  Value* scalartype_v =
-      ins_node->owningGraph()->insertConstant(IValue(static_cast<int>(t)));
-  return scalartype_v;
-}
-
 class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
@@ -129,28 +141,47 @@ class InsertObserversHelper {
       const script::Module& module,
       const std::string& method_name);
 
-  // Values that are the output of GetAttr[name="weight"] and
-  // GetAttr[name="bias"] will be propagated from parent method call to the
-  // child graph
-  void propagateValues(Node* n, std::shared_ptr<Graph>& graph);
-
   const ModuleQConfigMap& module_qconfig_map_;
   // Values we want to skip observing, used to skip values in
   // the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
-  // Values that are the output of GetAttr[name="weight"] and they
-  // will be propagated through the function call hierarchy
-  std::unordered_set<Value*> weight_values_;
-  // Values that are the output of GetAttr[name="bias"] and they
-  // will be propagated through the function call hierarchy
-  std::unordered_set<Value*> bias_values_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
   // every time to find a unique id.
   int uid_ = 0;
 };
+
+bool isBiasOfConvOrLinear(Value* v) {
+  for (const Use& u : v->uses()) {
+    if (u.user->kind() == Symbol::aten("conv2d")) {
+      if (v == u.user->inputs().at(2)) {
+        return true;
+      }
+    } else if (u.user->kind() == prim::CallFunction) {
+      auto func_name = getFuncName(u.user->inputs()[0]);
+      if (func_name == "linear" && v == u.user->inputs().at(3)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isWeightOfConvOrLinear(Value* v) {
+  for (const Use& u : v->uses()) {
+    if (u.user->kind() == Symbol::aten("conv2d") &&
+        v == u.user->inputs().at(1)) {
+      return true;
+    } else if (u.user->kind() == prim::CallFunction &&
+               getFuncName(u.user->inputs()[0]) == "linear" &&
+               v == u.user->inputs().at(2)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
@@ -160,41 +191,50 @@ Node* InsertObserversHelper::insertObserverFor(
     script::Module& module,
     const QConfig& qconfig) {
   // Skip observing bias
-  if (bias_values_.count(v)) {
+  if (isBiasOfConvOrLinear(v)) {
     return nullptr;
   }
 
   script::Module observer_module;
-  if (weight_values_.count(v)) {
+  if (isWeightOfConvOrLinear(v)) {
+    TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
   }
+
   script::Module observer = observer_module.clone();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
-  while (module.find_module(observer_name)) {
+  while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
-  // Get handle of observer module
-  Node* observer_instance = g->create(c10::prim::GetAttr);
-  // self._observer_v
-  observer_instance->addInput(g->inputs()[0]);
-  observer_instance->s_(c10::attr::name, observer_name);
-  observer_instance->output()->setDebugName(observer_name);
-  observer_instance->output()->setType(observer.type());
-  observer_instance->insertAfter(v->node());
 
-  // Create forward method call
-  Node* call = g->create(c10::prim::CallMethod);
-  TORCH_INTERNAL_ASSERT(call != nullptr, "Failed to create forward call node");
-  call->s_(c10::attr::name, "forward");
-  call->addInput(observer_instance->output());
-  call->addInput(v);
-  call->output()->setType(v->type());
-  call->output()->setDebugName(v->debugName() + ".observed");
-  call->insertAfter(observer_instance);
-  return call;
+  // Get handle of observer module
+  Node* observer_instance =
+      g->createGetAttr(g->inputs()[0], observer_name)->insertAfter(v->node());
+  observer_instance->output()->setDebugName(observer_name);
+
+  {
+    WithInsertPoint guard(observer_instance->next());
+    // Match arguments to types of observer's arguments
+    script::MatchedSchema forward_matched_schema = script::matchSchema(
+        observer.get_method("forward").function().getSchema(),
+        v->node()->sourceRange(),
+        *g,
+        {observer_instance->output(), v},
+        {});
+    // Insert call to observer's forward
+    Node* call = g->insertMethodCall("forward", forward_matched_schema)->node();
+    call->output()->copyMetadata(v);
+
+    // Replace v with the output of observer
+    v->replaceAllUsesWith(call->output());
+    // The above also replaced the input to `call`, so switch it back to
+    // the correct value
+    call->replaceInput(1, v);
+    return call;
+  }
 }
 
 void InsertObserversHelper::findIntermediateValuesInPattern(
@@ -250,23 +290,10 @@ graph(%input, %weight, %bias, %4):
   }
 }
 
-void InsertObserversHelper::propagateValues(
-    Node* n,
-    std::shared_ptr<Graph>& graph) {
-  for (size_t i = 1; i < n->inputs().size(); ++i) {
-    if (weight_values_.count(n->inputs()[i])) {
-      weight_values_.emplace(graph->inputs()[i]);
-    }
-    if (bias_values_.count(n->inputs()[i])) {
-      bias_values_.emplace(graph->inputs()[i]);
-    }
-  }
-}
-
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
-  if (!module_qconfig_map_.count(module.module_object())) {
+  if (!module_qconfig_map_.count(module._ivalue())) {
     // the module is added by us, e.g.: observer module
     return;
   }
@@ -295,7 +322,7 @@ void InsertObserversHelper::insertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      auto qconfig = module_qconfig_map_.at(module.module_object());
+      auto qconfig = module_qconfig_map_.at(module._ivalue());
       if (qconfig) {
         auto observer_node =
             insertObserverFor(v, v->owningGraph(), module, qconfig.value());
@@ -322,13 +349,6 @@ void InsertObserversHelper::insertObservers(
         if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
-        if (v->node()->kind() == prim::GetAttr) {
-          if (v->node()->s(attr::name) == "weight") {
-            weight_values_.emplace(v);
-          } else if (v->node()->s(attr::name) == "bias") {
-            bias_values_.emplace(v);
-          }
-        }
       }
 
       if (n->kind() == prim::CallMethod) {
@@ -340,11 +360,7 @@ void InsertObserversHelper::insertObservers(
         script::Module callee_module;
         if (module_instance->node()->kind() == prim::GetAttr) {
           auto child_module_name = module_instance->node()->s(attr::name);
-          auto child_module = module.find_module(child_module_name);
-          TORCH_INTERNAL_ASSERT(
-              child_module,
-              "Child module " + child_module_name + " does not exist");
-          callee_module = child_module.value();
+          callee_module = module.attr(child_module_name).toModule();
         } else {
           TORCH_INTERNAL_ASSERT(
               module_instance == graph->inputs()[0],
@@ -354,7 +370,6 @@ void InsertObserversHelper::insertObservers(
         }
         auto method_graph =
             callee_module.get_method(module_method_name).graph();
-        propagateValues(n, method_graph);
         // Recursively insert observer for the forward function of child
         // module
         insertObservers(callee_module, module_method_name);
@@ -368,7 +383,7 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    auto qconfig = module_qconfig_map_.at(module.module_object());
+    auto qconfig = module_qconfig_map_.at(module._ivalue());
     // Skip inserting observer if no qconfig is specified
     if (qconfig) {
       insertObserverFor(v, v->owningGraph(), module, qconfig.value());
@@ -379,64 +394,55 @@ void InsertObserversHelper::insertObservers(
 Node* insertQuantDeQuantCall(
     Value* v,
     const IValue& qparams,
-    const IValue& scalar_type,
-    bool insert_after = true) {
+    const IValue& scalar_type) {
   Graph* g = v->node()->owningGraph();
+  auto tp = qparams.toTuple();
+  at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
+  at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
 
-  Node* quant = g->create(at::Symbol::aten("quantize_per_tensor"));
+  bool is_per_channel = scale.numel() > 1;
+  std::string quantize_func;
+  std::vector<Value*> inputs = {v};
+
+  // Inserting before insert point
+  WithInsertPoint ins(v->node()->next());
+  if (is_per_channel) {
+    quantize_func = "quantize_per_channel";
+    inputs.push_back(g->insertConstant(scale));
+    inputs.push_back(g->insertConstant(zero_point));
+    inputs.push_back(g->insertConstant(tp->elements()[2].toInt()));
+  } else {
+    quantize_func = "quantize_per_tensor";
+    inputs.push_back(g->insertConstant(scale.item<double>()));
+    inputs.push_back(g->insertConstant(zero_point.item<int64_t>()));
+  }
+  Value* scalar_type_val = g->insertConstant(IValue(scalar_type));
+  inputs.push_back(scalar_type_val);
+
+  Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
 
-  Node* dequant = g->create(at::Symbol::aten("dequantize"));
+  Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
   dequant->output()->setDebugName(v->debugName() + ".dequant");
 
-  Node* insert_point = insert_after ? v->node() : *g->nodes().begin();
-  WithCurrentScope scope_guard(
-      *insert_point->owningGraph(), insert_point->scope());
-  WithInsertPoint ins(insert_point);
+  g->insertNode(quant);
+  g->insertNode(dequant);
 
-  // Add quant-dequant nodes and replace for all uses of Value
-  // Create qparam constant nodes
-  auto tp = qparams.toTuple();
-  IValue scale = tp->elements()[0].toTensor().item().toFloat();
-  IValue zero_point = tp->elements()[1].toTensor().item().toInt();
-  Value* scale_val = g->insertConstant(scale);
-  Value* zero_point_val = g->insertConstant(zero_point);
-
-  // Insert quant/dequant nodes
-  if (insert_after) {
-    quant->insertAfter(insert_point);
-  } else {
-    quant->insertBefore(insert_point);
-  }
-
-  dequant->insertAfter(quant);
-
-  // Attach inputs to quantize node
-  quant->addInput(v);
-  quant->addInput(scale_val);
-  quant->addInput(zero_point_val);
-  Value* scalar_type_val = insertScalarType(quant, scalar_type.toScalarType());
-  TORCH_INTERNAL_ASSERT(scalar_type_val != nullptr);
-  quant->addInput(scalar_type_val);
-
-  dequant->addInput(quant->output());
   return dequant;
 }
 
 // find the observer for Value `v` and return the name of the observer
 c10::optional<std::string> findObserverName(Value* v) {
-  for (const Use& u : v->uses()) {
-    // Note that here we just check for the name of observer, but the ideally
-    // we should be comparing the type of observer, this is a temporary
-    // work around until data only clone of module.clone is supported.
-    if (u.user->kind() == prim::CallMethod &&
-        u.user->s(attr::name) == "forward") {
-      auto module_instance = u.user->inputs().at(0);
-      if (module_instance->node()->kind() == prim::GetAttr &&
-          module_instance->node()->s(attr::name).find("_observer_") !=
-              std::string::npos) {
-        return module_instance->node()->s(attr::name);
-      }
+  // Note that here we just check for the name of observer, but the ideally
+  // we should be comparing the type of observer, this is a temporary
+  // work around until data only clone of module.clone is supported.
+  Node* n = v->node();
+  if (n->kind() == prim::CallMethod && n->s(attr::name) == "forward") {
+    auto module_instance = n->inputs().at(0);
+    if (module_instance->node()->kind() == prim::GetAttr &&
+        module_instance->node()->s(attr::name).find("_observer_") !=
+            std::string::npos) {
+      return module_instance->node()->s(attr::name);
     }
   }
   return c10::nullopt;
@@ -444,14 +450,27 @@ c10::optional<std::string> findObserverName(Value* v) {
 
 class QuantizeHelper {
  public:
-  QuantizeHelper(const script::Module& m) : module_(m) {}
+  QuantizeHelper(script::Module& m) : module_(m) {}
   // quantization parameters and scalar type
   std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
-  void quantizeTensor(Value* v, bool insert_after = true);
-  void removeObserver(Value* v, const std::string& observer_name);
-  void destroyNodes() {
+  void quantizeTensor(Value* v);
+  // Remove the observer for value `v`. This function returns
+  // the original value (i.e. before observation), and thus all
+  // uses of the passed-in `v` should be replaced by the caller with
+  // the return value
+  Value* removeObserver(Value* v, const std::string& observer_name);
+  void removeModulesAndNodes() {
+    // Remove observer modules from last one to first one in order to
+    // reduce the time complexity, assuming all the observer modules
+    // are added after the existing modules, we'll have complexity of
+    // O(N) where N is number of observer moduels with this optimization
+    for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
+      auto observer_name = observer_modules_to_remove_[i];
+      module_._ivalue()->unsafeRemoveAttr(observer_name);
+      module_.type()->unsafeRemoveAttribute(observer_name);
+    }
     // Destroy observer forward calls
     for (auto& n : nodes_to_destroy_) {
       n->destroy();
@@ -459,28 +478,29 @@ class QuantizeHelper {
   }
 
  private:
-  const script::Module& module_;
+  script::Module& module_;
   std::vector<std::string> observer_modules_to_remove_;
   std::vector<Node*> nodes_to_destroy_;
 };
 
-void QuantizeHelper::removeObserver(
+Value* QuantizeHelper::removeObserver(
     Value* v,
     const std::string& observer_name) {
   // remove observer_module
   observer_modules_to_remove_.push_back(observer_name);
-  // remove observer forward call
-  for (const Use& u : v->uses()) {
-    Node* user = u.user;
-    if (user->kind() == prim::CallMethod && user->s(attr::name) == "forward" &&
-        user->inputs()[0]->node()->kind() == prim::GetAttr &&
-        user->inputs()[0]->node()->s(attr::name) == observer_name) {
-      // Observer forward call node
-      nodes_to_destroy_.push_back(user);
-      // GetAttr node for observer module
-      nodes_to_destroy_.push_back(user->inputs()[0]->node());
-    }
-  }
+
+  Node* observer = v->node();
+  TORCH_INTERNAL_ASSERT(
+      observer->kind() == prim::CallMethod &&
+      observer->s(attr::name) == "forward" &&
+      observer->inputs()[0]->node()->kind() == prim::GetAttr &&
+      observer->inputs()[0]->node()->s(attr::name) == observer_name);
+  // Observer forward call node
+  nodes_to_destroy_.push_back(observer);
+  // GetAttr node for observer module
+  nodes_to_destroy_.push_back(observer->inputs()[0]->node());
+  v->replaceAllUsesWith(observer->input(1));
+  return observer->input(1);
 }
 
 void checkCalculateQParamsResult(const IValue& qparams) {
@@ -491,17 +511,27 @@ void checkCalculateQParamsResult(const IValue& qparams) {
       qparams.tagKind());
   auto tp = qparams.toTuple();
   TORCH_CHECK(
-      tp->elements().size() == 2,
+      tp->elements().size() == 2 || tp->elements().size() == 3,
       "`calculate_qparams` function is expected to reutrn a "
-      "Tuple of size 2, got Tuple of size ",
+      "Tuple of size 2 or 3, got Tuple of size ",
       tp->elements().size());
-  for (size_t i = 0; i < tp->elements().size(); ++i) {
+  // Expect first two elements of the tuple to be Tensor
+  for (size_t i = 0; i < 2; ++i) {
     TORCH_CHECK(
         tp->elements()[i].isTensor(),
         "Element of Tuple is expected to be Tensor, but element ",
         i,
         " has type: ",
         tp->elements()[i].tagKind());
+  }
+  // Expect the third elements of the tuple to be int
+  if (tp->elements().size() == 3) {
+    TORCH_CHECK(
+        tp->elements()[2].isInt(),
+        "Element of Tuple is expected to be int, but element ",
+        2,
+        " has type: ",
+        tp->elements()[2].tagKind());
   }
 }
 
@@ -513,21 +543,17 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto observer_module = module_.find_module(observer_name.value());
-  TORCH_INTERNAL_ASSERT(
-      observer_module,
-      "getQParams expects the corresponding observer for ",
-      v->debugName(),
-      " exists.");
-  auto om = observer_module.value();
+  auto om = module_.attr(observer_name.value()).toModule();
   auto calculate_qparams = om.get_method("calculate_qparams");
   IValue qparams = calculate_qparams(std::vector<IValue>());
   checkCalculateQParamsResult(qparams);
-  auto scalar_type = om.get_attribute("dtype");
+  auto scalar_type = om.attr("dtype");
+  TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
+              "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
 }
 
-void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
+void QuantizeHelper::quantizeTensor(Value* v) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
@@ -535,9 +561,11 @@ void QuantizeHelper::quantizeTensor(Value* v, bool insert_after) {
   auto tp = getQParams(v);
   auto qparams = std::get<0>(tp);
   auto scalar_type = std::get<1>(tp);
-  removeObserver(v, observer_name.value());
+  // NB: v is updated here, since removeObserver replaces
+  // v with the input to the observer call
+  v = removeObserver(v, observer_name.value());
   Node* dequant;
-  dequant = insertQuantDeQuantCall(v, qparams, scalar_type, insert_after);
+  dequant = insertQuantDeQuantCall(v, qparams, scalar_type);
   v->replaceAllUsesWith(dequant->output());
   Node* q = dequant->input(0)->node();
   // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the one
@@ -552,12 +580,7 @@ c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
       "Child instance should come from GetAttr.");
   auto child_module_name = child_instance->node()->s(attr::name);
   if (child_module_name.find("_observer_") == std::string::npos) {
-    auto child_module = module_.find_module(child_module_name);
-    TORCH_INTERNAL_ASSERT(
-        child_module,
-        "InsertQuantDeQuant - Child module " + child_module_name +
-            " does not exist");
-    return child_module;
+    return module_.attr(child_module_name).toModule();
   }
   return c10::nullopt;
 }
@@ -605,10 +628,6 @@ void InsertQuantDeQuantImpl(
             InsertQuantDeQuantImpl(m.value(), module_method_name);
           }
         }
-        if (v->node()->kind() == prim::GetAttr &&
-            v->node()->s(c10::attr::name) == "bias") {
-          continue;
-        }
         qh.quantizeTensor(v);
       }
 
@@ -619,23 +638,21 @@ void InsertQuantDeQuantImpl(
   }
 
   for (Value* v : input_values) {
-    qh.quantizeTensor(v, false);
+    qh.quantizeTensor(v);
   }
 
-  qh.destroyNodes();
+  qh.removeModulesAndNodes();
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
   std::string linear_with_quant = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+graph(%linear, %a_dequant, %w_quant, %b):
         %w_dequant = aten::dequantize(%w_quant)
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
         return (%r) )";
 
   std::string linear_with_quant_prepack = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+graph(%linear, %a_dequant, %w_quant, %b):
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
@@ -646,10 +663,8 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
-    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
-    auto func =
-        linear_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto linear_value = match_vmap.at(vmap.at("linear"));
+    auto func_name = getFuncName(linear_value);
     if (func_name == "linear") {
       return true;
     }
@@ -657,23 +672,22 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   };
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
+  rewriter.RegisterRewritePattern(linear_with_quant,
+                                  linear_with_quant_prepack);
   rewriter.runOnGraph(graph, filter);
 }
 
 void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
   std::string conv_with_quant = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   std::string conv_with_quant_prepack = R"(
-graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_unpack(%packed_params)
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
         return (%r) )";
@@ -767,31 +781,31 @@ static std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
   return std::make_tuple(new_w, new_b);
 }
 
+static bool hastensor(script::Module& m, const char* name) {
+  return m.hasattr(name) && m.attr(name).isTensor();
+}
+
 static bool tryExtractingConvBNParameters(
     script::Module& conv,
     script::Module& bn,
     ConvBNParameters& r) {
-  if (!conv.find_parameter("weight") || !bn.find_parameter("weight") ||
-      !bn.find_parameter("bias")) {
-    return false;
-  }
-  if (!bn.find_attribute("running_mean") || !bn.find_attribute("running_var") ||
-      !bn.get_attribute("running_mean").isTensor() ||
-      !bn.get_attribute("running_var").isTensor()) {
+  if (!hastensor(conv, "weight") || !hastensor(bn, "weight") ||
+      !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
+      !hastensor(bn, "running_var")) {
     return false;
   }
 
-  r.bn_rm = bn.get_attribute("running_mean").toTensor();
-  r.bn_rv = bn.get_attribute("running_var").toTensor();
+  r.bn_rm = bn.attr("running_mean").toTensor();
+  r.bn_rv = bn.attr("running_var").toTensor();
   r.bn_eps = 1e-5; // TODO: allow access to the actual value. NOLINT
                    // Now we cannot do it because we inline all fields that are
                    // in __constants__ and lose all tracks of them.
-  r.bn_w = bn.get_parameter("weight");
-  r.bn_b = bn.get_parameter("bias");
+  r.bn_w = bn.attr("weight").toTensor();
+  r.bn_b = bn.attr("bias").toTensor();
 
-  r.conv_w = conv.get_parameter("weight");
-  if (conv.find_parameter("bias")) {
-    r.conv_b = conv.get_parameter("bias");
+  r.conv_w = conv.attr("weight").toTensor();
+  if (conv.hasattr("bias")) {
+    r.conv_b = conv.attr("bias").toTensor();
   } else {
     r.conv_b = at::zeros_like(r.bn_rm);
   }
@@ -826,8 +840,8 @@ graph(%self, %x):
     worklist.pop();
 
     // Queue submodules for processing
-    for (const script::NameModule& submodule : current.get_modules()) {
-      worklist.push(submodule.module);
+    for (const script::Module& submodule : current.children()) {
+      worklist.push(submodule);
     }
 
     // Process forward method of the current module
@@ -837,7 +851,8 @@ graph(%self, %x):
 
     script::Method method = current.get_method("forward");
     GRAPH_DUMP(
-        current.name().name() + "::forward() before Conv2d-BatchNorm2d folding",
+        current.type()->name()->name() +
+            "::forward() before Conv2d-BatchNorm2d folding",
         method.graph());
     const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
@@ -854,9 +869,11 @@ graph(%self, %x):
       TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
 
       script::Module conv_submodule =
-          current.get_module(matched_conv_submodule->s(Symbol::attr("name")));
+          current.attr(matched_conv_submodule->s(Symbol::attr("name")))
+              .toModule();
       script::Module bn_submodule =
-          current.get_module(matched_bn_submodule->s(Symbol::attr("name")));
+          current.attr(matched_bn_submodule->s(Symbol::attr("name")))
+              .toModule();
 
       ConvBNParameters params;
       if (!tryExtractingConvBNParameters(
@@ -883,9 +900,9 @@ graph(%self, %x):
       GRAPH_UPDATE("Deleting ", *matched_bn);
 
       auto new_w_b = computeUpdatedConvWeightAndBias(params);
-      conv_submodule.set_parameter("weight", std::get<0>(new_w_b));
-      if (conv_submodule.find_parameter("bias")) {
-        conv_submodule.set_parameter("bias", std::get<1>(new_w_b));
+      conv_submodule.setattr("weight", std::get<0>(new_w_b));
+      if (conv_submodule.hasattr("bias")) {
+        conv_submodule.setattr("bias", std::get<1>(new_w_b));
       } else {
         conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
       }
@@ -936,7 +953,7 @@ graph(%self, %scale, %zero_point, %dtype):
       continue;
     }
     auto match_vmap = match.values_map;
-    auto float_weight = module.get_parameter("weight").variable_data();
+    auto float_weight = module.attr("weight").toTensor().data();
     auto scale = toIValue(match_vmap.at(vmap.at("scale"))).value().toDouble();
     auto zero_point =
         toIValue(match_vmap.at(vmap.at("zero_point"))).value().toInt();
@@ -965,9 +982,9 @@ void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     InsertPrepackUnpack(graph);
-    for (script::NameModule m : module.get_modules()) {
-      InsertPrepackUnpack(m.module);
-    }
+  }
+  for (script::Module m : module.children()) {
+    InsertPrepackUnpack(m);
   }
 }
 
@@ -978,90 +995,142 @@ void FoldPrepackedWeightIntoModule(
     const script::Module& conv_params_module) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
-  std::string linear_prepack = R"(
+  GRAPH_DUMP(
+      "Before FoldPrepackWeightIntoModule: ",
+      graph);
+
+  std::string linear_prepack_per_tensor = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        return (%packed_params) )";
+
+  std::string linear_prepack_per_channel = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype):
+        %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
         %packed_params = quantized::linear_prepack(%w_quant, %b)
         return (%packed_params) )";
 
   std::string conv2d_prepack = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params))";
 
-  // (is_conv, pattern, packed_params_module)
-  auto pattern_and_modules = {
-      std::make_tuple(false, linear_prepack, linear_params_module),
-      std::make_tuple(true, conv2d_prepack, conv_params_module)};
-  for (const auto& item : pattern_and_modules) {
-    bool is_conv = std::get<0>(item);
-    const std::string& pattern = std::get<1>(item);
-    const script::Module& packed_params_module = std::get<2>(item);
+  std::string conv2d_prepack_per_channel = R"(
+graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
+        %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
+        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        return (%packed_params))";
+
+  // (is_conv, is_per_channel, pattern, packed_params_module)
+  std::vector<PatternsAndModules> pattern_and_modules = {
+    {false, false, linear_prepack_per_tensor, linear_params_module},
+    {false, true, linear_prepack_per_channel, linear_params_module},
+    {true, false, conv2d_prepack, conv_params_module},
+    {true, true, conv2d_prepack_per_channel, conv_params_module}};
+  for (const auto& pm : pattern_and_modules) {
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
-    script::parseIR(pattern, &pattern_graph, vmap);
+    script::parseIR(pm.pattern, &pattern_graph, vmap);
     const auto& matches = findPatternMatches(pattern_graph, *graph);
     TORCH_INTERNAL_ASSERT(
         matches.size() <= 1, "We only support at most one match right now");
     for (const auto& match : matches) {
       const auto& match_vmap = match.values_map;
-      auto w_scale =
-          toIValue(match_vmap.at(vmap.at("w_scale"))).value().toDouble();
-      auto w_zero_point =
-          toIValue(match_vmap.at(vmap.at("w_zero_point"))).value().toInt();
-      auto w_dtype =
-          toIValue(match_vmap.at(vmap.at("w_dtype"))).value().toScalarType();
-      auto w = module.get_parameter("weight").variable_data();
-      auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
-      c10::optional<at::Tensor> b = c10::nullopt;
-      if (module.find_parameter("bias")) {
-        b = module.get_parameter("bias").variable_data();
+      auto w_dtype_opt = getIValue("w_dtype", match_vmap, vmap);
+      auto w_scale_opt = getIValue("w_scale", match_vmap, vmap);
+      auto w_zero_point_opt = getIValue("w_zero_point", match_vmap, vmap);
+      if (!w_dtype_opt || !w_scale_opt || !w_zero_point_opt) {
+        GRAPH_DEBUG("dtype, scale or zero_point for weight(",
+                    getValue("w_dtype", match_vmap, vmap)->debugName(),
+                    ", ",
+                    getValue("w_scale", match_vmap, vmap)->debugName(),
+                    ", ",
+                    getValue("w_zero_point", match_vmap, vmap)->debugName(),
+                    ") is not constant, skipping the match.");
+        continue;
       }
-      script::Module wrapper_module = packed_params_module.clone();
+      auto w_dtype = w_dtype_opt.value().toScalarType();
+      auto w = module.attr("weight").toTensor().data();
+      at::Tensor w_quant;
+      if (pm.is_per_channel) {
+        auto w_axis_opt = getIValue("w_axis", match_vmap, vmap);
+        if (!w_axis_opt) {
+          GRAPH_DEBUG("axis for weight ",
+                      getValue("w_axis", match_vmap, vmap)->debugName(),
+                      " is non-constant, skipping the match");
+          continue;
+        }
+        auto w_scale = w_scale_opt.value().toTensor().to(at::kFloat);
+        auto w_zero_point = w_zero_point_opt.value().toTensor().to(at::kInt);
+        int w_axis = w_axis_opt.value().toInt();
+        TORCH_CHECK(w_scale.sizes() == w_zero_point.sizes(),
+                    "scale and zero_point must have the same size");
+        w_quant = at::quantize_per_channel(w, w_scale, w_zero_point, w_axis, w_dtype);
+      } else {
+        auto w_scale = w_scale_opt.value().toDouble();
+        auto w_zero_point = w_zero_point_opt.value().toInt();
+        w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
+      }
+      c10::optional<at::Tensor> b = c10::nullopt;
+      if (hastensor(module, "bias")) {
+        b = module.attr("bias").toTensor().data();
+      }
+      script::Module wrapper_module = pm.packed_params_module.clone();
       auto set_weight_bias = wrapper_module.get_method("set_weight_bias");
-      if (is_conv) {
-        auto stride = toTwoElementIntList(match_vmap.at(vmap.at("stride")));
-        auto padding = toTwoElementIntList(match_vmap.at(vmap.at("padding")));
-        auto dilation = toTwoElementIntList(match_vmap.at(vmap.at("dilation")));
-        auto groups = toIValue(match_vmap.at(vmap.at("groups")));
+      std::string module_name_prefix;
+      if (pm.is_conv) {
+        module_name_prefix = "_conv_packed_params_module_for_";
+        auto stride_opt = toTwoElementIntList(getValue("stride", match_vmap, vmap));
+        auto padding_opt = toTwoElementIntList(getValue("padding", match_vmap, vmap));
+        auto dilation_opt = toTwoElementIntList(getValue("dilation", match_vmap, vmap));
+        auto groups_opt = getIValue("groups", match_vmap, vmap);
         auto set_conv_params = wrapper_module.get_method("set_conv_params");
-        if (!stride || !padding || !dilation) {
-          TORCH_WARN(
-              "Failed to extract two element IntList for stride/padding/dilation");
+        if (!stride_opt || !padding_opt || !dilation_opt) {
+          GRAPH_DEBUG(
+              "Failed to extract two element IntList for stride/padding/dilation, (",
+              getValue("stride", match_vmap, vmap)->debugName(),
+              ", ",
+              getValue("padding", match_vmap, vmap)->debugName(),
+              ", ",
+              getValue("dilation", match_vmap, vmap)->debugName(),
+              ") skipping the match");
           continue;
         }
         set_conv_params(std::vector<IValue>{
-            stride.value(), padding.value(), dilation.value(), groups.value()});
-      }
-      set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
-      std::string module_name_prefix;
-      if (is_conv) {
-        module_name_prefix = "_conv_packed_params_module_for_";
+            stride_opt.value(), padding_opt.value(), dilation_opt.value(), groups_opt.value()});
       } else {
         module_name_prefix = "_linear_packed_params_module_for_";
       }
-      auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
+      set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
+      auto w_quant_val = getValue("w_quant", match_vmap, vmap);
       // unique name for the module based on %w_quant
       int uid = 0;
       auto module_name = module_name_prefix + c10::to_string(uid++);
-      while (module.find_module(module_name)) {
+      while (module.hasattr(module_name)) {
         module_name_prefix + c10::to_string(uid++);
       }
+      GRAPH_UPDATE("Adding new module: ", module_name);
       module.register_module(module_name, wrapper_module);
 
       // Add GetAttr of the packed module
-      auto packed_params_val = match_vmap.at(vmap.at("packed_params"));
+      auto packed_params_val = getValue("packed_params", match_vmap, vmap);
       WithInsertPoint ins(packed_params_val->node());
       // wrapper_module =
       // self.{_conv,_linear}_packed_params_module_for_{unique_id}
       Value* packed_params_module =
           graph->insertGetAttr(graph->inputs()[0], module_name)
               ->setType(wrapper_module.type());
+      GRAPH_UPDATE(
+          "Adding GetAttr node for the wrapper module");
 
       // packed_params = wrapper_module._packed_params
       Value* packed_params_from_attr =
           graph->insertGetAttr(packed_params_module, "_packed_params");
+      GRAPH_UPDATE(
+          "Adding GetAttr node for _packed_params: ",
+          packed_params_from_attr->debugName());
       packed_params_val->replaceAllUsesWith(packed_params_from_attr);
 
       // Delete nodes
@@ -1071,6 +1140,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         n->removeAllInputs();
       }
       for (auto n : nodes_to_delete) {
+        GRAPH_UPDATE("Deleting node: ", n);
         n->destroy();
       }
     }
@@ -1084,10 +1154,10 @@ void FoldPrepackedWeightIntoModule(
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
         module, method.name(), linear_params_module, conv_params_module);
-    for (script::NameModule m : module.get_modules()) {
-      FoldPrepackedWeightIntoModule(
-          m.module, linear_params_module, conv_params_module);
-    }
+  }
+  for (script::Module m : module.children()) {
+    FoldPrepackedWeightIntoModule(
+        m, linear_params_module, conv_params_module);
   }
 }
 } // namespace jit

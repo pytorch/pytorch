@@ -1,0 +1,3 @@
+#pragma once
+
+#cmakedefine TRACE_ENABLED
