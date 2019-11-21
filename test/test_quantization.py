@@ -842,15 +842,19 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         qconfig_dict = {
             '': default_qconfig
         }
-        model_script = quantize_script(
-            torch.jit.script(conv_model_to_script),
-            qconfig_dict,
-            default_eval_fn,
-            [self.img_data],
-            inplace=False)
-        result_eager = model_eager(self.img_data[0][0])
-        result_script = model_script(self.img_data[0][0])
-        self.assertEqual(result_eager, result_script)
+        for trace in [True, False]:
+            model_under_test = torch.jit.trace(conv_model_to_script, self.img_data[0][0]) \
+                if trace else torch.jit.script(conv_model_to_script)
+
+            model_script = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                default_eval_fn,
+                [self.img_data],
+                inplace=False)
+            result_eager = model_eager(self.img_data[0][0])
+            result_script = model_script(self.img_data[0][0])
+            self.assertEqual(result_eager, result_script)
 
     @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
     def test_conv_bn(self):

@@ -103,6 +103,7 @@ bool nodeQuantizable(Node* n) {
       "conv2d",
       "linear",
       "relu",
+      "_convolution",
   };
   std::vector<Symbol> aten_funcs = {
       Symbol::aten("addmm"), Symbol::aten("matmul"), Symbol::aten("add_")};
@@ -219,7 +220,7 @@ bool isBiasOfConvOrLinear(Value* v) {
 
 bool isWeightOfConvOrLinear(Value* v) {
   for (const Use& u : v->uses()) {
-    if (u.user->kind() == Symbol::aten("conv2d") &&
+    if ((u.user->kind() == Symbol::aten("conv2d") || u.user->kind() == Symbol::aten("_convolution")) &&
         v == u.user->inputs().at(1)) {
       return true;
     } else if (u.user->kind() == prim::CallFunction &&
@@ -706,23 +707,11 @@ graph(%linear, %a_dequant, %w_quant, %b):
 }
 
 void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
-  std::string conv_with_quant = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        return (%r) )";
-
-  std::string conv_with_quant_prepack = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
-        return (%r) )";
-
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(conv_with_quant, conv_with_quant_prepack);
-  rewriter.runOnGraph(graph);
+  for (const auto& item : insert_pack_replacements()) {
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(item.first, item.second);
+    rewriter.runOnGraph(graph);
+  }
 }
 
 c10::optional<IValue> toTwoElementIntList(Value* v) {
