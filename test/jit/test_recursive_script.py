@@ -132,7 +132,7 @@ class TestRecursiveScript(JitTestCase):
                 return t + self.x
 
         m = torch.jit.script(MyModule())
-        FileCheck().check("ClassType<MyModule>").run(m.graph)
+        FileCheck().check("MyModule").run(m.graph)
 
     def test_repeated_error_stack(self):
         def d(x):
