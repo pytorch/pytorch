@@ -44,7 +44,7 @@ Tensor& OptimizerBase::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   if (buffers.size() <= index) {
     buffers.reserve(index);
     for (auto i = buffers.size(); i <= index; ++i) {
-      buffers.push_back(torch::zeros_like(parameters_.at(i)));
+      buffers.push_back(torch::zeros_like(parameters_.at(i), torch::MemoryFormat::Preserve));
     }
   }
   // Copy the buffer to the device and dtype of the parameter.

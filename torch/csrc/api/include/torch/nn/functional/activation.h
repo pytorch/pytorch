@@ -101,7 +101,7 @@ inline Tensor gumbel_softmax(const Tensor& logits,
                              double tau,
                              bool hard,
                              int dim) {
-  auto gumbels = -torch::empty_like(logits).exponential_().log();  // ~Gumbel(0,1)
+  auto gumbels = -torch::empty_like(logits, torch::MemoryFormat::Preserve).exponential_().log();  // ~Gumbel(0,1)
   gumbels = (logits + gumbels) / tau;  // ~Gumbel(logits, tau)
   auto y_soft = gumbels.softmax(dim);
 
@@ -109,7 +109,7 @@ inline Tensor gumbel_softmax(const Tensor& logits,
   if (hard) {
     // Straight through.
     auto index = std::get<1>(y_soft.max(dim, /*keepdim=*/true));
-    auto y_hard = torch::zeros_like(logits).scatter_(dim, index, 1.0);
+    auto y_hard = torch::zeros_like(logits, torch::MemoryFormat::Preserve).scatter_(dim, index, 1.0);
     ret = y_hard - y_soft.detach() + y_soft;
   } else {
     ret = y_soft;
