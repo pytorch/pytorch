@@ -1249,7 +1249,10 @@ struct PythonPrintImpl {
       indent();
       body_ << name << " : " << "Final[" + v.type()->python_str() << "] = ";
       if (v.isString()) {
-        body_ << "'" << v << "'\n";
+        body_ << "'" << v.toStringRef() << "'\n";
+      } else if (v.isDevice()) {
+        body_ << "torch.device(";
+        body_ << "'" << v.toDevice() << "')\n";
       } else {
         body_ << v << "\n";
       }
