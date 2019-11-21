@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import concurrent.futures
 from datetime import timedelta
 import sys
+import time
 import unittest
 from collections import namedtuple
 from unittest import mock
@@ -17,6 +18,20 @@ from dist_utils import dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from rpc_agent_test_fixture import RpcAgentTestFixture
 
+rpc_done = [False, False, False, False]
+
+# TODO: dedupe this with the code in dist_autograd_test.py.
+# Send rpc done info and context_id to
+# dst_rank = (self.rank + rank_distance) % self.world_size
+# we don't need a lock here since the GIL is held while executing remote
+# python UDFs, so access is serialized across several workers.
+def _set_rpc_done(rank_distance):
+    global rpc_done
+    rpc_done[rank_distance] = True
+
+def _check_rpc_done(rank_distance):
+    while not rpc_done[rank_distance]:
+        time.sleep(0.1)
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
@@ -126,7 +141,6 @@ def my_tensor_function(a, b):
     return a + b
 
 def my_sleep_func(seconds=1):
-    import time
     time.sleep(seconds)
 
 
@@ -700,8 +714,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
-        import time
-
         n = self.rank + 1
         dst_rank = n % self.world_size
         futs = []
@@ -1095,12 +1107,25 @@ class RpcTest(RpcAgentTestFixture):
     def test_rpc_local_shutdown(self):
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
+            backend=rpc.backend_registry.BackendType[
+                dist_utils.TEST_CONFIG.rpc_backend_name
+            ],
             rank=self.rank,
             world_size=self.world_size,
             init_method=self.init_method,
-            rpc_agent_options=self.rpc_agent_options
+            rpc_agent_options=self.rpc_agent_options,
         )
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n)),
+        )
+        # wait for RPCs to be done, so that some workers don't try to shut down
+        # too early.
+        rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(1,))
+        _check_rpc_done(1)
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)

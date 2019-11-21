@@ -289,9 +289,7 @@ void ProcessGroupAgent::shutdown() {
   listenerThread_.join();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
-  threadPool_.waitWorkComplete();
   PythonRpcHandler::getInstance().cleanup();
-  RRefContext::getInstance().destroyInstance();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
