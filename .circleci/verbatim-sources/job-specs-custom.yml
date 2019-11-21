@@ -378,14 +378,7 @@
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
       - checkout
-      - run_brew_for_ios_build
-      - run:
-          name: Install XCode Commandline tool
-          no_output_timeout: "1h"
-          command: |
-            set -e
-            xcode-select --install
-            instrument -s -devices
+      - run_brew_for_ios_build            
       - run:
           name: Run Fastlane
           no_output_timeout: "1h"
@@ -440,7 +433,7 @@
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
-          name: Test
+          name: Run Build Tests
           no_output_timeout: "30m"
           command: |
             set -e
@@ -458,7 +451,7 @@
               exit 1
             fi
       - run:
-          name: Simulator Tests
+          name: Run Simulator Tests
           no_output_timeout: "2h"
           command: |
             set -e
@@ -477,5 +470,6 @@
             python trace_model.py
             ruby setup.rb
             cd ${PROJ_ROOT}/ios/TestApp
+            instruments -s -devices
             fastlane scan
             
