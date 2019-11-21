@@ -72,7 +72,7 @@ def calculate_gain(nonlinearity, param=None):
 
 
 def uniform_(tensor, a=0., b=1., generator=None):
-    # type: (Tensor, float, float, Optional[Generator]) -> Tensor
+    # type: (Tensor, float, float, Optional[object]) -> Tensor
     r"""Fills the input Tensor with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
 
@@ -90,7 +90,7 @@ def uniform_(tensor, a=0., b=1., generator=None):
 
 
 def normal_(tensor, mean=0., std=1., generator=None):
-    # type: (Tensor, float, float, Optional[Generator]) -> Tensor
+    # type: (Tensor, float, float, Optional[object]) -> Tensor
     r"""Fills the input Tensor with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
 
@@ -218,7 +218,7 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform_(tensor, gain=1., generator=None):
-    # type: (Tensor, float, Optional[Generator]) -> Tensor
+    # type: (Tensor, float, Optional[object]) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
@@ -247,7 +247,7 @@ def xavier_uniform_(tensor, gain=1., generator=None):
 
 
 def xavier_normal_(tensor, gain=1., generator=None):
-    # type: (Tensor, float, Optional[Generator]) -> Tensor
+    # type: (Tensor, float, Optional[object]) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
