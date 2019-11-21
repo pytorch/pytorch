@@ -852,9 +852,10 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                 default_eval_fn,
                 [self.img_data],
                 inplace=False)
-            result_eager = model_eager(self.img_data[0][0])
-            result_script = model_script(self.img_data[0][0])
-            self.assertEqual(result_eager, result_script)
+            with torch.no_grad():
+                result_eager = model_eager(self.img_data[0][0])
+                result_script = model_script(self.img_data[0][0])
+                self.assertEqual(result_eager, result_script)
 
     @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
     def test_conv_bn(self):

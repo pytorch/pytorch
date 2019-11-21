@@ -707,11 +707,57 @@ graph(%linear, %a_dequant, %w_quant, %b):
 }
 
 void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
-  for (const auto& item : insert_pack_replacements()) {
-    SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(item.first, item.second);
-    rewriter.runOnGraph(graph);
-  }
+  std::string conv_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(conv_with_quant, conv_with_quant_prepack);
+  rewriter.runOnGraph(graph);
+}
+
+void insertPrepackUnpackForConvolution(std::shared_ptr<Graph>& graph) {
+  std::string conv_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::_convolution(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+        return (%r) )";
+
+  std::string conv_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  // Filter the unsupported case
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto transposed_value = getIValue("transposed", match_vmap, vmap);
+    auto benchmark_value = getIValue("benchmark", match_vmap, vmap);
+    auto deterministic_value = getIValue("deterministic", match_vmap, vmap);
+    auto cudnn_enabled_value = getIValue("cudnn_enabled", match_vmap, vmap);
+
+    if (!transposed_value && !benchmark_value && !deterministic_value && cudnn_enabled_value) {
+      return false;
+    }
+    return true;
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(conv_with_quant, conv_with_quant_prepack);
+  rewriter.runOnGraph(graph, filter);
 }
 
 c10::optional<IValue> toTwoElementIntList(Value* v) {
@@ -998,6 +1044,7 @@ graph(%self, %scale, %zero_point, %dtype):
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
   insertPrepackUnpackForLinear(graph);
   insertPrepackUnpackForConv2d(graph);
+  insertPrepackUnpackForConvolution(graph);
 }
 
 void InsertPrepackUnpack(script::Module& module) {

@@ -71,40 +71,4 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
   };
 }
 
-std::unordered_map<std::string, std::string> insert_pack_replacements() {
-  std::string conv_with_quant = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        return (%r) )";
-
-  std::string conv_with_quant_prepack = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
-        return (%r) )";
-
-  std::string convolution_with_quant = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = aten::_convolution(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
-        return (%r) )";
-
-  std::string convolution_with_quant_prepack = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
-        return (%r) )";
-
-  return {
-    {conv_with_quant, conv_with_quant_prepack},
-    {convolution_with_quant, convolution_with_quant_prepack},
-  };
-
-}
-
 }} // torch::jit
