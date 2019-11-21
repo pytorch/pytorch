@@ -1,0 +1,31 @@
+name: Main workflow
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: [1.8]
+      fail-fast: false
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v1
+      - name: Set up JDK ${{matrix.java}}
+        uses: actions/setup-java@v1
+        with:
+          java-version: ${{matrix.java}}
+      - name: Run test
+        run: mvn test
+      - name: Build with Maven
+        run: mvn package -Dmaven.test.skip=true
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1.0.2
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+          file: ./zhuzhu-project/target/site/jacoco/jacoco.xml
