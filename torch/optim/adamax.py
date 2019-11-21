@@ -60,13 +60,8 @@ class Adamax(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-<<<<<<< HEAD
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-=======
-                    state['exp_avg'] = torch.zeros_like(p)
-                    state['exp_inf'] = torch.zeros_like(p)
->>>>>>> Remove use of .data in optimizers
 
                 exp_avg, exp_inf = state['exp_avg'], state['exp_inf']
                 beta1, beta2 = group['betas']

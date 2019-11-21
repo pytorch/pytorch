@@ -60,15 +60,9 @@ class SparseAdam(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     # Exponential moving average of gradient values
-<<<<<<< HEAD
-                    state['exp_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-=======
-                    state['exp_avg'] = torch.zeros_like(p)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p)
->>>>>>> Remove use of .data in optimizers
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 state['step'] += 1
 
