@@ -238,6 +238,15 @@ class TestNamedTensor(TestCase):
             output = x.index_fill('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
             self.assertEqual(output.names, expected_names)
 
+    def test_equal(self):
+        for device in torch.testing.get_all_device_types():
+            tensor = torch.randn(2, 3, device=device)
+            other = tensor.clone()
+
+            self.assertTrue(torch.equal(tensor.rename('N', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename('M', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename(None, 'C'), other.rename('N', 'C')))
+
     def test_squeeze(self):
         x = create('N:3,C:1,H:1,W:1')
         output = x.squeeze('C')

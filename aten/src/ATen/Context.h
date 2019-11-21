@@ -140,7 +140,7 @@ static inline void init() {
 
 CAFFE2_API Allocator* getCPUAllocator();
 
-static inline DeprecatedTypeProperties& getNonVariableDeprecatedTypeProperties(Backend p, ScalarType s) {
+static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       p, s);
 }

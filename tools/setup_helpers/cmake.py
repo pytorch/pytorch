@@ -230,6 +230,7 @@ class CMake:
              'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
+             'JAVA_HOME',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',

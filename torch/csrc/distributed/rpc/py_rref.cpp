@@ -77,6 +77,7 @@ py::object PyRRef::localValue() {
     const py::object& value =
         std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
 
+    PythonRpcHandler::getInstance().handleException(value);
     {
       // acquiring GIL as the return statement construct a new py::object from
       // a const reference.

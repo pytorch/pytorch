@@ -233,7 +233,7 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
 RReLUImpl::RReLUImpl(const RReLUOptions& options_) : options(options_) {}
 
 Tensor RReLUImpl::forward(Tensor input) {
-  return F::detail::rrelu(input, options.lower(), options.upper(), options.inplace(), is_training());
+  return F::detail::rrelu(input, options.lower(), options.upper(), is_training(), options.inplace());
 }
 
 void RReLUImpl::reset() {}
@@ -263,6 +263,20 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
     stream << std::boolalpha << ", inplace=" << options.inplace();
   }
   stream << ")";
+}
+
+// ============================================================================
+
+GLUImpl::GLUImpl(const GLUOptions& options_) : options(options_) {}
+
+Tensor GLUImpl::forward(const Tensor& input) {
+  return F::detail::glu(input, options.dim());
+}
+
+void GLUImpl::reset() {}
+
+void GLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::GLU(dim=" << options.dim() << ")";
 }
 
 // ============================================================================

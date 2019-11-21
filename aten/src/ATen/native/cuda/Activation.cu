@@ -64,7 +64,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
   TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
-  Tensor result = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto strides = input.strides();
 
   // case1: shared weight for all channels
@@ -177,9 +177,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
   int64_t weight_num = weight.numel();
   auto strides = input.strides();
   auto dims = input.dim();
-  Tensor input_grad = at::empty_like(input, at::MemoryFormat::Contiguous);
-  Tensor weight_grad = at::empty_like(weight, at::MemoryFormat::Contiguous);
-  Tensor weight_grad_collector = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // case1: shared parameter for all channels
   if (weight_num == 1) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_backward_cuda", [&] {
@@ -270,7 +270,7 @@ void hardshrink_backward_cuda_kernel(const Tensor& self, Tensor& out_tensor, sca
 }
 
 Tensor hardshrink_cuda(const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "hardshrink_cuda", [&] {
     hardshrink_cuda_kernel<scalar_t>(self, out_tensor, lambd.to<scalar_t>());
   });
@@ -278,7 +278,7 @@ Tensor hardshrink_cuda(const Tensor & self, Scalar lambd) {
 }
 
 Tensor hardshrink_backward_cuda(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(grad, at::MemoryFormat::Contiguous);
+  auto out_tensor = at::empty_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "hardshrink_backward_cuda", [&] {
     hardshrink_backward_cuda_kernel<scalar_t>(self, out_tensor, lambd.to<scalar_t>(), grad);
   });
@@ -329,21 +329,49 @@ void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
-  Tensor Y = at::native::empty_like(self, at::MemoryFormat::Contiguous);
+  Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
-  GeluKernel(kCUDA, it);
+  GeluCUDAKernelImpl(it);
   return Y;
 }
 
 Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(self, at::MemoryFormat::Contiguous);
+  Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::binary_op(dX, grad, self);
-  GeluBackwardKernel(kCUDA, it);
+  GeluBackwardCUDAKernelImpl(it);
   return dX;
 }
 
-REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
-REGISTER_DISPATCH(GeluKernel, &GeluCUDAKernelImpl);
-REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardCUDAKernelImpl);
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+static Tensor threshold_out_cuda(
+    optional<Tensor> opt_result,
+    const Tensor& self,
+    Scalar threshold,
+    Scalar value,
+    const Tensor& other) {
+  Tensor result = opt_result.value_or(Tensor());
+  auto iter = TensorIterator::binary_op(result, self, other);
+  threshold_kernel(iter, threshold, value);
+  return iter.output();
+}
+
+Tensor threshold_cuda(const Tensor& self, Scalar threshold, Scalar value) {
+  return threshold_out_cuda(nullopt, self, threshold, value, self);
+}
+
+Tensor& threshold__cuda(Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out_cuda(make_optional(self), self, threshold, value, self);
+  return self;
+}
+
+Tensor& threshold_out_cuda(Tensor& result, const Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out_cuda(make_optional(result), self, threshold, value, self);
+  return result;
+}
+
+Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar threshold) {
+  return threshold_out_cuda(nullopt, self, threshold, 0, grad);
+}
 
 }}  // namespace at::native

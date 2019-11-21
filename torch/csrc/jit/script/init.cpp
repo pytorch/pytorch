@@ -196,6 +196,35 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
 }
 } // namespace
 
+bool checkMutableFunctionDefault(const py::object& def_arg) {
+  if (py::isinstance<py::list>(def_arg) || py::isinstance<py::dict>(def_arg)) {
+    return true;
+  }
+  if (py::isinstance<py::tuple>(def_arg)) {
+    auto pytuple = def_arg.cast<py::tuple>();
+    for (py::handle t : pytuple) {
+      py::object obj = py::reinterpret_borrow<py::object>(t);
+      if (checkMutableFunctionDefault(obj)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void checkMutableFunctionDefault(
+    const SourceRange& range,
+    const Argument& arg,
+    const py::object& def_arg) {
+  if (checkMutableFunctionDefault(def_arg) || arg.type()->cast<ClassType>()) {
+    throw ErrorReport(range)
+        << "Mutable default parameters are not supported because Python binds them to the function"
+        << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
+        << " the default parameter within the body of the function. Found "
+        << def_arg.get_type() << " on parameter " << arg.name();
+  }
+}
+
 FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
     const FunctionSchema& schema,
@@ -205,6 +234,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
   for (auto& arg : schema.arguments()) {
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
+      checkMutableFunctionDefault(range, arg, it->second);
       try {
         IValue value;
         auto n = arg.N();
@@ -267,7 +297,7 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
   }
 
   ClassTypePtr getClassType() const override {
-    return concreteType_->getJitType();
+    return concreteType_->getJitType()->expect<ClassType>();
   }
 
  private:
@@ -360,9 +390,10 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
   auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
-  v->setType(module.module_object()->type());
-  const auto name = QualifiedName(module.name(), "forward");
-  auto method = module.class_compilation_unit()->create_function(name, graph);
+  v->setType(module._ivalue()->type());
+  const auto name = QualifiedName(*module.type()->name(), "forward");
+  auto method =
+      module._ivalue()->compilation_unit()->create_function(name, graph);
   module.type()->addMethod(method);
 }
 
@@ -373,7 +404,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     IValue b;
   };
   std::unordered_set<const void*> visited;
-  std::vector<Work> work = {{lhs.module_object(), rhs.module_object()}};
+  std::vector<Work> work = {{lhs._ivalue(), rhs._ivalue()}};
   while (!work.empty()) {
     Work item = work.back();
     work.pop_back();
@@ -471,7 +502,7 @@ struct slot_dict_impl {
   static void bind(const py::module& m, const char* name) {
     py::class_<slot_dict_impl<Policy>>(m, name)
         .def(py::init(
-            [](Module& m) { return slot_dict_impl<Policy>(m.module_object()); }))
+            [](Module& m) { return slot_dict_impl<Policy>(m._ivalue()); }))
         .def("contains", &slot_dict_impl<Policy>::contains)
         .def("items", &slot_dict_impl<Policy>::items)
         .def("setattr", &slot_dict_impl<Policy>::setattr)
@@ -532,10 +563,56 @@ void initJitScriptBindings(PyObject* module) {
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
 
+  py::class_<Object>(m, "ScriptObject")
+      .def("_type", [](Module& m) { return m.type(); })
+      .def(
+          "_get_method",
+          [](Object& self, const std::string& name) -> Method {
+            return self.get_method(name);
+          },
+          py::keep_alive<0, 1>())
+      .def(
+          "setattr",
+          [](Object& self, const std::string& name, py::object value) {
+            TypePtr type = self.type()->getAttribute(name);
+            TORCH_CHECK(type, "Module has no attribute '", name, "'");
+            auto ivalue = toIValue(std::move(value), type);
+            self.setattr(name, ivalue);
+          })
+      .def(
+          "getattr",
+          [](Object& self, const std::string& name) {
+            return toPyObject(self.attr(name));
+          })
+      .def(
+          "__getattr__",
+          [](Object& self, const std::string& name) {
+            if (auto method = self.find_method(name)) {
+              return py::cast(*method);
+            }
+            return toPyObject(self.attr(name));
+          })
+      .def(
+          "hasattr",
+          [](Object& self, const std::string& name) {
+            return self.hasattr(name);
+          })
+      .def(
+          "_has_method",
+          [](Object& self, const std::string& name) {
+            return bool(self.find_method(name));
+          })
+      .def(
+          "_method_names", [](Object& self) {
+            return fmap(self.get_methods(), [](const Method& method) {
+              return method.name();
+            });
+          });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
-  py::class_<Module>(m, "ScriptModule")
+  py::class_<Module, Object>(m, "ScriptModule")
       .def(py::init<std::string, std::shared_ptr<CompilationUnit>, bool>())
       .def(
           "save",
@@ -569,45 +646,9 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("params") = true,
           py::arg("indent") = 0)
       .def(
-          "_define",
-          [](Module& m,
-             std::shared_ptr<ConcreteModuleType> concreteType,
-             const std::string& script,
-             ResolutionCallback rcb) {
-            const auto self = ModuleSelf(std::move(concreteType));
-            m.class_compilation_unit()->define(
-                m.name(), script, pythonResolver(rcb), &self);
-            didFinishEmitModule(m);
-          })
-      .def("_type", [](Module& m) { return m.type(); })
-      .def(
-          "_get_method",
-          [](Module& self, const std::string& name) -> Method {
-            return self.get_method(name);
-          },
-          py::keep_alive<0, 1>())
-      .def(
-          "setattr",
-          [](Module& self, const std::string& name, py::object value) {
-            TypePtr type = self.type()->getAttribute(name);
-            TORCH_CHECK(type, "Module has no attribute '", name, "'");
-            auto ivalue = toIValue(std::move(value), type);
-            self.setattr(name, ivalue);
-          })
-      .def(
-          "getattr",
-          [](Module& self, const std::string& name) {
-            return toPyObject(self.attr(name));
-          })
-      .def(
-          "hasattr",
-          [](Module& self, const std::string& name) {
-            return self.hasattr(name);
-          })
-      .def(
           "_replicate_for_data_parallel",
           [](Module& module) {
-            const ModulePtr& obj = module.module_object();
+            const ModulePtr& obj = module._ivalue();
             auto copy = c10::ivalue::Object::create(
                 c10::StrongTypePtr(obj->compilation_unit(), obj->type()),
                 obj->slots().size());
@@ -617,16 +658,24 @@ void initJitScriptBindings(PyObject* module) {
             return Module(std::move(copy));
           })
       .def(
-          "_has_method",
-          [](Module& self, const std::string& name) {
-            return bool(self.find_method(name));
+          "get_debug_state",
+          [](Module& self) {
+            if (auto m = self.find_method("forward")) {
+              return m->get_executor().getDebugState();
+            }
+            throw std::runtime_error(
+                "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
       .def(
-          "_method_names",
-          [](Module& self) {
-            return fmap(self.get_methods(), [](const Method& method) {
-              return method.name();
-            });
+          "_define",
+          [](Module& m,
+             std::shared_ptr<ConcreteModuleType> concreteType,
+             const std::string& script,
+             ResolutionCallback rcb) {
+            const auto self = ModuleSelf(std::move(concreteType));
+            m._ivalue()->compilation_unit()->define(
+                *m.type()->name(), script, pythonResolver(rcb), &self);
+            didFinishEmitModule(m);
           })
       .def(
           "_create_method_from_trace",
@@ -642,20 +691,11 @@ void initJitScriptBindings(PyObject* module) {
 
             std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self));
-            const auto method_name = QualifiedName(self.name(), name);
-            auto fn = self.class_compilation_unit()->create_function(
+            const auto method_name = QualifiedName(*self.type()->name(), name);
+            auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
-          })
-      .def(
-          "get_debug_state",
-          [](Module& self) {
-            if (auto m = self.find_method("forward")) {
-              return m->get_executor().getDebugState();
-            }
-            throw std::runtime_error(
-                "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
       .def_property_readonly(
           "code",
@@ -668,8 +708,7 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
-      .def_property_readonly(
-          "name", [](const Module& self) { return self.name().name(); });
+      .def("_clone_instance", &Module::clone_instance);
 
   slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
@@ -1014,42 +1053,51 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
+  py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
+      m, "ConcreteModuleTypeBuilder")
+      .def(py::init<py::object>())
+      .def("add_constant", &ConcreteModuleTypeBuilder::addConstant)
+      .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
+      .def(
+          "add_function_attribute",
+          &ConcreteModuleTypeBuilder::addFunctionAttribute)
+      .def("add_module", &ConcreteModuleTypeBuilder::addModule)
+      .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
+      .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
+      .def("add_failed_attribute", &ConcreteModuleTypeBuilder::addFailedAttribute)
+      .def(
+          "set_module_dict",
+          [](ConcreteModuleTypeBuilder& self) {
+            self.setIterableModuleKind(IterableModuleKind::DICT);
+          })
+      .def("build", &ConcreteModuleTypeBuilder::build)
+      .def(
+          "equals",
+          [](const ConcreteModuleTypeBuilder& self,
+             const ConcreteModuleTypeBuilder& other) { return self.equals(other); })
+      .def("set_module_list", [](ConcreteModuleTypeBuilder& self) {
+        self.setIterableModuleKind(IterableModuleKind::LIST);
+      });
+
   py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(
       m, "ConcreteModuleType")
-      .def(py::init<>())
       .def_property_readonly("py_class", &ConcreteModuleType::getPyClass)
       .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
+      .def_static("from_jit_type", &ConcreteModuleType::fromJitType)
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
-      .def("add_constant", &ConcreteModuleType::addConstant)
-      .def("add_attribute", &ConcreteModuleType::addAttribute)
-      .def("add_function_attribute", &ConcreteModuleType::addFunctionAttribute)
-      .def("add_module", &ConcreteModuleType::addModule)
-      .def("add_module_interface", &ConcreteModuleType::addModuleInterface)
-      .def("add_pyclass", &ConcreteModuleType::addPyClass)
-      .def("add_overload", &ConcreteModuleType::addOverload)
-      .def("add_jit_type", &ConcreteModuleType::addJitType)
-      .def("set_poisoned", &ConcreteModuleType::setPoisoned)
-      .def(
-          "set_module_dict",
-          [](ConcreteModuleType& self) {
-            self.setIterableModuleKind(IterableModuleKind::DICT);
-          })
-      .def(
-          "set_module_list",
-          [](ConcreteModuleType& self) {
-            self.setIterableModuleKind(IterableModuleKind::LIST);
-          })
-      .def(
-          "create_new_type_from_this",
-          &ConcreteModuleType::createNewTypeFromThis)
-      .def("add_failed_attribute", &ConcreteModuleType::addFailedAttribute)
       .def("dump", &ConcreteModuleType::dump)
       .def(
           "equals",
           [](const ConcreteModuleType& self, const ConcreteModuleType& other) {
-            return self == other;
+            return self.equals(other);
+          })
+      .def(
+          "equals",
+          [](const ConcreteModuleType& self,
+             const ConcreteModuleTypeBuilder& other) {
+            return self.equals(other);
           })
       .def(
           "_create_methods",
@@ -1063,7 +1111,8 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            const auto& selfType = concreteType->getJitType();
+            const auto& selfType =
+                concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();

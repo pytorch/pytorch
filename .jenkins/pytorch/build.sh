@@ -61,6 +61,25 @@ if ! which conda; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  # TODO: Fix Mac Java build
+  #POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      export JAVA_HOME="$JH"
+      export BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
+  fi
+fi
+
 # Use special scripts for Android builds
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk

@@ -24,7 +24,7 @@ cat_configs_short = op_bench.config_list(
 )
 
 cat_configs_long = op_bench.cross_product_configs(
-    M=[128, 1024],
+    M=[128],
     N=[128, 1024],
     K=[1, 2],
     dim=[0, 1, 2],

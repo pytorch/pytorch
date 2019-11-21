@@ -65,6 +65,19 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
 
+  // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
+  // making a remote call to self, which as for now, still goes through serde
+  // and invokes request callback. In this case, the OwnerRRef has already been
+  // created on the send side, and we need to pass it to the receive side,
+  // instead of creating a new OwnerRRef. This is done by adding the OwnerRRef
+  // into owners_. However, that alone is not enough, as it could be deleted
+  // when all UserRRef die, which would then remove the OwnerRRef from owners_
+  // and this could happen before the self remote call finishes. To prevent
+  // that, this API adds the RRefId as a ForkId, which will then delete the
+  // ForkId when the self remote is done.
+  template <typename T>
+  void addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref);
+
   // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
