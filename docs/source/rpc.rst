@@ -53,7 +53,7 @@ This library provides primitives allowing users to create and modify references
 .. autofunction:: rpc_async
 .. autofunction:: remote
 .. autofunction:: get_worker_info
-.. autofunction:: join_rpc
+.. autofunction:: wait_all_workers
 
 Distributed Autograd Framework
 ------------------------------
