@@ -428,6 +428,10 @@ public:
   // See [unsafe set type] for why this exists.
   void unsafeSetElementType(TypePtr t);
 
+  operator ArrayRef<T>() const {
+    return ArrayRef<T>(begin(), end());
+  }
+
 private:
   explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
   friend struct IValue;

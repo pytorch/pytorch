@@ -396,10 +396,10 @@ class QMaxPool2D_arr_args final : public torch::OperatorKernel {
    #endif
   Tensor operator()(
       Tensor qx,
-      std::vector<int64_t> kernel_size,
-      std::vector<int64_t> stride,
-      std::vector<int64_t> padding,
-      std::vector<int64_t> dilation,
+      c10::List<int64_t> kernel_size,
+      c10::List<int64_t> stride,
+      c10::List<int64_t> padding,
+      c10::List<int64_t> dilation,
       bool ceil_mode) {
     #ifdef USE_PYTORCH_QNNPACK
     if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
