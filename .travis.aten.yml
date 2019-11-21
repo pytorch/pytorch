@@ -38,11 +38,6 @@ after_success:
   - cd Tests/
   - bash <(curl -s https://codecov.io/bash) -t 8faabb77-d745-44bc-be18-b906de8e2928
 
-deploy:
-  provider: pages
-  skip_cleanup: true
-  github_token: $L_token # Set in travis-ci.org dashboard
-  on:
-    branch: master
+
 
 
