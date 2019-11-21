@@ -14454,7 +14454,7 @@ def generate_test_function(cls,
         device_result = getattr(device_tensor, op_str)(*device_args)
 
         dtype2precision = {torch.half : half_precision,
-                           torch.bfloat16 : bfloat16_precision,}
+                           torch.bfloat16 : bfloat16_precision}
 
         # Compares CPU and device inputs and outputs
         precision = dtype2precision.get(dtype, float_precision)
