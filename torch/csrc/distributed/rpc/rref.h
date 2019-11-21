@@ -188,7 +188,7 @@ static_assert(
 //
 // ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
 // Each ``RRef`` has a globally unique ``RRefId``.
-class RRef {
+class TORCH_API RRef {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
@@ -230,7 +230,7 @@ class RRef {
 // never owns the real value, the only way to get the value of the ``RRef`` is
 // to call ``to_here()`` and get a copy..
 template <typename T>
-class UserRRef final : public RRef {
+class UserRRef TORCH_API final : public RRef {
  public:
   UserRRef(const UserRRef& other) = delete;
   UserRRef(UserRRef&& other) = delete;
@@ -266,7 +266,7 @@ class UserRRef final : public RRef {
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
 template <typename T>
-class OwnerRRef final : public RRef {
+class OwnerRRef TORCH_API final : public RRef {
  public:
   OwnerRRef(const OwnerRRef& other) = delete;
   OwnerRRef(OwnerRRef&& other) = delete;
