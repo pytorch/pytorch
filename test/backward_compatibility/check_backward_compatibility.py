@@ -27,6 +27,7 @@ white_list = [
     ('_prim::ListConstruct', datetime.date(2019, 11, 22)),
     ('thnn_conv3d', datetime.date(9999, 1, 1)),
     ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
+    ('grad', datetime.date(2020, 1, 1)),
 ]
 
 

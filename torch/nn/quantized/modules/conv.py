@@ -47,8 +47,19 @@ class ConvPackedParams(torch.nn.Module):
     def forward(self, x):
         return x
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(ConvPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
+        (w, b) = self._weight_bias()
+        destination[prefix + 'weight'] = w
+        destination[prefix + 'bias'] = b
+
     @torch.jit.export
     def __getstate__(self):
+        if not torch.jit.is_scripting():
+            raise RuntimeError(
+                'torch.save() is not currently supported for quantized modules.'
+                ' See https://github.com/pytorch/pytorch/issues/24045.'
+                ' Please use state_dict or torch.jit serialization.')
         qweight, bias = self._weight_bias()
         return (qweight,
                 bias,
@@ -57,6 +68,16 @@ class ConvPackedParams(torch.nn.Module):
                 self.dilation,
                 self.groups,
                 self.training)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self.set_weight_bias(
+            state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
+        state_dict.pop(prefix + 'weight')
+        state_dict.pop(prefix + 'bias')
+        super(ConvPackedParams, self)._load_from_state_dict(
+            state_dict, prefix, local_metadata, False, missing_keys,
+            unexpected_keys, error_msgs)
 
     @torch.jit.export
     def __setstate__(self, state):
@@ -117,6 +138,28 @@ class _ConvNd(nn.Module):
             s += ', bias=False'
         return s.format(**self.__dict__)
 
+    # ===== Serialization methods =====
+    # The special consideration here is that we have to unpack the weights into
+    # their regular QTensor form for serialization. Packed weights should not
+    # live outside the process in which they were created, rather they should be
+    # derived from the QTensor weight.
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'scale'] = torch.tensor(self.scale)
+        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
+
+    # ===== Deserialization methods =====
+    # Counterpart to the serialization methods, we must pack the serialized
+    # QTensor weight into its packed format for use by the FBGEMM ops.
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self.scale = float(state_dict[prefix + 'scale'])
+        state_dict.pop(prefix + 'scale')
+        self.zero_point = int(state_dict[prefix + 'zero_point'])
+        state_dict.pop(prefix + 'zero_point')
+        super(_ConvNd, self)._load_from_state_dict(
+            state_dict, prefix, local_metadata, False, missing_keys,
+            unexpected_keys, error_msgs)
 
 class Conv2d(_ConvNd):
     r"""Applies a 2D convolution over a quantized input signal composed of
