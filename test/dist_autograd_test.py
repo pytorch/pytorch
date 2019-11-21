@@ -474,6 +474,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def test_graph_for_py_nested_call(self):
         self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29938")
     @dist_init
     def test_graph_for_py_nested_remote_call(self):
         self._test_graph_for_py_nested_call(ExecMode.REMOTE)
@@ -1359,7 +1360,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         # receive gradients from the node that received an error (and as a
         # result it didn't execute the rest of the graph).
         dist.barrier()
-        rpc.join_rpc()
+        rpc.wait_all_workers()
         sys.exit(0)
 
 
