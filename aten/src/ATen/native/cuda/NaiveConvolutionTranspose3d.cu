@@ -881,8 +881,8 @@ Tensor& slow_conv_transpose3d_out_cuda(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor finput = at::empty_like(input, at::MemoryFormat::Contiguous);
-  Tensor fgrad = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor fgrad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   slow_conv_transpose3d_out_cuda_template(
       output,
@@ -909,9 +909,9 @@ Tensor slow_conv_transpose3d_cuda(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
-  Tensor finput = at::empty_like(input, at::MemoryFormat::Contiguous);
-  Tensor fgrad = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor fgrad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   slow_conv_transpose3d_out_cuda_template(
       output,

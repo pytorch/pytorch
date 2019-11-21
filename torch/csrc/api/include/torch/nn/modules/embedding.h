@@ -20,6 +20,8 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
 
   void reset() override;
 
+  void reset_parameters();
+
   /// Pretty prints the `Embedding` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
@@ -70,6 +72,8 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
   explicit EmbeddingBagImpl(const EmbeddingBagOptions& options_);
 
   void reset() override;
+
+  void reset_parameters();
 
   /// Pretty prints the `EmbeddingBag` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
