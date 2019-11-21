@@ -11,6 +11,8 @@ before_install:
 
 install:
     - travis_retry pip install pyyaml typing
+    - pip install codecov 
+    - pip install coverage
 
 script:
     - cd aten
