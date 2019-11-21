@@ -212,11 +212,11 @@ class with methods that match :class:`Tensor`. But what if you want to be able
 to pass these types to functions like :func:`torch.add` in the top-level
 :mod:`torch` namespace that accept :class:`Tensor` operands?
 
-If your custom python type defines a method named `__torch_function__`, PyTorch
-will invoke your `__torch_function__` implementation when an instance of your
+If your custom python type defines a method named ``__torch_function__``, PyTorch
+will invoke your ``__torch_function__`` implementation when an instance of your
 custom class is passed to a function in the :mod:`torch` namespace. This makes
 it possible to define custom implementations for any of the functions in the
-:mod:`torch` namespace which your `__torch_function__` implementation can call,
+:mod:`torch` namespace which your ``__torch_function__`` implementation can call,
 allowing your users to make use of your custom type with existing PyTorch
 workflows that they have already written for :class:`Tensor`. This works with
 "duck" types that are unrelated to :class:`Tensor` as well as user-defined
@@ -292,7 +292,7 @@ this time adding a ``__torch_function__`` implementation::
               return NotImplemented
           return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
-The `__torch_function__` method takes three arguments: ``func``, a reference to
+The ``__torch_function__`` method takes three arguments: ``func``, a reference to
 the torch API function that is being overrided, ``args``, the tuple of arguments
 passed to the function, and ``kwargs``, the dict of keyword arguments passed to
 the function. It uses a global dispatch stable named ``HANDLED_FUNCTIONS`` to
@@ -352,7 +352,7 @@ a tensor or tensor-like that defines ``__torch_function__``, for example for
          return torch.add(ensure_tensor(input), ensure_tensor(other))
 
 This version has a fast path for when both operands are ``ScalarTensor``
-instances and also a slower path whcih degrades to converting the data to
+instances and also a slower path which degrades to converting the data to
 tensors when either operand is not a ``ScalarTensor``. That makes the override
 function correctly when either operand is a ``ScalarTensor`` or a regular
 :class:`Tensor`::
@@ -389,6 +389,38 @@ of such a type is passed::
   TypeError: no implementation found for 'torch.mul' on types that
   implement __torch_function__: [ScalarTensor]
 
+In practice this means that if you would like to implement your overrides using
+a ``__torch_function__`` implementation along these lines, you will need to
+explicitly implement the full :mod:`torch` API or the entire subset of the API
+that you care about for your use case. This may be a tall order as the full
+:mod:`torch` API is quite extensive.
+
+Another option is to not return ``NotImplemented`` for operations that are not
+handled but to instead pass a :class:`Tensor` to the original :mod:`torch`
+function when no override is available. For example, if we change our
+implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
+
+  def __torch_function__(self, func, args=(), kwargs=None):
+      if kwargs is None:
+          kwargs = {}
+      if func not in HANDLED_FUNCTIONS:
+          args = [a.tensor() if hasattr(a, 'tensor') else a for a in args]
+          return func(*args, **kwargs)
+      return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+Then :func:`torch.mul` will work correctly, although the return type will always
+be a :class:`Tensor` rather than a :class:`ScalarTensor`, even if both operands
+are :class:`ScalarTensor` instances::
+
+  >>> s = ScalarTensor(2, 2)
+  >>> torch.mul(s, s)
+  tensor([[4., 0.],
+          [0., 4.]])
+
+Also see the ``MetadataTensor`` example below for another variation on this
+pattern but instead always returns a ``MetadataTensor`` to propagate metadata
+through operations in the :mod:`torch` API.
+
 Extending :mod:`torch` with a :class:`Tensor` wrapper type
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -397,7 +429,7 @@ attribute or via subclassing. Below we implement a special case of this sort of
 type, a ``MetadataTensor`` that attaches a dictionary of metadata to a
 :class:`Tensor` that is propagated through :mod:`torch` operations. Since this
 is a generic sort of wrapping for the full :mod:`torch` API, we do not need to
-individually implement each override so we can make the `__torch_function__`
+individually implement each override so we can make the ``__torch_function__``
 implementation more permissive about what operations are allowed::
 
   class MetadataTensor(object):
@@ -445,7 +477,7 @@ a case the rules are:
 
 * The dispatch operation gathers all distinct implementations of
   ``__torch_function__`` for each operand and calls them in order: subclasses
-  before superclasses, and otherwise left to right in the operater expression.
+  before superclasses, and otherwise left to right in the operator expression.
 * If any value other than ``NotImplemented`` is returned, that value is
   returned as the result. Implementations can register that they do not
   implement an operation by returning ``NotImplemented``.
