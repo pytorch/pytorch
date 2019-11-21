@@ -1,4 +1,5 @@
-#include <torch/custom_class.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/custom_class.h>
 
 #include <atomic>
 
@@ -7,7 +8,7 @@ namespace jit {
 
 namespace {
 
-TypePtr noOpGetter(const std::string& /*unused*/) {
+at::TypePtr noOpGetter(const std::string& /*unused*/) {
   return nullptr;
 }
 
@@ -19,7 +20,7 @@ void setGetCustomClassFn(GetCustomClassFnType fn) {
   custom_class_fn.store(fn);
 }
 
-TypePtr getCustomClass(const std::string& name) {
+at::TypePtr getCustomClass(const std::string& name) {
   return custom_class_fn.load()(name);
 }
 
