@@ -2094,9 +2094,8 @@ class TestSparse(TestCase):
             self.assertEqual(sp_tensor, sp_tensor_loaded)
 
     def test_div_by_sparse_error(self):
-
-        self.assertRaisesRegex(RuntimeError, 'Unsupported tensor layout', 
-                               lambda: torch.tensor(1., device=self.device) / torch.tensor(1., device=self.device).to_sparse())
+        self.assertRaisesRegex(RuntimeError, 'A Sparse Tensor can only be divided',
+                               lambda: torch.tensor(1., device=self.device).to_sparse() / torch.tensor(1., device=self.device).to_sparse())
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
