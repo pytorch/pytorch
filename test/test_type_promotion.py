@@ -520,6 +520,7 @@ class TestTypePromotion(TestCase):
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
             self.assertRaises(RuntimeError, lambda: op(s1, d2.view(d2.numel())[0].item()))
 
+    @onlyOnCPUAndCUDA
     def test_sparse_ops(self, device):
         dtypes = torch.testing.get_all_math_dtypes(device)
         ops = ['add', 'sub', 'mul', 'div']
