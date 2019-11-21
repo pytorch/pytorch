@@ -49,7 +49,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import quantize
 from common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from common_quantization import ConvModel, AnnotatedConvModel
-from common_quantization import test_only_eval_fn
+from common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 
 # Testing utils
@@ -1496,7 +1496,7 @@ graph(%input, %weight):
                 m = M()
                 copy_weights(name, m, ref_m)
                 ref_m.qconfig = qconfig
-                ref_m = quantize(ref_m, test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
+                ref_m = quantize(ref_m, _test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
                 ref_res = ref_m(data)
                 # script mode
                 m = torch.jit.script(m)
