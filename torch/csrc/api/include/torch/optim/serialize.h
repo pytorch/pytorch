@@ -2,6 +2,7 @@
 
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
+#include <torch/optim/optimizer.h> //todo-change the include after moving OptimizerParamState to another file
 
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,18 @@ void serialize(
     serialize::InputArchive& archive,
     const std::string& key,
     std::vector<int64_t>& steps);
+
+// //todo-description
+// void serialize(
+//   serialize::OutputArchive& archive,
+//   const std::string& key,
+//   const ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state);
+//
+// //todo- description
+// void serialize(
+//   serialize::InputArchive& archive,
+//   const std::string& key,
+//   ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state);
 
 /// Utility function to save a vector of buffers.
 template <typename BufferContainer>
