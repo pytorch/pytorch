@@ -7,7 +7,6 @@ import torch
 from torch._six import inf
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
@@ -336,12 +335,12 @@ class TestOptim(TestCase):
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
-            lambda params: optim.SparseAdam(params, lr=4e-2),
+            lambda params: optim.Adam(params, lr=4e-2),
             [],
             True
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-            optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
+            optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
@@ -505,33 +504,33 @@ class TestLRScheduler(TestCase):
     def setUp(self):
         super(TestLRScheduler, self).setUp()
         self.net = SchedulerTestNet()
-        self.opt = SGD(
+        self.opt = optim.SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
     def test_no_cyclic_references(self):
         import gc
         param = Variable(torch.Tensor(10), requires_grad=True)
-        optim = SGD([param], lr=0.5)
-        scheduler = LambdaLR(optim, lambda epoch: 1.0)
+        opt = optim.SGD([param], lr=0.5)
+        scheduler = LambdaLR(opt, lambda epoch: 1.0)
         del scheduler
 
         # Prior to Python 3.7, local variables in a function will be referred by the current frame.
         import sys
         if sys.version_info < (3, 7):
             import inspect
-            referrers = gc.get_referrers(optim)
+            referrers = gc.get_referrers(opt)
             self.assertTrue(
                 len(referrers) == 1 and referrers[0] is inspect.currentframe(),
                 "Optimizer should contain no cyclic references (except current frame)")
             del referrers
         else:
             self.assertTrue(
-                len(gc.get_referrers(optim)) == 0,
+                len(gc.get_referrers(opt)) == 0,
                 "Optimizer should contain no cyclic references")
 
         gc.collect()
-        del optim
+        del opt
         self.assertEqual(
             gc.collect(), 0, "Optimizer should be garbage-collected on __del__")
 

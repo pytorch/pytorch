@@ -9,7 +9,6 @@ from .adadelta import Adadelta
 from .adagrad import Adagrad
 from .adam import Adam
 from .optimizerw import AdamW
-from .sparse_adam import SparseAdam
 from .adamax import Adamax
 from .asgd import ASGD
 from .sgd import SGD
@@ -23,7 +22,6 @@ del adadelta
 del adagrad
 del adam
 del optimizerw
-del sparse_adam
 del adamax
 del asgd
 del sgd
