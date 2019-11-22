@@ -34,7 +34,6 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_ANY_THROW(und.base());
   ASSERT_ANY_THROW(und.name());
   ASSERT_ANY_THROW(und.grad_fn());
-  ASSERT_ANY_THROW(und.remove_hook(0));
   ASSERT_ANY_THROW(und.register_hook([](const Tensor& x) -> Tensor { return x; }));
 
   // copy_

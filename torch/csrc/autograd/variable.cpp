@@ -252,7 +252,6 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   Tensor variable_data(const Tensor&) const override;
   const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const override;
   torch::utils::hooks::RemovableHandle _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const override;
-  void remove_hook(const Tensor&, unsigned pos) const override;
   bool is_view(const Tensor&) const override;
   const Tensor& base(const Tensor&) const override;
   const std::string& name(const Tensor&) const override;

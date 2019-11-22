@@ -558,7 +558,7 @@ TEST(CustomAutogradTest, Hooks) {
   z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 4);
 
-  z.remove_hook(hook_2);
+  hook_2.remove();
   z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 5);
 
@@ -566,7 +566,7 @@ TEST(CustomAutogradTest, Hooks) {
     return grad.mul(2);
   });
 
-  z.remove_hook(hook_1);
+  hook_1.remove();
   z.register_hook(bw_hook_modify);
   y.grad().zero_();
   z.backward(torch::ones({5,5}), true, false);
@@ -576,8 +576,6 @@ TEST(CustomAutogradTest, Hooks) {
   y.grad().zero_();
   z.backward(torch::ones({5,5}), false, false);
   ASSERT_VARIABLE_EQ(y.grad(), (x+1)*4);
-
-  ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");
 }
 
 TEST(CustomAutogradTest, HookNone) {
