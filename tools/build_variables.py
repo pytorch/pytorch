@@ -258,6 +258,7 @@ def add_torch_libs():
         "torch/csrc/api/src/optim/sgd.cpp",
         "torch/csrc/api/src/serialize/input-archive.cpp",
         "torch/csrc/api/src/serialize/output-archive.cpp",
+        "torch/csrc/api/src/utils/hooks.cpp",
     ]
 
     libtorch_python_sources = [

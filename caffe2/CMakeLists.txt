@@ -608,6 +608,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/utils/hooks.cpp
     )
   endif()
 
