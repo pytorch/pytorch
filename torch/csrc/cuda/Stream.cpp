@@ -1,4 +1,3 @@
-#include <pybind11/pybind11.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/Device.h>
@@ -86,10 +85,7 @@ static PyObject * THCPStream_query(THCPStream *self, PyObject *noargs) {
 
 static PyObject * THCPStream_synchronize(THCPStream *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
-  {
-    pybind11::gil_scoped_release no_gil;
-    self->cuda_stream.synchronize();
-  }
+  with_no_gil([&] { self->cuda_stream.synchronize(); });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

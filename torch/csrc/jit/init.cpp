@@ -1,3 +1,4 @@
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
@@ -52,6 +53,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -283,7 +285,7 @@ void initJITBindings(PyObject* module) {
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
-            pybind11::gil_scoped_release _no_gil;
+            AutoNoGIL _no_gil;
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
