@@ -4,7 +4,6 @@ import numpy as np
 import unittest
 import torch.onnx
 import io
-import torch.nn as nn
 
 import onnx
 import caffe2.python.onnx.backend as c2
@@ -150,7 +149,7 @@ class TestQuantizedOps(unittest.TestCase):
         module_quant = torch.jit.load("/home/supriyar/pytorch/quantized_ts_V4.pt")
 
         input_img = torch.from_numpy(np.random.random((1, 3, 48, 64)).astype("float32"))
-        input_fp =  torch.from_numpy(np.random.random((1, 12, 48, 64)).astype("float32"))
+        input_fp = torch.from_numpy(np.random.random((1, 12, 48, 64)).astype("float32"))
         X = torch.from_numpy(np.random.random((1, 2)).astype("float32"))
         module_quant.eval()
         output = module_quant(input_img, input_fp, X)
