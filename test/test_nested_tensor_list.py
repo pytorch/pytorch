@@ -41,8 +41,8 @@ def gen_nested_list(seed, nested_dim, tensor_dim, size_low=1, size_high=10):
     assert nested_dim > 0
     if nested_dim == 1:
         for i in range(num_tensors):
-            ran = gen_random_int((seed * nested_dim + seed)
-                                 * (1024 * i), low=size_low, high=size_high)
+            ran = gen_random_int((seed * nested_dim + seed) *
+                                 (1024 * i), low=size_low, high=size_high)
             ran_size = ()
             for _ in range(tensor_dim):
                 ran = gen_random_int(ran * 1024, low=size_low, high=size_high)
@@ -65,6 +65,23 @@ def nested_map(fn, data):
 
 def gen_nested_tensor(seed, nested_dim, tensor_dim, size_low=1, size_high=10):
     return torch._ListNestedTensor(gen_nested_list(seed, nested_dim, tensor_dim, size_low=size_low, size_high=size_high))
+
+
+def _test_property(self, fn):
+    num_nested_tensor = 3
+    nested_tensor_lists = [gen_nested_list(i, i, 3)
+                           for i in range(1, num_nested_tensor)]
+    first_tensors = [get_first_tensor(ntl) for ntl in nested_tensor_lists]
+    nested_tensors = [torch._ListNestedTensor(ntl) for ntl in nested_tensor_lists]
+    for nested_tensor, first_tensor in zip(nested_tensors, first_tensors):
+        self.assertEqual(fn(nested_tensor), fn(first_tensor))
+
+
+def get_first_tensor(nested_list):
+    if isinstance(nested_list, list):
+        return get_first_tensor(nested_list[0])
+    else:
+        return nested_list
 
 
 class Test_ListNestedTensor(TestCase):
@@ -176,10 +193,25 @@ class Test_ListNestedTensor(TestCase):
         a = torch._ListNestedTensor([torch.tensor([1, 2])])
         self.assertEqual(len(a), 1)
 
+    def test_dtype(self):
+        _test_property(self, lambda x: x.dtype)
+
+    def test_device(self):
+        _test_property(self, lambda x: x.device)
+
+    def test_layout(self):
+        _test_property(self, lambda x: x.layout)
+
+    def test_requires_grad(self):
+        _test_property(self, lambda x: x.requires_grad)
+
     def test_unbind(self):
         # This is the most important operation. We want to make sure
         # that the Tensors we use for construction can be retrieved
         # and used independently while still being kept track of.
+
+        # Strategy: use torch.equal and storage data_ptr
+        # Also benchmark this
         a = torch.tensor([1, 2])
         b = torch.tensor([7, 8])
         nt = torch._ListNestedTensor([a, b])

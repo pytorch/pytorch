@@ -114,8 +114,16 @@ static PyObject* _ListNestedTensorVariable_pynew(
   if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &listObj)) {
     throw std::runtime_error("invalid arguments");
   }
+  if (false) {
+    if (PyObject_Length(listObj) > 0) {
+      Variable first_variable = _get_first_variable(listObj);
+      if (not _verify_variables(first_variable, listObj)) {
+        throw std::runtime_error("Invalid list of Tensors");
+      }
+    }
+  }
   return _ListNestedTensorVariable_NewWithVar(
-      type, std::move(_ListNestedTensor(_get_structure(listObj))));
+      type, _ListNestedTensor(_get_structure(listObj)));
 }
 
 static PyObject* _ListNestedTensorVariable_requires_grad_(

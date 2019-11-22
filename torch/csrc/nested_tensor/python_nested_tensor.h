@@ -1,13 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/tensor_new.h>
 
 // TODO:
 // - HANDLE_TH_ERRORS
@@ -15,24 +15,27 @@
 // - Implement NestedSize to avoid expensive python ops in *_nested_size/stride
 // - map and apply functions that accepted JIT-ed functions to avoid unbind
 // - don't make some functions static?
+// - DEBUG enabled checking of constiuents
 
 namespace torch {
 namespace nested_tensor {
 
 using namespace at;
+using namespace torch::autograd;
 
 struct _ListNestedTensor;
 
 struct _VariableNode {
   _VariableNode() {}
-  _VariableNode(torch::autograd::Variable variable) : _variable(variable) {}
+  _VariableNode(Variable variable) : _variable(variable) {}
 
-  torch::autograd::Variable _variable;
+  Variable _variable;
 };
 
-THP_API PyObject *_ListNestedTensorVariableClass;
+THP_API PyObject* _ListNestedTensorVariableClass;
 
-// The implicit contract is that, if there are no children, variable_node is defined.
+// The implicit contract is that, if there are no children, variable_node is
+// defined.
 struct _NestedNode {
   _NestedNode() {}
   _NestedNode(const std::vector<_NestedNode> children) : _children(children) {}
@@ -41,7 +44,7 @@ struct _NestedNode {
   _VariableNode _variable_node;
 };
 
-static size_t _num_tensor(const _NestedNode &meta_node) {
+static size_t _num_tensor(const _NestedNode& meta_node) {
   size_t result = 0;
   for (size_t i = 0; i < meta_node._children.size(); i++) {
     result += _num_tensor(meta_node._children[i]);
@@ -49,7 +52,7 @@ static size_t _num_tensor(const _NestedNode &meta_node) {
   return result;
 }
 
-static int64_t _numel(const _NestedNode &meta_node) {
+static int64_t _numel(const _NestedNode& meta_node) {
   if (meta_node._children.size() == 0) {
     return meta_node._variable_node._variable.numel();
   } else {
@@ -61,7 +64,61 @@ static int64_t _numel(const _NestedNode &meta_node) {
   }
 }
 
-static _NestedNode _get_structure(PyObject *tensors) {
+static Variable _get_first_variable(PyObject* tensors) {
+  if (THPVariable_Check(tensors)) {
+    return THPVariable_Unpack(tensors);
+  } else {
+    return _get_first_variable(PyList_GetItem(tensors, 0));
+  }
+}
+
+static bool _verify_variables(
+    const Variable& first_variable,
+    PyObject* tensors) {
+  // The attributes must match across all constiuents
+  //
+  // The NestedTensor's attributes then become that of its
+  // constiuents.
+  //
+  // data must be a list of Tensors or NestedTensors
+  //
+  // Attributes:
+  //     dim()
+  //     layout
+  //     device
+  //     dtype
+  //     requires_grad
+  //     is_pinned()
+  if (THPVariable_Check(tensors)) {
+    Variable variable_ = THPVariable_Unpack(tensors);
+    bool valid = true;
+    // TODO: Add more checks?
+    valid = valid && (variable_.dim() == first_variable.dim());
+    valid = valid && (variable_.layout() == first_variable.layout());
+    valid = valid && (variable_.device() == first_variable.device());
+    valid = valid && (variable_.dtype() == first_variable.dtype());
+    valid =
+        valid && (variable_.requires_grad() == first_variable.requires_grad());
+    // NOTE: This is a very costly check! For now we'll let this to be enabled
+    // manually. valid = valid && (variable_.is_pinned() ==
+    // first_variable.is_pinned());
+    return valid;
+  } else {
+    bool valid = true;
+    Py_ssize_t i, n;
+    n = PyObject_Length(tensors);
+    if (n < 0) {
+      throw python_error();
+    }
+    for (i = 0; i < n; i++) {
+      auto item = PyList_GetItem(tensors, i);
+      valid = valid && _verify_variables(first_variable, item);
+    }
+    return valid;
+  }
+}
+
+static _NestedNode _get_structure(PyObject* tensors) {
   if (THPVariable_Check(tensors)) {
     auto variable_ = THPVariable_Unpack(tensors);
     auto variable = make_variable_view(variable_, variable_);
@@ -70,7 +127,7 @@ static _NestedNode _get_structure(PyObject *tensors) {
     std::vector<_NestedNode> meta_nodes;
     Py_ssize_t i, n;
     n = PyObject_Length(tensors);
-    PyObject *item;
+    PyObject* item;
     if (n < 0) {
       throw python_error();
     }
@@ -83,18 +140,22 @@ static _NestedNode _get_structure(PyObject *tensors) {
   }
 }
 
-static torch::autograd::Variable _get_first_variable(_NestedNode nested_node) {
-  const _NestedNode *start = &nested_node;
+static Variable _get_first_variable(_NestedNode nested_node) {
+  const _NestedNode* start = &nested_node;
   while (start->_children.size()) {
     start = &start->_children[0];
   }
   if (start->_variable_node._variable.defined()) {
-  return start->_variable_node._variable;
+    return start->_variable_node._variable;
   } else {
     PyObject* fake_args = PyTuple_New(0);
     PyObject* fake_kwargs = PyDict_New();
     // TODO: Update if python_variable updates it too
-    return torch::utils::legacy_tensor_ctor(torch::tensors::get_default_tensor_type_id(), torch::tensors::get_default_scalar_type(), fake_args, fake_kwargs);
+    return torch::utils::legacy_tensor_ctor(
+        torch::tensors::get_default_tensor_type_id(),
+        torch::tensors::get_default_scalar_type(),
+        fake_args,
+        fake_kwargs);
   }
 }
 
@@ -114,7 +175,8 @@ static std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
   }
 }
 
-template <typename T, class F> static T map(_NestedNode nested_node, F fn) {
+template <typename T, class F>
+static T map(_NestedNode nested_node, F fn) {
   if (nested_node._children.size() == 0) {
     T new_nested_node(_VariableNode(fn(nested_node._variable_node._variable)));
     return new_nested_node;
@@ -153,10 +215,10 @@ static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
   }
 }
 
-static std::string _NestedNode___str__(const _NestedNode &nested_node) {
+static std::string _NestedNode___str__(const _NestedNode& nested_node) {
   std::stringstream result;
   if (nested_node._children.size() == 0) {
-    PyObject *objectsRepresentation =
+    PyObject* objectsRepresentation =
         PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
     result << PyBytes_AsString(PyUnicode_AsUTF8String(objectsRepresentation));
     return result.str();
@@ -174,8 +236,7 @@ static std::string _NestedNode___str__(const _NestedNode &nested_node) {
   }
 }
 
-static torch::autograd::Variable
-_NestedNode_to_tensor(const _NestedNode &nested_node) {
+static Variable _NestedNode_to_tensor(const _NestedNode& nested_node) {
   if (nested_node._children.size() == 0) {
     return nested_node._variable_node._variable;
   } else {
@@ -195,45 +256,54 @@ struct TORCH_API _ListNestedTensor {
   _ListNestedTensor(_NestedNode structure)
       : _structure(structure),
         _first_variable(_get_first_variable(_structure)) {}
-  int64_t element_size() { return _first_variable.element_size(); }
-  _ListNestedTensor to(at::TensorOptions options, bool non_blocking, bool copy,
-                       c10::optional<MemoryFormat> memory_format) {
+  int64_t element_size() {
+    return _first_variable.element_size();
+  }
+  _ListNestedTensor to(
+      at::TensorOptions options,
+      bool non_blocking,
+      bool copy,
+      c10::optional<MemoryFormat> memory_format) {
     return _ListNestedTensor(
         map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
           return tensor.to(options, non_blocking, copy, memory_format);
         }));
   }
-  _ListNestedTensor to(ScalarType dtype, bool non_blocking, bool copy,
-                       c10::optional<MemoryFormat> memory_format) {
+  _ListNestedTensor to(
+      ScalarType dtype,
+      bool non_blocking,
+      bool copy,
+      c10::optional<MemoryFormat> memory_format) {
     return _ListNestedTensor(
         map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
           return tensor.to(dtype, non_blocking, copy, memory_format);
         }));
   }
-  _ListNestedTensor to(Device device, ScalarType dtype, bool non_blocking,
-                       bool copy, c10::optional<MemoryFormat> memory_format) {
+  _ListNestedTensor to(
+      Device device,
+      ScalarType dtype,
+      bool non_blocking,
+      bool copy,
+      c10::optional<MemoryFormat> memory_format) {
     return _ListNestedTensor(
         map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
           return tensor.to(device, dtype, non_blocking, copy, memory_format);
         }));
   }
   _ListNestedTensor pin_memory() {
-    return _ListNestedTensor(
-        map<_NestedNode>(_structure, [](at::Tensor tensor) -> at::Tensor {
-          return tensor.pin_memory();
-        }));
+    return _ListNestedTensor(map<_NestedNode>(
+        _structure,
+        [](at::Tensor tensor) -> at::Tensor { return tensor.pin_memory(); }));
   }
   _ListNestedTensor grad() {
-    return _ListNestedTensor(
-        map<_NestedNode>(_structure, [](at::Tensor tensor) -> at::Tensor {
-          return tensor.grad();
-        }));
+    return _ListNestedTensor(map<_NestedNode>(
+        _structure,
+        [](at::Tensor tensor) -> at::Tensor { return tensor.grad(); }));
   }
   _ListNestedTensor detach() {
-    return _ListNestedTensor(
-        map<_NestedNode>(_structure, [](at::Tensor tensor) -> at::Tensor {
-          return tensor.detach();
-        }));
+    return _ListNestedTensor(map<_NestedNode>(
+        _structure,
+        [](at::Tensor tensor) -> at::Tensor { return tensor.detach(); }));
   }
   _ListNestedTensor requires_grad_(bool requires_grad) {
     return _ListNestedTensor(map<_NestedNode>(
@@ -241,26 +311,36 @@ struct TORCH_API _ListNestedTensor {
           return tensor.requires_grad_(requires_grad);
         }));
   }
-  void backward(_ListNestedTensor gradient, bool retain_graph,
-                bool create_graph) {
-    apply2(_structure, gradient.get_structure(),
-           [retain_graph, create_graph](at::Tensor &tensor1,
-                                        const at::Tensor &tensor2) {
-             tensor1.backward(tensor2, retain_graph, create_graph);
-           });
+  void backward(
+      _ListNestedTensor gradient,
+      bool retain_graph,
+      bool create_graph) {
+    apply2(
+        _structure,
+        gradient.get_structure(),
+        [retain_graph, create_graph](
+            at::Tensor& tensor1, const at::Tensor& tensor2) {
+          tensor1.backward(tensor2, retain_graph, create_graph);
+        });
   }
-  int64_t __len__() { return _structure._children.size(); }
-  std::string __str__() { return _NestedNode___str__(_structure); }
+  int64_t __len__() {
+    return _structure._children.size();
+  }
+  std::string __str__() {
+    return _NestedNode___str__(_structure);
+  }
   // NOTE: Don't delete this. repr is an important concept, this
   // implementation is just faulty due to torch.Tensor.__repr__
   // TODO: Assuming that there is no difference in __str__ and __repr__ for
   // torch.Tensor.
-  std::string __repr__() { return _NestedNode___str__(_structure); }
-  torch::autograd::Variable to_tensor() {
+  std::string __repr__() {
+    return _NestedNode___str__(_structure);
+  }
+  Variable to_tensor() {
     return _NestedNode_to_tensor(_structure);
   }
   int64_t nested_dim() {
-    const _NestedNode *start_structure = &_structure;
+    const _NestedNode* start_structure = &_structure;
     int64_t depth = 0;
     while (start_structure->_children.size()) {
       depth++;
@@ -268,16 +348,36 @@ struct TORCH_API _ListNestedTensor {
     }
     return depth;
   }
-  at::ScalarType scalar_type() { return _first_variable.scalar_type(); }
-  at::Backend backend() { return _first_variable.type().backend(); }
-  at::Device device() { return _first_variable.device(); }
-  at::TensorOptions options() { return _first_variable.options(); }
-  bool requires_grad() { return _first_variable.requires_grad(); }
-  int64_t dim() { return _first_variable.dim() + nested_dim(); }
-  int64_t numel() { return _numel(_structure); }
-  bool is_pinned() { return _first_variable.is_pinned(); }
-  bool is_contiguous() { return false; }
-  _NestedNode get_structure() { return _structure; }
+  at::ScalarType scalar_type() {
+    return _first_variable.scalar_type();
+  }
+  at::Backend backend() {
+    return _first_variable.type().backend();
+  }
+  at::Device device() {
+    return _first_variable.device();
+  }
+  at::TensorOptions options() {
+    return _first_variable.options();
+  }
+  bool requires_grad() {
+    return _first_variable.requires_grad();
+  }
+  int64_t dim() {
+    return _first_variable.dim() + nested_dim();
+  }
+  int64_t numel() {
+    return _numel(_structure);
+  }
+  bool is_pinned() {
+    return _first_variable.is_pinned();
+  }
+  bool is_contiguous() {
+    return false;
+  }
+  _NestedNode get_structure() {
+    return _structure;
+  }
   // TODO: Implement these and call into them isntead of implementing them
   // _ListNestedTensor to - it's a pain due to the 100s of to overloads
   // std::vector<py::object> nested_size();
@@ -288,9 +388,9 @@ struct TORCH_API _ListNestedTensor {
   // std::string __repr__();
   // py::tuple size(int64_t dim);
 
-private:
+ private:
   const _NestedNode _structure;
-  const torch::autograd::Variable _first_variable;
+  const Variable _first_variable;
 };
 
 struct TORCH_API _ListNestedTensorVariable {
@@ -299,21 +399,21 @@ struct TORCH_API _ListNestedTensorVariable {
       _ListNestedTensor cdata;
 };
 
-inline bool _ListNestedTensorVariable_Check(PyObject *obj) {
+inline bool _ListNestedTensorVariable_Check(PyObject* obj) {
   return _ListNestedTensorVariableClass &&
-         PyObject_IsInstance(obj, _ListNestedTensorVariableClass);
+      PyObject_IsInstance(obj, _ListNestedTensorVariableClass);
 }
 
 void initialize_python_bindings();
 
 // Creates a new Python object for a Variable. The Variable must not already
 // have a PyObject* associated with it.
-static PyObject *
-_ListNestedTensorVariable_NewWithVar(PyTypeObject *type,
-                                     _ListNestedTensor nested_tensor) {
-  PyObject *obj = type->tp_alloc(type, 0);
+static PyObject* _ListNestedTensorVariable_NewWithVar(
+    PyTypeObject* type,
+    _ListNestedTensor nested_tensor) {
+  PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
-    auto v = (_ListNestedTensorVariable *)obj;
+    auto v = (_ListNestedTensorVariable*)obj;
     new (&v->cdata) _ListNestedTensor(std::move(nested_tensor));
     // v->cdata.set_pyobj(obj);
     return obj;
@@ -322,9 +422,9 @@ _ListNestedTensorVariable_NewWithVar(PyTypeObject *type,
   }
 }
 
-static PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
+static PyObject* _ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
   return _ListNestedTensorVariable_NewWithVar(
-      (PyTypeObject *)_ListNestedTensorVariableClass, std::move(var));
+      (PyTypeObject*)_ListNestedTensorVariableClass, std::move(var));
 }
 
 } // namespace nested_tensor
@@ -332,12 +432,12 @@ static PyObject *_ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
 namespace torch {
 namespace autograd {
 namespace utils {
-inline PyObject *wrap(torch::nested_tensor::_ListNestedTensor nested_tensor) {
+inline PyObject* wrap(torch::nested_tensor::_ListNestedTensor nested_tensor) {
   // TODO: Necessary to create new object?
   // What about copy behavior?
   return _ListNestedTensorVariable_Wrap(
       torch::nested_tensor::_ListNestedTensor(nested_tensor));
 }
-}
-}
-}
+} // namespace utils
+} // namespace autograd
+} // namespace torch
