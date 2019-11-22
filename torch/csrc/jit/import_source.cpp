@@ -264,66 +264,6 @@ struct SourceImporterImpl : public Resolver,
     }
   }
 
-  IValue importConstant(const Expr& rhs, const TypePtr& type) {
-    switch (rhs.kind()) {
-      case TK_TRUE: {
-        type->expect<c10::BoolType>();
-        return true;
-      }
-      case TK_FALSE: {
-        type->expect<c10::BoolType>();
-        return false;
-      }
-      case TK_NONE: {
-        type->expect<c10::NoneType>();
-        return IValue();
-      }
-      case TK_CONST: {
-        const auto v = Const(rhs);
-        if (v.isFloatingPoint()) {
-          type->expect<c10::FloatType>();
-          return v.asFloatingPoint();
-        } else if (v.isIntegral()) {
-          type->expect<c10::IntType>();
-          return v.asIntegral();
-        } else {
-          throw ErrorReport(rhs.range()) <<
-            " is not recognized as a valid constant: " << rhs;
-        }
-      }
-      case TK_TUPLE_LITERAL: {
-        auto tuple_type = type->expect<c10::TupleType>();
-        auto tuple = TupleLiteral(rhs);
-        std::vector<IValue> vs;
-        for (size_t i = 0; i < tuple.inputs().size(); ++i) {
-          vs.push_back(importConstant(tuple.inputs()[i], tuple_type->elements()[i]));
-        }
-        return c10::ivalue::Tuple::create(vs);
-      }
-      case TK_STRINGLITERAL: {
-        auto string_type = type->expect<c10::StringType>();
-        auto str = StringLiteral(rhs);
-        return str.text();
-      }
-      case TK_APPLY: {
-        // matching torch.device('cpu')
-        auto apply = Apply(rhs);
-        auto callee = Select(apply.callee());
-        auto value = Var(callee.value());
-        auto selector = Ident(callee.selector());
-        TORCH_INTERNAL_ASSERT(value.name().name() == "torch");
-        TORCH_INTERNAL_ASSERT(selector.name() == "device");
-        auto inputs = List<StringLiteral>(apply.inputs());
-        TORCH_INTERNAL_ASSERT(inputs.size() == 1);
-        auto device_str = StringLiteral(inputs[0]).text();
-        return c10::Device(device_str);
-      }
-      default:
-        throw ErrorReport(rhs.range()) <<
-          " is not recognized as a valid constant: " << rhs;
-    }
-  }
-
   void importClass(
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
@@ -432,10 +372,11 @@ struct SourceImporterImpl : public Resolver,
     // Populate class constants
     for (const auto& assign : constants) {
       TORCH_INTERNAL_ASSERT(assign.lhs().kind() == TK_VAR);
-      const auto name = Var(assign.lhs()).name().name();
-      const auto type = type_parser.parseTypeFromExpr(assign.type().get());
+      const auto type = assign.type().get();
       auto rhs = assign.rhs().get();
-      class_type->addConstant(name, importConstant(rhs, type));
+      auto const_val = type_parser.parseConstant(type, rhs);
+      const auto name = Var(assign.lhs()).name().name();
+      class_type->addConstant(name, const_val);
     }
 
     cu_->register_type(class_type);

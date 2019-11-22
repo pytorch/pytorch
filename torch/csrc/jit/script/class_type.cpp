@@ -52,7 +52,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         name,
         "' to ",
         python_str(),
-        " but a attribute field of the same name already exists with type ",
+        " but an attribute field of the same name already exists with type ",
         attributeTypes_[i]->python_str());
   }
 }
