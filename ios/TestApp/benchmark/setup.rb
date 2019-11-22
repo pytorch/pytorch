@@ -63,14 +63,17 @@ targets.each do |target|
     target.resources_build_phase.add_file_reference(config_file_ref, true)
 end
 puts "Linking static libraries..."
-target.frameworks_build_phases.clear
 libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
-for lib in libs do 
-    path = "#{install_path}/lib/#{lib}"
-    if File.exist?(path)
-        libref = project.frameworks_group.new_file(path)
-        target.frameworks_build_phases.add_file_reference(libref)
+targets.each do |target|
+    target.frameworks_build_phases.clear
+    for lib in libs do 
+        path = "#{install_path}/lib/#{lib}"
+        if File.exist?(path)
+            libref = project.frameworks_group.new_file(path)
+            target.frameworks_build_phases.add_file_reference(libref)
+        end
     end
 end
+
 project.save
 puts "Done."

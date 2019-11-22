@@ -99,10 +99,7 @@ else()
   # Prefer dynamic linking on the host
   target_link_libraries(pytorch_jni
       fbjni
-      -Wl,--gc-sections
-      -Wl,--whole-archive
       torch
-      -Wl,--no-whole-archive
       c10
       nnpack
       pytorch_qnnpack
