@@ -141,13 +141,12 @@ UserRRef<T>::~UserRRef() {
   } catch(const std::exception& ex) {
     LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
         << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-        << ex.what() << std::endl;
+        << ex.what();
   } catch (...) {
     std::exception_ptr p = std::current_exception();
     LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
         << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-        << (p ? p.__cxa_exception_type()->name() : "unknown error")
-        << std::endl;
+        << (p ? p.__cxa_exception_type()->name() : "unknown error");
   }
 }
 
