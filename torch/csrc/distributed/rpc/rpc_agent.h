@@ -12,8 +12,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct RpcAgentOptions {
-  RpcAgentOptions() noexcept = default;
+struct RpcBackendOptions {
+  RpcBackendOptions() noexcept = default;
   std::chrono::milliseconds rpcTimeout;
 };
 
@@ -126,7 +126,11 @@ class TORCH_API RpcAgent {
   virtual void sync() = 0;
 
   // start accepting requests
-  virtual void start() {}
+  virtual void start() = 0;
+
+  // Stop accepting requests and shutdown the RPC framework as soon as possible
+  // by terminating all RPC threads.
+  virtual void shutdown() = 0;
 
   // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
