@@ -185,7 +185,7 @@ class AmpScaler(object):
         .. warning::
             :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
             and only after all gradients for that optimizer's assigned parameters have been accumulated.
-            Calling :meth:`unscale_` twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
+            Calling :meth:`unscale_` twice for a given optimizer between each :meth:`step` triggers a RuntimeError.
         """
         if not self._enabled:
             return

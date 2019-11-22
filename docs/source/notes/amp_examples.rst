@@ -94,7 +94,7 @@ this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale g
 .. warning::
     :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
     and only after all gradients for that optimizer's assigned parameters have been accumulated.
-    Calling :meth:`unscale_` twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
+    Calling :meth:`unscale_` twice for a given optimizer between each :meth:`step` triggers a RuntimeError.
 
 Working with Scaled Gradients
 -----------------------------
