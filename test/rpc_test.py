@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import concurrent.futures
 from datetime import timedelta
 import sys
-import time
 import unittest
 from collections import namedtuple
 from unittest import mock
@@ -19,20 +18,6 @@ from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from rpc_agent_test_fixture import RpcAgentTestFixture
 
-rpc_done = [False, False, False, False]
-
-# TODO: dedupe this with the code in dist_autograd_test.py.
-# Send rpc done info and context_id to
-# dst_rank = (self.rank + rank_distance) % self.world_size
-# we don't need a lock here since the GIL is held while executing remote
-# python UDFs, so access is serialized across several workers.
-def _set_rpc_done(rank_distance):
-    global rpc_done
-    rpc_done[rank_distance] = True
-
-def _check_rpc_done(rank_distance):
-    while not rpc_done[rank_distance]:
-        time.sleep(0.1)
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
@@ -142,6 +127,7 @@ def my_tensor_function(a, b):
     return a + b
 
 def my_sleep_func(seconds=1):
+    import time
     time.sleep(seconds)
 
 
@@ -377,7 +363,6 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_backend_options=self.rpc_backend_options,
             )
         rpc.wait_all_workers()
-        rpc.shutdown()
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
@@ -543,7 +528,6 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
         rpc.wait_all_workers()
-        rpc.shutdown()
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
             rpc.rpc_sync(
@@ -717,6 +701,8 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
+        import time
+
         n = self.rank + 1
         dst_rank = n % self.world_size
         futs = []
@@ -1105,50 +1091,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(result, sum(vals))
 
     @dist_init(setup_rpc=False)
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_rpc_shutdown(self):
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
-            rank=self.rank,
-            world_size=self.world_size,
-            init_method=self.init_method,
-            rpc_agent_options=self.rpc_agent_options,
-        )
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), torch.ones(n, n)),
-        )
-        # wait for RPCs to be done, so that some workers don't try to shut down
-        # too early.
-        rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(1,))
-        _check_rpc_done(1)
-        rpc.wait_all_workers()
-        rpc.shutdown()
-
-    @dist_init(setup_rpc=False)
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_wait_all_workers_and_shutdown(self):
-        # This tests ensures that both rpc.wait_all_workers() and rpc.shutdown() can be
-        # called without errors being raised due to attempting to shut down
-        # multiple times.
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
-            rank=self.rank,
-            world_size=self.world_size,
-            init_method=self.init_method,
-            rpc_agent_options=self.rpc_agent_options
-        )
-        rpc.wait_all_workers()
-        rpc.shutdown()
-
-    @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
 
@@ -1168,7 +1110,6 @@ class RpcTest(RpcAgentTestFixture):
         set_timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, set_timeout)
         rpc.wait_all_workers()
-        rpc.shutdown()
 
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")

@@ -155,10 +155,6 @@ Otherwise, throws an exception.
           &ProcessGroupAgent::join,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "shutdown",
-          &ProcessGroupAgent::shutdown,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
           "sync",
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
