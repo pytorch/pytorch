@@ -179,20 +179,12 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
 }
 
 void ProcessGroupAgent::join() {
-  // Every process i sends a SHUTDOWN message to process i + 1. This is
-  // necessary for now because:
-  // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
-  //    feed it a message or kill the thread.
-  // 2. A GLOO process cannot send message to itself. (there is an ongoing
-  //    effort to fix this problem).
   sync();
-
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
-  threadPool_.waitWorkComplete();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
@@ -278,7 +270,7 @@ void ProcessGroupAgent::shutdown() {
   listenerThread_.join();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();
-  PythonRpcHandler::getInstance().cleanup();
+  // PythonRpcHandler::getInstance().cleanup();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
