@@ -656,10 +656,10 @@ class Module(object):
         """
         for name, param in self._parameters.items():
             if param is not None:
-                destination[prefix + name] = param if keep_vars else param.data
+                destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
             if buf is not None:
-                destination[prefix + name] = buf if keep_vars else buf.data
+                destination[prefix + name] = buf if keep_vars else buf.detach()
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
@@ -701,6 +701,7 @@ class Module(object):
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
+    @torch.no_grad()
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
@@ -738,7 +739,7 @@ class Module(object):
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
         local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
-        local_state = {k: v.data for k, v in local_name_params if v is not None}
+        local_state = {k: v for k, v in local_name_params if v is not None}
 
         for name, param in local_state.items():
             key = prefix + name
@@ -756,9 +757,6 @@ class Module(object):
                                       .format(key, input_param.shape, param.shape))
                     continue
 
-                if isinstance(input_param, Parameter):
-                    # backwards compatibility for serialized parameters
-                    input_param = input_param.data
                 try:
                     param.copy_(input_param)
                 except Exception:
