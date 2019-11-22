@@ -1133,7 +1133,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_rpc_join_and_shutdown(self):
+    def test_wait_all_workers_and_shutdown(self):
         # This tests ensures that both rpc.wait_all_workers() and rpc.shutdown() can be
         # called without errors being raised due to attempting to shut down
         # multiple times.
