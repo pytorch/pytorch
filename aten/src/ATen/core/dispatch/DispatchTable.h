@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/function_schema.h>
-#include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
