@@ -18,13 +18,7 @@ namespace nn {
 template <size_t D, typename Derived>
 class TORCH_API ConvImpl : public torch::nn::Cloneable<Derived> {
  public:
-  ConvImpl(
-      int64_t input_channels,
-      int64_t output_channels,
-      ExpandingArray<D> kernel_size)
-      : ConvImpl(ConvOptions<D>(input_channels, output_channels, kernel_size)) {
-  }
-  explicit ConvImpl(const ConvOptions<D>& options_);
+  explicit ConvImpl(ConvOptions<D> options_);
 
   void reset() override;
 
@@ -37,7 +31,7 @@ class TORCH_API ConvImpl : public torch::nn::Cloneable<Derived> {
   /// The learned kernel (or "weight").
   Tensor weight;
 
-  /// The learned bias. Only defined if the `with_bias` option was true.
+  /// The learned bias. Only defined if the `bias` option was true.
   Tensor bias;
 };
 
@@ -48,7 +42,13 @@ class TORCH_API ConvImpl : public torch::nn::Cloneable<Derived> {
 /// the exact behavior of this module.
 class TORCH_API Conv1dImpl : public ConvImpl<1, Conv1dImpl> {
  public:
-  using ConvImpl<1, Conv1dImpl>::ConvImpl;
+  Conv1dImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<1> kernel_size)
+      : Conv1dImpl(ConvOptions<1>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit Conv1dImpl(ConvOptions<1> options_);
   Tensor forward(const Tensor& input);
 };
 
@@ -65,7 +65,13 @@ TORCH_MODULE(Conv1d);
 /// the exact behavior of this module.
 class TORCH_API Conv2dImpl : public ConvImpl<2, Conv2dImpl> {
  public:
-  using ConvImpl<2, Conv2dImpl>::ConvImpl;
+  Conv2dImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<2> kernel_size)
+      : Conv2dImpl(ConvOptions<2>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit Conv2dImpl(ConvOptions<2> options_);
   Tensor forward(const Tensor& input);
 };
 
@@ -82,7 +88,13 @@ TORCH_MODULE(Conv2d);
 /// the exact behavior of this module.
 class TORCH_API Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
  public:
-  using ConvImpl<3, Conv3dImpl>::ConvImpl;
+  Conv3dImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<3> kernel_size)
+      : Conv3dImpl(ConvOptions<3>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit Conv3dImpl(ConvOptions<3> options_);
   Tensor forward(const Tensor& input);
 };
 

@@ -22,7 +22,7 @@ inline Tensor l1_loss(
 inline Tensor l1_loss(
     const Tensor& input,
     const Tensor& target,
-    L1LossFuncOptions options = {}) {
+    const L1LossFuncOptions& options = {}) {
   return detail::l1_loss(input, target, options.reduction());
 }
 
@@ -61,7 +61,7 @@ inline Tensor kl_div(
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
-    KLDivLossFuncOptions options = {}) {
+    const KLDivLossFuncOptions& options = {}) {
   return detail::kl_div(input, target, options.reduction());
 }
 
@@ -100,7 +100,7 @@ inline Tensor mse_loss(
 inline Tensor mse_loss(
     const Tensor& input,
     const Tensor& target,
-    MSELossFuncOptions options = {}) {
+    const MSELossFuncOptions& options = {}) {
   return detail::mse_loss(input, target, options.reduction());
 }
 
@@ -139,7 +139,7 @@ inline Tensor binary_cross_entropy(
 inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
-    BCELossFuncOptions options = {}) {
+    const BCELossFuncOptions& options = {}) {
   return detail::binary_cross_entropy(input, target, options.weight(), options.reduction());
 }
 
@@ -162,7 +162,7 @@ inline Tensor hinge_embedding_loss(
 inline Tensor hinge_embedding_loss(
     const Tensor& input,
     const Tensor& target,
-    HingeEmbeddingLossFuncOptions options = {}) {
+    const HingeEmbeddingLossFuncOptions& options = {}) {
   return detail::hinge_embedding_loss(input, target, options.margin(), options.reduction());
 }
 
@@ -195,7 +195,7 @@ inline Tensor multi_margin_loss(
 inline Tensor multi_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    MultiMarginLossFuncOptions options = {}) {
+    const MultiMarginLossFuncOptions& options = {}) {
   return detail::multi_margin_loss(input, target, options.p(), options.margin(), options.weight(), options.reduction());
 }
 
@@ -221,7 +221,7 @@ inline Tensor cosine_embedding_loss(
     const Tensor& input1,
     const Tensor& input2,
     const Tensor& target,
-    CosineEmbeddingLossFuncOptions options = {}) {
+    const CosineEmbeddingLossFuncOptions& options = {}) {
   return detail::cosine_embedding_loss(input1, input2, target, options.margin(), options.reduction());
 }
 
@@ -236,7 +236,7 @@ namespace detail {
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    torch::Reduction::Reduction reduction) {
+    SmoothL1LossFuncOptions::reduction_t reduction) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN("Using a target size (", target.sizes(), ") that is different to the input size (", input.sizes(), "). ",
                   "This will likely lead to incorrect results due to broadcasting. ",
@@ -247,12 +247,12 @@ inline Tensor smooth_l1_loss(
 
   if (target.requires_grad()) {
     ret = _smooth_l1_loss(input, target);
-    if (reduction != torch::Reduction::None) {
-      ret = reduction == torch::Reduction::Mean ? torch::mean(ret) : torch::sum(ret);
+    if (!c10::get_if<enumtype::kNone>(&reduction)) {
+      ret = c10::get_if<enumtype::kMean>(&reduction) ? torch::mean(ret) : torch::sum(ret);
     }
   } else {
     std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
-    ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], reduction);
+    ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction));
   }
   return ret;
 }
@@ -261,7 +261,7 @@ inline Tensor smooth_l1_loss(
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    SmoothL1LossFuncOptions options = {}) {
+    const SmoothL1LossFuncOptions& options = {}) {
   return detail::smooth_l1_loss(input, target, options.reduction());
 }
 
@@ -282,7 +282,7 @@ inline Tensor multilabel_margin_loss(
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    MultiLabelMarginLossFuncOptions options = {}) {
+    const MultiLabelMarginLossFuncOptions& options = {}) {
   return detail::multilabel_margin_loss(input, target, options.reduction());
 }
 
@@ -303,7 +303,7 @@ inline Tensor soft_margin_loss(
 inline Tensor soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    SoftMarginLossFuncOptions options = {}) {
+    const SoftMarginLossFuncOptions& options = {}) {
   return detail::soft_margin_loss(input, target, options.reduction());
 }
 
@@ -344,7 +344,7 @@ inline Tensor multilabel_soft_margin_loss(
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    MultiLabelSoftMarginLossFuncOptions options = {}) {
+    const MultiLabelSoftMarginLossFuncOptions& options = {}) {
   return detail::multilabel_soft_margin_loss(input, target, options.weight(), options.reduction());
 }
 
@@ -376,7 +376,7 @@ inline Tensor triplet_margin_loss(
     const Tensor& anchor,
     const Tensor& positive,
     const Tensor& negative,
-    TripletMarginLossFuncOptions options = {}) {
+    const TripletMarginLossFuncOptions& options = {}) {
   return detail::triplet_margin_loss(
     anchor,
     positive,
@@ -413,7 +413,7 @@ inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& targets,
                        const Tensor& input_lengths,
                        const Tensor& target_lengths,
-                       CTCLossFuncOptions options = {}) {
+                       const CTCLossFuncOptions& options = {}) {
   return detail::ctc_loss(
     log_probs,
     targets,
@@ -440,7 +440,7 @@ inline Tensor poisson_nll_loss(const Tensor& input,
 } // namespace detail
 
 inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
-                               PoissonNLLLossFuncOptions options = {}) {
+                               const PoissonNLLLossFuncOptions& options = {}) {
   return detail::poisson_nll_loss(
     input, target,
     options.log_input(), options.full(), options.eps(), options.reduction());
@@ -465,7 +465,7 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
 } // namespace detail
 
 inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
-  const Tensor& target, MarginRankingLossFuncOptions options = {}) {
+  const Tensor& target, const MarginRankingLossFuncOptions& options = {}) {
   return detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
 }
 

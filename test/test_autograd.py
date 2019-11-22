@@ -2594,6 +2594,18 @@ class TestAutograd(TestCase):
         print(prof.table())
         print(prof.key_averages(group_by_input_shape=True).table())
 
+    def test_profiler_no_cuda(self):
+        print("")
+        layer = torch.nn.Linear(20, 30)
+        x = torch.randn(128, 20)
+        with profile(use_cuda=False) as prof:
+            layer(x)
+
+        prof_str = str(prof)
+        print(prof_str)
+        self.assertTrue('cpu' in prof_str.lower())
+        self.assertTrue('cuda' not in prof_str.lower())
+
     def test_profiler_aggregation_lstm(self):
         print("")
         rnn = torch.nn.LSTM(10, 20, 2)

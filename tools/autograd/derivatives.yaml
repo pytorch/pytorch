@@ -1459,10 +1459,9 @@
 
 # nnpack
 
-- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding) -> Tensor
-  input: _nnpack_spatial_convolution_backward_input(input, grad, weight, padding)
-  weight: _nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad, padding)
-  bias: grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1)
+- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding, int[2] stride=1) -> Tensor
+  # NNPACK does not support strided convolutions in the backwards path, which is the reason why we are using the closest available function that does here.
+  input, weight, bias: slow_conv_dilated2d_backward(grad, input, weight, std::vector<int64_t>{weight.size(2), weight.size(3)}, stride, padding, std::vector<int64_t>{1, 1}, grad_input_mask)
 
 # Only frst three of _cudnn_rnn outputs can have gradients.
 # _cudnn_rnn outputs: (output, hy, cy, reserve, weight_buf)

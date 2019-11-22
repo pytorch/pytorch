@@ -423,7 +423,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
     """
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, reduce_range=False):
         super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range)
@@ -501,7 +501,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
     """
 
     def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, reduce_range=False):
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
             reduce_range=reduce_range)

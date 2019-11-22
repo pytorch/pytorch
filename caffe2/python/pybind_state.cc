@@ -1527,6 +1527,12 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));
     return true;
   });
+  m.def("reset_blob", [](const std::string& name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* b = gWorkspace->GetBlob(name);
+    CAFFE_ENFORCE(b);
+    b->Reset();
+  });
   m.def("fetch_blob", [](const std::string& name) -> py::object {
     return python_detail::fetchBlob(gWorkspace, name);
   });

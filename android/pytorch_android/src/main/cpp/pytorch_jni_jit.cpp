@@ -6,6 +6,7 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
+#include <torch/csrc/autograd/record_function.h>
 #include <torch/script.h>
 
 #include "pytorch_jni_common.h"
@@ -26,12 +27,30 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     return makeCxxInstance(modelPath);
   }
 
+#ifdef TRACE_ENABLED
+  static void onFunctionEnter(
+      const torch::autograd::profiler::RecordFunction& fn) {
+    Trace::beginSection(fn.name().str());
+  }
+
+  static void onFunctionExit(const torch::autograd::profiler::RecordFunction&) {
+    Trace::endSection();
+  }
+#endif
+
   PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
     auto qengines = at::globalContext().supportedQEngines();
     if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
         qengines.end()) {
       at::globalContext().setQEngine(at::QEngine::QNNPACK);
     }
+#ifdef TRACE_ENABLED
+    torch::autograd::profiler::pushCallback(
+        &onFunctionEnter,
+        &onFunctionExit,
+        /* need_inputs */ false,
+        /* sampled */ false);
+#endif
     module_ = torch::jit::load(std::move(modelPath->toStdString()));
     module_.eval();
   }
@@ -48,6 +67,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
       facebook::jni::alias_ref<
           facebook::jni::JArrayClass<JIValue::javaobject>::javaobject>
           jinputs) {
+    Trace _s{"jni::Module::forward"};
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);

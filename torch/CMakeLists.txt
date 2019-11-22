@@ -125,7 +125,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/pybind11/include
+    ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include

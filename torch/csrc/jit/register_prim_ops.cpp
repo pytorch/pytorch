@@ -325,7 +325,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Scalar s;
            pop(stack, s);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
+           push(stack, at::scalar_to_tensor(s));
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -336,7 +336,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            bool b;
            pop(stack, b);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(b)));
+           push(stack, at::scalar_to_tensor(b));
            return 0;
          },
          aliasAnalysisFromSchema()),

@@ -42,13 +42,7 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return g.insertNode(g.createNone())->output();
     }
-    // TODO: fix all cases where we are not passing in a variable,
-    // and then change this to an AT_ASSERT
-    if (!ref.is_variable()) {
-      ref = autograd::make_variable(ref, /*requires_grad=*/false);
-    } else {
-      AT_ASSERT(!ref.requires_grad());
-    }
+    TORCH_INTERNAL_ASSERT(!ref.requires_grad());
     n->output()->inferTypeFrom(
         ref); // note: before t_ because of std::move(ref)
     n->t_(attr::value, std::move(ref));

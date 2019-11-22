@@ -598,7 +598,7 @@ void initTensorImplConversion(PyObject* module) {
     // In the near future, once we make every tensor a Variable, we can remove
     // the `tensor.is_variable()` check and directly return `tensor` as a Variable.
     return py::cast(tensor.is_variable() ? torch::autograd::Variable(tensor) :
-      torch::autograd::make_variable(std::move(tensor), false));
+      std::move(tensor));
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
   m.def("_tensor_impl_raw_handle", [](torch::autograd::Variable* t) -> void* {

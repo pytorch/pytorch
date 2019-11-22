@@ -6,6 +6,7 @@ import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
+from torch.nn.utils.rnn import PackedSequence
 from torch.quantization import \
     QConfigDynamic, get_observer_dict, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
@@ -605,8 +606,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         torch.testing.assert_allclose(output_fp16, ref_out)
         self.assertEqual(output_fp16, ref_out)
-        for out, ref in zip(final_hiddens_fp16, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+        for out, ref_val in zip(final_hiddens_fp16, ref_hid):
+            torch.testing.assert_allclose(out, ref_val)
 
         # Test tracing
         # TODO: TorchScript overloads don't work without this wrapper
@@ -631,8 +632,40 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         torch.testing.assert_allclose(output_fp16, ref_out)
         self.assertEqual(output_fp16, ref_out)
-        for out, ref in zip(final_hiddens_fp16, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+        for out, ref_val in zip(final_hiddens_fp16, ref_hid):
+            torch.testing.assert_allclose(out, ref_val)
+
+        class ScriptWrapperPacked(torch.nn.Module):
+            def __init__(self, cell):
+                super(ScriptWrapperPacked, self).__init__()
+                self.cell = cell
+
+            def forward(self, x, hiddens):
+                # type: (PackedSequence, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+                return self.cell(x, hiddens)
+
+        cell_packed = torch.jit.script(ScriptWrapperPacked(cell_int8))
+        packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
+        ref_out_packed, ref_hid_packed = ref(packed_input, hiddens)
+        output_packed, hiddens_packed = cell_packed(packed_input, hiddens)
+
+        for packed_val, ref_val in zip(output_packed, ref_out_packed):
+            if isinstance(packed_val, torch.Tensor):
+                torch.testing.assert_allclose(packed_val, ref_val)
+            else:
+                self.assertEqual(packed_val, ref_val)
+
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_packed, b)
+        b.seek(0)
+        loaded_packed = torch.jit.load(b)
+        out_loaded_packed, hid_loaded_packed = loaded_packed(packed_input, hiddens)
+        for packed_val, ref_val in zip(out_loaded_packed, ref_out_packed):
+            if isinstance(packed_val, torch.Tensor):
+                torch.testing.assert_allclose(packed_val, ref_val)
+            else:
+                self.assertEqual(packed_val, ref_val)
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"

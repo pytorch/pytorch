@@ -10,10 +10,10 @@ namespace utils {
 // See
 // https://pytorch.org/docs/stable/nn.html?highlight=clip_grad_norm#torch.nn.utils.clip_grad_norm_
 // for more details about this module.
-inline float clip_grad_norm_(
+inline double clip_grad_norm_(
     std::vector<Tensor>& parameters,
-    float max_norm,
-    float norm_type = 2.0) {
+    double max_norm,
+    double norm_type = 2.0) {
   std::vector<Tensor> params_with_grad;
 
   for (const auto& param : parameters) {
@@ -22,10 +22,10 @@ inline float clip_grad_norm_(
       params_with_grad.push_back(param);
     }
   }
-  float total_norm = 0.0;
-  if (norm_type == std::numeric_limits<float>::infinity()) {
+  double total_norm = 0.0;
+  if (norm_type == std::numeric_limits<double>::infinity()) {
     for (const auto& param : params_with_grad) {
-      auto param_max = param.grad().data().abs().max().item().toFloat();
+      auto param_max = param.grad().data().abs().max().item().toDouble();
       if (param_max > total_norm) {
         total_norm = param_max;
       }
@@ -33,7 +33,7 @@ inline float clip_grad_norm_(
   } else {
     for (const auto& param : params_with_grad) {
       auto param_norm = param.grad().data().norm(norm_type);
-      total_norm += std::pow(param_norm.item().toFloat(), norm_type);
+      total_norm += std::pow(param_norm.item().toDouble(), norm_type);
     }
     total_norm = std::pow(total_norm, 1.0 / norm_type);
   }
@@ -49,10 +49,10 @@ inline float clip_grad_norm_(
 
 // A wrapper around clip_grad_norm_ that allows us to call the function with a
 // single Tensor.
-inline float clip_grad_norm_(
+inline double clip_grad_norm_(
     Tensor& parameters,
-    float max_norm,
-    float norm_type = 2.0) {
+    double max_norm,
+    double norm_type = 2.0) {
   std::vector<Tensor> params = {parameters};
   return clip_grad_norm_(params, max_norm, norm_type);
 }
@@ -63,7 +63,7 @@ inline float clip_grad_norm_(
 // for more details about this module.
 inline void clip_grad_value_(
     std::vector<Tensor>& parameters,
-    float clip_value) {
+    double clip_value) {
 
   for (const auto& param : parameters) {
     if (param.grad().defined()) {
@@ -74,7 +74,7 @@ inline void clip_grad_value_(
 
 // A wrapper around clip_grad_value_ that allows us to call the function with a
 // single Tensor.
-inline void clip_grad_value_(Tensor& parameters, float clip_value) {
+inline void clip_grad_value_(Tensor& parameters, double clip_value) {
   std::vector<Tensor> params = {parameters};
   clip_grad_value_(params, clip_value);
 }

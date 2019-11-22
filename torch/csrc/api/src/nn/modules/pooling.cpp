@@ -235,7 +235,7 @@ void MaxUnpoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 Tensor MaxUnpool1dImpl::forward(const Tensor& input, const Tensor& indices,
-    const c10::optional<IntArrayRef>& output_size) {
+    const c10::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool1d(
     input,
     indices,
@@ -246,7 +246,7 @@ Tensor MaxUnpool1dImpl::forward(const Tensor& input, const Tensor& indices,
 }
 
 Tensor MaxUnpool2dImpl::forward(const Tensor& input, const Tensor& indices,
-    const c10::optional<IntArrayRef>& output_size) {
+    const c10::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool2d(
     input,
     indices,
@@ -257,7 +257,7 @@ Tensor MaxUnpool2dImpl::forward(const Tensor& input, const Tensor& indices,
 }
 
 Tensor MaxUnpool3dImpl::forward(const Tensor& input, const Tensor& indices,
-    const c10::optional<IntArrayRef>& output_size) {
+    const c10::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool3d(
     input,
     indices,

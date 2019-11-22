@@ -47,6 +47,8 @@ struct TORCH_API BatchNormFuncOptions {
 
   TORCH_ARG(Tensor, bias) = Tensor();
 
+  TORCH_ARG(bool, training) = false;
+
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
   TORCH_ARG(c10::optional<double>, momentum) = 0.1;

@@ -17,7 +17,7 @@ inline Tensor elu(Tensor& input, double alpha, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor elu(Tensor& input, ELUFuncOptions options = {}) {
+inline Tensor elu(Tensor& input, const ELUFuncOptions& options = {}) {
   return detail::elu(input, options.alpha(), options.inplace());
 }
 
@@ -33,7 +33,7 @@ inline Tensor selu(Tensor& input, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor selu(Tensor& input, SELUFuncOptions options = {}) {
+inline Tensor selu(Tensor& input, const SELUFuncOptions& options = {}) {
   return detail::selu(input, options.inplace());
 }
 
@@ -47,7 +47,7 @@ inline Tensor hardshrink(const Tensor& input,
 } // namespace detail
 
 inline Tensor hardshrink(const Tensor& input,
-                         HardshrinkFuncOptions options = {}) {
+                         const HardshrinkFuncOptions& options = {}) {
   return detail::hardshrink(input, options.lambda());
 }
 
@@ -66,7 +66,7 @@ inline Tensor hardtanh(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor hardtanh(Tensor& input, HardtanhFuncOptions options = {}) {
+inline Tensor hardtanh(Tensor& input, const HardtanhFuncOptions& options = {}) {
   return detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
 }
 
@@ -84,7 +84,7 @@ inline Tensor leaky_relu(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor leaky_relu(Tensor& input, LeakyReLUFuncOptions options = {}) {
+inline Tensor leaky_relu(Tensor& input, const LeakyReLUFuncOptions& options = {}) {
   return detail::leaky_relu(input, options.negative_slope(), options.inplace());
 }
 
@@ -118,7 +118,7 @@ inline Tensor gumbel_softmax(const Tensor& logits,
 }
 } // namespace detail
 
-inline Tensor gumbel_softmax(const Tensor& logits, GumbelSoftmaxFuncOptions options = {}) {
+inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxFuncOptions& options = {}) {
   return detail::gumbel_softmax(logits, options.tau(), options.hard(), options.dim());
 }
 
@@ -139,9 +139,8 @@ inline Tensor softmax(const Tensor& input, int64_t dim,
 }
 } // namespace detail
 
-inline Tensor softmax(const Tensor& input, SoftmaxFuncOptions options,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  return detail::softmax(input, options.dim(), dtype);
+inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options) {
+  return detail::softmax(input, options.dim(), options.dtype());
 }
 
 // ============================================================================
@@ -161,9 +160,8 @@ inline Tensor softmin(const Tensor& input, int64_t dim,
 }
 } // namespace detail
 
-inline Tensor softmin(const Tensor& input, SoftminFuncOptions options,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  return detail::softmin(input, options.dim(), dtype);
+inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options) {
+  return detail::softmin(input, options.dim(), options.dtype());
 }
 
 // ============================================================================
@@ -183,9 +181,8 @@ inline Tensor log_softmax(const Tensor& input, int64_t dim,
 }
 } // namespace detail
 
-inline Tensor log_softmax(const Tensor& input, LogSoftmaxFuncOptions options,
-                          c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  return detail::log_softmax(input, options.dim(), dtype);
+inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& options) {
+  return detail::log_softmax(input, options.dim(), options.dtype());
 }
 
 // ============================================================================
@@ -212,7 +209,7 @@ inline Tensor relu(Tensor& input, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor relu(Tensor& input, ReLUFuncOptions options = {}) {
+inline Tensor relu(Tensor& input, const ReLUFuncOptions& options = {}) {
   return detail::relu(input, options.inplace());
 }
 
@@ -224,18 +221,19 @@ inline Tensor relu6(Tensor& input, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor relu6(Tensor& input, ReLU6FuncOptions options = {}) {
+inline Tensor relu6(Tensor& input, const ReLU6FuncOptions& options = {}) {
   return detail::relu6(input, options.inplace());
 }
 
 // ============================================================================
 
 namespace detail {
+
 inline Tensor rrelu(Tensor& input,
                     double lower,
                     double upper,
-                    bool inplace,
-                    bool training) {
+                    bool training,
+                    bool inplace) {
   if (inplace) {
     return torch::rrelu_(input, lower, upper, training);
   } else {
@@ -244,9 +242,8 @@ inline Tensor rrelu(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor rrelu(Tensor& input, RReLUFuncOptions options = {},
-                    bool training = false) {
-  return detail::rrelu(input, options.lower(), options.upper(), options.inplace(), training);
+inline Tensor rrelu(Tensor& input, const RReLUFuncOptions& options = {}) {
+  return detail::rrelu(input, options.lower(), options.upper(), options.training(), options.inplace());
 }
 
 // ============================================================================
@@ -263,7 +260,7 @@ inline Tensor celu(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor celu(Tensor& input, CELUFuncOptions options = {}) {
+inline Tensor celu(Tensor& input, const CELUFuncOptions& options = {}) {
   return detail::celu(input, options.alpha(), options.inplace());
 }
 
@@ -278,7 +275,7 @@ inline Tensor softplus(const Tensor& input,
 } // namespace detail
 
 inline Tensor softplus(const Tensor& input,
-                       SoftplusFuncOptions options = {}) {
+                       const SoftplusFuncOptions& options = {}) {
   return detail::softplus(input, options.beta(), options.threshold());
 }
 
@@ -293,7 +290,7 @@ inline Tensor softshrink(const Tensor& input,
 } // namespace detail
 
 inline Tensor softshrink(const Tensor& input,
-                         SoftshrinkFuncOptions options = {}) {
+                         const SoftshrinkFuncOptions& options = {}) {
   return detail::softshrink(input, options.lambda());
 }
 
@@ -324,7 +321,7 @@ inline Tensor threshold(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor threshold(Tensor& input, ThresholdFuncOptions options) {
+inline Tensor threshold(Tensor& input, const ThresholdFuncOptions& options) {
   return detail::threshold(input, options.threshold(), options.value(), options.inplace());
 }
 

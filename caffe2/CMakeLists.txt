@@ -1055,7 +1055,7 @@ install(TARGETS torch EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}
 caffe2_interface_library(torch torch_library)
 list(APPEND Caffe2_MAIN_LIBS torch_library)
 if (USE_TBB)
-  list(APPEND Caffe2_MAIN_LIB tbb)
+  list(APPEND Caffe2_MAIN_LIBS tbb)
 endif()
 
 # Install PDB files for MSVC builds

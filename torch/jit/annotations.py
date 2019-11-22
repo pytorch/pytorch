@@ -7,7 +7,7 @@ from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType
+    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType
 
 from textwrap import dedent
 from torch._six import builtins
@@ -238,6 +238,8 @@ def ann_to_type(ann, resolver=None):
         return BoolType.get()
     elif ann is Any:
         return AnyType.get()
+    elif ann is type(None):
+        return NoneType.get()
     elif hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
     elif hasattr(ann, "__torch_script_interface__"):

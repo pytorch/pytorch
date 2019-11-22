@@ -98,9 +98,7 @@ class ScriptModuleOp final : public Operator<Context> {
     const int num_inputs = InputSize();
     inputs.reserve(num_inputs);
     for (int i = 1; i < num_inputs; ++i) {
-      // jit::Interpreter takes only autograd variables (which have
-      // require_grad=False in this case)
-      inputs.emplace_back(torch::autograd::make_variable(at::Tensor(Input(i))));
+      inputs.emplace_back(at::Tensor(Input(i)));
     }
     // We just convert specified inputs. If some of the inputs were omitted and
     // don't have default values, method::operator() is going to complain.
