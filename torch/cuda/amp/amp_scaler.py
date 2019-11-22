@@ -77,6 +77,11 @@ class AmpScaler(object):
         enabled (bool,optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply
             invokes the underlying ``optimizer.step()``, and other methods become no-ops.
     """
+    # Python 2 doesn't support enums.
+    READY = 0
+    UNSCALED = 1
+    STEPPED = 2
+
     def __init__(self,
                  init_scale=2.**24,
                  growth_factor=1.001,
@@ -92,7 +97,7 @@ class AmpScaler(object):
             self._scale = None
             self._growth_factor = growth_factor
             self._backoff_factor = backoff_factor
-            self._per_optimizer_states = defaultdict(dict)
+            self._per_optimizer_states = defaultdict(lambda: {"stage": self.READY, "found_inf_per_device": {}})
 
     @staticmethod
     def _scale_not_initialized_error(funcname):
@@ -189,15 +194,17 @@ class AmpScaler(object):
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
-        if "unscaled" in optimizer_state:
-            raise RuntimeError("unscale_ has already been called on this optimizer this iteration.")
+        if optimizer_state["stage"] == self.UNSCALED:
+            raise RuntimeError("unscale_() has already been called on this optimizer since the last update().")
+        elif optimizer_state["stage"] == self.STEPPED:
+            raise RuntimeError("unscale_() is being called after step().")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
-        optimizer_state["unscaled"] = True
+        optimizer_state["stage"] = self.UNSCALED
 
     def step(self, optimizer, *args, **kwargs):
         """
@@ -229,22 +236,31 @@ class AmpScaler(object):
 
         assert self._scale is not None, self._scale_not_initialized_error("step")
 
-        if (hasattr(optimizer, "_step_supports_amp_scaling") and optimizer._step_supports_amp_scaling):
-            # This optimizer has customized scale-handling logic, so we call it directly.
-            # The contract with custom optimizers is that their step methods should accept an additional,
-            # optional amp_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
-            # it can query its own state, invoke unscale_ on itself, etc
-            return optimizer.step(*args, **dict(kwargs, amp_scaler=self))
-
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
-        if "unscaled" not in optimizer_state:
+        if optimizer_state["stage"] == self.STEPPED:
+            raise RuntimeError("step() has already been called since the last update().")
+
+        if (hasattr(optimizer, "_step_supports_amp_scaling") and optimizer._step_supports_amp_scaling):
+            # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
+            # The contract with custom optimizers is that their step() should accept an additional,
+            # optional amp_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
+            # it can query its own state, invoke unscale_ on itself, etc
+            retval = optimizer.step(*args, **dict(kwargs, amp_scaler=self))
+            optimizer_state["stage"] == self.STEPPED
+            return retval
+
+        if optimizer_state["stage"] == self.READY:
             self.unscale_(optimizer)
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
         if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
-            return optimizer.step(*args, **kwargs)
+            retval = optimizer.step(*args, **kwargs)
+
+        optimizer_state["stage"] == self.STEPPED
+
+        return retval
 
     def update(self, new_scale=None):
         """
@@ -298,7 +314,7 @@ class AmpScaler(object):
                                                   self._backoff_factor)
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
-        self._per_optimizer_states = defaultdict(dict)
+        self._per_optimizer_states = defaultdict(lambda: {"stage": self.READY, "found_inf_per_device": {}})
 
     def _get_scale_async(self):
         return self._scale
