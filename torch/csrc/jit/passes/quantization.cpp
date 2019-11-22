@@ -512,7 +512,7 @@ void checkGetQParamsResult(const IValue& qparams) {
   auto tp = qparams.toTuple();
   TORCH_CHECK(
       tp->elements().size() == 2 || tp->elements().size() == 3,
-      "`get_qparams` function is expected to reutrn a "
+      "`get_qparams` function is expected to return a "
       "Tuple of size 2 or 3, got Tuple of size ",
       tp->elements().size());
   // Expect first two elements of the tuple to be Tensor
@@ -543,11 +543,11 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto om = module_.attr(observer_name.value()).toModule();
-  auto get_qparams = om.get_method("get_qparams");
+  auto observer_module = module_.attr(observer_name.value()).toModule();
+  auto get_qparams = observer_module.get_method("get_qparams");
   IValue qparams = get_qparams(std::vector<IValue>());
   checkGetQParamsResult(qparams);
-  auto scalar_type = om.attr("dtype");
+  auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
               "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
