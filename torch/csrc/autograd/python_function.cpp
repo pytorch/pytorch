@@ -6,7 +6,6 @@
 #include <unordered_set>
 #include <exception>
 #include <ATen/ATen.h>
-#include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -21,6 +20,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/Exceptions.h>
 
 #include <exception>
@@ -45,7 +45,7 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
 
   THPObjectPtr pyInputs(PyTuple_New(inputs.size()));
   if (!pyInputs) throw python_error();
@@ -92,7 +92,7 @@ auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
 // it's used by engine.cpp.  This is responsible for forwarding a call from
 // C++'s Node::apply to a Python method "apply".
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
@@ -187,7 +187,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 }
 
 auto PyNode::is_traceable() -> bool {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
   THPObjectPtr forward_class {PyObject_GetAttrString(obj, "_forward_cls")};
   if (!forward_class) throw python_error();
   THPObjectPtr traceable_py_bool {PyObject_GetAttrString(forward_class, "is_traceable")};
@@ -196,14 +196,14 @@ auto PyNode::is_traceable() -> bool {
 }
 
 auto PyNode::release_variables() -> void {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
   auto f = (THPFunction*) obj;
   f->saved_variables.clear();
   f->has_freed_buffers = 1;
 }
 
 auto PyNode::name() const -> std::string {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
   auto f = (THPFunction*) obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
   // Python API functions are not const-correct

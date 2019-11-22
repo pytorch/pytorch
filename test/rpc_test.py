@@ -1063,7 +1063,6 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
-    @unittest.skip("Test is flaky on ASAN, see https://github.com/pytorch/pytorch/issues/29117")
     @dist_init(setup_rpc=True)
     def test_call_method_on_rref(self):
         """
