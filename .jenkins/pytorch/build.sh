@@ -3,6 +3,10 @@
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
+# Example value: py3.6-devtoolset7-rocmrpm-centos7.5
+# to build using python3, devtoolset7, ROCm CentOS RPMs
+# Print a message and exit if environment variable is not set
+${BUILD_ENVIRONMENT:?"Environment variable BUILD_ENVIRONMENT must be set"}
 
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
