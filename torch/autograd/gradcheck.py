@@ -9,7 +9,7 @@ def zero_gradients(x):
     if isinstance(x, torch.Tensor):
         if x.grad is not None:
             x.grad.detach_()
-            x.grad.data.zero_()
+            x.grad.zero_()
     elif isinstance(x, container_abcs.Iterable):
         for elem in x:
             zero_gradients(elem)
@@ -41,7 +41,7 @@ def iter_tensors(x, only_requiring_grad=False):
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
 
-
+@torch.no_grad()
 def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     """
     input: input to `fn`
@@ -63,8 +63,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        # need data here to get around the version check because without .data,
-        # the following code updates version but doesn't change content
         if x_tensor.is_sparse:
             def get_stride(size):
                 dim = len(size)
@@ -78,7 +76,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             x_nnz = x_tensor._nnz()
             x_size = list(x_tensor.size())
             x_indices = x_tensor._indices().t()
-            x_values = x_tensor._values().data
+            x_values = x_tensor._values()
             x_stride = get_stride(x_size)
 
             for i in range(x_nnz):
@@ -98,7 +96,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             if len(input) != 1:
                 raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
                                  len(input))
-            x_tensor = x_tensor.data
+            x_tensor = x_tensor
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 # this is really inefficient, but without indexing implemented, there's
                 # not really a better way than converting back and forth
@@ -116,7 +114,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
-            x_tensor = x_tensor.data
+            x_tensor = x_tensor
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
                 x_tensor[x_idx] = orig - eps
