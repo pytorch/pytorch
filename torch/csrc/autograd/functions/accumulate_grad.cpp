@@ -23,7 +23,6 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
 }
 
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
-  // XXX: this method is not thread-safe!
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())
@@ -34,11 +33,11 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
 
   auto new_grad = std::move(grads[0]);
-  std::lock_guard<std::mutex> lock(grad_mutex);
   for (auto& hook : impl::hooks(variable)) {
     new_grad = (*hook)({new_grad})[0];
   }
 
+  std::lock_guard<std::mutex> lock(grad_mutex);
   at::Tensor& grad = variable.grad();
   if (!grad.defined()) {
     // under following condition, we can avoid clone()

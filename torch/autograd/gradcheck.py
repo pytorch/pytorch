@@ -130,7 +130,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     return jacobian
 
 
-def get_analytical_jacobian(input, output, nondet_tol=1e-13, nondet_rtol=1e-13):
+def get_analytical_jacobian(input, output, nondet_tol=0.0, nondet_rtol=0.0):
     # it is easier to call to_dense() on the sparse output than
     # to modify analytical jacobian
     if output.is_sparse:
@@ -185,7 +185,7 @@ def _differentiable_outputs(x):
 
 
 def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True,
-              check_sparse_nnz=False, nondet_tol=1e-13, nondet_rtol=1e-13):
+              check_sparse_nnz=False, nondet_tol=0.0, nondet_rtol=0.0):
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
     and with ``requires_grad=True``.
@@ -218,10 +218,10 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             and for any SparseTensor at input, gradcheck will perform check at nnz positions only.
         nondet_tol (float, optional): absolute tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
-            exactly (default, 1e-13) or be within this tolerance.
+            exactly (default, 0.0) or be within this tolerance.
         nondet_rtol (float, optional): relative tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
-            exactly (default, 1e-13) or be within this tolerance.
+            exactly (default, 0.0) or be within this tolerance.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -272,6 +272,11 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                 if len(torch.nonzero(n)) > 0:
                     return fail_test('Numerical gradient for function expected to be zero')
         return True
+
+    # multithreaded autograd allow nondeterminism, apply tolerance of 1e-13 rather than 0.0
+    if torch.autograd.get_num_threads_per_device() > 1:
+        nondet_tol = 1e-13
+        nondet_rtol = 1e-13
 
     for i, o in enumerate(output):
         if not o.requires_grad:
@@ -332,7 +337,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
 def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
                   gen_non_contig_grad_outputs=False, raise_exception=True,
-                  nondet_tol=1e-13, nondet_rtol=1e-13):
+                  nondet_tol=0.0, nondet_rtol=0.0):
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point type and with
@@ -373,12 +378,12 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
             exact nature of the failure. This is helpful when debugging gradchecks.
         nondet_tol (float, optional): absolute tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
-            exactly (default, 1e-13) or be within this tolerance. Note that a small amount
+            exactly (default, 0.0) or be within this tolerance. Note that a small amount
             of nondeterminism in the gradient will lead to larger inaccuracies in
             the second derivative.
         nondet_rtol (float, optional): relative tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
-            exactly (default, 1e-13) or be within this tolerance.
+            exactly (default, 0.0) or be within this tolerance.
 
     Returns:
         True if all differences satisfy allclose condition

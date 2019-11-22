@@ -194,8 +194,7 @@ auto ReadyQueue::pop(const std::chrono::microseconds &timeout)
     return nullptr;
   }
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto task =
-      make_unique<NodeTask>(std::move(const_cast<NodeTask &>(heap_.top())));
+  auto task = make_unique<NodeTask>(std::move(const_cast<NodeTask &>(heap_.top())));
   heap_.pop();
   return task;
 }
@@ -302,7 +301,11 @@ auto Engine::thread_main(
   while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
     std::unique_ptr<NodeTask> task{nullptr};
     if (graph_task) {
-      task = queue->pop(std::chrono::microseconds(100));
+      // For the case where there're more re-entrant threads than outstanding
+      // tasks, then some thread that couldn't grab the task will hang on
+      // trying to pop from readyQueue, give a timeout to pop (return null if
+      // timeout) to ensure they don't hang forever
+      task = queue->pop(std::chrono::microseconds(10));
       if (!task) {
         continue;
       }
