@@ -42,6 +42,15 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
 
   Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`) supports both CPU and CUDA.
 
+
+.. note::
+
+  When preparing a quantized model for use on the ARM to take advange of the `QNNPACK library <https://github.com/pytorch/QNNPACK>`_
+  you will probably want to override the default engine to use QNNPack so that you can validate the numerics. Do this by setting the
+  ``torch.backends.quantized.engine`` parameter as shown here.
+
+  ``torch.backends.quantized.engine = 'qnnpack'``
+
 Quantized Tensors
 ---------------------------------------
 
