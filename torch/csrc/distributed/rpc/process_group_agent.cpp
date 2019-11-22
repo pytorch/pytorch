@@ -194,7 +194,6 @@ void ProcessGroupAgent::join() {
   lock.unlock();
   pg_->barrier()->wait();
   threadPool_.waitWorkComplete();
-  // PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
