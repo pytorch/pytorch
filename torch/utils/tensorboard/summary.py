@@ -121,8 +121,8 @@ def hparams(hparam_dict=None, metric_dict=None):
         logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
         raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
 
-    hps = [HParamInfo(name=k) for k in hparam_dict.keys()]
-    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+    hps = [HParamInfo(name=k.replace(" ", "_")) for k in hparam_dict.keys()]
+    mts = [MetricInfo(name=MetricName(tag=k.replace(" ", "_"))) for k in metric_dict.keys()]
 
     exp = Experiment(hparam_infos=hps, metric_infos=mts)
 
@@ -137,21 +137,22 @@ def hparams(hparam_dict=None, metric_dict=None):
 
     ssi = SessionStartInfo()
     for k, v in hparam_dict.items():
+        key = k.replace(" ", "_")
         if isinstance(v, int) or isinstance(v, float):
-            ssi.hparams[k].number_value = v
+            ssi.hparams[key].number_value = v
             continue
 
         if isinstance(v, string_types):
-            ssi.hparams[k].string_value = v
+            ssi.hparams[key].string_value = v
             continue
 
         if isinstance(v, bool):
-            ssi.hparams[k].bool_value = v
+            ssi.hparams[key].bool_value = v
             continue
 
         if isinstance(v, torch.Tensor):
             v = make_np(v)[0]
-            ssi.hparams[k].number_value = v
+            ssi.hparams[key].number_value = v
             continue
         raise ValueError('value should be one of int, float, str, bool, or torch.Tensor')
 

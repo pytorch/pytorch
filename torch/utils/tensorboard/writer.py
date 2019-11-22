@@ -308,7 +308,7 @@ class SummaryWriter(object):
             w_hp.file_writer.add_summary(ssi)
             w_hp.file_writer.add_summary(sei)
             for k, v in metric_dict.items():
-                w_hp.add_scalar(k, v)
+                w_hp.add_scalar(k.replace(" ", "_"), v)
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
         """Add scalar data to summary.
