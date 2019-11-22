@@ -91,12 +91,13 @@ namespace impl {
     }
   }
 
+  // yf225 TODO: we should store cpp hooks in a dict, not a vector!
   void create_cpp_hook(const Variable& self) {
-    auto &list = materialize_autograd_meta(self)->cpp_hooks_list;
-    list.reset(new hooks_list());
-    std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
+    auto &map = materialize_autograd_meta(self)->cpp_hooks_map;
+    map.reset(new hooks_map());
+    std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(map, self.output_nr()));
     clear_hooks(self);
-    add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
+    add_hook(self, std::make_shared<CppFunctionPreHook>(map, 0));
     auto fn = self.grad_fn();
     if (fn) {
       fn->add_pre_hook(std::move(hook_ptr));
@@ -348,22 +349,22 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
 }
 
 void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
-  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list;
-  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
+  auto &map = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_map;
+  TORCH_CHECK(map && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
-  (*list)[pos] = nullptr;
+  (*map)[pos] = nullptr;
 }
 
 unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list;
-  if(!list) {
+  auto &map = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_map;
+  if(!map) {
     torch::autograd::impl::create_cpp_hook(self);
   }
-  unsigned idx = list->size();
-  list->push_back(hook);
+  unsigned idx = map->size();
+  map->insert(idx, hook);
   return idx;
 }
 

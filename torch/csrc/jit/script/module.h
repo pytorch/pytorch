@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/api/include/torch/ordered_dict.h>
+#include <torch/csrc/ordered_dict.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/utils/memory.h>
 
