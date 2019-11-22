@@ -1214,21 +1214,10 @@ graph(%x : Tensor,
         get_forward(m._c)(data, weight, weight, weight)
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
-        assert len(m._modules._c.items()) == 0, \
-            'Expected to have zero submodule of conv'
-
         get_forward(m._c)(data, weight, weight, weight)
-        FileCheck().check("aten::dequantize") \
-                   .check("aten::conv2d") \
-                   .check("aten::quantize_per_tensor") \
-                   .check("aten::dequantize") \
-                   .check_next("aten::dequantize") \
-                   .check("aten::conv2d") \
-                   .check("aten::conv2d") \
-                   .check("return") \
+        FileCheck().check_count("aten::dequantize", 8, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
-    @_tmp_donotuse_dont_inline_everything
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
         class L(torch.nn.Module):

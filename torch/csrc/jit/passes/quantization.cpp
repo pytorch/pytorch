@@ -452,29 +452,19 @@ void insertQuantDeQuantCall(
   quant->output()->setDebugName(v->debugName() + ".quant");
   g->insertNode(quant);
 
-  // Insert all the dequants first
-  Node* observer_node = nullptr;
-  while (!v->uses().empty()) {
-    Node* cur = v->uses()[0].user;
-    if (isObserverNode(cur, observer_name)) {
-      // temporarily remove observer use and restore later
-      observer_node = cur;
-      v->replaceFirstUseWith(quant->output());
-    } else if (cur != quant) {
-      Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
-      dequant->output()->setDebugName(v->debugName() + ".dequant." + std::to_string(v->uses().size()));
-      v->replaceFirstUseWith(dequant->output());
-      g->insertNode(dequant);
-    } else {
-      // temporarily remove quant use and restore later
-      v->replaceFirstUseWith(quant->output());
-    }
+  std::vector<Node*> use_of_node_to_be_removed;
+  for (const auto& use : v->uses()) {
+    auto cur = use.user;
+    if(!isObserverNode(cur, observer_name) && cur != quant)
+      use_of_node_to_be_removed.push_back(cur);
   }
-  // restore the quant input and observer input
-  if (observer_node) {
-    observer_node->replaceInputWith(quant->output(), v);
+
+  for (size_t i = 0; i < use_of_node_to_be_removed.size(); ++i) {
+    Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
+    dequant->output()->setDebugName(v->debugName() + ".dequant." + std::to_string(i));
+    use_of_node_to_be_removed[i]->replaceInputWith(v, dequant->output());
+    g->insertNode(dequant);
   }
-  quant->replaceInputWith(quant->output(), v);
 }
 
 // find the observer for Value `v` and return the name of the observer
