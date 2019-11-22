@@ -84,6 +84,9 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
+const std::chrono::milliseconds INFINITE_TIMEOUT =
+    std::chrono::milliseconds::max();
+
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
   const auto worldSize = pg_->getSize();
@@ -176,24 +179,12 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
 }
 
 void ProcessGroupAgent::join() {
-  // Every process i sends a SHUTDOWN message to process i + 1. This is
-  // necessary for now because:
-  // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
-  //    feed it a message or kill the thread.
-  // 2. A GLOO process cannot send message to itself. (there is an ongoing
-  //    effort to fix this problem).
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
-  int dst = (pg_->getRank() + 1) % pg_->getSize();
-  enqueueSend(
-      SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
-  threadPool_.waitWorkComplete();
-  listenerThread_.join();
-  PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
@@ -259,12 +250,32 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
+  rpcRunning_.store(true);
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
+  futureTimeoutThread_ =
+      std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
+}
+
+void ProcessGroupAgent::shutdown() {
+  if (!rpcRunning_.exchange(false)) {
+    return;
+  }
+  LOG(INFO) << "Stopping ProcessGroupAgent.";
+  {
+    std::unique_lock<std::mutex> lock(recvWorkMutex_);
+    if (recvWork_) {
+      recvWork_->abort();
+    }
+  }
+  listenerThread_.join();
+  futureTimeoutCV_.notify_one();
+  futureTimeoutThread_.join();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
       "Destination rank is out of bound, got ",
@@ -281,9 +292,22 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
             std::chrono::steady_clock::now().time_since_epoch());
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
-      futures_[requestId] = std::make_pair(future, futureStartTime);
+      // Set infinite timeout if specified.
+      auto timeout = rpcTimeout_.load();
+      if (timeout.count() == 0) {
+        timeout = INFINITE_TIMEOUT;
+      }
+      auto futureInfo = FutureInfo(future, futureStartTime, to.id_, timeout);
+      futures_[requestId] = futureInfo;
+      auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
-      futureTimeouts_[futureStartTime].push_back(requestId);
+      futureTimeouts_[rpcEndTime].push_back(requestId);
+      // Signal the watchdog to monitor future timeouts if this is the first
+      // future created or if an RPC with a shorter TTL has been created.
+      if (futures_.size() == 1 ||
+          futureTimeouts_.begin()->first == rpcEndTime) {
+        futureTimeoutCV_.notify_one();
+      }
     }
     message.setId(requestId);
   } else {
@@ -389,27 +413,35 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
-          std::chrono::milliseconds futureStartTime;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
-            std::tie(fm, futureStartTime) = futures_[id];
+            const auto& futureInfo = futures_.find(id);
+            if (futureInfo == futures_.end()) {
+              // Received a completion for a timed out future, drop the recv.
+              // RecvCounts will not be incremented here, it will be incremented
+              // by the sender who has determined the future has timed out.
+              return;
+            }
+
+            fm = futureInfo->second.future_;
+            auto rpcEndTime = getRPCEndTime(futureInfo->second);
+            futures_.erase(id);
+            // look up the corresponding future by its time out and request ID,
+            // and remove it from the timeouts map
+            auto& futuresAtTime = futureTimeouts_[rpcEndTime];
+            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+            TORCH_INTERNAL_ASSERT(
+                it != futuresAtTime.end(),
+                "Error: could not find future in futureTimeouts map, race condition.");
+            futuresAtTime.erase(it);
+            if (futuresAtTime.empty()) {
+              // remove the key from futureTimeouts_
+              futureTimeouts_.erase(rpcEndTime);
+            }
           }
           // Not holding lock on markCompleted as this could run callbacks that
           // call agent_->send
           fm->markCompleted(std::move(message));
-          {
-            std::lock_guard<std::mutex> lock{futureMutex_};
-            futures_.erase(id);
-            // look up the corresponding future by its time out and request ID,
-            // and remove it from the timeouts map
-            auto& futuresAtTime = futureTimeouts_[futureStartTime];
-            futuresAtTime.erase(
-                std::find(futuresAtTime.begin(), futuresAtTime.end(), id));
-            if (futuresAtTime.size() == 0) {
-              // remove the key from futureTimeouts_
-              futureTimeouts_.erase(futureStartTime);
-            }
-          }
           futureCV_.notify_all();
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
@@ -423,10 +455,22 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  while (true) {
+  while (rpcRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
-    pg_->recvAnysource(preamble, pg_->getRank())->wait();
+    {
+      std::lock_guard<std::mutex> guard(recvWorkMutex_);
+      recvWork_ = pg_->recvAnysource(preamble, pg_->getRank());
+    }
+
+    if (!rpcRunning_.load()) {
+      return;
+    }
+    bool aborted = !recvWork_->wait();
+    if (aborted) {
+      continue;
+    }
+
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];
@@ -447,6 +491,98 @@ void ProcessGroupAgent::listenLoop() {
 
     enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
   }
+}
+
+void ProcessGroupAgent::pollTimedOutRPCs() {
+  while (rpcRunning_.load()) {
+    std::chrono::milliseconds sleepTime;
+    std::unique_lock<std::mutex> lock{futureMutex_};
+    // Estimate amount of time the first future will time out in, and sleep
+    // for that long.
+    // if there are no futures or the first future's RPC timeout is set to 0
+    // (meaning no timeout), then sleep for a set "infinity" time.
+    if (futureTimeouts_.empty() ||
+        futureTimeouts_.begin()->first == INFINITE_TIMEOUT) {
+      sleepTime = INFINITE_TIMEOUT;
+    } else {
+      const auto minFutureExpirationTime = futureTimeouts_.begin()->first;
+      const auto remainingTime = getRPCRemainingTime(minFutureExpirationTime);
+      sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
+    }
+
+    if (sleepTime == INFINITE_TIMEOUT) {
+      futureTimeoutCV_.wait(lock);
+    } else {
+      futureTimeoutCV_.wait_for(lock, sleepTime);
+    }
+
+    if (!rpcRunning_.load()) {
+      return;
+    }
+
+    const auto timedOutFutures = processTimedOutFutures();
+
+    // Do not hold the lock while marking futures completed, as markCompleted()
+    // could invoke callbacks.
+    lock.unlock();
+    for (const auto& timedOutFuture : timedOutFutures) {
+      std::ostringstream ss;
+      ss << "RPC ran for more than " << timedOutFuture.timeout_.count()
+         << " milliseconds and timed out.";
+      const auto exceptionMsg = createExceptionResponse(
+          Message({}, {}, MessageType::EXCEPTION), ss.str());
+      timedOutFuture.future_->markCompleted(exceptionMsg);
+
+      const int dst = timedOutFuture.dstRank_;
+      recvCounts_.increment(dst);
+      futureCV_.notify_all();
+    }
+  }
+}
+
+const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
+    processTimedOutFutures() {
+  std::vector<FutureInfo> timedOutFutures;
+  for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
+       /* intentional no increment */) {
+    const auto& endTime = it->first;
+    const auto remainingTime = getRPCRemainingTime(endTime);
+
+    if (remainingTime.count() > 0) {
+      // Since the futureTimeouts_ map is ordered by timeout, we don't need
+      // to check the remaining futures.
+      break;
+    } else {
+      const std::vector<int64_t>& futureIDs = it->second;
+      for (const auto& futureID : futureIDs) {
+        auto futureIt = futures_.find(futureID);
+        TORCH_INTERNAL_ASSERT(
+            futureIt != futures_.end(),
+            "Race Condition - Expected future does not exist in map");
+        const auto futInfo = futureIt->second;
+        timedOutFutures.push_back(futInfo);
+        futures_.erase(futureID);
+      }
+      it = futureTimeouts_.erase(it);
+    }
+  }
+  return timedOutFutures;
+}
+
+const std::chrono::milliseconds ProcessGroupAgent::getRPCRemainingTime(
+    const std::chrono::milliseconds& rpcEndTime) const {
+  const auto remainingTime =
+      rpcEndTime -
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch());
+  return remainingTime;
+}
+
+const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
+    const FutureInfo& futureInfo) const {
+  return futureInfo.timeout_ == INFINITE_TIMEOUT
+      ? INFINITE_TIMEOUT
+      : futureInfo.startTime_ + futureInfo.timeout_;
 }
 
 } // namespace rpc
