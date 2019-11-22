@@ -181,9 +181,9 @@ inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) co
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::doCallUnboxed(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const {
+inline Return Dispatcher::doCallUnboxed(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
+  return backendFallbackKernels.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
     c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
     const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
     return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
@@ -203,9 +203,9 @@ inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::doCallUnboxedOnly(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const {
+inline Return Dispatcher::doCallUnboxedOnly(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
+  return backendFallbackKernels.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
     c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
     const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
     return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
