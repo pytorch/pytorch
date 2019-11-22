@@ -71,7 +71,7 @@ class SGD(Optimizer):
     def reset_state(self):
         for group in self.param_groups:
             if group['momentum'] > 0:
-                for p in group['parameters']:
+                for p in group['params']:
                     self.state[p]['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
     def get_update(self, p, momentum=0, dampening=0, weight_decay=0, nesterov=False, **_):
@@ -90,3 +90,5 @@ class SGD(Optimizer):
                 update = buf
 
         return update
+
+    get_sparse_update = get_update

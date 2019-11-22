@@ -36,10 +36,12 @@ class Adadelta(Optimizer):
         super(Adadelta, self).__init__(params, defaults)
 
     def reset_state(self):
-        for p, state in self.state.iteritems():
-            state['step'] = 0
-            state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-            state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
     def get_update(self, p, rho=0.9, eps=1e-6, weight_decay=0, **_):
         grad = p.grad

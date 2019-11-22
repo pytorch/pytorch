@@ -29,13 +29,13 @@ class Rprop(Optimizer):
     def reset_state(self):
         for group in self.param_groups:
             lr = group['lr']
-            for p in group['parameters']:
+            for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
                 state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                 state['step_size'] = torch.ones_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, p, etas=(0.5, 1.2), step_sizes=(1e-4, 5000)):
+    def get_update(self, p, etas=(0.5, 1.2), step_sizes=(1e-4, 5000), **_):
         grad = p.grad
         state = self.state[p]
 

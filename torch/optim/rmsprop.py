@@ -56,7 +56,7 @@ class RMSprop(Optimizer):
         for group in self.param_groups:
             momentum = group['momentum']
             centered = group['centered']
-            for p in group['parameters']:
+            for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
                 state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)

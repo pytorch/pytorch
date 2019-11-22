@@ -35,7 +35,7 @@ class ASGD(Optimizer):
     def reset_state(self):
         for group in self.param_groups:
             lr = group['lr']
-            for p in group['parameters']:
+            for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
                 state['eta'] = lr
