@@ -56,7 +56,7 @@ class FakeQuantize(Module):
         self.zero_point = None
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
-        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else 0
+        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else None
 
     def enable_fake_quant(self, enabled=True):
         self.fake_quant_enabled = enabled
