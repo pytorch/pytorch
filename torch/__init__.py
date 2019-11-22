@@ -273,12 +273,23 @@ for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
 
 ################################################################################
+# Finish populating the torch. module before importing Python code
+################################################################################
+
+# Warning: torch.no_grad cannot be used for module-level functions in
+# torch.autograd as it is only available after this line
+from torch.autograd import no_grad, enable_grad, set_grad_enabled
+
+# Import the ops "namespace"
+from torch._ops import ops
+from torch._classes import classes
+
+################################################################################
 # Import interface functions defined in Python
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
 from .functional import *
-
 
 ################################################################################
 # Remove unnecessary members
@@ -301,7 +312,6 @@ del BFloat16StorageBase
 
 import torch.cuda
 import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled
 import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantized
@@ -335,10 +345,6 @@ def compiled_with_cxx11_abi():
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
     return _C._GLIBCXX_USE_CXX11_ABI
 
-
-# Import the ops "namespace"
-from torch._ops import ops
-from torch._classes import classes
 
 # Import the quasi random sampler
 import torch.quasirandom
