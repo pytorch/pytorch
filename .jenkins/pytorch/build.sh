@@ -36,6 +36,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
+  # Use linux host toolchain + mobile build options in order to build & test
+  # mobile libtorch without having to setup Android/iOS toolchain/simulator.
+  exec ./scripts/build_mobile.sh -DBUILD_BINARY=ON "$@"
+fi
+
 echo "Python version:"
 python --version
 
