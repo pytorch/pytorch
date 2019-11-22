@@ -111,7 +111,7 @@ Operations that are available from the ``torch`` namespace or as methods on Tens
 
 * :func:`~torch.quantize_per_tensor` - Convert float tensor to quantized tensor with per-tensor scale and zero point
 * :func:`~torch.quantize_per_channel` - Convert float tensor to quantized tensor with per-channel scale and zero point
-* View-based operations like :meth:`~torch.Tensor.view`, :meth:`~torch.Tensor.as_strided`, :meth:`~torch.Tensor.expand`, :meth:`~torch.Tensor.flatten`, :meth:`~torch.Tensor.slice`, python-style indexing, etc - work as on regular tensor (if quantization is not per-channel)
+* View-based operations like :meth:`~torch.Tensor.view`, :meth:`~torch.Tensor.as_strided`, :meth:`~torch.Tensor.expand`, :meth:`~torch.Tensor.flatten`, :meth:`~torch.Tensor.select`, python-style indexing, etc - work as on regular tensor (if quantization is not per-channel)
 * Comparators
     * :meth:`~torch.Tensor.ne` — Not equal
     * :meth:`~torch.Tensor.eq` — Equal
@@ -132,12 +132,17 @@ Operations that are available from the ``torch`` namespace or as methods on Tens
 * :meth:`~torch.Tensor.q_per_channel_scales` — Returns the scales of the per-channel quantized tensor
 * :meth:`~torch.Tensor.q_per_channel_zero_points` — Returns the zero points of the per-channel quantized tensor
 * :meth:`~torch.Tensor.q_per_channel_axis` — Returns the channel axis of the per-channel quantized tensor
-* :meth:`~torch.Tensor.relu` — Rectified linear unit (copy)
-* :meth:`~torch.Tensor.relu_` — Rectified linear unit (inplace)
 * :meth:`~torch.Tensor.resize_` — In-place resize
 * :meth:`~torch.Tensor.sort` — Sorts the tensor
 * :meth:`~torch.Tensor.topk` — Returns k largest values of a tensor
 
+``torch.nn.functional``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Basic activations are supported.
+
+* :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
+* :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
 
 ``torch.nn.intrinsic``
 ~~~~~~~~~~~~~~~~~~~~~~
