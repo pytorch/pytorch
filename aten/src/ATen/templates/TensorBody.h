@@ -14,6 +14,7 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/ordered_dict.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/EnableNamedTensor.h>
@@ -36,11 +37,23 @@ namespace torch { namespace autograd {
 
 struct Node;
 
+using hooks_dict = c10::OrderedDict<unsigned, std::function<Tensor(const Tensor&)>>;
+
 }} // namespace torch::autograd
 
 namespace torch { namespace utils { namespace hooks {
 
-struct RemovableHandle;
+/// A handle which provides the capability to remove a hook.
+struct RemovableHandle {
+ public:
+  explicit RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> hooks_dict);
+  void remove();
+
+ private:
+  std::weak_ptr<torch::autograd::hooks_dict> hooks_dict_ref_;
+  unsigned id_;
+  static unsigned next_id;
+};
 
 }}} // namespace torch::utils::hooks
 

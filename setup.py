@@ -823,7 +823,6 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/data/samplers/*.h',
                 'include/torch/csrc/api/include/torch/data/transforms/*.h',
                 'include/torch/csrc/api/include/torch/detail/*.h',
-                'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'include/torch/csrc/api/include/torch/nn/*.h',
                 'include/torch/csrc/api/include/torch/nn/functional/*.h',
                 'include/torch/csrc/api/include/torch/nn/options/*.h',
