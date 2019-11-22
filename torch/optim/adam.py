@@ -45,7 +45,7 @@ class Adam(Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
-    def reset_parameters(self):
+    def reset_state(self):
         for group in self.param_groups:
             amsgrad = group['amsgrad']
             for p in group['params']:
