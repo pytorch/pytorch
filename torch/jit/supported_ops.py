@@ -97,24 +97,33 @@ def _get_nn_functional_ops():
                         functions.append(_emit_schema(name, elem, schema))
     return "Supported PyTorch Functions", functions
 
-
-def _get_torchscript_builtins():
-    functions = []
-    # Iterate over the specially added builtins
+def _get_builtins_helper():
+    builtins = []
     for fn, _builtin_name in torch.jit._builtin_ops:
         mod = inspect.getmodule(fn)
         if _hidden(fn.__name__) or _hidden(fn.__qualname__) or _hidden(mod.__name__):
             # skip internal-only methods
             continue
 
-        print(fn, mod.__name__)
-        if mod.__name__ == 'math':
-            # Skip math
-            continue
-
         if 'torch._C' in mod.__name__:
             continue
 
+        builtins.append((fn, _builtin_name))
+
+    return builtins
+
+def _is_math_fn(fn):
+    mod = inspect.getmodule(fn)
+    return mod.__name__ == 'math'
+
+
+def _get_torchscript_builtins():
+    functions = []
+    builtins = filter(lambda fn: not _is_math_fn(fn[0]), _get_builtins_helper())
+    builtins = list(builtins)
+    # Iterate over the specially added builtins
+    for fn, _builtin_name in builtins:
+        mod = inspect.getmodule(fn)
         builtin = torch.jit._find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
@@ -127,20 +136,11 @@ def _get_torchscript_builtins():
 
 def _get_math_builtins():
     functions = []
+    builtins = filter(lambda fn: _is_math_fn(fn[0]), _get_builtins_helper())
+    builtins = list(builtins)
     # Iterate over the specially added builtins
-    for fn, _builtin_name in torch.jit._builtin_ops:
+    for fn, _builtin_name in builtins:
         mod = inspect.getmodule(fn)
-        if _hidden(fn.__name__) or _hidden(fn.__qualname__) or _hidden(mod.__name__):
-            # skip internal-only methods
-            continue
-
-        if mod.__name__ != 'math':
-            # Skip non math functions
-            continue
-
-        if 'torch._C' in mod.__name__:
-            continue
-
         builtin = torch.jit._find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
