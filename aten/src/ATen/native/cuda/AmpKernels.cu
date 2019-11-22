@@ -14,17 +14,17 @@ namespace native {
 // Multiplies scaled_grad in-place by inv_scale.  If an element of scaled_grad was inf or NaN sets found_inf to 1.0.
 //
 // Args:
+// inv_scale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
 // scaled_grad:  A (scaled) gradient tensor.  May contain infs or NaNs.
 // found_inf:  A single-element float tensor to which 1.0 will be written if any gradients contain infs/nans.
 //             Pre-zeroing found_inf, if appropriate, is the responsibility of the caller.
-// inv_scale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
 //
 // Returns:
 // A tuple with references to scaled_grad, which is now unscaled in place, and found_inf,
 // which is now guaranteed to contain 1.0 if an inf or NaN was found in scaled_grad.
-std::tuple<Tensor&, Tensor&> _amp_non_finite_check_and_unscale_cuda(Tensor& scaled_grad,
-                                                                    Tensor& found_inf,
-                                                                    const Tensor& inv_scale)
+std::tuple<Tensor&, Tensor&> _amp_non_finite_check_and_unscale_cuda(const Tensor& inv_scale,
+                                                                    Tensor& scaled_grad,
+                                                                    Tensor& found_inf)
 {
   TORCH_CHECK(scaled_grad.is_cuda(), "scaled_grad must be a CUDA tensor.");
   TORCH_CHECK(inv_scale.is_cuda(), "inv_scale must be a CUDA tensor.");
@@ -56,7 +56,7 @@ std::tuple<Tensor&, Tensor&> _amp_non_finite_check_and_unscale_cuda(Tensor& scal
         });
     });
 
-  return std::tuple<Tensor&, Tensor&>{scaled_grad, found_inf} ;
+  return std::tuple<Tensor&, Tensor&>{scaled_grad, found_inf};
 }
 
 

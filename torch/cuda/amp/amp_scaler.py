@@ -152,9 +152,9 @@ class AmpScaler(object):
                     if (not allow_fp16) and param.grad.dtype == torch.float16:
                         raise ValueError("Attempting to unscale FP16 gradients.")
                     else:
-                        torch._amp_non_finite_check_and_unscale_(param.grad,
-                                                                 per_device_found_inf.get(param.grad.device),
-                                                                 per_device_inv_scale.get(param.grad.device))
+                        torch._amp_non_finite_check_and_unscale(per_device_inv_scale.get(param.grad.device),
+                                                                param.grad,
+                                                                per_device_found_inf.get(param.grad.device))
 
         return per_device_found_inf._per_device_tensors
 
