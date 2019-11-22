@@ -27,21 +27,21 @@ else
   fi
 fi
 
-if which sccache > /dev/null; then
-  printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${WORKSPACE_DIR}/clang++"
-  chmod a+x "${WORKSPACE_DIR}/clang++"
+# if which sccache > /dev/null; then
+#   printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${WORKSPACE_DIR}/clang++"
+#   chmod a+x "${WORKSPACE_DIR}/clang++"
 
-  printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${WORKSPACE_DIR}/clang"
-  chmod a+x "${WORKSPACE_DIR}/clang"
+#   printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${WORKSPACE_DIR}/clang"
+#   chmod a+x "${WORKSPACE_DIR}/clang"
 
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-    printf "#!/bin/sh\nexec sccache $(which nvcc) \$*" > "${WORKSPACE_DIR}/nvcc"
-    chmod a+x "${WORKSPACE_DIR}/nvcc"
-    export CUDA_NVCC_EXECUTABLE="${WORKSPACE_DIR}/nvcc"
-  fi
+#   if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+#     printf "#!/bin/sh\nexec sccache $(which nvcc) \$*" > "${WORKSPACE_DIR}/nvcc"
+#     chmod a+x "${WORKSPACE_DIR}/nvcc"
+#     export CUDA_NVCC_EXECUTABLE="${WORKSPACE_DIR}/nvcc"
+#   fi
 
-  export PATH="${WORKSPACE_DIR}:$PATH"
-fi
+#   export PATH="${WORKSPACE_DIR}:$PATH"
+# fi
 
 # If we run too many parallel jobs, we will OOM
 MAX_JOBS=2 USE_DISTRIBUTED=1 python setup.py install
