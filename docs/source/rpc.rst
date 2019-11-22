@@ -16,10 +16,11 @@ RPC and RRef Framework
 
 Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
-`init_rpc` which would initialize the RPC framework, RRef framework
-and distributed autograd. By default, this will also initialize the
-`ProcessGroup` (:func:`torch.distributed.Backend`) backend for RPC
-communication. The `ProcessGroup` backend internally uses gloo for communication.
+:meth:`~torch.distributed.rpc.init_rpc` which would initialize the RPC
+framework, RRef framework and distributed autograd. By default, this will also
+initialize the `ProcessGroup` (:meth:`~torch.distributed.init_process_group`)
+backend for RPC communication. The `ProcessGroup` backend internally uses gloo
+for communication.
 
 
 .. automodule:: torch.distributed.rpc
