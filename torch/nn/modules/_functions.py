@@ -7,7 +7,11 @@ class SyncBatchNorm(Function):
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
         input = input.contiguous()
-        count = torch.Tensor([input.numel() // input.size(1)]).to(input.device)
+
+        size = input.numel() // input.size(1)
+        if size == 1:
+            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+        count = torch.Tensor([size]).to(input.device)
 
         # calculate mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)

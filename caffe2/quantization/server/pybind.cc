@@ -69,6 +69,40 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("mul_nets") = false);
 
   m.def(
+      "AddOutputColumnMaxHistogramObserver",
+      [](const string& net_name,
+         const string& out_file_name,
+         const std::vector<std::string>& observe_column_max_for_blobs,
+         int dump_freq,
+         bool mul_nets) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        CAFFE_ENFORCE(
+            gWorkspace->GetNet(net_name), "Can't find net ", net_name);
+        pybind11::gil_scoped_release g;
+
+        NetBase* net = gWorkspace->GetNet(net_name);
+        const Observable<NetBase>::Observer* observer = nullptr;
+
+        observer = net->AttachObserver(
+            make_unique<OutputColumnMaxHistogramNetObserver>(
+                net,
+                out_file_name,
+                observe_column_max_for_blobs,
+                2048,
+                dump_freq,
+                mul_nets));
+
+        CAFFE_ENFORCE(observer != nullptr);
+        return pybind11::cast(observer);
+      },
+      pybind11::arg("net_name"),
+      pybind11::arg("out_file_name"),
+      pybind11::arg("observe_column_max_for_blobs"),
+      pybind11::arg("dump_freq") = -1,
+      pybind11::arg("mul_nets") = false);
+
+  m.def(
       "ChooseQuantizationParams",
       [](const std::string& blob_name) {
         Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();

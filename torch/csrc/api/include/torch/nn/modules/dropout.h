@@ -129,5 +129,35 @@ class TORCH_API FeatureDropoutImpl
 
 TORCH_MODULE(FeatureDropout);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AlphaDropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class TORCH_API AlphaDropoutImpl
+    : public detail::_DropoutNd<AlphaDropoutImpl> {
+ public:
+  using detail::_DropoutNd<AlphaDropoutImpl>::_DropoutNd;
+
+  Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `AlphaDropout` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(AlphaDropout);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FeatureAlphaDropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class TORCH_API FeatureAlphaDropoutImpl
+    : public detail::_DropoutNd<FeatureAlphaDropoutImpl> {
+ public:
+  using detail::_DropoutNd<FeatureAlphaDropoutImpl>::_DropoutNd;
+
+  Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `FeatureAlphaDropout` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(FeatureAlphaDropout);
+
 } // namespace nn
 } // namespace torch
