@@ -92,8 +92,8 @@ namespace impl {
   }
 
   void create_cpp_hook(const Variable& self) {
-    auto &map = materialize_autograd_meta(self)->cpp_hooks_map;
-    map.reset(new hooks_map());
+    auto &map = materialize_autograd_meta(self)->cpp_hooks_dict;
+    map.reset(new hooks_dict());
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(map, self.output_nr()));
     clear_hooks(self);
     add_hook(self, std::make_shared<CppFunctionPreHook>(map, 0));
@@ -348,7 +348,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
 }
 
 void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
-  auto &map = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_map;
+  auto &map = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_dict;
   TORCH_CHECK(map && map->contains(pos), "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*map)[pos] = nullptr;
@@ -358,7 +358,7 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto &map = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_map;
+  auto &map = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_dict;
   if(!map) {
     torch::autograd::impl::create_cpp_hook(self);
   }

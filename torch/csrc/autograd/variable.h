@@ -184,7 +184,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::weak_ptr<Node> grad_accumulator_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
-  std::shared_ptr<hooks_map> cpp_hooks_map;
+  std::shared_ptr<hooks_dict> cpp_hooks_dict;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
