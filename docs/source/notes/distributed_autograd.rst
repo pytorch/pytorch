@@ -365,6 +365,7 @@ autograd and distributed optimizer is as follows:
   def run_process(self_rank, dst_rank, file_name):
       _run_process(self_rank, dst_rank, file_name)
       rpc.wait_all_workers()
+      rpc.shutdown()
 
   file_name = NamedTemporaryFile().name
   processes = []
