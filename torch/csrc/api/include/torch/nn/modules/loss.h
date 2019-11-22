@@ -481,5 +481,33 @@ struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(CrossEntropyLoss);
 
+// ============================================================================
+
+struct TORCH_API BCEWithLogitsLossImpl : public Cloneable<BCEWithLogitsLossImpl> {
+  explicit BCEWithLogitsLossImpl(const BCEWithLogitsLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `BCEWithLogitsLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  BCEWithLogitsLossOptions options;
+
+  /// A manual rescaling weight given to the loss of each batch element.
+  Tensor weight;
+
+  /// A weight of positive examples.
+  Tensor pos_weight;
+};
+
+/// A `ModuleHolder` subclass for `BCEWithLogitsLossImpl`.
+/// See the documentation for `BCEWithLogitsLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(BCEWithLogitsLoss);
+
 } // namespace nn
 } // namespace torch

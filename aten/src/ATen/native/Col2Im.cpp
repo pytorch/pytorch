@@ -213,7 +213,7 @@ Tensor col2im_cpu(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   col2im_out_cpu_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
@@ -238,7 +238,7 @@ Tensor col2im_backward_cpu(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
+  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   col2im_backward_out_cpu_template(
       grad_input, grad_output, kernel_size, dilation, padding, stride);
