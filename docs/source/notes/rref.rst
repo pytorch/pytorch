@@ -1,3 +1,5 @@
+.. _remote-reference-protocol:
+
 Remote Reference Protocol
 =========================
 

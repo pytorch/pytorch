@@ -37,7 +37,8 @@ transferred to the local worker in the future. RRefs can be used in
 multi-machine training by holding references to `nn.Modules
 <https://pytorch.org/docs/stable/nn.html#torch.nn.Module>`_ that exist on
 other workers, and calling the appropriate functions to retrieve or modify their
-parameters during training.
+parameters during training. See :ref:`remote-reference-protocol` for more
+details.
 
 .. autoclass:: RRef
     :members:
