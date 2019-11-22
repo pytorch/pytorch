@@ -1,0 +1,152 @@
+node {
+  name: "input/input"
+  op: "IO Node"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 1
+          }
+          dim {
+            size: 3
+          }
+        }
+      }
+    }
+  }
+  attr {
+    key: "attr"
+    value {
+      s: ""
+    }
+  }
+}
+node {
+  name: "output/output.1"
+  op: "IO Node"
+  input: "myLinear/Linear[l]/22"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 1
+          }
+          dim {
+            size: 5
+          }
+        }
+      }
+    }
+  }
+  attr {
+    key: "attr"
+    value {
+      s: ""
+    }
+  }
+}
+node {
+  name: "myLinear/Linear[l]/bias/17"
+  op: "prim::GetAttr"
+  input: "myLinear/Linear[l]/weight/14"
+  attr {
+    key: "attr"
+    value {
+      s: "{ name :  bias }"
+    }
+  }
+}
+node {
+  name: "myLinear/Linear[l]/weight/18"
+  op: "prim::GetAttr"
+  input: "myLinear/Linear[l]/weight/14"
+  attr {
+    key: "attr"
+    value {
+      s: "{ name :  weight }"
+    }
+  }
+}
+node {
+  name: "myLinear/Linear[l]/19"
+  op: "aten::t"
+  input: "myLinear/Linear[l]/weight/18"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 3
+          }
+          dim {
+            size: 5
+          }
+        }
+      }
+    }
+  }
+  attr {
+    key: "attr"
+    value {
+      s: "{}"
+    }
+  }
+}
+node {
+  name: "myLinear/Linear[l]/20"
+  op: "prim::Constant"
+  attr {
+    key: "attr"
+    value {
+      s: "{ value : 1}"
+    }
+  }
+}
+node {
+  name: "myLinear/Linear[l]/21"
+  op: "prim::Constant"
+  attr {
+    key: "attr"
+    value {
+      s: "{ value : 1}"
+    }
+  }
+}
+node {
+  name: "myLinear/Linear[l]/22"
+  op: "aten::addmm"
+  input: "myLinear/Linear[l]/bias/17"
+  input: "input/input"
+  input: "myLinear/Linear[l]/19"
+  input: "myLinear/Linear[l]/20"
+  input: "myLinear/Linear[l]/21"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 1
+          }
+          dim {
+            size: 5
+          }
+        }
+      }
+    }
+  }
+  attr {
+    key: "attr"
+    value {
+      s: "{}"
+    }
+  }
+}
+versions {
+  producer: 22
+}
