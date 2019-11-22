@@ -2080,7 +2080,7 @@ t2.start()
                     scaler.scale(loss).backward()
                     if i == skip_iter and scaler.is_enabled():
                         model[1].weight.grad.data.fill_(float('inf'))
-                    scaler.unscale(optimizer)
+                    scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
                     scaler.step(optimizer)
                     scaler.update()
@@ -2175,7 +2175,7 @@ t2.start()
                             model1[1].weight.grad.data.fill_(float('inf'))
 
                         # As an additional stress test, separately unscale for one of the optimizers.
-                        scaler.unscale(optimizer0)
+                        scaler.unscale_(optimizer0)
 
                         scaler.step(optimizer0)
                         scaler.step(optimizer1)
@@ -2231,7 +2231,7 @@ t2.start()
                             model1[1].weight.grad.data.fill_(float('inf'))
 
                         # As an additional stress test, separately unscale for one of the optimizers.
-                        scaler.unscale(optimizer0)
+                        scaler.unscale_(optimizer0)
 
                         scaler.step(optimizer0)
                         scaler.step(optimizer1)

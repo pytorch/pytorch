@@ -22,8 +22,8 @@ class _MultiDeviceReplicator(object):
 
 class AmpScaler(object):
     """
-    An instance ``scaler`` of :class:`AmpScaler` provides convenience functions for all
-    aspects of gradient scaling:
+    An instance ``scaler`` of :class:`AmpScaler` helps perform the steps of gradient scaling
+    conveniently.
 
     * ``scaler.scale(loss)`` multiplies a given loss by ``scaler``'s current scale factor.
     * ``scaler.step(optimizer)`` safely unscales gradients and calls ``optimizer.step()``.
@@ -58,7 +58,7 @@ class AmpScaler(object):
     the scale factor is too large.  Therefore, the optimal scale factor is the largest factor that can be used
     without incurring inf or NaN gradient values.
     ``scaler`` approximates the optimal scale factor over time by checking the gradients for infs and NaNs during every
-    ``scaler.step(optimizer)`` (or optional separate ``scaler.unscale(optimizer)``).
+    ``scaler.step(optimizer)`` (or optional separate ``scaler.unscale_(optimizer)``, see :meth:`unscale_`).
     If no infs/NaNs are found, ``scaler.step(optimizer)`` runs the underlying ``optimizer.step()`` as usual and
     ``scaler.update()`` multiplies the scale factor by ``growth_factor``.  If infs/NaNs are found,
     ``scaler.step(optimizer)`` skips the underlying ``optimizer.step()`` (so the params themselves remain uncorrupted)
@@ -137,7 +137,7 @@ class AmpScaler(object):
 
         return apply_scale(outputs)
 
-    def _unscale_grads(self, optimizer, inv_scale, found_inf, allow_fp16):
+    def _unscale_grads_(self, optimizer, inv_scale, found_inf, allow_fp16):
         per_device_inv_scale = _MultiDeviceReplicator(inv_scale)
         per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
@@ -153,20 +153,20 @@ class AmpScaler(object):
 
         return per_device_found_inf._per_device_tensors
 
-    def unscale(self, optimizer):
+    def unscale_(self, optimizer):
         """
         Divides ("unscales") the optimizer's gradient tensors by the scale factor.
 
-        :meth:`unscale` is optional, serving cases where you need to
+        :meth:`unscale_` is optional, serving cases where you need to
         :ref:`modify or inspect gradients<working-with-unscaled-gradients>`
         between the backward pass(es) and :meth:`step`.
-        If :meth:`unscale` is not called explicitly,  gradients will be unscaled  automatically during :meth:`step`.
+        If :meth:`unscale_` is not called explicitly,  gradients will be unscaled  automatically during :meth:`step`.
 
-        Simple example, using :meth:`unscale` to enable clipping of unscaled gradients::
+        Simple example, using :meth:`unscale_` to enable clipping of unscaled gradients::
 
             ...
             scaler.scale(loss).backward()
-            scaler.unscale(optimizer)
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
             scaler.step(optimizer)
             scaler.update()
@@ -175,12 +175,12 @@ class AmpScaler(object):
             optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
         .. note::
-            :meth:`unscale` does not incur a CPU-GPU sync.
+            :meth:`unscale_` does not incur a CPU-GPU sync.
 
         .. warning::
-            :meth:`unscale` should only be called once per optimizer per :meth:`step` call,
+            :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
             and only after all gradients for that optimizer's assigned parameters have been accumulated.
-            Calling unscale twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
+            Calling :meth:`unscale_` twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
         """
         if not self._enabled:
             return
@@ -190,21 +190,21 @@ class AmpScaler(object):
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
         if "unscaled" in optimizer_state:
-            raise RuntimeError("unscale() has already been called on this optimizer this iteration.")
+            raise RuntimeError("unscale_ has already been called on this optimizer this iteration.")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
-        optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, inv_scale, found_inf, False)
+        optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["unscaled"] = True
 
     def step(self, optimizer, *args, **kwargs):
         """
         :meth:`step` carries out the following two operations:
 
-        1.  Internally invokes ``unscale(optimizer)`` (unless ``unscale`` was explicitly called for ``optimizer``
-            earlier in the iteration).  As part of the ``unscale``, gradients are checked for infs/NaNs.
+        1.  Internally invokes ``unscale_(optimizer)`` (unless :meth:`unscale_` was explicitly called for ``optimizer``
+            earlier in the iteration).  As part of the :meth:`unscale_`, gradients are checked for infs/NaNs.
         2.  If no inf/NaN gradients are found, invokes ``optimizer.step()`` using the unscaled
             gradients.  Otherwise, ``optimizer.step()`` is skipped to avoid corrupting the params.
 
@@ -233,13 +233,13 @@ class AmpScaler(object):
             # This optimizer has customized scale-handling logic, so we call it directly.
             # The contract with custom optimizers is that their step methods should accept an additional,
             # optional amp_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
-            # it can query its own state, invoke unscale on its own gradients for convenience, etc.
+            # it can query its own state, invoke unscale_ on itself, etc
             return optimizer.step(*args, **dict(kwargs, amp_scaler=self))
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
         if "unscaled" not in optimizer_state:
-            self.unscale(optimizer)
+            self.unscale_(optimizer)
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
@@ -392,7 +392,7 @@ class AmpScaler(object):
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
-            self._unscale_grads(optimizer, dummy_inv_scale, found_inf, True)
+            self._unscale_grads_(optimizer, dummy_inv_scale, found_inf, True)
 
         return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]
 

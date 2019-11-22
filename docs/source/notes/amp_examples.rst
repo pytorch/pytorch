@@ -56,15 +56,15 @@ is :math:`<=` some user-imposed threshold.  If you attempted to clip _without_ u
 magnitude would also be scaled, so your requested threshold (which was meant to be the threshold for _unscaled_ gradients)
 would be invalid.
 
-``scaler.unscale(optimizer)`` unscales gradients held by ``optimizer``'s assigned parameters.
+``scaler.unscale_(optimizer)`` unscales gradients held by ``optimizer``'s assigned parameters.
 If your model or models contain other parameters that were assigned to another optimizer
-(say ``optimizer1``), you may call ``scaler.unscale(optimizer1)`` separately to unscale those
+(say ``optimizer1``), you may call ``scaler.unscale_(optimizer1)`` separately to unscale those
 parameters' gradients as well.
 
 Gradient clipping
 """""""""""""""""
 
-Calling ``scaler.unscale(optimizer)`` before clipping enables you to clip unscaled gradients as usual::
+Calling ``scaler.unscale_(optimizer)`` before clipping enables you to clip unscaled gradients as usual::
 
     scaler = AmpScaler()
     ...
@@ -75,7 +75,7 @@ Calling ``scaler.unscale(optimizer)`` before clipping enables you to clip unscal
         scaler.scale(loss).backward()
 
         # Unscale the gradients of optimizer's assigned params in-place
-        scaler.unscale(optimizer)
+        scaler.unscale_(optimizer)
 
         # Since the gradients of optimizer's assigned params are unscaled, clip as usual:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
@@ -87,20 +87,20 @@ Calling ``scaler.unscale(optimizer)`` before clipping enables you to clip unscal
         # Update the scale for next iteration.
         scaler.update()
 
-``scaler`` records that ``scaler.unscale(optimizer)`` was already called for this optimizer
+``scaler`` records that ``scaler.unscale_(optimizer)`` was already called for this optimizer
 this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale gradients before
 (internally) calling ``optimizer.step()``.
 
 .. warning::
-    :meth:`unscale` should only be called once per optimizer per :meth:`step` call,
+    :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
     and only after all gradients for that optimizer's assigned parameters have been accumulated.
-    Calling unscale twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
+    Calling :meth:`unscale_` twice for a given optimizer between :meth:`step`\ s triggers a RuntimeError.
 
 Working with Scaled Gradients
 -----------------------------
 
 For some operations, you may need to work with scaled gradients in a setting where
-``scaler.unscale`` is unsuitable.
+``scaler.unscale_`` is unsuitable.
 
 Gradient penalty
 """"""""""""""""
@@ -147,7 +147,7 @@ Here's how that looks for the same L2 penalty::
         scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
 
         # Unscale grad_params before computing the penalty.  grad_params are not owned
-        # by any optimizer, so use ordinary ops instead of scaler.unscale:
+        # by any optimizer, so use ordinary ops instead of scaler.unscale_:
         inv_scale = 1./scaler.get_scale()
         grad_params = [p*inv_scale for p in scaled_grad_params]
 
@@ -168,7 +168,7 @@ Working with Multiple Losses and Optimizers
 -------------------------------------------
 
 If your network has multiple losses, you must call ``scaler.scale`` on each of them individually.
-If your network has multiple optimizers, you may call ``scaler.unscale`` on any of them individually,
+If your network has multiple optimizers, you may call ``scaler.unscale_`` on any of them individually,
 and you must call ``scaler.step`` on each of them individually.
 
 However, ``scaler.update()`` should only be called once,
@@ -189,7 +189,7 @@ after all optimizers used in this iteration have been stepped::
 
         # You can choose which optimizers receive explicit unscaling, if you
         # want to inspect or modify the gradients of the params they own.
-        scaler.unscale(optimizer0)
+        scaler.unscale_(optimizer0)
 
         scaler.step(optimizer0)
         scaler.step(optimizer1)
