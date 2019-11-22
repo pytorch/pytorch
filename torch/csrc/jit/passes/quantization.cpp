@@ -948,6 +948,7 @@ graph(%self, %scale, %zero_point, %dtype):
         zero_point_node->kind() == prim::Constant &&
         dtype_node->kind() == prim::Constant;
   };
+  std::unordered_set<Node*> nodes_to_delete;
   for (const auto& match : matches) {
     if (!filter(match, vmap)) {
       continue;
@@ -962,15 +963,20 @@ graph(%self, %scale, %zero_point, %dtype):
     module.register_buffer(
         "_quantized_weight",
         at::quantize_per_tensor(float_weight, scale, zero_point, dtype));
+
+    // Replace the GetAttr[weight]->quantize_per_tensor sequence
+    // with a simple GetAttr[_quantized_weight] node.
+    Value* orig_weight = match_vmap.at(vmap.at("weight"));
+    Value* orig_weight_quant = match_vmap.at(vmap.at("weight_quant"));
+
+    orig_weight->node()->s_(attr::name, "_quantized_weight");
+    orig_weight_quant->replaceAllUsesWith(orig_weight);
+    nodes_to_delete.insert(orig_weight_quant->node());
   }
 
-  std::string replacement = R"(
-graph(%self, %scale, %zero_point, %dtype):
-    %weight_quant = prim::GetAttr[name="_quantized_weight"](%self)
-    return (%weight_quant) )";
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph, filter);
+  for (Node* n : nodes_to_delete) {
+    n->destroy();
+  }
 }
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
