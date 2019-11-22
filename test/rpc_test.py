@@ -1111,7 +1111,7 @@ class RpcTest(RpcAgentTestFixture):
             init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
-            rpc_agent_options=self.rpc_agent_options,
+            rpc_backend_options=self.rpc_backend_options,
         )
 
         # This is for the below `dist.barrier`.
@@ -1159,7 +1159,7 @@ class RpcTest(RpcAgentTestFixture):
             rank=self.rank,
             world_size=self.world_size,
             init_method=self.init_method,
-            rpc_agent_options=self.rpc_agent_options,
+            rpc_backend_options=self.rpc_backend_options,
         )
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1187,7 +1187,7 @@ class RpcTest(RpcAgentTestFixture):
             rank=self.rank,
             world_size=self.world_size,
             init_method=self.init_method,
-            rpc_agent_options=self.rpc_agent_options
+            rpc_backend_options=self.rpc_backend_options
         )
         rpc.wait_all_workers()
         rpc.shutdown()
