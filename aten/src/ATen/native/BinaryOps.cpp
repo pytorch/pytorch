@@ -23,6 +23,7 @@ DEFINE_DISPATCH(gt_stub);
 DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
+DEFINE_DISPATCH(sigmoid_backward_stub);
 
 static inline void alpha_check(const TensorIterator& iter, Scalar alpha) {
   TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool,
@@ -119,6 +120,19 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub_out(self, self, other, alpha);
+}
+
+Tensor& sigmoid_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+  auto iter = TensorIterator::binary_op(result, grad_output, output);
+  sigmoid_backward_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, output);
+  sigmoid_backward_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {

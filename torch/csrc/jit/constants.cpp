@@ -67,7 +67,7 @@ c10::optional<Value*> tryInsertConstant(
     n->ts_(
         attr::value,
         fmap(val.toTensorListRef(), [](const at::Tensor& t) {
-          AT_ASSERT(t.is_variable() && !t.requires_grad());
+          AT_ASSERT(!t.requires_grad());
           return t;
         }));
     n->output()->setType(ListType::ofTensors());

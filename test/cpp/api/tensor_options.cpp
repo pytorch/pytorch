@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <test/cpp/api/support.h>
 
 #include <torch/torch.h>
 
@@ -6,6 +7,7 @@
 #include <vector>
 
 using namespace at;
+using namespace torch::test;
 
 // A macro so we don't lose location information when an assertion fails.
 #define REQUIRE_OPTIONS(device_, index_, type_, layout_)                  \
@@ -119,29 +121,25 @@ TEST(DeviceTest, ParsesCorrectlyFromString) {
   }
 }
 
-struct DefaultDtypeTest : ::testing::Test {
-  DefaultDtypeTest() {
-    set_default_dtype(caffe2::TypeMeta::Make<float>());
-  }
-  ~DefaultDtypeTest() override {
-    set_default_dtype(caffe2::TypeMeta::Make<float>());
-  }
-};
+TEST(DefaultDtypeTest, CanSetAndGetDefaultDtype) {
+  AutoDefaultDtypeMode dtype_mode(kFloat);
 
-TEST_F(DefaultDtypeTest, CanSetAndGetDefaultDtype) {
   ASSERT_EQ(at::get_default_dtype(), kFloat);
   set_default_dtype(caffe2::TypeMeta::Make<int>());
   ASSERT_EQ(at::get_default_dtype(), kInt);
 }
 
-TEST_F(DefaultDtypeTest, NewTensorOptionsHasCorrectDefault) {
+TEST(DefaultDtypeTest, NewTensorOptionsHasCorrectDefault) {
+  AutoDefaultDtypeMode dtype_mode(kFloat);
+
   set_default_dtype(caffe2::TypeMeta::Make<int>());
   ASSERT_EQ(at::get_default_dtype(), kInt);
   TensorOptions options;
   ASSERT_EQ(options.dtype(), kInt);
 }
 
-TEST_F(DefaultDtypeTest, NewTensorsHaveCorrectDefaultDtype) {
+TEST(DefaultDtypeTest, NewTensorsHaveCorrectDefaultDtype) {
+  AutoDefaultDtypeMode dtype_mode(kFloat);
   set_default_dtype(caffe2::TypeMeta::Make<int>());
   {
     auto tensor = torch::ones(5);
