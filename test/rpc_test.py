@@ -1107,7 +1107,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_rpc_local_shutdown(self):
+    def test_rpc_shutdown(self):
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[
@@ -1129,6 +1129,7 @@ class RpcTest(RpcAgentTestFixture):
         # too early.
         rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(1,))
         _check_rpc_done(1)
+        rpc.wait_all_workers()
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
