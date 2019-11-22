@@ -39,8 +39,9 @@ import torch.jit.quantized
 from torch.jit._recursive import wrap_cpp_module
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.quantized.modules.linear import LinearPackedParams
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
+from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
@@ -49,7 +50,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import quantize
 from common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
 from common_quantization import ConvModel, AnnotatedConvModel
-from common_quantization import test_only_eval_fn
+from common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 
 # Testing utils
@@ -736,20 +737,33 @@ class TestJit(JitTestCase):
 
     def test_script_autograd_grad(self):
         def test_simple_grad(x, y):
-            # type: (Tensor, Tensor) -> List[Tensor]
+            # type: (Tensor, Tensor) -> List[Optional[Tensor]]
             z = x + 2 * y + x * y
             return torch.autograd.grad((z.sum(), ), (x, y))
 
         def test_simple_grad_with_grad_outputs(x, y):
-            # type: (Tensor, Tensor) -> List[Tensor]
+            # type: (Tensor, Tensor) -> List[Optional[Tensor]]
             z = x + 2 * y + x * y
             grad_outputs = torch.jit.annotate(List[Optional[torch.Tensor]], [torch.ones((2, 2)), ])
             return torch.autograd.grad((z, ), (x, y), grad_outputs)
+
+        def test_one_output_not_requires_grad(x, y):
+            # type: (Tensor, Tensor) -> List[Optional[Tensor]]
+            z = 2 * y + y
+            return torch.autograd.grad((z.sum(),), (x, y), allow_unused=True)
+
+        def test_retain_graph(x, y):
+            # type: (Tensor, Tensor) -> None
+            z = x + 2 * y + x * y
+            torch.autograd.grad((z.sum(), ), (x, y), retain_graph=True)
+            torch.autograd.grad((z.sum(), ), (x, y))
 
         x = torch.randn(2, 2, requires_grad=True)
         y = torch.randn(2, 2, requires_grad=True)
         self.checkScript(test_simple_grad, (x, y), inputs_requires_grad=True)
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_one_output_not_requires_grad, (x, y), inputs_requires_grad=True)
+        self.checkScript(test_retain_graph, (x, y), inputs_requires_grad=True)
 
     def test_script_backward(self):
         def checkBackwardScript(fn, inputs):
@@ -1488,7 +1502,7 @@ graph(%input, %weight):
                 m = M()
                 copy_weights(name, m, ref_m)
                 ref_m.qconfig = qconfig
-                ref_m = quantize(ref_m, test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
+                ref_m = quantize(ref_m, _test_only_eval_fn, [(data, torch.randint(0, 1, (5,), dtype=torch.long))])
                 ref_res = ref_m(data)
                 # script mode
                 m = torch.jit.script(m)
@@ -3611,6 +3625,18 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_nested_bailouts(self):
+        @torch.jit.script
+        def fct_loop(x):
+            for i in range(3):
+                x = torch.cat((x, x), 0)
+            return x
+
+        x = torch.ones(2, 3, 4, dtype=torch.float32)
+        out = fct_loop(x)
+        jit_trace = torch.jit.trace(fct_loop, x)
+        out_trace = jit_trace(x)
+
     def test_set_attribute_through_optional(self):
         class A(torch.nn.Module):
             __annotations__ = {"x": Optional[torch.Tensor]}

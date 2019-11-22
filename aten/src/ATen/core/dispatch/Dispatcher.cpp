@@ -60,8 +60,14 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
       str << schema << " vs " << found->schema();
       TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
     }
-    if (found->options() != options) {
-      TORCH_CHECK(false, "Tried to register multiple operators with the same schema but different options: ", toString(schema));
+    if (options.isDefaultAliasAnalysisKind()) {
+      // just do nothing and let it pass.
+    } else if (found->options().isDefaultAliasAnalysisKind()) {
+      found->operatorIterator_->op.updateOptionsAliasAnalysis(options.aliasAnalysis());
+    } else {
+      TORCH_CHECK(
+        found->options() == options,
+        "Tried to register multiple operators with the same schema but different options: ", toString(schema));
     }
     return *found;
   }
