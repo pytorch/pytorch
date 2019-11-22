@@ -1,7 +1,5 @@
 #include <ATen/core/TensorBody.h>
 
-#include <torch/csrc/autograd/cpp_hook.h>
-
 namespace torch {
 namespace utils {
 namespace hooks {
