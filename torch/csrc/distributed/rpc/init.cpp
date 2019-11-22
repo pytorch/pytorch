@@ -155,6 +155,10 @@ Otherwise, throws an exception.
           &ProcessGroupAgent::join,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "shutdown",
+          &ProcessGroupAgent::shutdown,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "sync",
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
@@ -163,21 +167,6 @@ Otherwise, throws an exception.
     RpcAgent::setDefaultRpcAgent(agent);
     agent->start();
   });
-
-  module.def(
-      "shutdown",
-      []() {
-        auto agent = RpcAgent::getDefaultRpcAgent();
-        if (agent) {
-          agent->shutdown();
-        }
-      },
-      R"(
-      Locally shuts down the running RPC agent, without sending messages to
-      other agents to shutdown. This stops the local agent from accepting
-      outstanding requests, and shuts down the RPC framework as quickly as
-      possible by terminating all RPC threads.
-      )");
 
   module.def("_destroy_rref_context", []() {
     RRefContext::getInstance().destroyInstance();

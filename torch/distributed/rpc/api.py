@@ -45,7 +45,7 @@ def _require_initialized(func):
 def wait_all_workers():
     r"""
     Block until all local and remote RPC processes reach this method, and then
-    destroy local the RPC agent. Every RPC process must call this method before
+    destroy RRef and RPC handlers. Every RPC process must call this method before
     exit. This should be used to terminate the RPC framework, and there is no
     guarantee that the RPC framework will work after this method returns.
 
@@ -71,13 +71,23 @@ def wait_all_workers():
 
     if _agent:
         _agent.join()
-        _agent = None
         _destroy_rref_context()
         # clean up python rpc handler in wait_all_workers(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
         # interpreter exists
         _cleanup_python_rpc_handler()
+
+def shutdown():
+    r"""
+    Perform a local shutdown of the RPC agent, and then destroy the RPC agent.
+    This stops the local agent from  accepting outstanding requests, and shuts
+    down the RPC framework by terminating all RPC threads.
+    """
+    global _agent
+    if _agent:
+        _agent.shutdown()
+        _agent = None
 
 # TODO: add a context manager to wrap _init_rpc_backend and wait_all_workers
 def _init_rpc_backend(
