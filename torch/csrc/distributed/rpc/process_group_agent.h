@@ -57,6 +57,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void start() override;
 
+  void shutdown() override;
+
  protected:
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
@@ -143,10 +145,6 @@ class ProcessGroupAgent : public RpcAgent {
     return ++nextId_;
   }
 
-  // atomic bool indicating if join() has been called and background threads
-  // should shutdown.
-  std::atomic_bool shutdown_;
-
   std::shared_ptr<c10d::ProcessGroup> pg_;
   // worker name -> rank
   std::unordered_map<std::string, int> nameMap_;
@@ -159,12 +157,19 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
+  // atomic bool indicating if this agent is running. It is set in
+  // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
+  // ProcessGroupAgent::join. It controls whether several background threads
+  // should be running.
+  std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
   std::thread listenerThread_;
   // A thread to poll existing futures and check for timed out ones.
   std::thread futureTimeoutThread_;
+  std::mutex recvWorkMutex_;
+  std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
   // A threadPool that processing both SendWork and RecvWork. There are two
   // motivations for adding a ThreadPool:
   // (1) RPC serialization/deserialization and processing can be expensive,
