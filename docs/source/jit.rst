@@ -483,13 +483,15 @@ These types and features from the :mod:`typing` module are unavailble in TorchSc
 
    ":any:`typing.Any`", ":any:`typing.Any` is currently in development but not yet released"
    ":any:`typing.NoReturn`", "Not implemented"
-   ":any:`typing.Union`", "Unlikely to be implemented"
+   ":any:`typing.Union`", "Unlikely to be implemented (however :any:`typing.Optional` is supported)"
    ":any:`typing.Callable`", "Not implemented"
    ":any:`typing.Literal`", "Not implemented"
    ":any:`typing.ClassVar`", "Not implemented"
    ":any:`typing.Final`", "This is supported for :any:`module attributes <Module Attributes>` class attribute annotations but not for functions"
    ":any:`typing.AnyStr`", "TorchScript does not support :any:`bytes` so this type is not used"
-   "Type aliases", "Unlikely to be implemented"
+   ":any:`typing.overload`", ":any:`typing.overload` is currently in development but not yet released"
+   "Type aliases", "Not implemented"
+   "Nominal vs structural subtyping", "Nominal typing is in development, but structural typing is not"
    "NewType", "Unlikely to be implemented"
    "Generics", "Unlikely to be implemented"
 
