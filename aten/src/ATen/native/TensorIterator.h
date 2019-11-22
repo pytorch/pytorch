@@ -76,12 +76,13 @@ struct CAFFE2_API OperandInfo {
   explicit OperandInfo(const Tensor& t) : tensor(t) {
     if (t.defined()) {
       device = t.device();
-      dtype = t.scalar_type();
+      target_dtype = t.scalar_type();
+      current_dtype = target_dtype;
     }
     validate();
   }
   OperandInfo(const Tensor& t, Device device, ScalarType dtype)
-    : tensor(t), device(device), dtype(dtype) {
+    : tensor(t), device(device), target_dtype(dtype), current_dtype(t.scalar_type()) {
     validate();
   }
 
@@ -99,14 +100,20 @@ struct CAFFE2_API OperandInfo {
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
-  /// specifies which type to allocate. Note that there is very limited support
-  /// for type conversions currently: they are only allowed for zero-dim tensors.
+  /// specifies which type to allocate. target_dtype and device are initialized with the dtype and device of the tensor
+  /// but during type promotion target_dtype value can become different from tensor's dtype
+  /// also, during type promotion target_dtype and device can be set for an undefined tensor so that tensor can be properly
+  /// constructed later.
   Device device = kCPU;
-  ScalarType dtype = ScalarType::Undefined;
+  ScalarType target_dtype = ScalarType::Undefined;
+  // Caches dtype of the tensor, because scalar_type is an expensive operation
+  // If dtype of the tensor is changed (e.g. as a result of type promotion or in allocate_outputs), this
+  //value should be changed too.
+  ScalarType current_dtype = ScalarType::Undefined;
 
-  bool is_type_defined() const { return dtype != ScalarType::Undefined; }
+  bool is_type_defined() const { return target_dtype != ScalarType::Undefined; }
   TensorOptions options() const {
-    return TensorOptions(dtype).device(device);
+    return TensorOptions(target_dtype).device(device);
   }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
@@ -190,9 +197,9 @@ struct CAFFE2_API TensorIterator {
   /// Accessors for each operand
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
-  ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
+  ScalarType dtype(int arg=0) const { return operands_[arg].current_dtype; }
   ScalarType common_dtype() const { return common_dtype_; }
-  ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].dtype; }
+  ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].current_dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
