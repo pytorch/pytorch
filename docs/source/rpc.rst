@@ -15,15 +15,12 @@ RPC and RRef Framework
 ----------------------
 
 Before using RPC and distributed autograd primitives, initialization must take
-place. First, a backend over which RPCs can be sent over must be initialized.
-The default (and currently, only available) implementation is the `ProcessGroup`
-backend, and must be initialized with `torch.distributed.init_process_group
-<https://pytorch.org/docs/stable/distributed.html#torch.distributed.init_process_group>`_
-before using other functions. See the `documentation for
-torch.distributed <https://pytorch.org/docs/stable/distributed.html>`_ for
-additional details. Next, to initialize the RPC framework we need to use
+place. To initialize the RPC framework we need to use
 `init_rpc` which would initialize the RPC framework, RRef framework
-and distributed autograd.
+and distributed autograd. By default, this will also initialize the
+`ProcessGroup` (:func:`torch.distributed.Backend`) backend for RPC
+communication. The `ProcessGroup` backend internally uses gloo for communication.
+
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
@@ -40,7 +37,8 @@ transferred to the local worker in the future. RRefs can be used in
 multi-machine training by holding references to `nn.Modules
 <https://pytorch.org/docs/stable/nn.html#torch.nn.Module>`_ that exist on
 other workers, and calling the appropriate functions to retrieve or modify their
-parameters during training.
+parameters during training. See :ref:`remote-reference-protocol` for more
+details.
 
 .. autoclass:: RRef
     :members:
@@ -56,7 +54,7 @@ This library provides primitives allowing users to create and modify references
 .. autofunction:: rpc_async
 .. autofunction:: remote
 .. autofunction:: get_worker_info
-.. autofunction:: join_rpc
+.. autofunction:: wait_all_workers
 
 Distributed Autograd Framework
 ------------------------------

@@ -34,10 +34,9 @@ if is_available():
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current
-        process ready to send and receive RPCs. The caller needs to make
-        sure the specified backend is properly intialized before calling
-        this method. For example, to use ``pg`` (ProcessGroup) backend,
-        ``init_process_group`` must be invoked prior to this method.
+        process ready to send and receive RPCs. This method also properly
+        initializes a default process group backend that uses gloo for
+        collective communication.
 
         Arguments:
             backend (Enum): type of RPC backend implementation.
@@ -49,9 +48,6 @@ if is_available():
                         ``Worker1``) Name can only contain number, alphabet,
                         underscore, and/or dash, and must be shorter than
                         128 characters.
-            init_method(str): URL specifying how to initialize the
-                                     RPC backend. Default is "env://" if no
-                                     ``init_method`` is specified.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
             rpc_backend_options (RpcBackendOptions): The options passed to RpcAgent
@@ -59,7 +55,7 @@ if is_available():
         """
 
         if not rpc_backend_options:
-            # default construct a set of RPC agent options.
+            # default construct a set of RPC backend options.
             rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
                 backend
             )

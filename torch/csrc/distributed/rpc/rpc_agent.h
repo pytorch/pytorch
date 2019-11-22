@@ -13,7 +13,7 @@ namespace distributed {
 namespace rpc {
 
 struct RpcBackendOptions {
-  RpcBackendOptions() noexcept = default;
+  RpcBackendOptions() = default;
   std::chrono::milliseconds rpcTimeout;
   std::string initMethod;
 };

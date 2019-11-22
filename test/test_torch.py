@@ -1669,6 +1669,13 @@ class _TestTorchMixin(object):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+        # Test Rounding Errors
+        line = torch.zeros(size=(1, 49))
+        self.assertWarnsRegex(lambda: torch.arange(-1, 1, 2. / 49, dtype=torch.float32, out=line),
+                              'resized',
+                              'The out tensor will be resized')
+        self.assertEqual(line.shape, [50])
+
         x = torch.empty(1).expand(10)
         self.assertRaises(RuntimeError, lambda: torch.arange(10, out=x))
         msg = "unsupported range"

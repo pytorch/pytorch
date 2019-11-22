@@ -21,7 +21,7 @@ namespace at {
 
 namespace torch { namespace autograd {
 
-struct Variable;
+using Variable = at::Tensor;
 using at::Context;
 using at::Device;
 #ifdef BUILD_NAMEDTENSOR
