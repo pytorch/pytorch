@@ -258,7 +258,6 @@ def add_torch_libs():
         "torch/csrc/api/src/optim/sgd.cpp",
         "torch/csrc/api/src/serialize/input-archive.cpp",
         "torch/csrc/api/src/serialize/output-archive.cpp",
-        "torch/csrc/api/src/utils/hooks.cpp",
     ]
 
     libtorch_python_sources = [
@@ -334,6 +333,7 @@ def add_torch_libs():
         "torch/csrc/utils/throughput_benchmark.cpp",
         "torch/csrc/utils.cpp",
         "torch/csrc/utils/cuda_lazy_init.cpp",
+        "torch/csrc/utils/hooks.cpp",
         "torch/csrc/utils/invalid_arguments.cpp",
         "torch/csrc/utils/object_ptr.cpp",
         "torch/csrc/utils/python_arg_parser.cpp",

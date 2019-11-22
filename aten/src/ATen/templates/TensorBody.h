@@ -38,6 +38,12 @@ struct Node;
 
 }} // namespace torch::autograd
 
+namespace torch { namespace utils { namespace hooks {
+
+struct RemovableHandle;
+
+}}} // namespace torch::utils::hooks
+
 namespace at {
 
 class Tensor;
@@ -474,11 +480,11 @@ class CAFFE2_API Tensor {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, torch::utils::hooks::RemovableHandle>;
   template <typename T>
-  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, torch::utils::hooks::RemovableHandle>;
 
-  // Returns the index of the hook in the list which can be used to remove hook
+  // Returns a handle with a method ``handle.remove()`` that removes the hook
   // Register a hook with no return value
   template <typename T>
   hook_return_void_t<T> register_hook(T&& hook) const;
@@ -487,12 +493,9 @@ class CAFFE2_API Tensor {
   hook_return_var_t<T> register_hook(T&& hook) const;
 
 private:
-  unsigned _register_hook(std::function<Tensor(const Tensor&)> hook) const;
+  torch::utils::hooks::RemovableHandle _register_hook(std::function<Tensor(const Tensor&)> hook) const;
 
 public:
-
-  // Remove hook at given position
-  void remove_hook(unsigned pos) const;
 
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

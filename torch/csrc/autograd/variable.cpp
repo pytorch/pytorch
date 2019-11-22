@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
+#include <torch/csrc/utils/hooks.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
@@ -20,6 +21,8 @@
 #include <string>
 #include <vector>
 #include <typeinfo>
+
+using namespace torch::utils;
 
 namespace torch {
 namespace autograd {
@@ -248,7 +251,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   Tensor tensor_data(const Tensor&) const override;
   Tensor variable_data(const Tensor&) const override;
   const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const override;
-  unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const override;
+  torch::utils::hooks::RemovableHandle _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const override;
   void remove_hook(const Tensor&, unsigned pos) const override;
   bool is_view(const Tensor&) const override;
   const Tensor& base(const Tensor&) const override;
@@ -347,14 +350,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
   }
 }
 
-void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
-  auto &map = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_dict;
-  TORCH_CHECK(map && map->contains(pos), "Invalid index, no hook at position ", pos);
-  // Hook will be ignored
-  (*map)[pos] = nullptr;
-}
-
-unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
+hooks::RemovableHandle VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
@@ -362,9 +358,10 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
   if(!map) {
     torch::autograd::impl::create_cpp_hook(self);
   }
-  unsigned idx = map->size();
-  map->insert(idx, hook);
-  return idx;
+
+  auto handle = hooks::RemovableHandle(map);
+  map->insert(handle.id(), hook);
+  return handle;
 }
 
 }} // namespace torch::autograd

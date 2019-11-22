@@ -43,8 +43,7 @@ struct CAFFE2_API VariableHooksInterface {
   virtual Tensor tensor_data(const Tensor&) const = 0;
   virtual Tensor variable_data(const Tensor&) const = 0;
   virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const = 0;
-  virtual unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const = 0;
-  virtual void remove_hook(const Tensor&, unsigned pos) const = 0;
+  virtual torch::utils::hooks::RemovableHandle _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const = 0;
   virtual bool is_view(const Tensor&) const = 0;
   virtual const Tensor& base(const Tensor&) const = 0;
   virtual const std::string& name(const Tensor&) const = 0;

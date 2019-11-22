@@ -48,12 +48,24 @@ namespace utils {
 namespace hooks {
 
 /// A handle which provides the capability to remove a hook.
-class RemovableHandle {
+struct RemovableHandle {
  public:
-  // yf225 TODO: let's use a std::weak_ptr to mimick Python version behavior
-  explicit RemovableHandle(torch::autograd::hooks_map hooks_map) {}
+  explicit RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> hooks_dict)
+    : hooks_dict_ref_(hooks_dict),
+      id_(RemovableHandle::next_id) {
+    RemovableHandle::next_id++;
+  }
+
+  void remove() {
+    if (auto hooks_dict = hooks_dict_ref.lock() && hooks_dict->contains(id_)) {
+      hooks_dict->erase(id_);
+    }
+  }
+
  private:
-  static int64_t next_id;
+  std::weak_ptr<torch::autograd::hooks_dict> hooks_dict_ref_;
+  unsigned id_;
+  static unsigned next_id;
 };
 
 } // namespace hooks
