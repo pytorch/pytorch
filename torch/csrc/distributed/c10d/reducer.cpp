@@ -606,7 +606,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       const auto offset = replica.offsets[intra_bucket_index];
       const auto length = replica.lengths[intra_bucket_index];
 
-      const VariableIndex& var_idx = func_[variable.grad_accumulator().get()];
+      const VariableIndex& var_idx =
+          func_[torch::autograd::impl::grad_accumulator(variable).get()];
       bool global_unused =
           local_used_maps_[var_idx.replica_index][var_idx.variable_index]
               .item<int>() == 0;
