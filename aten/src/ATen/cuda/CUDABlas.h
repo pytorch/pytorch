@@ -7,7 +7,7 @@
 
     gemv<Dtype>(stream, transa, m, n, alpha, a, lda, x, incx, beta, y, incy)
 
-  where Dtype is double, float, at::Half or at::BFloat16(ROCm). The functions are
+  where Dtype is double, float, at::Half or at::BFloat16. The functions are
   available in at::cuda::blas namespace.
  */
 
