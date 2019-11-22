@@ -55,7 +55,8 @@ Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_ke
 
 // SFINAE version for ops with returns
 template<class Result, class... Args>
-Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, guts::enable_if_t<supports_boxing<Result, Args...>::value && !std::is_same<void, Result>::value, int> = 0) {
+guts::enable_if_t<supports_boxing<Result, Args...>::value && !std::is_same<void, Result>::value, Result>
+boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
   // TODO Reuse stack vector instead of allocating?
   torch::jit::Stack stack;
   torch::jit::push(stack, std::forward<Args>(args)...);
@@ -68,7 +69,8 @@ Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_ke
 
 // SFINAE version for ops without returns
 template<class Result, class... Args>
-Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, guts::enable_if_t<supports_boxing<Result, Args...>::value && std::is_same<void, Result>::value, int> = 0) {
+guts::enable_if_t<supports_boxing<Result, Args...>::value && std::is_same<void, Result>::value, Result>
+boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
   // TODO Reuse stack vector instead of allocating?
   torch::jit::Stack stack;
   torch::jit::push(stack, std::forward<Args>(args)...);
