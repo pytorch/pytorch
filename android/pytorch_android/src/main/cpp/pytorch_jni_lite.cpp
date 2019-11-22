@@ -6,9 +6,9 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
-#include <torch/script.h>
-#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/module.h>
+#include <torch/script.h>
 
 #include "pytorch_jni_common.h"
 
@@ -17,12 +17,12 @@ using namespace pytorch_jni;
 namespace pytorch_jni {
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
-private:
+ private:
   friend HybridBase;
   torch::jit::mobile::Module module_;
 
-public:
-  constexpr static auto kJavaDescriptor = "Lorg/pytorch/Module$NativePeer;";
+ public:
+  constexpr static auto kJavaDescriptor = "Lorg/pytorch/LiteNativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
@@ -41,16 +41,16 @@ public:
 
   static void registerNatives() {
     registerHybrid({
-      makeNativeMethod("initHybrid", PytorchJni::initHybrid),
-      makeNativeMethod("forward", PytorchJni::forward),
-      makeNativeMethod("runMethod", PytorchJni::runMethod),
+        makeNativeMethod("initHybrid", PytorchJni::initHybrid),
+        makeNativeMethod("forward", PytorchJni::forward),
+        makeNativeMethod("runMethod", PytorchJni::runMethod),
     });
   }
 
   facebook::jni::local_ref<JIValue> forward(
       facebook::jni::alias_ref<
           facebook::jni::JArrayClass<JIValue::javaobject>::javaobject>
-      jinputs) {
+          jinputs) {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
@@ -58,7 +58,6 @@ public:
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
       inputs.push_back(std::move(atIValue));
     }
-
 
     auto output = [&]() {
       torch::autograd::AutoGradMode guard(false);
@@ -72,7 +71,7 @@ public:
       facebook::jni::alias_ref<facebook::jni::JString::javaobject> jmethodName,
       facebook::jni::alias_ref<
           facebook::jni::JArrayClass<JIValue::javaobject>::javaobject>
-      jinputs) {
+          jinputs) {
     std::string methodName = jmethodName->toStdString();
 
     std::vector<at::IValue> inputs{};

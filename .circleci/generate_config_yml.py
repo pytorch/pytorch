@@ -88,6 +88,7 @@ YAML_SOURCES = [
     File("job-specs-custom.yml"),
     File("binary_update_htmls.yml"),
     File("binary-build-tests.yml"),
+    File("docker_build_job.yml"),
     File("workflows.yml"),
     Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
     File("workflows-pytorch-macos-builds.yml"),
@@ -105,6 +106,7 @@ YAML_SOURCES = [
     File("workflows-nightly-uploads-header.yml"),
     Listgen(binary_build_definitions.get_nightly_uploads, 3),
     File("workflows-s3-html.yml"),
+    File("workflows-docker-builder.yml")
 ]
 
 

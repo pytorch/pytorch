@@ -311,6 +311,7 @@ static auto registry0 = torch::RegisterOperators().op(
   torch::RegisterOperators::options().catchAllKernel(
   []() {
   })
+
 // Pytext operators
 ).op(
   "_aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor",
