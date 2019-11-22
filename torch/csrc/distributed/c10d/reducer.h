@@ -144,6 +144,9 @@ class Reducer {
   struct Bucket {
     std::vector<BucketReplica> replicas;
 
+    // Global indice of participating variables in the bucket
+    std::vector<size_t> variable_indices;
+
     // Number of replicas to be marked done before this bucket is ready.
     size_t pending;
 

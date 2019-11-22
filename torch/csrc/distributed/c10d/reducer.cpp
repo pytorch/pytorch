@@ -496,6 +496,8 @@ void Reducer::initialize_buckets(
           .bucket_index = bucket_index,
           .intra_bucket_index = intra_bucket_index++,
       };
+
+      bucket.variable_indices.push_back(variable_index);
     }
 
     buckets_.push_back(std::move(bucket));
@@ -597,7 +599,9 @@ void Reducer::prepare_for_backward(
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
-  for (auto& replica : bucket.replicas) {
+  for (size_t replica_index = 0; replica_index < bucket.replicas.size();
+       replica_index++) {
+    auto& replica = bucket.replicas[replica_index];
     for (size_t intra_bucket_index = 0;
          intra_bucket_index < replica.variables.size();
          intra_bucket_index++) {
@@ -605,11 +609,10 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       const auto offset = replica.offsets[intra_bucket_index];
       const auto length = replica.lengths[intra_bucket_index];
 
-      const VariableIndex& var_idx =
-          func_[torch::autograd::impl::grad_accumulator(variable).get()];
       bool global_unused =
-          local_used_maps_[var_idx.replica_index][var_idx.variable_index]
-              .item<int>() == 0;
+          local_used_maps_[replica_index]
+                          [bucket.variable_indices[intra_bucket_index]]
+                              .item<int>() == 0;
 
       auto bucket_view =
           replica.contents.narrow(0, offset, length).view(variable.sizes());
