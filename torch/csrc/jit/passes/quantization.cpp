@@ -733,8 +733,11 @@ class ModuleUseDeduper {
   }
 
  private:
-  // Analyze the code to record necessary information
-  // to dedup the module uses
+  // Analyze the code to record information represents
+  // uses of the module to dedup the module uses, which
+  // we'll use later to actually perform the dedup operation
+  // Please see the comments of member variables of the class
+  // for more information
   void findModuleUses(Graph* graph) {
     GRAPH_DUMP("Finding module uses for ", graph);
 
@@ -766,7 +769,7 @@ class ModuleUseDeduper {
           }
           value_to_path_map_[instance] = path;
           auto m = findChildModule(module_, path);
-          if (module_set_.insert(m._ivalue()).second) {
+          if (unique_modules_.insert(m._ivalue()).second) {
             uses_to_rewrite_.push_back(instance);
             GRAPH_DEBUG("Found use to rewrite: ", instance);
           }
@@ -859,7 +862,11 @@ class ModuleUseDeduper {
   // starting from the top level module, e.g. ["sub1", "sub2", "relu"]
   // Also this is a cache of calling `getModuleAccessPath` of the value
   std::unordered_map<Value*, std::vector<std::string>> value_to_path_map_;
-  std::unordered_set<script::ModulePtr> module_set_;
+  // Set of unique modules that are used in the graphs
+  std::unordered_set<script::ModulePtr> unique_modules_;
+  // Values that represent the module instance(the use of the module)
+  // that we'll need to rewrite as a use of a cloned module
+  // instance
   std::vector<Value*> uses_to_rewrite_;
 };
 
