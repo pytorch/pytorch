@@ -43,12 +43,15 @@ class Rprop(Optimizer):
         min_step, max_step = step_sizes
         step_size = state['step_size']
         state['step'] += 1
+
         sign = grad.mul(state['prev']).sign()
         sign[sign.gt(0)] = eta_plus
         sign[sign.lt(0)] = eta_minus
         sign[sign.eq(0)] = 1
+
         # update stepsizes with step size updates
         step_size.mul_(sign).clamp_(min_step, max_step)
+
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx
         grad = grad.clone(memory_format=torch.preserve_format)

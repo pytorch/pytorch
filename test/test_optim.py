@@ -323,6 +323,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
+    def test_adam_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Adam(params, lr=4e-2)
+        )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Adam(params, lr=4e-2),
+            [lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
+        )
+
     def test_adamw(self):
         self._test_basic_cases(
             lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3)
@@ -340,7 +349,7 @@ class TestOptim(TestCase):
             True
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-            optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
+            optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     # ROCm precision is too low to pass this test
     @skipIfRocm

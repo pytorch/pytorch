@@ -18,6 +18,9 @@ from .optimizer import Optimizer
 from .lbfgs import LBFGS
 from . import lr_scheduler
 
+# backward compatibility
+SparseAdam = Adam
+
 del adadelta
 del adagrad
 del adam
