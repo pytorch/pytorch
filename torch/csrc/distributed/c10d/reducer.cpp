@@ -350,8 +350,11 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     }
   }
 
-  // Run finalizer function once the final bucket was marked ready.
+  // Run finalizer function and kick off reduction for local_used_maps_ once the
+  // final bucket was marked ready.
   if (next_bucket_ == buckets_.size()) {
+    local_used_work_ = process_group_->allreduce(local_used_maps_);
+
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
       this->finalize_backward();
@@ -654,8 +657,7 @@ void Reducer::finalize_backward() {
   // Check that all buckets were completed and had their work kicked off.
   TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
 
-  // Allreduce locally used param maps to get the global consensus
-  local_used_work_ = process_group_->allreduce(local_used_maps_);
+  // Wait for local_used_maps_ reduction to complete.
   local_used_work_->wait();
 
   // Wait for asynchronous reduction to complete and unflatten contents.
