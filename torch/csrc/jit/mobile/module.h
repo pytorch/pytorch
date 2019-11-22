@@ -22,9 +22,9 @@ class TORCH_API Module {
          std::shared_ptr<CompilationUnit> cu)
       : object_(object), cu_(cu) {};
   Module() {}
-  c10::IValue run_method(const std::string& method_name, Stack& stack);
-  c10::IValue forward(std::vector<c10::IValue>& inputs) {
-    return run_method("forward", inputs);
+  c10::IValue run_method(const std::string& method_name, Stack stack);
+  c10::IValue forward(std::vector<c10::IValue> inputs) {
+    return run_method("forward", std::move(inputs));
   }
   Function* find_method(const std::string& basename) const;
  private:
