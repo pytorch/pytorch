@@ -172,7 +172,7 @@ class InsertObserversHelper {
   // every time to find a unique id.
   int uid_ = 0;
 
-  // These are the IR patterns that we match when we insert observers.
+  // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
   const PatternInfo conv_functional_relu = PatternInfo::parse_from_str(R"(
