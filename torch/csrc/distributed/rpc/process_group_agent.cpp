@@ -179,12 +179,8 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   return allWorkerInfo_[id];
 }
 
-std::set<std::string> ProcessGroupAgent::getWorkerNames() const {
-  std::set<std::string> worker_names;
-  for (auto& workerInfo : allWorkerInfo_) {
-    worker_names.emplace(workerInfo.name_);
-  }
-  return worker_names;
+std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
+  return allWorkerInfo_;
 }
 
 void ProcessGroupAgent::join() {

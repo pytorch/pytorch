@@ -8,8 +8,9 @@ namespace distributed {
 namespace rpc {
 
 RRefContext& RRefContext::getInstance() {
-  static RRefContext context(RpcAgent::getDefaultRpcAgent());
-  return context;
+  // Leaky singleton to avoid module destructor races.
+  static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
+  return *context;
 }
 
 void RRefContext::destroyInstance() {
@@ -30,7 +31,7 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     owners_.clear();
   }
 }
@@ -340,7 +341,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     }
   }
   if (deletedRRef && deletedRRef->isPyObj()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     deletedRRef.reset();
   }
 }

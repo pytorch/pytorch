@@ -82,7 +82,7 @@ struct PythonResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -101,7 +101,7 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -707,7 +707,8 @@ void initJitScriptBindings(PyObject* module) {
             return pp.str();
           })
       .def("apply", &Module::apply)
-      .def("_clone", &Module::clone);
+      .def("_clone", &Module::clone)
+      .def("_clone_instance", &Module::clone_instance);
 
   slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
