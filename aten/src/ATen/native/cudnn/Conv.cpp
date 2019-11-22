@@ -1096,10 +1096,10 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {
     if (output_mask[0]) {
-      grad_input = at::empty_like(input, at::MemoryFormat::Contiguous);
+      grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (output_mask[1]) {
-      grad_weight = at::zeros_like(weight, at::MemoryFormat::Contiguous);
+      grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (output_mask[2]) {
       grad_bias = at::zeros({grad_output.size(1)}, grad_output.options());
