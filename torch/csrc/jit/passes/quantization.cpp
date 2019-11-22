@@ -768,9 +768,9 @@ class ModuleUseDeduper {
           }
           value_to_path_map_[instance] = path;
           auto m = findChildModule(module_, path);
-          if (unique_modules_.insert(m._ivalue()).second) {
+          if (!unique_modules_.insert(m._ivalue()).second) {
             uses_to_rewrite_.push_back(instance);
-            GRAPH_DEBUG("Found use to rewrite: ", instance);
+            GRAPH_DEBUG("Found use to rewrite: ", instance->debugName());
           }
         } else {
           GRAPH_DEBUG(
