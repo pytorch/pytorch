@@ -59,7 +59,7 @@ default_set = set([
     'pytorch-ios-10.2.1-x86_64_build',
     'pytorch-ios-10.2.1-arm64_build',
     # PyTorch Mobile builds
-    'pytorch_linux_xenial_py3_clang5_mobile_build',
+    'pytorch-linux-xenial-py3-clang5-mobile-build',
 
     # Pytorch backward compatibility check
     'pytorch-linux-backward-compatibility-check-test',
