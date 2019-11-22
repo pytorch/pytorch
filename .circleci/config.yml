@@ -1032,6 +1032,7 @@ jobs:
             export IN_CIRCLECI=1
 
             # Install sccache
+            brew install openssl
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
@@ -1114,6 +1115,7 @@ jobs:
             sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
 
             # Install sccache
+            brew install openssl
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
