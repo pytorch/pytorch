@@ -630,9 +630,8 @@ void TensorIterator::remove_operand(int arg) {
   operands_.erase(operands_.begin() + arg);
 }
 
-void TensorIterator::replace_operand(int arg, void* data, IntArrayRef stride) {
+void TensorIterator::unsafe_replace_operand(int arg, void* data) {
   operands_[arg].data = data;
-  operands_[arg].stride_bytes = stride;
 }
 
 void TensorIterator::remove_dimension(int dim) {

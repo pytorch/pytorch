@@ -238,8 +238,10 @@ struct CAFFE2_API TensorIterator {
   void narrow(int dim, int64_t start, int64_t size);
   /// Narrows every dim after and including `start_dim` to size one.
   void select_all_keeping_dim(int start_dim, IntArrayRef starts);
-  /// Replaces the data pointer and strides for the operand at index `arg`
-  void replace_operand(int arg, void* data, IntArrayRef stride);
+  /// Replaces the data pointer for the operand at index `arg`.
+  /// The new pointer should have the same sizes, strides and dtype as the
+  /// original
+  void unsafe_replace_operand(int arg, void* data);
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
   /// the entire operation. Used by `with_32bit_indexing()`.
