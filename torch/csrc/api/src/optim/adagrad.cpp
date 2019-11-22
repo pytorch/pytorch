@@ -14,6 +14,28 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
+void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
+  c10::IValue ivalue;
+  archive.read("learning_rate", ivalue);
+  this->step(ivalue.toDouble());
+  archive.read("lr_decay", ivalue);
+  this->step(ivalue.toDouble());
+  archive.read("weight_decay", ivalue);
+  this->step(ivalue.toDouble());
+  archive.read("initial_accumulator_value", ivalue);
+  this->step(ivalue.toDouble());
+  archive.read("eps", ivalue);
+  this->step(ivalue.toDouble());
+}
+
+void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) {
+  archive.write("learning_rate", IValue(this->learning_rate()));
+  archive.write("lr_decay", IValue(this->lr_decay()));
+  archive.write("weight_decay", IValue(this->weight_decay()));
+  archive.write("initial_accumulator_value", IValue(this->initial_accumulator_value()));
+  archive.write("eps", IValue(this->eps()));
+}
+
 void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
     c10::IValue step_, sum_;
     archive.read("step", step_);

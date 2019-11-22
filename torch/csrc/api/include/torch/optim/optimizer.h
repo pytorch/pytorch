@@ -35,8 +35,8 @@ namespace optim {
 class TORCH_API OptimizerParamState {
  public:
   virtual std::unique_ptr<OptimizerParamState> clone() const;
-  virtual void serialize(torch::serialize::InputArchive& archive) {};
-  virtual void serialize(torch::serialize::OutputArchive& archive) {};
+  virtual void serialize(torch::serialize::InputArchive& archive) {}
+  virtual void serialize(torch::serialize::OutputArchive& archive) {}
 public:
   virtual ~OptimizerParamState() = default;
 };
@@ -52,6 +52,8 @@ class TORCH_API OptimizerOptions {
  public:
   virtual std::unique_ptr<OptimizerOptions> clone() const;
   virtual ~OptimizerOptions() = default;
+  virtual void serialize(torch::serialize::InputArchive& archive) {}
+  virtual void serialize(torch::serialize::OutputArchive& archive) {}
 };
 
 template <typename Derived>

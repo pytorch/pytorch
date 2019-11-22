@@ -27,6 +27,8 @@ struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOption
   TORCH_ARG(double, eps) = 1e-10;
 public:
   ~AdagradOptions() = default;
+  void serialize(torch::serialize::InputArchive& archive);
+  void serialize(torch::serialize::OutputArchive& archive);
 };
 
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
