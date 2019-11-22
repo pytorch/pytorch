@@ -164,6 +164,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "sparse division only supports division by a scalar (got shape ",
       value.sizes(), " for argument 'other')");
+  TORCH_CHECK(!value.is_sparse(), "A Sparse Tensor can only be divided by a scalar or zero-dim dense tensor");
 
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
