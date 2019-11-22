@@ -19,7 +19,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   torch::jit::script::Module module_;
 
  public:
-  constexpr static auto kJavaDescriptor = "Lorg/pytorch/Module$NativePeer;";
+  constexpr static auto kJavaDescriptor = "Lorg/pytorch/NativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,

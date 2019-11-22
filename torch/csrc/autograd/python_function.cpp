@@ -329,7 +329,7 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
 
     dirty_inputs.insert(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
     auto variable = (THPVariable*)obj;
-    variable->cdata.bump_version();
+    torch::autograd::impl::bump_version(variable->cdata);
   }
   // We're not going to ever need this so let's remove references now
   Py_CLEAR(self->dirty_tensors);
