@@ -334,5 +334,27 @@ Tensor CrossEntropyLossImpl::forward(
     options.reduction());
 }
 
+// ============================================================================
+
+BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
+  const BCEWithLogitsLossOptions& options_) : options(options_) {
+  reset();
+}
+
+void BCEWithLogitsLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+  pos_weight = register_buffer("pos_weight", options.pos_weight());
+}
+
+void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::BCEWithLogitsLoss()";
+}
+
+Tensor BCEWithLogitsLossImpl::forward(
+  const Tensor& input, const Tensor& target) {
+  return F::detail::binary_cross_entropy_with_logits(input, target,
+    options.weight(), options.reduction(), options.pos_weight());
+}
+
 } // namespace nn
 } // namespace torch
