@@ -2,9 +2,9 @@
 
 #include <sstream>
 
-#include <pybind11/pybind11.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/Exceptions.h>
@@ -29,13 +29,13 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
 }
 
 PyFunctionPreHook::~PyFunctionPreHook() {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
   Py_DECREF(dict);
 }
 
 auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
 {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
 
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
@@ -60,7 +60,7 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
 }
 
 PyFunctionPostHook::~PyFunctionPostHook() {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
   Py_DECREF(dict);
 }
 
@@ -68,7 +68,7 @@ auto PyFunctionPostHook::operator()(
     const variable_list& _outputs, /* grad_inputs */
     const variable_list& _inputs /* grad_outputs */) -> variable_list
 {
-  pybind11::gil_scoped_acquire gil;
+  AutoGIL gil;
 
   THPObjectPtr outputs(wrap_variables(_outputs));
   THPObjectPtr inputs(wrap_variables(_inputs));

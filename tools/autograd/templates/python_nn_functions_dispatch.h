@@ -2,6 +2,8 @@
 
 // ${generated_comment}
 
+#include "torch/csrc/utils/auto_gil.h"
+
 #include <ATen/ATen.h>
 
 // Contains inline wrappers around ATen functions that release the GIL and

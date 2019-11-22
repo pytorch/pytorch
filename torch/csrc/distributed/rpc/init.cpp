@@ -64,7 +64,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_worker_infos",
               &RpcAgent::getWorkerInfos,
-              py::call_guard<py::gil_scoped_acquire>());
+              py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
