@@ -191,8 +191,8 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
       linearIndex = linearIndex.view(-1);
-      auto sorted_indices = at::empty_like(linearIndex, at::MemoryFormat::Contiguous);
-      auto orig_indices = at::empty_like(linearIndex, at::MemoryFormat::Contiguous);
+      auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     

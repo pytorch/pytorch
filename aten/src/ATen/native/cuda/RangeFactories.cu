@@ -170,8 +170,15 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
              "invalid size, possible overflow?");
     int64_t size = static_cast<int64_t>(size_d);
+    int64_t numel = result.numel();
 
-    if (result.numel() != size) {
+    if (numel != size) {
+      if(numel > 0){
+        TORCH_WARN("The number of elements in the out tensor of shape ", result.sizes(),
+                    " is ", numel, " which does not match the computed number of elements ", size,
+                    ". Note that this may occur as a result of rounding error. "
+                    "The out tensor will be resized to a tensor of shape (", size, ",).");
+      }
       result.resize_({size});
     }
     Tensor r = result.is_contiguous() ? result : result.contiguous();

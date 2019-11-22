@@ -88,7 +88,9 @@ class ProcessGroupMPI : public ProcessGroup {
 
     int sourceRank() const override;
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     void populateException();
