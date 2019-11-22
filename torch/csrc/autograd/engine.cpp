@@ -52,6 +52,9 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
+// The timeout that a ReadyQueue pop operation should wait for
+static const int queue_pop_timeout = 10;
+
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 // Shutdown tasks are first and then empty NodeTask are next.
 struct CompareNodeTaskTime {
@@ -303,9 +306,9 @@ auto Engine::thread_main(
     if (graph_task) {
       // For the case where there're more re-entrant threads than outstanding
       // tasks, then some thread that couldn't grab the task will hang on
-      // trying to pop from readyQueue, give a timeout to pop (return null if
-      // timeout) to ensure they don't hang forever
-      task = queue->pop(std::chrono::microseconds(10));
+      // trying to pop from readyQueue and hold the mutex_, give a timeout to
+      // pop (return null if timeout) to ensure they don't hang forever
+      task = queue->pop(std::chrono::microseconds(queue_pop_timeout));
       if (!task) {
         continue;
       }
