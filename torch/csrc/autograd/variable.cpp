@@ -91,7 +91,6 @@ namespace impl {
     }
   }
 
-  // yf225 TODO: we should store cpp hooks in a dict, not a vector!
   void create_cpp_hook(const Variable& self) {
     auto &map = materialize_autograd_meta(self)->cpp_hooks_map;
     map.reset(new hooks_map());

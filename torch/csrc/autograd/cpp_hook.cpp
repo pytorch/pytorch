@@ -22,7 +22,7 @@ CppFunctionPreHook::CppFunctionPreHook(const std::shared_ptr<hooks_map> &hooks, 
 variable_list CppFunctionPreHook::operator()(const variable_list& values) {
   auto value = values[value_idx_];
   for (const auto& item : *hooks_) {
-    int64_t id = item.key();
+    unsigned id = item.key();
     const std::function<Variable(const Variable&)>& hook = item.value();
     if (!hook) {
       // hook was removed
