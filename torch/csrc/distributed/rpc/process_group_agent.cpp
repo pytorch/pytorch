@@ -298,15 +298,16 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       if (timeout.count() == 0) {
         timeout = INFINITE_TIMEOUT;
       }
-      auto futureInfo = FutureInfo(future, futureStartTime, to.id_, timeout);
+      std::chrono::milliseconds endTime = timeout == INFINITE_TIMEOUT
+          ? INFINITE_TIMEOUT
+          : futureStartTime + timeout;
+      auto futureInfo = FutureInfo(future, endTime, to.id_, timeout);
       futures_[requestId] = futureInfo;
-      auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
-      futureTimeouts_[rpcEndTime].push_back(requestId);
+      futureTimeouts_[endTime].push_back(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or if an RPC with a shorter TTL has been created.
-      if (futures_.size() == 1 ||
-          futureTimeouts_.begin()->first == rpcEndTime) {
+      if (futures_.size() == 1 || futureTimeouts_.begin()->first == endTime) {
         futureTimeoutCV_.notify_one();
       }
     }
@@ -423,13 +424,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               // by the sender who has determined the future has timed out.
               return;
             }
-
+            std::chrono::milliseconds endTime = futureInfo->second.endTime_;
             fm = futureInfo->second.future_;
-            auto rpcEndTime = getRPCEndTime(futureInfo->second);
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
-            auto& futuresAtTime = futureTimeouts_[rpcEndTime];
+            auto& futuresAtTime = futureTimeouts_[endTime];
             auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
@@ -437,7 +437,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             futuresAtTime.erase(it);
             if (futuresAtTime.empty()) {
               // remove the key from futureTimeouts_
-              futureTimeouts_.erase(rpcEndTime);
+              futureTimeouts_.erase(endTime);
             }
           }
           // Not holding lock on markCompleted as this could run callbacks that
@@ -565,13 +565,6 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCRemainingTime(
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::steady_clock::now().time_since_epoch());
   return remainingTime;
-}
-
-const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
-    const FutureInfo& futureInfo) const {
-  return futureInfo.timeout_ == INFINITE_TIMEOUT
-      ? INFINITE_TIMEOUT
-      : futureInfo.startTime_ + futureInfo.timeout_;
 }
 
 } // namespace rpc
