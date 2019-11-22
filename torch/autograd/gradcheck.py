@@ -3,6 +3,7 @@ from torch._six import container_abcs, istuple
 import torch.testing
 from itertools import product
 import warnings
+from .grad_mode import no_grad
 
 
 def zero_gradients(x):
@@ -41,7 +42,7 @@ def iter_tensors(x, only_requiring_grad=False):
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
 
-@torch.no_grad()
+@no_grad()
 def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     """
     input: input to `fn`
