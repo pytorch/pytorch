@@ -1,6 +1,6 @@
 #include <torch/nn/module.h>
 
-#include <torch/ordered_dict.h>
+#include <torch/csrc/ordered_dict.h>
 
 #include <torch/csrc/autograd/generated/VariableType.h>
 

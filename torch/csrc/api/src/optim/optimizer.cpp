@@ -1,7 +1,7 @@
 #include <torch/optim/optimizer.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/ordered_dict.h>
+#include <torch/csrc/ordered_dict.h>
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
 
