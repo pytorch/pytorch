@@ -460,10 +460,10 @@ class TestTypePromotion(TestCase):
         def op(t1, t2):
             return getattr(t1, op_name + suffix)(t2)
 
-        div, sub, mul, add = [op_name == x for x in ['div', 'sub', 'mul', 'add']]
+        add_sub = op_name == 'add' or op_name == 'sub'
 
         (dense1, sparse1) = self.get_sparse_tensors(device, dtype, coalesced)
-        (dense2, sparse2) = self.get_sparse_tensors(device, dtype, coalesced, not div)
+        (dense2, sparse2) = self.get_sparse_tensors(device, dtype, coalesced, op_name != 'div')
         common_dtype = torch.result_type(dense1, dense2)
         if self.device_type == 'cpu' and common_dtype == torch.half:
             self.assertRaises(RuntimeError, lambda: op(s1, d2))
@@ -474,7 +474,7 @@ class TestTypePromotion(TestCase):
         e, d1, s1, d2, s2 = [x.clone() for x in test_tensors] if inplace else test_tensors
 
         # Test op(sparse, sparse)
-        if not div:
+        if op_name != 'div':
             sparse = op(s1, s2)
             self.assertEqual(sparse.dtype, e.dtype)
             self.assertEqual(e, sparse.to_dense(), prec=precision, message=err)
@@ -483,7 +483,7 @@ class TestTypePromotion(TestCase):
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
 
         # Test op(dense, sparse)
-        if add or sub:
+        if add_sub:
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
@@ -500,7 +500,7 @@ class TestTypePromotion(TestCase):
         self.assertRaises(RuntimeError, lambda: op(s1, d2))
 
         # Test op(sparse, scalar)
-        if not add and not sub and not (self.device_type == 'cpu' and dtype == torch.half):
+        if not add_sub and not (self.device_type == 'cpu' and dtype == torch.half):
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             scalar = d2.view(d2.numel())[0].item()
