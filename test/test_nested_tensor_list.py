@@ -15,6 +15,7 @@ from unittest import TestCase
 import random
 import torch
 
+
 def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 32):
     """ Same as random_float_tensor but integers between [low, high)
     """
@@ -61,8 +62,10 @@ def nested_map(fn, data):
     else:
         return fn(data)
 
+
 def gen_nested_tensor(seed, nested_dim, tensor_dim, size_low=1, size_high=10):
     return torch._ListNestedTensor(gen_nested_list(seed, nested_dim, tensor_dim, size_low=size_low, size_high=size_high))
+
 
 class Test_ListNestedTensor(TestCase):
 
@@ -131,7 +134,6 @@ class Test_ListNestedTensor(TestCase):
         na = tuple(t.stride() for t in tensors)
         self.assertEqual(a.nested_stride(), na)
 
-
     def test_pin_memory(self):
         # Check if it can be applied widely
         nt = gen_nested_tensor(1, 4, 3)
@@ -162,24 +164,22 @@ class Test_ListNestedTensor(TestCase):
         self.assertFalse(a5.is_pinned())
         self.assertFalse(a6.is_pinned())
 
-
-
-
     def test_len(self):
         a = torch._ListNestedTensor([torch.tensor([1, 2]),
-                                 torch.tensor([3, 4]),
-                                 torch.tensor([5, 6]),
-                                 torch.tensor([7, 8])])
+                                     torch.tensor([3, 4]),
+                                     torch.tensor([5, 6]),
+                                     torch.tensor([7, 8])])
         self.assertEqual(len(a), 4)
         a = torch._ListNestedTensor([torch.tensor([1, 2]),
-                                 torch.tensor([7, 8])])
+                                     torch.tensor([7, 8])])
         self.assertEqual(len(a), 2)
         a = torch._ListNestedTensor([torch.tensor([1, 2])])
         self.assertEqual(len(a), 1)
 
-
-
     def test_unbind(self):
+        # This is the most important operation. We want to make sure
+        # that the Tensors we use for construction can be retrieved
+        # and used independently while still being kept track of.
         a = torch.tensor([1, 2])
         b = torch.tensor([7, 8])
         nt = torch._ListNestedTensor([a, b])
@@ -193,10 +193,11 @@ class Test_ListNestedTensor(TestCase):
 
     def test_contiguous(self):
         a = torch._ListNestedTensor([torch.tensor([1, 2]),
-                                 torch.tensor([3, 4]),
-                                 torch.tensor([5, 6]),
-                                 torch.tensor([7, 8])])
+                                     torch.tensor([3, 4]),
+                                     torch.tensor([5, 6]),
+                                     torch.tensor([7, 8])])
         self.assertTrue(not a.is_contiguous())
+
 
 if __name__ == "__main__":
     unittest.main()

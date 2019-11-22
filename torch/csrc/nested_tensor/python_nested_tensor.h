@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/include/torch/csrc/Exceptions.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/Device.h>
