@@ -13,7 +13,7 @@ def register_quantized_ops(domain, version):
     quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
-            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'slice', 'clamp']
+            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'slice', 'clamp', 'reshape']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -223,5 +223,18 @@ def slice(g, input, dim, start, end, step):
         "Y_zero_point_i": input.node()["Y_zero_point"],
     }
     output = g.op("_caffe2::Int8Slice", input, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+def reshape(g, input, shape):
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import reshape
+        return reshape(g, input, shape)
+
+    kwargs = {
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+    output = g.op("_caffe2::Int8Reshape", input, shape, **kwargs)
     sym_help._quantized_ops.add(output)
     return output

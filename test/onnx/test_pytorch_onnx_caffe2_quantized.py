@@ -147,14 +147,14 @@ class TestQuantizedOps(unittest.TestCase):
 
     def test_quantized_ts(self):
         torch.backends.quantized.engine = "qnnpack"
-        module_quant = torch.jit.load("/home/supriyar/pytorch/quantized_ts.pt")
+        module_quant = torch.jit.load("/home/supriyar/pytorch/quantized_ts_V4.pt")
 
         input_img = torch.from_numpy(np.random.random((1, 3, 48, 64)).astype("float32"))
         input_fp =  torch.from_numpy(np.random.random((1, 12, 48, 64)).astype("float32"))
         X = torch.from_numpy(np.random.random((1, 2)).astype("float32"))
         module_quant.eval()
-        #print("Printing module code ", module_quant)
         output = module_quant(input_img, input_fp, X)
+        torch.set_default_tensor_type(torch.FloatTensor)
         torch.onnx.export(module_quant, (input_img, input_fp, X), 'quant.onnx', verbose=True, example_outputs=output, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK, opset_version=9)
         onnx_model = onnx.load('quant.onnx')
         input_names = ["img", "fp", "ang"]

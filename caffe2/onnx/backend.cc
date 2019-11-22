@@ -349,6 +349,7 @@ Caffe2Backend::get_special_operators() const {
               {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
+              {"Int8Reshape", &Caffe2Backend::CreateInt8Reshape},
               {"Gather", &Caffe2Backend::CreateGather},
               {"Gemm", &Caffe2Backend::CreateGemm},
               {"Pad", &Caffe2Backend::CreatePad},
@@ -1358,6 +1359,17 @@ Caffe2Ops Caffe2Backend::CreateLRN(
       arg->set_name("beta");
       arg->set_f(0.75);
   }
+  return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateInt8Reshape(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
+  CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
+  auto* op = c2_op.ops.Mutable(0);
+  op->add_output(dummy_->NewDummyName());
+
   return c2_op;
 }
 

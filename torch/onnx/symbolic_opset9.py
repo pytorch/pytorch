@@ -1822,8 +1822,8 @@ def logsumexp(g, input, dim, keepdim):
 
 
 def arange(g, *args):
-    #if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-    #    return g.op("ATen", *args, operator_s="arange")
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", *args, operator_s="arange")
 
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')
