@@ -8,7 +8,7 @@ import torch
 import warnings
 
 from .variable import Variable
-from .function import Function, NestedIOFunction
+from .function import Function
 from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
