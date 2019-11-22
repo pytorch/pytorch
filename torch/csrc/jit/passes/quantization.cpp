@@ -726,19 +726,15 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
   rewriter.runOnGraph(graph);
 }
 
-void insertPrepackUnpackForConvolution(std::shared_ptr<Graph>& graph) {
-  std::string conv_with_quant = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %w_dequant = aten::dequantize(%w_quant)
+void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
+  std::string convolution = R"(
+graph(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
         %r = aten::_convolution(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
         return (%r) )";
 
-  std::string conv_with_quant_prepack = R"(
-graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+  std::string conv2d = R"(
+graph(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   // Filter the unsupported case
@@ -749,15 +745,17 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %transposed, %outp
     auto benchmark_value = getIValue("benchmark", match_vmap, vmap).value().toBool();
     auto deterministic_value = getIValue("deterministic", match_vmap, vmap).value().toBool();
     auto cudnn_enabled_value = getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
+    auto output_padding_value = getIValue("output_padding", match_vmap, vmap).value().toIntList();
 
-    if (!transposed_value && !benchmark_value && !deterministic_value && cudnn_enabled_value) {
+    if (!transposed_value && !benchmark_value && !deterministic_value && cudnn_enabled_value
+        && (output_padding_value[0] == 0) && (output_padding_value[1] == 0)) {
       return true;
     }
     return false;
   };
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(conv_with_quant, conv_with_quant_prepack);
+  rewriter.RegisterRewritePattern(convolution, conv2d);
   rewriter.runOnGraph(graph, filter);
 }
 
@@ -1043,9 +1041,9 @@ graph(%self, %scale, %zero_point, %dtype):
 }
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
+  replaceConvolutionWithConv2d(graph);
   insertPrepackUnpackForLinear(graph);
   insertPrepackUnpackForConv2d(graph);
-  insertPrepackUnpackForConvolution(graph);
 }
 
 void InsertPrepackUnpack(script::Module& module) {
