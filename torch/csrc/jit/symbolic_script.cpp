@@ -602,7 +602,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None
 
-            return torch.ones_like(self), backward
+            return torch.ones_like(self, memory_format=1), backward
 
         def pow_0(self,
                   exponent: number):
@@ -1169,10 +1169,10 @@ const std::vector<std::string> functions = {
             p1m = 1. - p
             if train:
                 if use_cuda:
-                    mask = torch.rand_like(input) < p1m
+                    mask = torch.rand_like(input, memory_format=1) < p1m
                     res = mask.type_as(input) * input * (1./p1m)
                 else:
-                    mask = torch.empty_like(input)
+                    mask = torch.empty_like(input, memory_format=1)
                     mask.bernoulli_(p1m)
                     res = mask * input / p1m
             else:

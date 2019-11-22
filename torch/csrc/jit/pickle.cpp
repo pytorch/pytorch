@@ -36,6 +36,7 @@ std::vector<char> pickle(
 // This has to live here instead of the C++ API to mirror torch.save since the
 // mobile build excludes the C++ API
 std::vector<char> pickle_save(const at::IValue& ivalue) {
+#ifndef C10_MOBILE
   // Pickle the IValue into an array of bytes
   std::vector<char> pickle_data;
   Pickler pickler(
@@ -49,7 +50,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   pickler.stop();
 
   std::vector<char> container_data;
-  container_data.reserve(pickle_data.size() );
+  container_data.reserve(pickle_data.size());
 
   caffe2::serialize::PyTorchStreamWriter writer(
       [&](const void* void_bytes, size_t len) {
@@ -67,6 +68,11 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
       pickler.tensorData(),
       writer);
   return container_data;
+#else
+  AT_ERROR(
+      "pickle_save not supported on mobile "
+      "(see https://github.com/pytorch/pytorch/pull/30108)");
+#endif
 }
 
 class VectorReader : public caffe2::serialize::ReadAdapterInterface {
