@@ -244,7 +244,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     const auto& meta_data = meta_it->second;
     size_t meta_data_pos = 0;
     auto meta_data_read_func = [&](char* buf, size_t n) -> size_t {
-      if (meta_data_pos >= meta_data.second) {
+      if (meta_data_pos >= meta_data.second || n == 0) {
         return 0;
       }
       size_t to_copy =
@@ -260,7 +260,9 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       }
       const auto& idat = it->second;
       auto dptr = at::getCPUAllocator()->allocate(idat.second);
-      memcpy(dptr.get(), idat.first, idat.second);
+      if (idat.second != 0) {
+        memcpy(dptr.get(), idat.first, idat.second);
+      }
       return dptr;
     };
 

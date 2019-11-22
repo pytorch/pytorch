@@ -72,6 +72,7 @@ if (ANDROID_ABI)
   endfunction(import_static_lib)
 
   import_static_lib(libtorch)
+  import_static_lib(libtorch_cpu)
   import_static_lib(libc10)
   import_static_lib(libnnpack)
   import_static_lib(libpytorch_qnnpack)
@@ -85,6 +86,7 @@ if (ANDROID_ABI)
       -Wl,--gc-sections
       -Wl,--whole-archive
       libtorch
+      libtorch_cpu
       -Wl,--no-whole-archive
       libc10
       libnnpack
@@ -102,6 +104,7 @@ else()
       -Wl,--gc-sections
       -Wl,--whole-archive
       torch
+      torch_cpu
       -Wl,--no-whole-archive
       c10
       nnpack

@@ -6,6 +6,7 @@ from . import WorkerInfo
 from . import backend_registry
 from .internal import _internal_rpc_pickler, PythonUDF
 
+import contextlib
 import functools
 import numbers
 import sys
@@ -15,6 +16,19 @@ import torch.distributed as dist
 
 _agent = None
 
+_default_pickler = _internal_rpc_pickler
+
+@contextlib.contextmanager
+def _use_rpc_pickler(rpc_pickler):
+    r"""
+    rpc_pickler: (.internal._InternalRPCPickler) Overrides the default RPC pickler
+    """
+    global _default_pickler
+    _default_pickler = rpc_pickler
+    try:
+        yield
+    finally:
+        _default_pickler = _internal_rpc_pickler
 
 def _require_initialized(func):
     @functools.wraps(func)
@@ -28,11 +42,28 @@ def _require_initialized(func):
     return wrapper
 
 
-def join_rpc():
+def wait_all_workers():
     r"""
-    Block until all local and remote RPC processes reach this method, process
-    (send and receive) all pending messages, and then destroy local RPC agent.
-    Every RPC process must call this method before exit.
+    Block until all local and remote RPC processes reach this method, and then
+    destroy local the RPC agent. Every RPC process must call this method before
+    exit. This should be used to terminate the RPC framework, and there is no
+    guarantee that the RPC framework will work after this method returns.
+
+    Example::
+
+        On worker 0:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> # do some work
+        >>> result = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(1), 1))
+        >>> # ready to shutdown
+        >>> rpc.wait_all_workers()
+
+        On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> # wait for worker 0 to finish work, and then shutdown.
+        >>> rpc.wait_all_workers()
     """
     global _agent
 
@@ -40,14 +71,13 @@ def join_rpc():
         _agent.join()
         _agent = None
         _destroy_rref_context()
-        # clean up python rpc handler in join_rpc(), see comments in
+        # clean up python rpc handler in wait_all_workers(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
         # interpreter exists
         _cleanup_python_rpc_handler()
 
-
-# TODO: add a context manager to wrap _init_rpc_backend and join_rpc
+# TODO: add a context manager to wrap _init_rpc_backend and wait_all_workers
 def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,
     store=None,
@@ -160,16 +190,15 @@ def remote(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_info("worker1")
-        >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
+        >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
-        >>> rpc.join_rpc()
+        >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
-        >>> rpc.join_rpc()
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.wait_all_workers()
     """
     qualified_name = torch.jit._find_builtin(func)
 
@@ -181,7 +210,7 @@ def remote(to, func, args=None, kwargs=None):
         return _invoke_remote_builtin(
             _agent, info, qualified_name, *args, **kwargs)
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         return _invoke_remote_python_udf(
             _agent, info, pickled_python_udf, tensors)
@@ -202,7 +231,7 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
             _agent, info, qualified_name, *args, **kwargs
         )
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = _invoke_rpc_python_udf(
             _agent, info, pickled_python_udf, tensors)
@@ -233,12 +262,12 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
-        >>> rpc.join_rpc()
+        >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
-        >>> rpc.join_rpc()
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut.wait()
@@ -270,16 +299,15 @@ def rpc_async(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_id("worker1")
-        >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
+        >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> fut2 = rpc.rpc_async("worker1", min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
-        >>> rpc.join_rpc()
+        >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
-        >>> rpc.join_rpc()
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut
