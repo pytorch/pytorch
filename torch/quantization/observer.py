@@ -891,6 +891,9 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
+    def get_qparams(self):
+        return self.calculate_qparams()
+
 
 # Restrict activations to be in the range (0,127)
 default_observer = MinMaxObserver.with_args(reduce_range=True)
