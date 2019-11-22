@@ -274,7 +274,6 @@ void Reducer::autograd_hook(VariableIndex index) {
   // function and their indexes stored in the `unused_parameters_` vector.
   if (!has_marked_unused_parameters_ && !unused_parameters_.empty()) {
     has_marked_unused_parameters_ = true;
-
     for (const auto& unused_index : unused_parameters_) {
       mark_variable_ready(unused_index);
     }
