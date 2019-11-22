@@ -27,7 +27,7 @@ class LinearReLU(nnq.Linear):
 
     def forward(self, input):
         Y_q = torch.ops.quantized.linear_relu(
-            input, self._packed_params,
+            input, self._packed_params._packed_params,
             float(self.scale),
             int(self.zero_point))
         return Y_q
