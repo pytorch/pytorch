@@ -1,0 +1,13 @@
+language: node_js
+node_js:
+  - "7"
+install:
+  - npm i
+  - npm i -g codecov
+script:
+  - npm run coverage
+  - node_modules/.bin/nyc report --reporter=text-lcov > coverage.lcov
+  - codecov
+cache:
+  directories:
+    - node_modules
