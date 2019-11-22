@@ -50,7 +50,7 @@ class BoundShapeInferencerBase {
     std::stringstream ss;
     for (const auto& kv : shape_info_) {
       const auto& s = kv.second;
-      ss << s.shape.name() << ": dim_type: " << s.dim_type << ", dims: [";
+      ss << s.shape.name() << ": dim_type: " << s.getDimType() << ", dims: [";
       for (const auto d : s.shape.dims()) {
         ss << d << ", ";
       }
@@ -76,17 +76,17 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
       caffe2::Workspace* ws) override;
 
  protected:
-  TensorShape& CheckAndSetTensorShapeAndType(
+  TensorShape& CheckAndSetTensorBoundShape(
       const std::string& name,
-      ShapeInfo::DimType t,
+      const std::vector<TensorBoundShape::DimType>& t,
       std::vector<int64_t> bound_dims,
       TensorProto::DataType type,
       bool is_quantized,
       bool allow_existing_shape = false);
 
-  TensorShape& SetTensorShapeAndTypeIfNotExist(
+  TensorShape& SetTensorBoundShapeIfNotExist(
       const std::string& name,
-      ShapeInfo::DimType t,
+      const std::vector<TensorBoundShape::DimType>& t,
       std::vector<int64_t> bound_dims,
       TensorProto::DataType type,
       bool is_quantized);
@@ -109,7 +109,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
 
   void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) const;
 
-  ShapeInfo::DimType current_dim_type_{ShapeInfo::DimType::BATCH};
+  TensorBoundShape::DimType current_dim_type_{TensorBoundShape_DimType_BATCH};
   int64_t current_max_batch_size_{0};
 };
 
