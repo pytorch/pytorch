@@ -126,7 +126,7 @@ class RRefContext {
   void finishForkRequest(const ForkId& forkId, worker_id_t parent);
 
   // If there is any leak on any RRef, this method will throw an error.
-  void checkRRefLeaks();
+  void checkRRefLeaks(bool ignoreRRefLeak);
 
   static std::atomic<local_id_t> nextLocalId_;
 

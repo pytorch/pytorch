@@ -21,9 +21,7 @@ void RRefContext::destroyInstance(bool ignoreRRefLeak) {
     std::lock_guard<std::mutex> lock(RRefContext::destroyedMutex_);
     RRefContext::destroyed_ = true;
   }
-  if (!ignoreRRefLeak) {
-    RRefContext::getInstance().checkRRefLeaks();
-  }
+  RRefContext::getInstance().checkRRefLeaks(ignoreRRefLeak);
 }
 
 void RRefContext::handleException(const Message& message) {
@@ -45,7 +43,7 @@ RRefContext::~RRefContext() {
   }
 }
 
-void RRefContext::checkRRefLeaks() {
+void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
   if (!forks_.empty()) {
     std::stringstream ss;
     for (auto& entry : forks_) {
@@ -55,7 +53,21 @@ void RRefContext::checkRRefLeaks() {
            << std::endl;
       }
     }
-    AT_ERROR(ss.str());
+
+    if (ignoreRRefLeak) {
+      LOG(WARNING) << "Detected RRef Leaks durinig shutdown. This usually "
+          << "occurs when the application code still holds references to RRef "
+          << "instances when calling `shutdown()`. If the program has "
+          << "completed correctly and the process is exiting, it is OK to "
+          << "ignore these leaks. However, if you program will keep running "
+          << "after this, these leaks could result in memory leaks on RRef "
+          << "owners. Please make sure all RRefs are out of scope and Python "
+          << "GC has deleted them before calling `shutdown()`: \n"
+          << ss.str() << std::endl;
+
+    } else {
+      AT_ERROR(ss.str());
+    }
   }
 }
 
