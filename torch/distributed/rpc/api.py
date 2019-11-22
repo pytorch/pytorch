@@ -88,7 +88,9 @@ def shutdown():
     r"""
     Perform a local shutdown of the RPC agent, and then destroy the RPC agent.
     This stops the local agent from  accepting outstanding requests, and shuts
-    down the RPC framework by terminating all RPC threads.
+    down the RPC framework by terminating all RPC threads. If wait_all_workers()
+    is not called before this function, there is no guarantee that this
+    shutdown is graceful.
     """
     global _agent
     if _agent:
