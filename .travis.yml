@@ -1,13 +1,11 @@
-language: node_js
-node_js:
-  - "7"
+language: python
+python:
+  - 2.7
+  - 3.3
 install:
-  - npm i
-  - npm i -g codecov
+  - pip install -r requirements.txt
+  - pip install coveralls
 script:
-  - npm run coverage
-  - node_modules/.bin/nyc report --reporter=text-lcov > coverage.lcov
-  - codecov
-cache:
-  directories:
-    - node_modules
+  coverage run --source=moscowdjango,meetup manage.py test
+after_success:
+  coveralls
