@@ -734,10 +734,9 @@ class ModuleUseDeduper {
 
  private:
   // Analyze the code to record information represents
-  // uses of the module to dedup the module uses, which
-  // we'll use later to actually perform the dedup operation
-  // Please see the comments of member variables of the class
-  // for more information
+  // uses of the module, which we'll use later to actually perform the dedup
+  // operation Please see the comments of member variables of the class for more
+  // information
   void findModuleUses(Graph* graph) {
     GRAPH_DUMP("Finding module uses for ", graph);
 
