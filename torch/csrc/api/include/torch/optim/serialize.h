@@ -53,6 +53,18 @@ void serialize(
   const std::string& key,
   ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state);
 
+//todo-description
+void serialize(
+  serialize::OutputArchive& archive,
+  const std::string& key,
+  const std::vector<OptimizerParamGroup>& param_groups);
+
+//todo-description
+void serialize(
+  serialize::InputArchive& archive,
+  const std::string& key,
+  std::vector<std::pair<std::vector<std::string>, OptimizerOptions>>& param_groups);
+
 /// Utility function to save a vector of buffers.
 template <typename BufferContainer>
 void serialize(

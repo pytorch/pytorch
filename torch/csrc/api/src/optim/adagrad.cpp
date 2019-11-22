@@ -17,15 +17,15 @@ AdagradOptions::AdagradOptions(double learning_rate)
 void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
   c10::IValue ivalue;
   archive.read("learning_rate", ivalue);
-  this->step(ivalue.toDouble());
+  this->learning_rate(ivalue.toDouble());
   archive.read("lr_decay", ivalue);
-  this->step(ivalue.toDouble());
+  this->lr_decay(ivalue.toDouble());
   archive.read("weight_decay", ivalue);
-  this->step(ivalue.toDouble());
+  this->weight_decay(ivalue.toDouble());
   archive.read("initial_accumulator_value", ivalue);
-  this->step(ivalue.toDouble());
+  this->initial_accumulator_value(ivalue.toDouble());
   archive.read("eps", ivalue);
-  this->step(ivalue.toDouble());
+  this->eps(ivalue.toDouble());
 }
 
 void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) {
