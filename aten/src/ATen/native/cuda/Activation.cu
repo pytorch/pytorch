@@ -384,9 +384,6 @@ Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar th
   return threshold_out_cuda(nullopt, self, threshold, 0, grad);
 }
 
-REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
-REGISTER_DISPATCH(GeluKernel, &GeluCUDAKernelImpl);
-REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardCUDAKernelImpl);
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 
 }}  // namespace at::native

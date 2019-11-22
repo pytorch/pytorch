@@ -228,7 +228,7 @@ void hardshrink_backward_cpu_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();
     auto max_val = max.to<scalar_t>();
     cpu_kernel_vec(
