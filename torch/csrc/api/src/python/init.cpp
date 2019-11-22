@@ -2,7 +2,7 @@
 #include <torch/python.h>
 
 #include <torch/nn/module.h>
-#include <torch/csrc/ordered_dict.h>
+#include <c10/util/ordered_dict.h>
 
 #include <torch/csrc/utils/pybind.h>
 

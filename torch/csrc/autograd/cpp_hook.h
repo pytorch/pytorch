@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/ordered_dict.h>
+#include <c10/util/ordered_dict.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <functional>
 #include <memory>
