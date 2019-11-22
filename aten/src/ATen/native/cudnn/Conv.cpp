@@ -865,9 +865,24 @@ void raw_cudnn_convolution_forward_out(
   ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
-  args.idesc.set(input);
-  args.wdesc.set(weight);
-  args.odesc.set(output);
+  // overwrite_nhwc does two things:
+  //   1. handles the ambiguous case where ChannelsLast could not be encoded in
+  //      strides;
+  //   2. handles cuDNN's stringent requirement on strides for size-1
+  //      dimensions. If we know a tensor is ChannelsLast packed, we'll generate
+  //      proper strides to make it compatible with cuDNN, since PyTorch doesn't
+  //      regulate stride on size-1 dimension at all.
+  bool overwrite_nhwc = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  overwrite_nhwc = overwrite_nhwc &&
+      input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+      weight.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+      output.is_contiguous(at::MemoryFormat::ChannelsLast);
+  args.idesc.set(input, overwrite_nhwc);
+  args.wdesc.set(weight, 0, overwrite_nhwc);
+  args.odesc.set(output, overwrite_nhwc);
+
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   // TODO: when we do legacy group convolution support, we'll repeatedly
@@ -999,9 +1014,35 @@ void raw_cudnn_convolution_backward_input_out(
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
-  args.idesc.set(grad_input);
-  args.wdesc.set(weight);
-  args.odesc.set(grad_output);
+  // overwrite_nhwc does two things:
+  //   1. handles the ambiguous case where ChannelsLast could not be encoded in
+  //      strides;
+  //   2. handles cuDNN's stringent requirement on strides for size-1
+  //      dimensions. If we know a tensor is ChannelsLast packed, we'll generate
+  //      proper strides to make it compatible with cuDNN, since PyTorch doesn't
+  //      regulate stride on size-1 dimension at all.
+  bool overwrite_nhwc = grad_input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      grad_output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  printf("attempted format: %d\n", overwrite_nhwc);
+  overwrite_nhwc = overwrite_nhwc &&
+      grad_input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+      weight.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+      grad_output.is_contiguous(at::MemoryFormat::ChannelsLast);
+  if (grad_input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    printf("grad_input nhwc\n");
+  }
+  if (weight.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    printf("weight nhwc\n");
+  }
+  if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    printf("grad_output nhwc\n");
+  }
+  printf("actual format: %d\n", overwrite_nhwc);
+  args.idesc.set(grad_input, overwrite_nhwc);
+  args.wdesc.set(weight, 0, overwrite_nhwc);
+  args.odesc.set(grad_output, overwrite_nhwc);
+
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   cudnnConvolutionBwdDataAlgoPerf_t bwdDataAlgPerf;
@@ -1152,9 +1193,24 @@ void raw_cudnn_convolution_backward_weight_out(
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
-  args.idesc.set(input);
-  args.wdesc.set(grad_weight);
-  args.odesc.set(grad_output);
+  // overwrite_nhwc does two things:
+  //   1. handles the ambiguous case where ChannelsLast could not be encoded in
+  //      strides;
+  //   2. handles cuDNN's stringent requirement on strides for size-1
+  //      dimensions. If we know a tensor is ChannelsLast packed, we'll generate
+  //      proper strides to make it compatible with cuDNN, since PyTorch doesn't
+  //      regulate stride on size-1 dimension at all.
+  bool overwrite_nhwc = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      grad_weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      grad_output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  overwrite_nhwc = overwrite_nhwc &&
+      input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+      grad_weight.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+      grad_output.is_contiguous(at::MemoryFormat::ChannelsLast);
+  args.idesc.set(input, overwrite_nhwc);
+  args.wdesc.set(grad_weight, 0, overwrite_nhwc);
+  args.odesc.set(grad_output, overwrite_nhwc);
+
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   cudnnConvolutionBwdFilterAlgoPerf_t bwdFilterAlgPerf;

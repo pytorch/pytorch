@@ -117,14 +117,16 @@ public:
   // target broadcast, and then second, CuDNN takes of actually
   // broadcasting size 1 dimensions.
 
-  void set(const at::Tensor &t, size_t pad = 0);
-  void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
+  void set(const at::Tensor &t, size_t pad = 0, bool overwrite_nhwc_packed = false);
+  void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0, bool overwrite_nhwc_packed = false);
 
   void print();
 
 private:
-  void set(cudnnDataType_t dataType, int dim, int* size, int* stride) {
-    fixSizeOneDimStride(dim, size, stride);
+  void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool overwrite_nhwc_packed = false) {
+    if (!overwrite_nhwc_packed) {
+      fixSizeOneDimStride(dim, size, stride);
+    }
     AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
@@ -137,7 +139,7 @@ class FilterDescriptor
                       &cudnnDestroyFilterDescriptor>
 {
 public:
-  void set(const at::Tensor &t, int64_t pad = 0);
+  void set(const at::Tensor &t, int64_t pad = 0, bool overwrite_nhwc_packed = false);
 
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {

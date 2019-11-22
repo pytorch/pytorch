@@ -25,11 +25,17 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 } // anonymous namespace
 
 
-void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
-  set(getDataType(t), t.sizes(), t.strides(), pad);
+void TensorDescriptor::set(const at::Tensor &t, size_t pad, bool overwrite_nhwc_packed) {
+  IntArrayRef strides;
+  if (overwrite_nhwc_packed) {
+    strides = get_channels_last_strides(t.sizes());
+  } else {
+    strides = t.strides();
+  }
+  set(getDataType(t), t.sizes(), strides, pad, overwrite_nhwc_packed);
 }
 
-void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
+void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool overwrite_nhwc_packed) {
   size_t dim = t_sizes.size();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -47,7 +53,7 @@ void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArr
     size[i] = 1;
     stride[i] = 1;
   }
-  set(datatype, static_cast<int>(std::max(dim, pad)), size, stride);
+  set(datatype, static_cast<int>(std::max(dim, pad)), size, stride, overwrite_nhwc_packed);
 }
 
 std::string cudnnTypeToString(cudnnDataType_t dtype) {
@@ -102,7 +108,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
+void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool overwrite_nhwc_packed) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -126,7 +132,7 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
   }
   dim = std::max(dim, pad);
   cudnnTensorFormat_t filter_format = CUDNN_TENSOR_NCHW;
-  if (t.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+  if (overwrite_nhwc_packed || t.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
     filter_format = CUDNN_TENSOR_NHWC;
   }
   set(getDataType(t), (int) dim, size, filter_format);

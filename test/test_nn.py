@@ -10355,6 +10355,58 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
         self.assertEqual(input.grad, ref_input.grad)
 
+    def _run_conv(self, device, inp, grad, ref_conv, ref_input, ref_out, input_format, weight_format, grad_format, output_format):
+        conv = nn.Conv2d(inp.size(1), grad.size(1), ref_conv.weight.size(2)).float().to(device)
+        # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
+        conv.load_state_dict(ref_conv.state_dict())
+        conv.weight.data = conv.weight.contiguous(memory_format=weight_format)
+        input = inp.clone().contiguous(memory_format=input_format).requires_grad_()
+        grad = grad.contiguous(memory_format=grad_format)
+        out = conv(input)
+        out.backward(grad)
+        #self.assertTrue(out.is_contiguous(memory_format=output_format))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
+        self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    def _test_conv_cudnn_nhwc_nchw(self, n, c, h, w, k, filter_size, device):
+        data = torch.randint(1, 10, (n, c, h, w), dtype=torch.float32, device=device)
+
+        ref_input = data.clone().contiguous().requires_grad_(True)
+        ref_conv = nn.Conv2d(c, k, filter_size).float().to(device)
+        ref_out = ref_conv(ref_input)
+        grad = torch.randint(1, 10, ref_out.size(), dtype=torch.float32, device="cuda")
+        ref_out.backward(grad)
+        format_list = [
+            [torch.channels_last, torch.channels_last, torch.channels_last, torch.channels_last],
+            [torch.contiguous_format, torch.channels_last, torch.channels_last, torch.channels_last],
+            [torch.channels_last, torch.contiguous_format, torch.channels_last, torch.channels_last],
+            [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
+            [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last],
+            ]
+
+        for i_f, w_f, g_f, o_f in format_list:
+            self._run_conv(device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
+
+    @onlyCUDA
+    @skipCUDAIfNoCudnn
+    @skipCUDAIfRocm
+    def test_conv_cudnn_nhwc(self, device):
+        configs = [
+            #[4, 2, 8, 8, 4, 2],
+            #[4, 1, 8, 8, 4, 2],
+            #[1, 1, 8, 8, 4, 2],
+            #[4, 1, 8, 8, 4, 1],
+            [4, 2, 1, 8, 4, 1],
+            #[4, 2, 8, 8, 4, 1],
+        ]
+        for n, c, h, w, k, filter_size in configs:
+            self._test_conv_cudnn_nhwc_nchw(n,c,h,w,k,filter_size, device)
+
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
