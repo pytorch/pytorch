@@ -76,6 +76,7 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard import _caffe2_graph as c2_graph
+    from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
 
@@ -501,6 +502,9 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
         with self.createSummaryWriter() as w:
             w.add_graph(myLinear(), dummy_input)
+
+        graphdef, _ = graph(myLinear(), dummy_input)
+        self.assertTrue(compare_proto(graphdef, self))
 
     def test_mlp_graph(self):
         dummy_input = (torch.zeros(2, 1, 28, 28),)
