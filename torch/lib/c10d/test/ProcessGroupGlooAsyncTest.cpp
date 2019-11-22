@@ -244,6 +244,10 @@ void runAsyncBroadcastTest(
 }
 
 int main(int argc, char** argv) {
+  if (cudaNumDevices() == 0) {
+    std::cout << "Skipping test since CUDA is not available" << std::endl;
+    return 0;
+  }
   {
     TemporaryFile file;
     runAsyncAllreduceTest(file.path, 4, 2);
