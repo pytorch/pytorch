@@ -4,6 +4,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/quantized/QTensorImpl.h>
 
 #include <ATen/Config.h>
 namespace at {
@@ -78,7 +79,14 @@ Tensor contiguous(const Tensor & self) {
 
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (self.is_contiguous(memory_format)) {
-    return self;
+    if (self.suggest_memory_format() == memory_format) {
+      return self;
+    // as_strided is not allowed on quantized tensor, unless its QScheme is PER_TENSOR_AFFINE
+    } else if (!self.is_quantized() || get_qtensorimpl(self)->quantizer()->qscheme() == QScheme::PER_TENSOR_AFFINE) {
+      // It's only stride that we want to update, there's no need for copy
+      auto other = self.as_strided(self.sizes(), get_channels_last_strides(self.sizes()));
+      return other;
+    }
   }
   TORCH_CHECK(
       memory_format != MemoryFormat::Preserve,
