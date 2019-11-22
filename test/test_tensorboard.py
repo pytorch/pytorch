@@ -72,6 +72,7 @@ class BaseTestCase(TestCase):
 
 
 if TEST_TENSORBOARD:
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
@@ -507,8 +508,22 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         with self.createSummaryWriter() as w:
             w.add_graph(myLinear(), dummy_input)
 
-        graphdef, _ = graph(myLinear(), dummy_input)
-        self.assertTrue(compare_proto(graphdef, self))
+        actual_proto, _ = graph(myLinear(), dummy_input)
+
+        expected_str = read_expected_content(self)
+        expected_proto = GraphDef()
+        text_format.Parse(expected_str, expected_proto)
+
+        self.assertEquals(len(expected_proto.node), len(actual_proto.node))
+        for i in range(len(expected_proto.node)):
+            expected_node = expected_proto.node[i]
+            actual_node = actual_proto.node[i]
+            self.assertEquals(expected_node.name, actual_node.name)
+            self.assertEquals(expected_node.op, actual_node.op)
+            self.assertEquals(expected_node.input, actual_node.input)
+            self.assertEquals(expected_node.device, actual_node.device)
+            self.assertEquals(
+                sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
     def test_mlp_graph(self):
         dummy_input = (torch.zeros(2, 1, 28, 28),)
