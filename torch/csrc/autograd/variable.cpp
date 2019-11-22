@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
-#include <torch/csrc/utils/hooks.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 

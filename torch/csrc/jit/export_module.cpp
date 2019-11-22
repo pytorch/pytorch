@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/export.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/ordered_dict.h>
 #include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickle.h>
@@ -252,7 +253,7 @@ class ScriptModuleSerializer {
 
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
-  OrderedDict<std::string, PythonPrint> file_streams_;
+  c10::OrderedDict<std::string, PythonPrint> file_streams_;
   bool bytecode_format_;
 };
 

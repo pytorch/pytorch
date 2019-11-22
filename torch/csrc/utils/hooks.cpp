@@ -12,10 +12,16 @@ RemovableHandle::RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> ho
   RemovableHandle::next_id++;
 }
 
-void RemovableHandle::remove() {
-  if (auto hooks_dict = hooks_dict_ref.lock() && hooks_dict->contains(id_)) {
-    hooks_dict->erase(id_);
+void RemovableHandle::remove() const {
+  if (auto hooks_dict = hooks_dict_ref_.lock()) {
+    if (hooks_dict->contains(id_)) {
+      hooks_dict->erase(id_);
+    }
   }
+}
+
+unsigned RemovableHandle::id() const {
+  return id_;
 }
 
 } // namespace hooks

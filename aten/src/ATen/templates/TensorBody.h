@@ -47,7 +47,8 @@ namespace torch { namespace utils { namespace hooks {
 struct RemovableHandle {
  public:
   explicit RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> hooks_dict);
-  void remove();
+  void remove() const;
+  unsigned id() const;
 
  private:
   std::weak_ptr<torch::autograd::hooks_dict> hooks_dict_ref_;
