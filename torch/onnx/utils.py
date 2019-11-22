@@ -396,6 +396,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
             else:
                 operator_export_type = OperatorExportTypes.ONNX
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            do_constant_folding = False
+
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
