@@ -214,6 +214,10 @@ class TestTensorBoardWriter(BaseTestCase):
             sample_rate = 44100
 
             n_iter = 0
+            writer.add_hparams(
+                {'lr': 0.1, 'bsize': 1},
+                {'hparam/accuracy': 10, 'hparam/loss': 10}
+            )
             writer.add_scalar('data/scalar_systemtime', 0.1, n_iter)
             writer.add_scalar('data/scalar_customtime', 0.2, n_iter, walltime=n_iter)
             writer.add_scalars('data/scalar_group', {
