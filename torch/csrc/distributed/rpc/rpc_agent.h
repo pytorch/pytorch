@@ -12,8 +12,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct RpcAgentOptions {
-  RpcAgentOptions() noexcept = default;
+struct RpcBackendOptions {
+  RpcBackendOptions() noexcept = default;
   std::chrono::milliseconds rpcTimeout;
 };
 
