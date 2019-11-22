@@ -161,6 +161,17 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
   return div_out_sparse_zerodim(self, self, value);
 }
 
+// inplace coalesce
+const SparseTensor& coalesce_(const SparseTensor& tensor) {
+  SparseTensor coalesced = tensor.coalesce();
+  tensor._values().resize_as_(coalesced._values());
+  tensor._indices().resize_as_(coalesced._indices());
+  tensor._values().copy_(coalesced._values());
+  tensor._indices().copy_(coalesced._indices());
+  tensor._coalesced_(true);
+  return tensor;
+}
+
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "sparse division only supports division by a scalar (got shape ",
       value.sizes(), " for argument 'other')");
@@ -169,8 +180,17 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   AT_ASSERT(t.is_sparse());
 
   if (is_same_tensor(r, t)) {
+    // Can't divide an uncoalesced integral tensor accurately. e.g. for a sparse int tensor with value 6
+    // represented as values=[3, 3], integer division by 2 would give values=[1, 1] => 2 instead
+    // of 6 / 2 => 3
+    if (!r.is_coalesced() && isIntegralType(r.scalar_type(), true)) {
+      coalesce_(r);
+    }
     r._values().div_(value);
   } else {
+    if (!t.is_coalesced() && isIntegralType(r.scalar_type(), true)) {
+      coalesce_(t);
+    }
     r.resize_as_(t);
     auto indices = r._indices();
     indices.resize_as_(t._indices());
