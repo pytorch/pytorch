@@ -3751,7 +3751,7 @@
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_index_add_
+    CPU: index_add_cpu_
     CUDA: legacy::cuda::_th_index_add_
 
 - func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
