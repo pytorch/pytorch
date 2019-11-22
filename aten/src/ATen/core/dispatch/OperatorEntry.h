@@ -41,6 +41,10 @@ public:
     return options_;
   }
 
+  void updateOptionsAliasAnalysis(AliasAnalysisKind a) {
+    options_.setAliasAnalysis(a);
+  }
+
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel);
   void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
