@@ -20,6 +20,11 @@ static std::unordered_set<Value *> collectLoopCounts(Node *n) {
     if (outerNode->kind() == prim::Loop) {
       LoopView lv(outerNode);
       loopCounts.insert(lv.currentTripCount());
+      // if maxTripCount is a constant it will be memoized instead
+      // of being added as a graph input, so we can safely skip it
+      if (lv.maxTripCount()->node()->kind() != prim::Constant) {
+        loopCounts.insert(lv.maxTripCount());
+      }
     }
     it = outerNode->owningBlock();
   }
