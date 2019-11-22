@@ -21,7 +21,7 @@
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/tracer.h>
 
-#include <torch/csrc/api/include/torch/ordered_dict.h>
+#include <torch/csrc/ordered_dict.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
