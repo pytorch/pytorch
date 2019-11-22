@@ -103,7 +103,6 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
   *address = address && val;
 }
 
-#ifdef __HIP_PLATFORM_HCC__
 static inline __device__ void atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
     unsigned int * address_as_ui =
       (unsigned int *) ((char *)address - ((size_t)address & 2));
@@ -119,7 +118,6 @@ static inline __device__ void atomicAdd(at::BFloat16 *address, at::BFloat16 val)
       old = atomicCAS(address_as_ui, assumed, old);
     } while (assumed != old);
 }
-#endif
 
 static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
   #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
