@@ -6,7 +6,7 @@
 
 namespace torch { namespace autograd {
 
-using hooks_map = torch::OrderedDict<int64_t, std::function<Variable(const Variable&)>>;
+using hooks_map = torch::OrderedDict<unsigned, std::function<Variable(const Variable&)>>;
 
 struct CppFunctionPreHook : public FunctionPreHook {
   CppFunctionPreHook(const std::shared_ptr<hooks_map> &hooks, int value_idx);

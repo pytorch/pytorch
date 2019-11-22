@@ -350,7 +350,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
 
 void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
   auto &map = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_map;
-  TORCH_CHECK(map && pos < list->size() , "Invalid index, no hook at position ", pos);
+  TORCH_CHECK(map && map->contains(pos), "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*map)[pos] = nullptr;
 }
