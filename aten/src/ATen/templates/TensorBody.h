@@ -44,7 +44,7 @@ using hooks_dict = c10::OrderedDict<unsigned, std::function<at::Tensor(const at:
 namespace torch { namespace utils { namespace hooks {
 
 /// A handle which provides the capability to remove a hook.
-struct RemovableHandle {
+struct CAFFE2_API RemovableHandle {
  public:
   explicit RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> hooks_dict);
   void remove() const;
@@ -498,7 +498,7 @@ class CAFFE2_API Tensor {
   template <typename T>
   using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, torch::utils::hooks::RemovableHandle>;
 
-  // Returns a handle with a method ``handle.remove()`` that removes the hook
+  // Returns a handle with a method `handle.remove()` that removes the hook
   // Register a hook with no return value
   template <typename T>
   hook_return_void_t<T> register_hook(T&& hook) const;
