@@ -37,7 +37,7 @@ namespace torch { namespace autograd {
 
 struct Node;
 
-using hooks_dict = c10::OrderedDict<unsigned, std::function<Tensor(const Tensor&)>>;
+using hooks_dict = c10::OrderedDict<unsigned, std::function<at::Tensor(const at::Tensor&)>>;
 
 }} // namespace torch::autograd
 
