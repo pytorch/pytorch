@@ -106,7 +106,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       Stack stack;
       stack.push_back(ret.value());
       {
-        pybind11::gil_scoped_acquire ag;
+        AutoGIL ag;
         // The createPyObjectForStack does not acquire GIL, but creating a new
         // py::object requires GIL.
         return torch::jit::createPyObjectForStack(std::move(stack));
