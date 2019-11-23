@@ -455,7 +455,7 @@ class QuantizeHelper {
   std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
-  void collectObserverNodesAndQuantizedValue(Value*);
+  void collectObserverNodesAndValueToQuantize(Value*);
   void removeObservers();
   void quantizeTensors();
 
@@ -468,7 +468,7 @@ class QuantizeHelper {
 };
 
 
-void QuantizeHelper::collectObserverNodesAndQuantizedValue(Value* v) {
+void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
@@ -634,7 +634,7 @@ void InsertQuantDeQuantImpl(
             InsertQuantDeQuantImpl(m.value(), module_method_name);
           }
         }
-        qh.collectObserverNodesAndQuantizedValue(v);
+        qh.collectObserverNodesAndValueToQuantize(v);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -644,7 +644,7 @@ void InsertQuantDeQuantImpl(
   }
 
   for (Value* v : input_values) {
-    qh.collectObserverNodesAndQuantizedValue(v);
+    qh.collectObserverNodesAndValueToQuantize(v);
   }
   qh.removeObservers();
   qh.quantizeTensors();
