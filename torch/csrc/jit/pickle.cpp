@@ -75,6 +75,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 #endif
 }
 
+#ifndef C10_MOBILE
 class VectorReader : public caffe2::serialize::ReadAdapterInterface {
    public:
     VectorReader(const std::vector<char>& data) : data_(std::move(data)) {}
@@ -96,9 +97,11 @@ class VectorReader : public caffe2::serialize::ReadAdapterInterface {
 private:
     std::vector<char> data_;
 };
+#endif
 
 IValue pickle_load(const std::vector<char>& data) {
   // Read in the pickle data
+#ifndef C10_MOBILE
   caffe2::serialize::PyTorchStreamReader reader(
       caffe2::make_unique<VectorReader>(data));
 
@@ -108,6 +111,11 @@ IValue pickle_load(const std::vector<char>& data) {
       /*obj_loader=*/c10::nullopt,
       /*device=*/c10::nullopt,
       reader);
+#else
+  AT_ERROR(
+      "pickle_load not supported on mobile "
+      "(see https://github.com/pytorch/pytorch/pull/30108)");
+#endif
 };
 
 IValue unpickle(
