@@ -79,10 +79,11 @@ PyObject* _ListNestedTensorVariable_unbind(PyObject* self_) {
   }
   for (size_t i = 0; i < children.size(); i++) {
     if (children[i]._children.size() == 0) {
+      Py_IncRef(children[i]._variable_node._variable.pyobj());
       if (PyList_SetItem(
               return_list,
               i,
-              THPVariable_Wrap(children[i]._variable_node._variable)) == -1) {
+              children[i]._variable_node._variable.pyobj()) == -1) {
         throw python_error();
       }
     } else {

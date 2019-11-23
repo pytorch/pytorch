@@ -120,8 +120,7 @@ static bool _verify_variables(
 
 static _NestedNode _get_structure(PyObject* tensors) {
   if (THPVariable_Check(tensors)) {
-    auto variable_ = THPVariable_Unpack(tensors);
-    auto variable = make_variable_view(variable_, variable_);
+    Variable variable = THPVariable_Unpack(tensors);
     return _NestedNode(_VariableNode(variable));
   } else {
     std::vector<_NestedNode> meta_nodes;
