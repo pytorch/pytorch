@@ -359,8 +359,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   if (next_bucket_ == buckets_.size()) {
     // H2D from local_used_maps_ to local_used_maps_dev_
     for (size_t i = 0; i < local_used_maps_.size(); i++) {
-      local_used_maps_dev_[i] =
-          local_used_maps_[i].to(local_used_maps_dev_[i].device());
+      local_used_maps_dev_[i].copy_(local_used_maps_[i]);
     }
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 
@@ -670,7 +669,7 @@ void Reducer::finalize_backward() {
   local_used_work_->wait();
   // D2H from local_used_maps_dev_ to local_used_maps_
   for (size_t i = 0; i < local_used_maps_.size(); i++) {
-    local_used_maps_[i] = local_used_maps_dev_[i].to(at::kCPU);
+    local_used_maps_[i].copy_(local_used_maps_dev_[i]);
   }
 
   // Wait for asynchronous reduction to complete and unflatten contents.
