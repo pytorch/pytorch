@@ -29,6 +29,15 @@ PyObject *THPDtype_is_floating_point(THPDtype *self, PyObject *noargs)
   }
 }
 
+PyObject *THPDtype_is_signed(THPDtype *self, PyObject *noargs)
+{
+  if (at::isSignedType(self->scalar_type)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 PyObject *THPDtype_reduce(THPDtype *self, PyObject *noargs)
 {
   /*
@@ -42,6 +51,7 @@ typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDtype_properties[] = {
   {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
+  {"is_signed", (getter)THPDtype_is_signed, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
