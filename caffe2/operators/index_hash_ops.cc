@@ -16,6 +16,7 @@ specified number. All input and output indices are enforced to be positive.
 )DOC")
     .Input(0, "Indices", "Input feature indices.")
     .Output(0, "HashedIndices", "Hashed feature indices.")
+    .AllowOneToOneInplace()
     .Arg("seed", "seed for the hash function")
     .Arg("modulo", "must be > 0, hashed ids will be modulo this number")
     .TensorInferenceFunction([](const OperatorDef& /* unused */,
