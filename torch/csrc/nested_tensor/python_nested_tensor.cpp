@@ -117,7 +117,7 @@ static PyObject* _ListNestedTensorVariable_pynew(
   if (false) {
     if (PyObject_Length(listObj) > 0) {
       Variable first_variable = _get_first_variable(listObj);
-      if (not _verify_variables(first_variable, listObj)) {
+      if (!_verify_variables(first_variable, listObj)) {
         throw std::runtime_error("Invalid list of Tensors");
       }
     }
@@ -129,7 +129,7 @@ static PyObject* _ListNestedTensorVariable_pynew(
 static PyObject* _ListNestedTensorVariable_requires_grad_(
     PyObject* self_,
     PyObject* bool_arg) {
-  if (not PyBool_Check(bool_arg)) {
+  if (!PyBool_Check(bool_arg)) {
     throw std::runtime_error("Argument must be bool.");
   }
   auto& self = reinterpret_cast<_ListNestedTensorVariable*>(self_)->cdata;
