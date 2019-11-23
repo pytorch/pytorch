@@ -170,7 +170,7 @@ inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) co
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
@@ -179,7 +179,7 @@ inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+  return kernel.template callUnboxedOnly<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
@@ -187,7 +187,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  kernel.callBoxed(stack);
+  kernel.callBoxed(op, stack);
 }
 
 inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) const {

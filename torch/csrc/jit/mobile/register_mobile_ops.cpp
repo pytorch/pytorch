@@ -31,9 +31,8 @@ void listAppend(Stack& stack) {
   list.push_back(std::move(el));
   push(stack, std::move(list));
 }
-}
 
-static auto registry0 = torch::RegisterOperators().op(
+static auto registry = torch::RegisterOperators().op(
   "_aten::add.Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
@@ -69,7 +68,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
      at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -93,7 +92,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
      at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -191,7 +190,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
 #ifdef USE_STATIC_DISPATCH
    at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
@@ -287,7 +286,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).permute(
          (std::move(peek(*stack, 1, 2))).toIntListRef()
      );
@@ -321,7 +320,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::cat(
          (std::move(peek(*stack, 0, 2))).toTensorListRef(),
          (std::move(peek(*stack, 1, 2))).toInt()
@@ -332,7 +331,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
   torch::RegisterOperators::options().catchAllKernel(
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
       c10::IValue self, obj;
       pop(*stack, self, obj);
       push(*stack, self.isSameIdentity(obj));
@@ -340,7 +339,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::log_softmax(
        (std::move(peek(*stack, 0, 3))).toTensor(),
        (std::move(peek(*stack, 1, 3))).toInt(),
@@ -352,7 +351,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
      auto result_ = at::softmax(
        (std::move(peek(*stack, 0, 3))).toTensor(),
        (std::move(peek(*stack, 1, 3))).toInt(),
@@ -364,7 +363,7 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::warn() -> void",
   torch::RegisterOperators::options().catchAllKernel(
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
     drop(*stack, 1);
     pop(*stack);
   })
@@ -391,14 +390,15 @@ static auto registry0 = torch::RegisterOperators().op(
 ).op(
   "_aten::append.Tensor(Tensor self) -> void",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
     listAppend<at::Tensor>(*stack);
   })
 ).op(
   "_aten::append.int(int self) -> void",
   torch::RegisterOperators::options().catchAllKernel(
-  [](c10::OperatorKernel* kernel, Stack* stack) {
+  [](c10::OperatorKernel* kernel, const c10::OperatorHandle& op, Stack* stack) {
     listAppend<int64_t>(*stack);
   })
 );
 
+}
