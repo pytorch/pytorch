@@ -377,7 +377,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   using IterArgs<MakeNextFunctionList>::operator();
   void operator()(const Variable& variable) {
     if (variable.defined()) {
-      next_edges.push_back(variable.gradient_edge());
+      next_edges.push_back(impl::gradient_edge(variable));
     } else {
       next_edges.emplace_back();
     }
@@ -401,7 +401,7 @@ inline void create_gradient_edge(
     std::shared_ptr<Node> function) {
   // Copy before move.
   const auto input_nr = function->add_input_metadata(variable);
-  variable.set_gradient_edge({std::move(function), input_nr});
+  impl::set_gradient_edge(variable, {std::move(function), input_nr});
 }
 
 /// Return true if any of the variables in the list require a gradient.

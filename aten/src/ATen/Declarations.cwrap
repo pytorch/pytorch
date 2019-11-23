@@ -6,6 +6,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   device_guard: False
   return: argument 0
   options:
@@ -27,6 +28,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedFill
   variants: function
   return: self
@@ -42,6 +44,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedFillBool
   variants: function
   return: self
@@ -57,6 +60,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedCopy
   variants: function
   return: self
@@ -71,6 +75,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedCopyBool
   variants: function
   return: self
@@ -86,6 +91,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -102,6 +108,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -119,6 +126,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -138,23 +146,9 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   arguments:
     - THTensor* self
-]]
-[[
-  name: _th_resize_as_
-  cname: resizeAs
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  return: self
-  scalar_check: the_template_->dim() == 0
-  arguments:
-    - THTensor* self
-    - THTensor* the_template
 ]]
 [[
   name: _th_index_select
@@ -221,6 +215,8 @@
   name: _th_index_add_
   cname: indexAdd
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - THTensor* self
@@ -490,6 +486,7 @@
         - THTensor* self
     - cname: cmin
       return: argument 0
+      scalar_check: false
       arguments:
       - arg: THTensor* result
         output: True
@@ -529,6 +526,7 @@
         - THTensor* self
     - cname: cmax
       return: argument 0
+      scalar_check: false
       arguments:
       - arg: THTensor* result
         output: True
@@ -577,6 +575,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* values
       output: True
@@ -782,6 +781,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -870,6 +870,7 @@
   cuda_bool: True
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -884,6 +885,7 @@
   cuda_bool: True
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -903,6 +905,7 @@
 [[
   name: _th_fmod
   return: argument 0
+  scalar_check: false
   variants:
     - function
   options:
@@ -940,6 +943,7 @@
 [[
   name: _th_remainder
   return: argument 0
+  scalar_check: false
   variants:
     - function
   options:
@@ -1056,12 +1060,12 @@
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
     ${THTensor}_diag(${state,}result_, self_, diagonal);
-    result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
   name: _th_addmm
   cname: addmm
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -1080,6 +1084,7 @@
 [[
   name: _th_addmm_
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: [function]
   return: self
   options:
@@ -1096,6 +1101,7 @@
   name: _th_addmv
   cname: addmv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   arguments:
@@ -1112,6 +1118,7 @@
   name: _th_addmv_
   cname: addmv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: self
   arguments:
@@ -1126,6 +1133,7 @@
   name: _th_addr
   cname: addr
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -1142,6 +1150,7 @@
 [[
   name: _th_addr_
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: addr
   return: self
   variants: function
@@ -1157,6 +1166,7 @@
   name: _th_ger
   cname: addr
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -1174,6 +1184,7 @@
 [[
   name: _th_mv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: addmv
   variants: function
   return: argument 0
@@ -1192,6 +1203,7 @@
 [[
   name: _th_mm
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   options:
@@ -1210,6 +1222,7 @@
 ]]
 [[
   name: _th_bmm
+  cuda_bfloat16: True
   cname: baddbmm
   variants:
     - function
@@ -1230,6 +1243,7 @@
 ]]
 [[
   name: _th_addbmm
+  cuda_bfloat16: True
   cname: addbmm
   variants:
     - function
@@ -1247,6 +1261,7 @@
 ]]
 [[
   name: _th_addbmm_
+  cuda_bfloat16: True
   cname: addbmm
   variants: function
   return: self
@@ -1260,6 +1275,7 @@
 ]]
 [[
   name: _th_baddbmm
+  cuda_bfloat16: True
   cname: baddbmm
   variants:
     - function
@@ -1289,6 +1305,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* res1
       output: True
@@ -1429,6 +1446,7 @@
     - CPU
     - CUDA
   return: argument 1,2
+  scalar_check: false
   arguments:
     - arg: THTensor* probs
     - arg: THIndexTensor* J
@@ -1595,6 +1613,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   arguments:
     - arg: THTensor* self
