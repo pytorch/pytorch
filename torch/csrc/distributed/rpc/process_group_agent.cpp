@@ -503,14 +503,14 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
     }
 
+    std::cv_status waitStatus = std::cv_status::no_timeout;
     if (sleepTime == INFINITE_TIMEOUT) {
       futureTimeoutCV_.wait(lock);
-      // End time has not arrived yet,
-      // no need to scan the future maps.
-      // Go back and update the sleepTime above,
-      continue;
     } else {
-      futureTimeoutCV_.wait_for(lock, sleepTime);
+      waitStatus = futureTimeoutCV_.wait_for(lock, sleepTime);
+    }
+    if (waitStatus == std::cv_status::no_timeout) {
+      continue;
     }
 
     if (shutdown_.load()) {
