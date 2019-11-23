@@ -50,6 +50,7 @@ Reducer::Reducer(
       require_finalize_(false),
       next_bucket_(0),
       has_marked_unused_parameters_(false),
+      local_used_maps_reduced_(false),
       backward_stats_base_(0) {
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
