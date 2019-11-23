@@ -103,7 +103,6 @@ bool nodeQuantizable(Node* n) {
       "conv2d",
       "linear",
       "relu",
-      "_convolution",
   };
   std::vector<Symbol> aten_funcs = {
       Symbol::aten("addmm"), Symbol::aten("matmul"), Symbol::aten("add_")};
@@ -220,7 +219,7 @@ bool isBiasOfConvOrLinear(Value* v) {
 
 bool isWeightOfConvOrLinear(Value* v) {
   for (const Use& u : v->uses()) {
-    if ((u.user->kind() == Symbol::aten("conv2d") || u.user->kind() == Symbol::aten("_convolution")) &&
+    if (u.user->kind() == Symbol::aten("conv2d") &&
         v == u.user->inputs().at(1)) {
       return true;
     } else if (u.user->kind() == prim::CallFunction &&
@@ -230,6 +229,39 @@ bool isWeightOfConvOrLinear(Value* v) {
     }
   }
   return false;
+}
+
+void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
+  std::string convolution = R"(
+graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %r = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+        return (%r) )";
+
+  std::string conv2d = R"(
+graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  // Filter the unsupported case
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto transposed_value = getIValue("transposed", match_vmap, vmap).value().toBool();
+    auto benchmark_value = getIValue("benchmark", match_vmap, vmap).value().toBool();
+    auto deterministic_value = getIValue("deterministic", match_vmap, vmap).value().toBool();
+    auto cudnn_enabled_value = getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
+    auto output_padding_value = getIValue("output_padding", match_vmap, vmap).value().toIntList();
+
+    if (!transposed_value && !benchmark_value && !deterministic_value && cudnn_enabled_value
+         && (output_padding_value[0] == 0) && (output_padding_value[1] == 0)) {
+      return true;
+    }
+    return false;
+  };
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(convolution, conv2d);
+  rewriter.runOnGraph(graph, filter);
 }
 
 // Clone observer module and add it to the original module,
@@ -324,6 +356,8 @@ void InsertObserversHelper::insertObservers(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
+  // must do constant propagation first before replacement
+  replaceConvolutionWithConv2d(graph);
   addIntermediateValuesToSkipObserver(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
@@ -726,39 +760,6 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
   rewriter.runOnGraph(graph);
 }
 
-void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
-  std::string convolution = R"(
-graph(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %r = aten::_convolution(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
-        return (%r) )";
-
-  std::string conv2d = R"(
-graph(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        return (%r) )";
-
-  // Filter the unsupported case
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto transposed_value = getIValue("transposed", match_vmap, vmap).value().toBool();
-    auto benchmark_value = getIValue("benchmark", match_vmap, vmap).value().toBool();
-    auto deterministic_value = getIValue("deterministic", match_vmap, vmap).value().toBool();
-    auto cudnn_enabled_value = getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
-    auto output_padding_value = getIValue("output_padding", match_vmap, vmap).value().toIntList();
-
-    if (!transposed_value && !benchmark_value && !deterministic_value && cudnn_enabled_value
-        && (output_padding_value[0] == 0) && (output_padding_value[1] == 0)) {
-      return true;
-    }
-    return false;
-  };
-
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(convolution, conv2d);
-  rewriter.runOnGraph(graph, filter);
-}
-
 c10::optional<IValue> toTwoElementIntList(Value* v) {
   auto* n = v->node();
   if (n->kind() == prim::Constant) {
@@ -1041,7 +1042,6 @@ graph(%self, %scale, %zero_point, %dtype):
 }
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
-  replaceConvolutionWithConv2d(graph);
   insertPrepackUnpackForLinear(graph);
   insertPrepackUnpackForConv2d(graph);
 }

@@ -69,6 +69,7 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
     {matmul_with_bias, quantized_linear},
     {matmul_no_bias, quantized_linear_no_bias}
   };
+
 }
 
 }} // torch::jit
