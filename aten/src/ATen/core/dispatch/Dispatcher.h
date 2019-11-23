@@ -127,7 +127,7 @@ private:
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
-  ska::flat_hash_map<TensorTypeId, KernelFunction> backendFallbackKernels_;
+  impl::KernelFunctionTable backendFallbackKernels_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -198,9 +198,9 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
       return *backendKernel;
     }
 
-    auto backendFallbackKernel = backendFallbackKernels_.find(*dispatchKey);
-    if (backendFallbackKernel != backendFallbackKernels_.end()) {
-      return backendFallbackKernel->second;
+    const auto& backendFallbackKernel = backendFallbackKernels_[*dispatchKey];
+    if (backendFallbackKernel.isValid()) {
+      return backendFallbackKernel;
     }
   }
 
