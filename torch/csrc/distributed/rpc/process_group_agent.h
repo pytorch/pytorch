@@ -51,6 +51,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   const WorkerInfo& getWorkerInfo(worker_id_t id) const override;
 
+  std::vector<WorkerInfo> getWorkerInfos() const override;
+
   void join() override;
 
   void sync() override;
