@@ -993,7 +993,7 @@ graph(%x : Tensor,
                    .check('Tensor = aten::conv2d') \
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                   .run(str(m._c.getattr("conv")._get_method('conv2d_forward').graph))
+                   .run(str(m._c.getattr("conv")._get_method('_conv_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_child_qconfig(self):
@@ -1046,8 +1046,8 @@ graph(%x : Tensor,
         check_not_observed(get_forward_graph(m._c))
         # check conv.forward is observed
         check_not_observed(get_forward_graph(m._c.getattr('conv')))
-        # check conv.conv2d_forward is observed
-        check_observed(get_module_method(m, 'conv', 'conv2d_forward').graph)
+        # check conv._conv_forward is observed
+        check_observed(get_module_method(m, 'conv', '_conv_forward').graph)
         # check sub is not observed
         check_not_observed(get_module_method(m, 'sub', 'forward'))
         # check forward of sub.linear is observed
@@ -1168,7 +1168,7 @@ graph(%x : Tensor,
                        .check(quant_func) \
                        .check_next("aten::dequantize") \
                        .check("return") \
-                       .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
+                       .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
 
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
