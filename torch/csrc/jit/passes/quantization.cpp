@@ -222,13 +222,53 @@ bool isWeightOfConvOrLinear(Value* v) {
     if (u.user->kind() == Symbol::aten("conv2d") &&
         v == u.user->inputs().at(1)) {
       return true;
-    } else if (u.user->kind() == prim::CallFunction &&
-               getFuncName(u.user->inputs()[0]) == "linear" &&
-               v == u.user->inputs().at(2)) {
+    } else if (
+        u.user->kind() == prim::CallFunction &&
+        getFuncName(u.user->inputs()[0]) == "linear" &&
+        v == u.user->inputs().at(2)) {
       return true;
     }
   }
   return false;
+}
+
+void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
+  std::string convolution = R"(
+graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %r = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+        return (%r) )";
+
+  std::string conv2d = R"(
+graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  // Filter the unsupported case
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto transposed_value =
+        getIValue("transposed", match_vmap, vmap).value().toBool();
+    auto benchmark_value =
+        getIValue("benchmark", match_vmap, vmap).value().toBool();
+    auto deterministic_value =
+        getIValue("deterministic", match_vmap, vmap).value().toBool();
+    auto cudnn_enabled_value =
+        getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
+    auto output_padding_value =
+        getIValue("output_padding", match_vmap, vmap).value().toIntList();
+
+    if (!transposed_value && !benchmark_value && !deterministic_value &&
+        cudnn_enabled_value && (output_padding_value[0] == 0) &&
+        (output_padding_value[1] == 0)) {
+      return true;
+    }
+    return false;
+  };
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(convolution, conv2d);
+  rewriter.runOnGraph(graph, filter);
 }
 
 // Clone observer module and add it to the original module,
@@ -245,7 +285,9 @@ Node* InsertObserversHelper::insertObserverFor(
 
   script::Module observer_module;
   if (isWeightOfConvOrLinear(v)) {
-    TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -323,6 +365,8 @@ void InsertObserversHelper::insertObservers(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
+  // must do constant propagation first before replacement
+  replaceConvolutionWithConv2d(graph);
   addIntermediateValuesToSkipObserver(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
@@ -596,8 +640,9 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   IValue qparams = calculate_qparams(std::vector<IValue>());
   checkCalculateQParamsResult(qparams);
   auto scalar_type = om.attr("dtype");
-  TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
-              "dtype of observer can't be undefined");
+  TORCH_CHECK(
+      scalar_type.toScalarType() != at::ScalarType::Undefined,
+      "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
 }
 
@@ -700,8 +745,7 @@ graph(%linear, %a_dequant, %w_quant, %b):
   };
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant,
-                                  linear_with_quant_prepack);
+  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
   rewriter.runOnGraph(graph, filter);
 }
 
