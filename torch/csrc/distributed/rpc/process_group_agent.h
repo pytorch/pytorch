@@ -106,7 +106,8 @@ class ProcessGroupAgent : public RpcAgent {
   // poll for timed out RPCs
   void pollTimedOutRPCs();
   // process timed out futures
-  const std::vector<FutureInfo> processTimedOutFutures();
+  const std::vector<FutureInfo> processTimedOutFutures(
+      std::unique_lock<std::mutex> lock);
   // compute the remaining time for an RPC, given its end time.
   const std::chrono::milliseconds getRPCRemainingTime(
       const std::chrono::milliseconds& rpcEndTime) const;
