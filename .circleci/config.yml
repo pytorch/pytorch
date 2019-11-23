@@ -2774,7 +2774,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -2786,7 +2786,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -2798,7 +2798,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -2810,7 +2810,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -2822,7 +2822,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2836,7 +2836,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2850,7 +2850,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2864,7 +2864,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2878,7 +2878,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2892,7 +2892,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2906,7 +2906,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2920,7 +2920,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2934,7 +2934,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2948,7 +2948,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2962,7 +2962,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2976,7 +2976,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_mac_test:
@@ -3562,7 +3562,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -3572,7 +3572,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -3582,7 +3582,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -3592,7 +3592,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3602,7 +3602,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3612,7 +3612,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3622,7 +3622,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3632,7 +3632,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3642,7 +3642,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3652,7 +3652,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3662,7 +3662,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3672,7 +3672,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3682,7 +3682,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3692,7 +3692,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3702,7 +3702,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3712,7 +3712,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_mac_build:
           name: binary_macos_wheel_2_7_cpu_nightly_build
           build_environment: "wheel 2.7 cpu"
@@ -4501,7 +4501,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -4512,7 +4512,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -4523,7 +4523,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -4534,7 +4534,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -4545,7 +4545,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4558,7 +4558,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4571,7 +4571,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4584,7 +4584,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4597,7 +4597,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4610,7 +4610,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4623,7 +4623,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4636,7 +4636,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4649,7 +4649,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4662,7 +4662,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4675,7 +4675,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4688,7 +4688,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       #- binary_linux_libtorch_2.7m_cpu_test:
