@@ -14,7 +14,9 @@
 #ifndef _WIN32
 #include <ctime>
 #endif
-
+#ifdef C10_IOS
+#include <sys/time.h>
+#endif
 #include <torch/csrc/autograd/record_function.h>
 
 typedef struct CUevent_st* CUDAEventStub;
@@ -76,7 +78,7 @@ inline int64_t getTime() {
   using namespace std::chrono;
   using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
-#elif defined(__MACH__) && !defined(CLOCK_REALTIME)
+#elif (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
   struct timeval now;
   gettimeofday(&now, NULL);
   return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
