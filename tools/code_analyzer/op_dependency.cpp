@@ -1,5 +1,5 @@
-// This LLVM pass takes LLVM bitcode / assembly as input and generates dependecy
-// graph among PyTorch ATen/C10 ops. From a set of root ops used by a model, we
+// This LLVM pass takes LLVM bitcode / assembly as input and generates
+// dependency graph among aten ops. From a set of root ops used by a model, we
 // can calculate transitive closure of all dependent ops, then we can produce a
 // custom LibTorch library with optimal build size which only registers and
 // contains ops needed by the specific model - unregistered / unused ops can be
@@ -7,60 +7,129 @@
 //
 // 1. Function Schema String -> Function (op registration)
 //
-// The analysis starts from searching for global string constants that look
-// like function schema, e.g.: "aten::cos_(Tensor(a!) self) -> Tensor(a!)". Then
-// search around the places using the function schema string constants. We use
-// fuzzy match to find all llvm::Function instances which are likely to be
-// registered as the implementation of the function schema. For example, for the
-// following code snippet that registers function schemas to function pointers:
+// The analysis starts from searching for global string constants that look like
+// function schema, e.g.: "aten::AA(Tensor self) -> Tensor" (from which we can
+// obtain operator name "aten::AA"). Then search around the places using the
+// function schema string constants. We use fuzzy match to find all
+// llvm::Function instances which are likely to be registered as the
+// implementation of the function schema. For example, for the following code
+// snippet that registers function schemas to function pointers:
 //
 // auto registerer = torch::RegisterOperators()
-// .op(torch::RegisterOperators::options()
-//   .schema("aten::cos_(Tensor(a!) self) -> Tensor(a!)")
-//   .impl_unboxedOnlyKernel<Tensor & (Tensor &),
-//                           &CPUType::cos_>(TensorTypeId::CPUTensorId)
-//   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-// .op(torch::RegisterOperators::options()
-//   .schema("aten::cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
-//   .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &)
-//                           &CPUType::cos_out>(TensorTypeId::CPUTensorId)
-//   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+//   .op(torch::RegisterOperators::options()
+//     .schema("aten::AA(Tensor self) -> Tensor")
+//     .kernel<decltype(AA_op), &AA_op>(TensorTypeId::CPUTensorId)
+//     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+//   .op(torch::RegisterOperators::options()
+//     .schema("aten::BB(Tensor self) -> Tensor")
+//     .catchAllKernel<decltype(BB_op), &BB_op>()
+//     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+//   ...
 //
-// It will try to collect all function references between two consecutive
-// "c10::RegisterOperators::Options::schema" calls. The function references
-// can be direct function call, function pointer or template argument.
+// It emits non-trivial LLVM assembly code to handle these registration
+// patterns, but we figured that at high level it follows the similar sequence
+// as in source code:
+//
+// Reference to function schema string "aten::AA(Tensor self) -> Tensor"
+// Call "c10::RegisterOperators::Options::schema()"
+// Reference to Function AA_op()
+// ...
+// Reference to function schema string "aten::BB(Tensor self) -> Tensor"
+// Call "c10::RegisterOperators::Options::schema()"
+// Reference to Function BB_op()
+// ...
+//
+// So our analysis pass will try to collect all function references between two
+// consecutive "c10::RegisterOperators::Options::schema()" calls and associate
+// them with the function schema string.
+//
+// The function references can be function pointer or template argument, which
+// are not direct function call/invoke instructions. But eventually registered
+// function get passed as some operand directly / as operand in a constant
+// expression. For example:
+//
+// %11 = tail call i8* @operator new(unsigned long)(i64 16) #37, !noalias !349
+// ...
+// %13 = getelementptr inbounds i8, i8* %11, i64 8
+// %14 = bitcast i8* %13 to i64*
+// store i64 ptrtoint (void (%"class.at::Tensor"*, %"class.at::Tensor"*)*
+//   @at::EE_op(at::Tensor const&) to i64), i64* %14, align 8, !tbaa !333, ...
+//
+// Above "@at::EE_op" is an operand of "ptrtoint", which in turn is a constant
+// operand of "store" instruction. So we make it to recursively traverse all
+// constant operands of an instruction and collect all llvm::Function type
+// objects it encounters.
 //
 // 2. Function -> Function
 //
 // LLVM has a standard “basiccg” analysis pass to dump call graph. However,
-// llvm::CallGraph only checks CallSites (call/invoke instructions only).
-// It doesn’t cover calling via lambda function / function pointer unless
-// they are inlined. We modified the method a bit to count function pointer
-// references as well for better recall (which is also consistent with the
-// analysis we did above for op registration via function pointer) - but the
-// function might not actually be called. Again, in our use case false
-// positive is probably better than false negative.
-
+// llvm::CallGraph only checks CallSites (call/invoke instructions only). It
+// doesn’t cover calling via lambda function / function pointer unless they are
+// inlined. We modified the method a bit to count function pointer references as
+// well for better recall (which is also consistent with the analysis we did
+// above for op registration via function pointer) - but the function might not
+// actually be called. For example:
+//
+// static std::function<Tensor()> helper(const Tensor& self) {
+//   return [&]() {
+//     return call_AA_op(self);
+//   };
+// }
+//
+// Tensor helper_call_AA_op(const Tensor& self) {
+//   return helper(self)();
+// }
+//
+// Tensor helper_not_call_AA_op(const Tensor& self) {
+//   helper(self);
+//   return self;
+// }
+//
+// The first helper calls the AA op while the second helper only accesses its
+// reference without actually calling. llvm::CallGraph analysis won’t count
+// either of them. We count both of them as edges in dependency graph. Again, in
+// our use case false positive is better than false negative.
+//
 // 3. Function -> Function Schema String (op invocation)
 //
 // One op can call another op and this is typically done via a static inline
 // function, e.g.:
 //
-// static inline Tensor & cos_(Tensor & self) {
+// static inline Tensor call_AA_op(const Tensor& self) {
 //   static c10::OperatorHandle op = c10::Dispatcher::singleton()
-//       .findSchema({"aten::cos_", ""}).value();
-//   return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
-//       op, self);
+//       .findSchema({"aten::AA", "out"}).value();
+//   return c10::Dispatcher::singleton().callUnboxedOnly<Tensor, const Tensor&>(
+//       op, self, self);
 // }
 //
+// Corresponding LLVM assembly:
+//
+// @.str.3.347 = private unnamed_addr constant [9 x i8] c"aten::AA\00", align 1
+// ...
+// invoke void @std::basic_string<char, std::char_traits<char>,
+//   std::allocator<char> >:: basic_string(char const*, std::allocator<char>
+//   const&)(%"class.std::basic_string"* nonnull %14, i8* getelementptr inbounds
+//   ([9 x i8], [9 x i8]* @.str.3.347, i64 0, i64 0), %"class.std::allocator.8"*
+//   nonnull dereferenceable(1) %15)
+// ...
+// invoke void @c10::Dispatcher::findSchema(c10::OperatorName const&)(
+//   %"class.c10::optional.92"* nonnull sret %12, %"class.c10::Dispatcher"*
+//   nonnull %28, %"struct.c10::OperatorName"* nonnull dereferenceable(16) %13)
+// ...
+//
 // We detect op invocation in a similar way as op registration - starting from
-// global string constants that look like function schema (e.g.: "aten::cos_"),
-// then searching around places using them. We simply check whether the parent
-// function calls 'c10::Dispatcher::findSchema' since the use of the schema
-// string.
+// global string constants that look like function schema / op name (e.g.:
+// "aten::AA"), then searching around places using them. In the example above
+// the function schema string is first used to initialize std::basic_string,
+// which in turn is used to initialize c10::OperatorName struct, which
+// eventually gets passed into findSchema. It’s NOT trivial to analyze the data
+// flow accurately as it involves several c++ structures. So we simply search
+// for “c10::Dispatcher::findSchema” function calls within the scope of parent
+// function of the instruction that “uses” the global string “aten::AA”. It
+// might generate false positive but we don’t care.
 //
 // Note that although we try to make these rules as general as possible it still
-// depends on how LLVM emit IRs to some extend. For example, if it changes the
+// depends on how LLVM emit IRs to some extent. For example, if it changes the
 // sequence of schema string reference and c10::RegisterOperators API call to
 // the extent that they no longer interlace with each other as in source code,
 // then we might need use more sophisticated alias analysis, analyze clang-AST
