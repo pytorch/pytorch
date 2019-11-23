@@ -2009,48 +2009,52 @@ def _get_script_class(name):
 # qualified name => list[compiled fns]
 _compiled_overloaded_fns = {}
 
-def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
+def _compile_function_with_overload(qual_name, impl_fn, overload_decl):
     impl_ast = torch.jit.get_jit_def(impl_fn)
+    overload_defaults = get_default_args(impl_fn)
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
-def _check_no_signature(func):
+def _check_no_signature_and_default_args(func):
     signature = torch.jit.annotations.get_signature(func, None, None)
     if signature is None:
         qual_name = _qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+    if get_default_args(func):
+        qual_name = _qualified_name(func)
+        raise RuntimeError("Overloaded default args must be on the implementation function: {}".format(qual_name))
 
-def _get_overload_decl_and_defaults(func):
-    _check_no_signature(func)
-    return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
+def _get_overload_decl(func):
+    _check_no_signature_and_default_args(func)
+    return torch.jit.get_jit_def(func).decl()
 
 def _get_overloads(obj):
     # check for cached compiled fns
     qual_name = _qualified_name(obj)
     global _compiled_overloaded_fns
     compiled_overloads = _compiled_overloaded_fns.get(qual_name, None)
-    if compiled_overloads is not None:
+    uncompiled_overloads = _jit_internal._get_fn_overloads(qual_name)
+    if compiled_overloads is not None and uncompiled_overloads is None:
         return compiled_overloads
 
     # check for not yet compiled overloads
-    overloads = _jit_internal._get_fn_overloads(qual_name)
-    if overloads is None:
+    if uncompiled_overloads is None:
         return None
+
     compiled_fns = []
-    # TODO: use default args from the implementation, not from the overload
-    # This is more complicated because you can have a default arg with a type
-    # incompatible with a type of parameter in an overload, and other validation.
-    # This is still an internal api so for now use defaults from overload
-    for overload_fn in overloads:
-        overload_decl, overload_defaults = _get_overload_decl_and_defaults(overload_fn)
-        compiled_fn = _compile_function_with_overload(qual_name, obj, overload_decl, overload_defaults)
+    for overload_fn in uncompiled_overloads:
+        overload_decl = _get_overload_decl(overload_fn)
+        compiled_fn = _compile_function_with_overload(qual_name, obj, overload_decl)
         compiled_fns.append(compiled_fn)
 
     # cache compilation, remove information stored to do compilation
-    _compiled_overloaded_fns[qual_name] = compiled_fns
+    if qual_name not in _compiled_overloaded_fns:
+        _compiled_overloaded_fns[qual_name] = []
+    for compiled_fn in compiled_fns:
+        _compiled_overloaded_fns[qual_name].append(compiled_fn)
     _jit_internal._clear_fn_overloads(qual_name)
-    return compiled_fns
+    return _compiled_overloaded_fns[qual_name]
 
 def _check_directly_compile_overloaded(obj):
     qual_name = _qualified_name(obj)

@@ -145,7 +145,9 @@ struct FunctionSchema {
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
-        is_varret_(is_varret) {}
+        is_varret_(is_varret) {
+    checkDefaultArgs();
+  }
 
   FunctionSchema(
       Symbol name,
@@ -160,7 +162,9 @@ struct FunctionSchema {
             std::move(arguments),
             std::move(returns),
             is_vararg,
-            is_varret) {}
+            is_varret) {
+    checkDefaultArgs();
+  }
 
   // check whether this schema is backward compatible with the old one.
   // the following conditions are considered as this schema is backward
@@ -176,9 +180,23 @@ struct FunctionSchema {
   //      this schema must provide default values.
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
-      std::ostream* why_not=nullptr) const;
+      std::ostream* why_not = nullptr) const;
 
-private:
+ private:
+  void checkDefaultArgs() {
+    bool seen_default_arg = false;
+    for (const auto& arg : arguments_) {
+      if (arg.default_value()) {
+        seen_default_arg = true;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            !seen_default_arg || arg.kwarg_only(),
+            "Non-default positional argument follows default argument",
+            this);
+      }
+    }
+  }
+
   OperatorName name_;
   std::vector<Argument> arguments_;
   std::vector<Argument> returns_;
