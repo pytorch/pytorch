@@ -193,7 +193,7 @@ struct SourceImporterImpl : public Resolver,
       const script::Module& mod,
       const std::shared_ptr<Source>& src) {
     auto self = SimpleSelf(mod.type());
-    c10::QualifiedName prefix = mod.name();
+    c10::QualifiedName prefix = *mod.type()->name();
     Parser p(src);
 
     parsePossibleVersionNumber(p.lexer());

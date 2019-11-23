@@ -36,6 +36,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
+  # Use linux host toolchain + mobile build options in order to build & test
+  # mobile libtorch without having to setup Android/iOS toolchain/simulator.
+  exec ./scripts/build_mobile.sh -DBUILD_BINARY=ON "$@"
+fi
+
 echo "Python version:"
 python --version
 
@@ -58,6 +64,24 @@ if ! which conda; then
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      export JAVA_HOME="$JH"
+      export BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
   fi
 fi
 

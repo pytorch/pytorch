@@ -4,7 +4,7 @@ import torch
 from torch.nn.modules.pooling import MaxPool2d
 
 from .activation import ReLU, ReLU6
-from .conv import Conv2d
+from .conv import Conv2d, Conv3d
 from .linear import Linear
 
 from .functional_modules import FloatFunctional, QFunctional
@@ -78,6 +78,7 @@ class DeQuantize(torch.nn.Module):
 
 __all__ = [
     'Conv2d',
+    'Conv3d',
     'DeQuantize',
     'Linear',
     'MaxPool2d',

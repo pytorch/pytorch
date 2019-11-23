@@ -528,7 +528,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   Tensor save_mean_;
   Tensor save_invstd_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
-  auto output_reshaped = at::empty_like(input_reshaped, at::MemoryFormat::Contiguous);
+  auto output_reshaped = at::empty_like(input_reshaped, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
@@ -596,14 +596,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   auto grad_output_reshaped = grad_out_.reshape(input_reshaped.sizes());
 
   if (grad_input_mask[0]) {
-    grad_input_ = at::empty_like(input_, at::MemoryFormat::Contiguous);
+    grad_input_ = at::empty_like(input_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     grad_input_reshaped = grad_input_.view(input_reshaped.sizes());
   }
   if (grad_input_mask[1]) {
-    grad_weight_ = at::empty_like(weight_, at::MemoryFormat::Contiguous);
+    grad_weight_ = at::empty_like(weight_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    grad_bias_ = at::empty_like(weight_, at::MemoryFormat::Contiguous);
+    grad_bias_ = at::empty_like(weight_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, DefaultPtrTraits, index_t>();
@@ -756,8 +756,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   auto grad_output_reshaped = grad_out_.reshape(input_reshaped.sizes());
 
   if (input_g) {
-    mean_dy_ = at::empty_like(mean_, at::MemoryFormat::Contiguous);
-    mean_dy_xmu_ = at::empty_like(mean_, at::MemoryFormat::Contiguous);
+    mean_dy_ = at::empty_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    mean_dy_xmu_ = at::empty_like(mean_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (weight_g) {
     grad_weight_ = at::empty({n_input}, weight_.options());
@@ -800,7 +800,7 @@ Tensor batch_norm_backward_elemt_cuda_template(const Tensor& grad_out_, const Te
   int64_t n_input = input_.size(1);
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
   auto grad_output_reshaped = grad_out_.reshape(input_reshaped.sizes());
-  auto grad_input_reshaped = at::empty_like(input_reshaped, at::MemoryFormat::Contiguous);
+  auto grad_input_reshaped = at::empty_like(input_reshaped, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
