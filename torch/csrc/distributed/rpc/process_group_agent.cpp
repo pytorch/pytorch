@@ -304,10 +304,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       std::lock_guard<std::mutex> lock{futureMutex_};
       futures_[requestId] = futureInfo;
       // insert future into timeouts map to keep track of its timeout
-      futureTimeouts_[endTime].push_back(requestId);
+      auto& requestIdVec = futureTimeouts_[endTime];
+      requestIdVec.push_back(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or it has closer end time than other futures in the map.
-      if (futures_.size() == 1 || futureTimeouts_.begin()->first == endTime) {
+      if (futures_.size() == 1 ||
+          (futureTimeouts_.begin()->first == endTime &&
+           (requestIdVec.size() == 1 // Avoid repeatedly waking up watchdog,
+                                     // if rpcTimeout_ == INFINITE_TIMEOUT
+            ))) {
         futureTimeoutCV_.notify_one();
       }
     }
