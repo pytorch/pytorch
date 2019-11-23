@@ -102,9 +102,6 @@ public:
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
-  template<class Return, class... Args>
-  Return callUnboxedOnly(const OperatorHandle& op, Args... args) const;
-
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
@@ -157,11 +154,6 @@ public:
     return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  template<class Return, class... Args>
-  Return callUnboxedOnly(Args... args) const {
-    return c10::Dispatcher::singleton().callUnboxedOnly<Return, Args...>(*this, std::forward<Args>(args)...);
-  }
-
   void callBoxed(Stack* stack) const {
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
@@ -182,18 +174,9 @@ template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
-  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxedOnly<Return, Args...>(op, std::forward<Args>(args)...);
+  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
