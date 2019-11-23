@@ -19,7 +19,10 @@ set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 if (ANDROID_ABI)
   set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
   set(BUILD_SUBDIR ${ANDROID_ABI})
+elseif(BUILD_LIBTORCH_WITH_JNI)
+  # Don't need LIBTORCH_HOME if we're building from within PyTorch.
 else()
+  # Building against a pre-built libtorch.
   if (NOT LIBTORCH_HOME)
     message(FATAL_ERROR
       "pytorch_android requires LIBTORCH_HOME to be defined for non-Android builds.")
@@ -96,10 +99,7 @@ else()
   # Prefer dynamic linking on the host
   target_link_libraries(pytorch_jni
       fbjni
-      -Wl,--gc-sections
-      -Wl,--whole-archive
       torch
-      -Wl,--no-whole-archive
       c10
       nnpack
       pytorch_qnnpack

@@ -16,7 +16,7 @@
 namespace torch {
 namespace serialize {
 
-InputArchive::InputArchive() {}
+InputArchive::InputArchive() : module_("Module", std::make_shared<jit::script::CompilationUnit>()) {}
 
 void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
   ivalue = module_.attr(key);
