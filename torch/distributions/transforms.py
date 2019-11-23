@@ -373,7 +373,7 @@ class TanhTransform(Transform):
     However this might not be numerically stable, thus it is recommended to use `TanhTransform`
     instead.
 
-    Note that one should use `cache_size=1` when it comes to `NaN/Inf` values. 
+    Note that one should use `cache_size=1` when it comes to `NaN/Inf` values.
 
     """
     domain = constraints.real
@@ -392,7 +392,7 @@ class TanhTransform(Transform):
         return x.tanh()
 
     def _inverse(self, y):
-        # We do not clamp to the boundary here as it may degrade the performance of certain algorithms. 
+        # We do not clamp to the boundary here as it may degrade the performance of certain algorithms.
         # one should use `cache_size=1` instead
         return self.atanh(y)
 
