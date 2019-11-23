@@ -39,8 +39,9 @@ import torch.jit.quantized
 from torch.jit._recursive import wrap_cpp_module
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.quantized.modules.linear import LinearPackedParams
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
+from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
@@ -397,6 +398,23 @@ class TestJit(JitTestCase):
         r = torch.jit.trace(m, m.x)
         t2 = torch.rand(3, 4)
         self.assertEqual(r(t2), m.x + t2)
+
+    def test_constants_pkl(self):
+        # This test asserts that the serialization archive includes a `constants.pkl`
+        # file. This file is used by `torch.load` to determine whether a zip file
+        # is a normal eager-mode serialization zip or a jit serialization zip. If
+        # you are deleting `constants.pkl`, make sure to update `torch.serialization.load`
+        # so it is still able to figure out which is which.
+        @torch.jit.script
+        def fn(x):
+            return x
+
+        buf = io.BytesIO()
+        torch.jit.save(fn, buf)
+        buf.seek(0)
+
+        files = zipfile.ZipFile(buf).filelist
+        self.assertTrue(any(['archive/constants.pkl' == f.filename for f in files]))
 
     def test_trace_nested_fn(self):
         class TracedInlineDecision(torch.nn.Module):
