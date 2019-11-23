@@ -1128,7 +1128,6 @@ class RpcTest(RpcAgentTestFixture):
         # too early.
         rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(1,))
         _check_rpc_done(1)
-        rpc.wait_all_workers()
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)

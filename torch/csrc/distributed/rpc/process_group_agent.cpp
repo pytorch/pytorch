@@ -267,6 +267,7 @@ void ProcessGroupAgent::shutdown() {
       recvWork_->abort();
     }
   }
+  threadPool_.waitWorkComplete();
   listenerThread_.join();
   futureTimeoutCV_.notify_one();
   futureTimeoutThread_.join();

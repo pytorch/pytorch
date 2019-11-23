@@ -77,12 +77,6 @@ def wait_all_workers():
 
     if _agent:
         _agent.join()
-        _destroy_rref_context()
-        # clean up python rpc handler in wait_all_workers(), see comments in
-        # PythonRpcHandler::cleanup(), call it in python API because the
-        # cleanup() function has python dependency, it assumes python
-        # interpreter exists
-        _cleanup_python_rpc_handler()
 
 def shutdown():
     r"""
@@ -95,6 +89,12 @@ def shutdown():
     global _agent
     if _agent:
         _agent.shutdown()
+        _destroy_rref_context()
+        # clean up python rpc handler in wait_all_workers(), see comments in
+        # PythonRpcHandler::cleanup(), call it in python API because the
+        # cleanup() function has python dependency, it assumes python
+        # interpreter exists
+        _cleanup_python_rpc_handler()
         _agent = None
 
 # TODO: add a context manager to wrap _init_rpc_backend and wait_all_workers
