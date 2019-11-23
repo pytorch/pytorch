@@ -25,8 +25,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                  freeze_bn=False,
                  qconfig=None):
         nn.modules.conv._ConvNd.__init__(self, in_channels, out_channels, kernel_size,
-                                        stride, padding, dilation, transposed,
-                                        output_padding, groups, False, padding_mode)
+                                         stride, padding, dilation, transposed,
+                                         output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.eps = eps
@@ -193,10 +193,9 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        _ConvBnNd.__init__(self,
-            in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _pair(0), groups, padding_mode,
-            eps, momentum, freeze_bn, qconfig)
+        _ConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
+                           padding, dilation, False, _pair(0), groups, padding_mode,
+                           eps, momentum, freeze_bn, qconfig)
 
 class ConvBnReLU2d(ConvBn2d):
     r"""
