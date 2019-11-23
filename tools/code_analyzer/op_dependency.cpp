@@ -150,27 +150,54 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
-static cl::list<std::string> FunctionSchemaPatterns(
+namespace {
+
+struct RegexOpt {
+  std::shared_ptr<Regex> pattern;
+
+  void operator=(const std::string& val) {
+    if (val.empty()) return;
+    pattern = std::make_shared<Regex>(val);
+    std::string regexError;
+    if (!pattern->isValid(regexError)) {
+      report_fatal_error(
+          "Invalid regular expression param: '" + val + "' err: " + regexError,
+          false);
+    }
+  };
+};
+
+static RegexOpt FunctionSchemaPatternLoc;
+static cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
     "op_schema_pattern",
-    cl::desc("Op schema patterns. "
-             "Example: -op_schema_pattern \"aten::,quantized::\""),
-    cl::OneOrMore,
-    cl::CommaSeparated);
+    cl::desc("Op schema regex pattern. "
+             "Example: -op_schema_pattern '(^aten::[^ ]+)|(^quantized::[^ ]+)'"),
+    cl::location(FunctionSchemaPatternLoc),
+    cl::Required,
+    cl::ValueRequired);
 
-static cl::opt<std::string> OpRegistrationSignature(
-    "register_sig",
-    cl::desc("Op registration signature. "
-             "Example: -register_sig c10::RegisterOperators::Options::schema"),
-    cl::init("c10::RegisterOperators::Options::schema"));
+static RegexOpt OpRegistrationPatternLoc;
+static cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
+    "op_register_pattern",
+    cl::desc("Op registration signature regex pattern. "
+             "Example: -op_register_pattern " "'^c10::RegisterOperators::Options::schema'"),
+    cl::location(OpRegistrationPatternLoc),
+    cl::Required,
+    cl::ValueRequired);
 
-static cl::opt<std::string> OpInvocationSignature(
-    "invoke_sig",
-    cl::desc("Op invocation signature. "
-             "Example: -invoke_sig c10::Dispatcher::findSchema"),
-    cl::init("c10::Dispatcher::findSchema"));
+static RegexOpt OpInvocationPatternLoc;
+static cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
+    "op_invoke_pattern",
+    cl::desc("Op invocation signature regex pattern. "
+             "Example: -op_invoke_pattern "
+             "'^c10::Dispatcher::findSchema'"),
+    cl::location(OpInvocationPatternLoc),
+    cl::Required,
+    cl::ValueRequired);
 
 enum OutputFormatType { Dot, YAML };
 static cl::opt<OutputFormatType> OutputFormat(
@@ -190,13 +217,14 @@ static cl::opt<int> Verbose(
     cl::Hidden,
     cl::init(0));
 
-static cl::list<std::string> DebugFilters(
-    "df",
-    cl::desc("Debug filter patterns. Example: -df CPUType,at::native"),
+static RegexOpt DebugFilterLoc;
+static cl::opt<RegexOpt, true, cl::parser<std::string>> DebugFilter(
+    "debug_filter",
+    cl::desc("Debug filter regex pattern. "
+             "Example: -debug_filter 'CPUType|TypeDefault|^at::native'"),
+    cl::location(DebugFilterLoc),
     cl::ZeroOrMore,
-    cl::CommaSeparated);
-
-namespace {
+    cl::ValueRequired);
 
 typedef std::set<std::string> SET;
 typedef std::unordered_map<std::string, std::set<std::string>> GRAPH;
@@ -249,7 +277,7 @@ public:
     // care about #1 as that's what we use to prune registered ops via codegen,
     // (then #2 will be stripped by linker automatically), so #1 is counted as
     // key nodes by default. #2 can also be kept in the result graph via
-    // "DebugFilters" flag, i.e. function symbols that match DebugFilters are
+    // "DebugFilter" flag, i.e. function symbols that match DebugFilter are
     // also counted as key nodes.
     SET keyNodes;
 
@@ -259,9 +287,9 @@ public:
     scanGlobalsForFunctionSchema(
         M, &keyNodes, &schemaStrToFunctions, &functionsToSchemaStrs);
 
-    // Find all function names that match DebugFilters.
-    if (!DebugFilters.empty()) {
-      scanFunctionsForDebugFilters(M, &keyNodes);
+    // Find all function names that match DebugFilter.
+    if (DebugFilterLoc.pattern) {
+      scanFunctionsForDebugFilter(M, &keyNodes);
     }
 
     // Extended llvm::CallGraph analysis - all references are counted.
@@ -302,6 +330,10 @@ private:
       std::string gvInitStr = gvInitArray->getAsCString().str();
       if (!isFunctionSchemaString(gvInitStr)) continue;
       std::string schemaStr = truncateFunctionSchemaString(gvInitStr);
+      if (Verbose) {
+        std::cerr << "[DEBUG][SCHEMA_STR] " << gvInitStr << " => "
+                  << schemaStr << std::endl;
+      }
 
       // Track all seen schema strings. Useful for checking whether we miss any
       // dependency in the logic below.
@@ -334,11 +366,11 @@ private:
   // 2) function to function schema (op invocation);
   //
   // For op invocation, simply check whether the parent function calls function
-  // matching `OpInvocationSignature` (e.g.: 'c10::Dispatcher::findSchema')
+  // matching `OpInvocationPattern` (e.g.: 'c10::Dispatcher::findSchema')
   // since the use of the schema string.
   //
   // For op registration, collect all function references between two following
-  // calls to function matching `OpRegistrationSignature` (e.g.:
+  // calls to function matching `OpRegistrationPattern` (e.g.:
   // "c10::RegisterOperators::Options::schema"). The function references
   // can be direct function call, function pointer or template argument.
   static void analyzeFunctionSchemaUser(
@@ -352,13 +384,19 @@ private:
          cur;
          cur = getNextInstruction(*cur)) {
       // Check pattern to call registered ops.
-      if (checkInstructionCalledFunction(*cur, OpInvocationSignature)) {
+      if (checkInstructionCalledFunction(
+              *cur, *OpInvocationPatternLoc.pattern)) {
         (*functionsToSchemaStrs)[parentFunctionName].insert(schemaStr);
+        if (Verbose) {
+          std::cerr << "[DEBUG][OP_CALL] " << demangle(parentFunctionName)
+                    << " => " << schemaStr << std::endl;
+        }
         continue;
       }
 
       // Check pattern to register ops.
-      if (checkInstructionCalledFunction(*cur, OpRegistrationSignature)) {
+      if (checkInstructionCalledFunction(
+              *cur, *OpRegistrationPatternLoc.pattern)) {
         if (seenOptionsSchemaCall) break;
         seenOptionsSchemaCall = true;
         continue;
@@ -370,12 +408,12 @@ private:
         auto cb = [&](Function* func) -> void {
           (*schemaStrToFunctions)[schemaStr].insert(func->getName());
           if (Verbose) {
-            std::cerr << "[DEBUG] " << schemaStr << " => "
+            std::cerr << "[DEBUG][OP_REG] " << schemaStr << " => "
                       << demangle(func->getName()) << std::endl;
           }
         };
-        if (Verbose) {
-          std::cerr << "[DEBUG] " << schemaStr << " [INST] "
+        if (Verbose > 2) {
+          std::cerr << "[DEBUG][OP_REG] " << schemaStr << " [INST] "
                     << *cur << std::endl;
         }
         scanReferredFunctionsFromOperands(*cur, cb);
@@ -392,14 +430,18 @@ private:
       scanReferredFunctionsFromOperandsInFunction(F,
           [&](Function* func) -> void {
             (*functionToFunctions)[name].insert(func->getName());
+          if (Verbose > 1) {
+            std::cerr << "[DEBUG][FUNC_CALL] " << demangle(name) << " => "
+                      << demangle(func->getName()) << std::endl;
+          }
       });
     }
   }
 
-  static void scanFunctionsForDebugFilters(Module& M, SET* keyNodes) {
+  static void scanFunctionsForDebugFilter(Module& M, SET* keyNodes) {
     for (Function& F : M) {
       std::string name = F.getName();
-      if (matchDebugFilters(name)) {
+      if (matchDebugFilter(name)) {
         keyNodes->insert(name);
       }
     }
@@ -436,12 +478,7 @@ private:
   }
 
   static bool isFunctionSchemaString(const std::string& str) {
-    for (auto& pattern : FunctionSchemaPatterns) {
-      if (str.find(pattern) == 0 && str.length() > pattern.length()) {
-        return true;
-      }
-    }
-    return false;
+    return FunctionSchemaPatternLoc.pattern->match(str);
   }
 
   static std::string truncateFunctionSchemaString(
@@ -450,15 +487,9 @@ private:
     return pos == std::string::npos ? schemaStr : schemaStr.substr(0, pos);
   }
 
-  static bool matchDebugFilters(const std::string& node) {
-    if (DebugFilters.empty()) return false;
-    auto str = demangle(node);
-    for (const auto& debug : DebugFilters) {
-      if (str.find(debug) != std::string::npos) {
-        return true;
-      }
-    }
-    return false;
+  static bool matchDebugFilter(const std::string& node) {
+    return DebugFilterLoc.pattern
+        && DebugFilterLoc.pattern->match(demangle(node));
   }
 
   static Instruction* getNextInstruction(Instruction& I) {
@@ -517,11 +548,9 @@ private:
     }
   }
 
-  static bool checkInstructionCalledFunction(
-      Instruction& I, const std::string& pattern) {
+  static bool checkInstructionCalledFunction(Instruction& I, Regex& pattern) {
     Function* callee = getCalledFunction(I);
-    return callee
-        && demangle(callee->getName()).find(pattern) == 0;
+    return callee && pattern.match(demangle(callee->getName()));
   }
 
   static void mergeGraph(GRAPH& src, GRAPH* dest) {
