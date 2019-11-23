@@ -1804,6 +1804,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
 
+    # This test checks output scalar type in the ONNX graph should not be null
+    # https://github.com/pytorch/pytorch/issues/28607
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_trace_script(self):
+        @torch.jit.script
+        def center_slice_helper(input, h_offset):
+            return input[:, h_offset:]
+
+        class CenterCrop(torch.nn.Module):
+            def forward(self, input):
+                return center_slice_helper(input, torch.tensor(input.shape[1] - 1))
+
+        x = torch.randn(3, 4)
+        self.run_test(CenterCrop(), x)
+
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_logdet(self):
