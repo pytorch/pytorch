@@ -470,9 +470,9 @@ Example (a type mismatch)
      ...
 
 
-Unsupported Types
-^^^^^^^^^^^^^^^^^
-Some parts of the :mod:`typing` module are missing from TorchScript. Some of these
+Unsupported Typing Constructs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TorchScript does not support all features and types of the :mod:`typing` module. Some of these
 are more fundamental things that are unlikely to be added in the future while others
 may be added if there is enough user demand to make it a priority.
 
