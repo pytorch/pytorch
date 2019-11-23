@@ -11,9 +11,9 @@
 #
 # 2. Analyze test project and generate dot file with specific debug filters:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# DEBUG_FILTERS="at::,TypeDefault,CPUType" \
 # FORMAT=dot \
-# ANALYZE_TEST=1 scripts/build_code_analyzer.sh
+# ANALYZE_TEST=1 scripts/build_code_analyzer.sh \
+# -debug_filter="CPUType|TypeDefault|^at::"
 #
 # 3. Analyze test project and compare with expected result:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
@@ -28,6 +28,7 @@ ANALYZER_SRC_HOME="${SRC_ROOT}/tools/code_analyzer"
 export LLVM_DIR="${LLVM_DIR:-/usr/lib/llvm-8}"
 export CC="${LLVM_DIR}/bin/clang"
 export CXX="${LLVM_DIR}/bin/clang++"
+EXTRA_ANALYZER_FLAGS=$@
 
 BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
@@ -72,20 +73,18 @@ build_test_project() {
 }
 
 call_analyzer() {
-  OPT_CLOSURE=$([ -n "${CLOSURE}" ] && echo "-closure=${CLOSURE}" || echo "" )
-  OPT_DEBUG_FILTERS=$([ -n "${DEBUG_FILTERS}" ] && echo "-df ${DEBUG_FILTERS}" || echo "" )
-
   echo "Analyze: ${INPUT}"
 
   "${LLVM_DIR}/bin/opt" \
     -load="${BUILD_ROOT}/libOpDependencyPass.so" \
     -op_dependency \
     -disable-output \
-    -op_schema_pattern="aten::,quantized::" \
+    -op_schema_pattern="(^aten::[^ ]+)|(^quantized::[^ ]+)" \
+    -op_register_pattern="^c10::RegisterOperators::Options::schema" \
+    -op_invoke_pattern="^c10::Dispatcher::findSchema" \
     -format="${FORMAT}" \
+    ${EXTRA_ANALYZER_FLAGS} \
     "${INPUT}" \
-    ${OPT_CLOSURE} \
-    ${OPT_DEBUG_FILTERS} \
     > "${OUTPUT}"
 
   echo "Result: ${OUTPUT}"
