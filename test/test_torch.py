@@ -2621,26 +2621,25 @@ class _TestTorchMixin(object):
             reference[0.0, :, 0.0] = 1
 
     def test_index_add(self):
-        num_copy, num_dest = 3, 3
-        dest = torch.randn(num_dest, 4, 5)
-        src = torch.randn(num_copy, 4, 5)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_add_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] += src[i]
-        self.assertEqual(dest, dest2)
+        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+            for other_sizes in ((), (4, 5)):
+                num_copy, num_dest = 3, 3
+                dest = torch.randn(num_dest, *other_sizes)
+                if not dest_contig:
+                    dest = torch.testing.make_non_contiguous(dest)
+                src = torch.randn(num_copy, *other_sizes)
+                if not src_contig:
+                    src = torch.testing.make_non_contiguous(src)
+                idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
+                if not index_contig:
+                    idx = torch.testing.make_non_contiguous(idx)
+                dest2 = dest.clone()
+                dest.index_add_(0, idx, src)
+                for i in range(idx.size(0)):
+                    dest2[idx[i]] += src[i]
+                self.assertEqual(dest, dest2)
 
-        dest = torch.randn(num_dest)
-        src = torch.randn(num_copy)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_add_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] = dest2[idx[i]] + src[i]
-        self.assertEqual(dest, dest2)
-
-    # add coverage for issue with atomic add that appeared only for 
+    # add coverage for issue with atomic add that appeared only for
     # specific dtypes on cuda:
     # https://github.com/pytorch/pytorch/issues/29153
     def test_index_add_all_dtypes(self):
