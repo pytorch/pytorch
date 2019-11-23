@@ -50,10 +50,11 @@ def _require_initialized(func):
 
 def wait_all_workers():
     r"""
-    Block until all local and remote RPC processes reach this method, and then
-    destroy RRef and RPC handlers. Every RPC process must call this method before
-    exit. This should be used to terminate the RPC framework, and there is no
-    guarantee that the RPC framework will work after this method returns.
+    Block until all local and remote RPC processes reach this method and wait
+    for all outstanding work to complete. Every RPC process must call this
+    method before exit to perform a graceful shutdown. This should be used to
+    terminate the RPC framework, and there is no guarantee that the RPC
+    framework will work after this method returns.
 
     Example::
 
