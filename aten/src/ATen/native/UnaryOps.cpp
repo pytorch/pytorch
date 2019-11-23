@@ -69,6 +69,18 @@ Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(r
 Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
+Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
+Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
+
+Tensor& real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
+Tensor real(const Tensor& self) { return unary_op_impl(self, at::real_out); }
+
+Tensor& imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
+Tensor imag(const Tensor& self) { return unary_op_impl(self, at::imag_out); }
+
+Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
+Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
@@ -303,10 +315,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-IMPLEMENT_UNARY_OP_VEC(angle)
-IMPLEMENT_UNARY_OP_VEC(real)
-IMPLEMENT_UNARY_OP_VEC(imag)
-IMPLEMENT_UNARY_OP_VEC(conj)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
