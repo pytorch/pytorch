@@ -1,19 +1,6 @@
-import traceback
-import functools
-import pdb
-import sys
+import torch
 import unittest
 from common_utils import TestCase
-import random
-
-import traceback
-import functools
-import pdb
-import sys
-import unittest
-from unittest import TestCase
-import random
-import torch
 
 
 def random_int_tensor(seed, size, low=0, high=2 ** 32, a=22695477, c=1, m=2 ** 32):
@@ -210,18 +197,31 @@ class Test_ListNestedTensor(TestCase):
         # that the Tensors we use for construction can be retrieved
         # and used independently while still being kept track of.
 
-        # Strategy: use torch.equal and storage data_ptr
-        # Also benchmark this
+        # In fact _ListNestedTensor behave just like a list. Any
+        # list of torch.Tensors you initialize it with will be
+        # unbound to have the same id. That is, they are indeed
+        # the same Variable, since each torch::autograd::Variable has
+        # assigned to it a unique PyObject* by construction.
+
         a = torch.tensor([1, 2])
         b = torch.tensor([7, 8])
         nt = torch._ListNestedTensor([a, b])
         a1, b1 = nt.unbind()
-        self.assertTrue((a == a1).all())
-        self.assertTrue((b == b1).all())
+        self.assertTrue(a is a1)
+        self.assertTrue(b is b1)
 
-        a = gen_float_tensor(1, (2, 3)).add_(1)
-        nt = torch._ListNestedTensor([a])
-        self.assertTrue((a == nt.unbind()[0]).all())
+        c = torch.tensor([3, 4])
+        d = torch.tensor([5, 6])
+        e = torch.tensor([6, 7])
+
+        nt1 = torch._ListNestedTensor([[c, d], [e]])
+        nt11, nt12 = nt1.unbind()
+        c1, d1 = nt11.unbind()
+        e1 = nt12.unbind()[0]
+
+        self.assertTrue(c is c1)
+        self.assertTrue(d is d1)
+        self.assertTrue(e is e1)
 
     def test_contiguous(self):
         a = torch._ListNestedTensor([torch.tensor([1, 2]),
