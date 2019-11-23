@@ -81,7 +81,12 @@ class Reducer {
   // the corresponding param has been used, and get allreduced in the end of
   // backward of current iteration or no_sync session for figuring out the
   // globally unused parameters.
+  //
+  // local_used_maps_:     CPU tensors for bookkeeping locally used params
+  // local_used_maps_dev_: dev tensors for reducing globally unused params
   std::vector<at::Tensor> local_used_maps_;
+  std::vector<at::Tensor> local_used_maps_dev_;
+
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 

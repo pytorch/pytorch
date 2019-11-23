@@ -165,15 +165,19 @@ Reducer::Reducer(
     const auto replica_count = replicas_.size();
     const auto variable_count = replicas_[0].size();
     local_used_maps_.resize(replica_count);
-    for (size_t i = 0; i < local_used_maps_.size(); i++) {
+    local_used_maps_dev_.resize(replica_count);
+
+    for (size_t i = 0; i < replica_count; i++) {
+      local_used_maps_[i] = at::zeros({static_cast<long>(variable_count)});
+
       at::TensorOptions options;
       // This tensor needs to be on the same device as replica because backend
       // such as NCCL may not support CPU tensors, and hence it might not work
       // if we always put it on CPU.
       options = options.device(replicas_[i][0].device());
       options = options.dtype(at::kInt);
-      local_used_maps_[i] =
-          at::zeros({static_cast<long>(variable_count)}, options);
+      local_used_maps_dev_[i] =
+          at::empty({static_cast<long>(variable_count)}, options);
     }
   }
 }
@@ -350,10 +354,15 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     }
   }
 
-  // Run finalizer function and kick off reduction for local_used_maps_ once the
+  // Run finalizer function and kick off reduction for local_used_maps once the
   // final bucket was marked ready.
   if (next_bucket_ == buckets_.size()) {
-    local_used_work_ = process_group_->allreduce(local_used_maps_);
+    // H2D from local_used_maps_ to local_used_maps_dev_
+    for (size_t i = 0; i < local_used_maps_.size(); i++) {
+      local_used_maps_dev_[i] =
+          local_used_maps_[i].to(local_used_maps_dev_[i].device());
+    }
+    local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
@@ -657,8 +666,12 @@ void Reducer::finalize_backward() {
   // Check that all buckets were completed and had their work kicked off.
   TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
 
-  // Wait for local_used_maps_ reduction to complete.
+  // Wait for local_used_maps reduction to complete.
   local_used_work_->wait();
+  // D2H from local_used_maps_dev_ to local_used_maps_
+  for (size_t i = 0; i < local_used_maps_.size(); i++) {
+    local_used_maps_[i] = local_used_maps_dev_[i].to(at::kCPU);
+  }
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
