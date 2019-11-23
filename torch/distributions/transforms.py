@@ -365,6 +365,16 @@ class SigmoidTransform(Transform):
 class TanhTransform(Transform):
     r"""
     Transform via the mapping :math:`y = \tanh(x)`.
+    
+    It is equivalent to
+    ```
+    ComposeTransform([AffineTransform(0., 2.), SigmoidTransform(), AffineTransform(-1., 2.)])
+    ```
+    However this might not be numerically stable, thus it is recommended to use `TanhTransform`
+    instead.
+    
+    Note that one should use `cache_size=1` when it comes to `NaN/Inf` values. 
+    
     """
     domain = constraints.real
     codomain = constraints.interval(-1.0, 1.0)
@@ -382,8 +392,9 @@ class TanhTransform(Transform):
         return x.tanh()
 
     def _inverse(self, y):
-        eps = torch.finfo(y.dtype).eps
-        return self.atanh(y.clamp(min=-1. + eps, max=1. - eps))
+        # We do not clamp to the boundary here as it may degrade the performance of certain algorithms. 
+        # one should use `cache_size=1` instead
+        return self.atanh(y)
 
     def log_abs_det_jacobian(self, x, y):
         # We use a formula that is more numerically stable, see details in the following link
