@@ -60,8 +60,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
-              "sync",
-              &RpcAgent::sync,
+              "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_worker_infos",
+              &RpcAgent::getWorkerInfos,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
@@ -149,6 +151,11 @@ Otherwise, throws an exception.
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
               ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_infos",
+          (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
+              ProcessGroupAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "join",

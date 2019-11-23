@@ -178,6 +178,10 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   return allWorkerInfo_[id];
 }
 
+std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
+  return allWorkerInfo_;
+}
+
 void ProcessGroupAgent::join() {
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
