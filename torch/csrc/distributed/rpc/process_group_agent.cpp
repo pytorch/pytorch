@@ -310,8 +310,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       // future created or it has closer end time than other futures in the map.
       if (futures_.size() == 1 ||
           (futureTimeouts_.begin()->first == endTime &&
-           (requestIdVec.size() == 1 // Avoid repeatedly waking up watchdog,
-                                     // if rpcTimeout_ == INFINITE_TIMEOUT
+           (requestIdVec.size() ==
+            1 // Avoid repeatedly waking up the watchdog,
+              // when we set rpcTimeout_ == INFINITE_TIMEOUT.
             ))) {
         futureTimeoutCV_.notify_one();
       }
@@ -445,10 +446,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               futureTimeouts_.erase(endTime);
             }
           }
-          // Not holding lock on markCompleted as this could run callbacks that
-          // call agent_->send
-          fm->markCompleted(std::move(message));
           futureCV_.notify_all();
+          fm->markCompleted(std::move(message));
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           TORCH_INTERNAL_ASSERT(
@@ -506,6 +505,9 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 
     if (sleepTime == INFINITE_TIMEOUT) {
       futureTimeoutCV_.wait(lock);
+      // End time has not arrived yet,
+      // no need to scan the future maps.
+      // Go back and update the sleepTime above,
       continue;
     } else {
       futureTimeoutCV_.wait_for(lock, sleepTime);
@@ -523,8 +525,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
-      // Do not hold the lock while marking futures completed, as
-      // markCompleted() could invoke callbacks.
       timedOutFuture.future_->markCompleted(exceptionMsg);
 
       const int dst = timedOutFuture.dstRank_;
