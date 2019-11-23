@@ -157,4 +157,8 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
   listeners_->addListener(std::move(listener));
 }
 
+void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
+  op.operatorIterator_->op.setManuallyBoxedKernel_(func);
+}
+
 }
