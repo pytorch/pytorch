@@ -620,10 +620,34 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       const auto offset = replica.offsets[intra_bucket_index];
       const auto length = replica.lengths[intra_bucket_index];
 
+      // Determine if this param has been used globally or not.
+      //
+      // If the variable was used locally, it is also used globally and then
+      // we don't need to wait for the reduction. Otherwise we lazily wait for
+      // the reduction to complete, only when we see a variable that was unused
+      // locally. Then we end up delaying the synchronization point that
+      // local_used_work_->wait() implies. If we don't have any unused
+      // parameters at all, we can skip waiting for the work to complete
+      // altogether, and cause negligible performance overhead for models where
+      // all parameters are used. Such lazily waiting means minimizing
+      // performance impact for the big majority of models where all parameters
+      // are always used. Then we only pay the overhead cost if there is indeed
+      // a parameter that is locally unused, because we need to check if it's
+      // also globally unused.
+      size_t variable_index = bucket.variable_indices[intra_bucket_index];
       bool global_unused =
-          local_used_maps_[replica_index]
-                          [bucket.variable_indices[intra_bucket_index]]
-                              .item<int>() == 0;
+          local_used_maps_[replica_index][variable_index].item<int>() == 0;
+      if (global_unused && !local_used_maps_reduced_) {
+        // Wait for local_used_maps reduction to complete.
+        local_used_work_->wait();
+        // D2H from local_used_maps_dev_ to local_used_maps_
+        for (size_t i = 0; i < local_used_maps_.size(); i++) {
+          local_used_maps_[i].copy_(local_used_maps_dev_[i]);
+        }
+        global_unused =
+            local_used_maps_[replica_index][variable_index].item<int>() == 0;
+        local_used_maps_reduced_ = true;
+      }
 
       auto bucket_view =
           replica.contents.narrow(0, offset, length).view(variable.sizes());
@@ -665,13 +689,6 @@ void Reducer::finalize_backward() {
   // Check that all buckets were completed and had their work kicked off.
   TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
 
-  // Wait for local_used_maps reduction to complete.
-  local_used_work_->wait();
-  // D2H from local_used_maps_dev_ to local_used_maps_
-  for (size_t i = 0; i < local_used_maps_.size(); i++) {
-    local_used_maps_[i].copy_(local_used_maps_dev_[i]);
-  }
-
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
     TORCH_INTERNAL_ASSERT(bucket.work);
@@ -687,6 +704,7 @@ void Reducer::finalize_backward() {
   for (auto& local_used : local_used_maps_) {
     local_used.fill_(0);
   }
+  local_used_maps_reduced_ = false;
 }
 
 namespace {

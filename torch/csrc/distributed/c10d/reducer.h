@@ -86,6 +86,8 @@ class Reducer {
   // local_used_maps_dev_: dev tensors for reducing globally unused params
   std::vector<at::Tensor> local_used_maps_;
   std::vector<at::Tensor> local_used_maps_dev_;
+  // Indicate that reduction is done and D2H copy is done as well.
+  bool local_used_maps_reduced_;
 
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
