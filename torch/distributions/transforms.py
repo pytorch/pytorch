@@ -365,16 +365,16 @@ class SigmoidTransform(Transform):
 class TanhTransform(Transform):
     r"""
     Transform via the mapping :math:`y = \tanh(x)`.
-    
+
     It is equivalent to
     ```
     ComposeTransform([AffineTransform(0., 2.), SigmoidTransform(), AffineTransform(-1., 2.)])
     ```
     However this might not be numerically stable, thus it is recommended to use `TanhTransform`
     instead.
-    
+
     Note that one should use `cache_size=1` when it comes to `NaN/Inf` values. 
-    
+
     """
     domain = constraints.real
     codomain = constraints.interval(-1.0, 1.0)
