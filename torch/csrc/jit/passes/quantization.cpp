@@ -140,12 +140,6 @@ bool valueNeedsToBeQuantized(Value* v) {
   return false;
 }
 
-static bool isObserverNode(const Node* node, const std::string& observer_name) {
-    return (node->kind() == prim::CallMethod && node->s(attr::name) == "forward" &&
-        node->inputs()[0]->node()->kind() == prim::GetAttr &&
-        node->inputs()[0]->node()->s(attr::name) == observer_name);
-}
-
 class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
@@ -422,8 +416,7 @@ void InsertObserversHelper::insertObservers(
 void insertQuantDeQuantCall(
     Value* v,
     const IValue& qparams,
-    const IValue& scalar_type,
-    const std::string& observer_name) {
+    const IValue& scalar_type) {
   Graph* g = v->node()->owningGraph();
   auto tp = qparams.toTuple();
   at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
@@ -455,8 +448,9 @@ void insertQuantDeQuantCall(
   std::vector<Node*> use_of_node_to_be_removed;
   for (const auto& use : v->uses()) {
     auto cur = use.user;
-    if(!isObserverNode(cur, observer_name) && cur != quant)
+    if(cur != quant) {
       use_of_node_to_be_removed.push_back(cur);
+    }
   }
 
   for (size_t i = 0; i < use_of_node_to_be_removed.size(); ++i) {
@@ -551,15 +545,7 @@ void QuantizeHelper::quantizeTensors() {
     auto tp = values_to_qparams_[v];
     auto qparams = std::get<0>(tp);
     auto scalar_type = std::get<1>(tp);
-    // NB: v is updated here, since removeObserver replaces
-    // v with the input to the observer call
-    Node* dequant;
-    dequant = insertQuantDeQuantCall(v, qparams, scalar_type);
-    v->replaceAllUsesWith(dequant->output());
-    Node* q = dequant->input(0)->node();
-    // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the one
-    // used in quant node. Restore it here:
-    q->replaceInputWith(dequant->output(), v);
+    insertQuantDeQuantCall(v, qparams, scalar_type);
   }
   // no need to clear the vector or map
 }
@@ -612,20 +598,6 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
               "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
-}
-
-void QuantizeHelper::quantizeTensor(Value* v) {
-  auto observer_name = findObserverName(v);
-  if (!observer_name) {
-    return;
-  }
-  auto tp = getQParams(v);
-  auto qparams = std::get<0>(tp);
-  auto scalar_type = std::get<1>(tp);
-  // NB: v is updated here, since removeObserver replaces
-  // v with the input to the observer call
-  v = removeObserver(v, observer_name.value());
-  insertQuantDeQuantCall(v, qparams, scalar_type, observer_name.value());
 }
 
 c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
