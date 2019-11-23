@@ -1028,21 +1028,10 @@ void raw_cudnn_convolution_backward_input_out(
   bool overwrite_nhwc = grad_input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
       weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
       grad_output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  printf("attempted format: %d\n", overwrite_nhwc);
   overwrite_nhwc = overwrite_nhwc &&
       grad_input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
       weight.is_contiguous(at::MemoryFormat::ChannelsLast) &&
       grad_output.is_contiguous(at::MemoryFormat::ChannelsLast);
-  if (grad_input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    printf("grad_input nhwc\n");
-  }
-  if (weight.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    printf("weight nhwc\n");
-  }
-  if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    printf("grad_output nhwc\n");
-  }
-  printf("actual format: %d\n", overwrite_nhwc);
   args.idesc.set(grad_input, 0, overwrite_nhwc);
   args.wdesc.set(weight, 0, overwrite_nhwc);
   args.odesc.set(grad_output, 0, overwrite_nhwc);
@@ -1214,9 +1203,9 @@ void raw_cudnn_convolution_backward_weight_out(
       input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
       grad_weight.is_contiguous(at::MemoryFormat::ChannelsLast) &&
       grad_output.is_contiguous(at::MemoryFormat::ChannelsLast);
-  args.idesc.set(input, overwrite_nhwc);
+  args.idesc.set(input, 0, overwrite_nhwc);
   args.wdesc.set(grad_weight, 0, overwrite_nhwc);
-  args.odesc.set(grad_output, overwrite_nhwc);
+  args.odesc.set(grad_output, 0, overwrite_nhwc);
 
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 

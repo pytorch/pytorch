@@ -27,13 +27,13 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 
 void TensorDescriptor::set(const at::Tensor &t, size_t pad, bool overwrite_nhwc_packed) {
   IntArrayRef strides;
-  printf("size: %d, %d, %d, %d, strides: %d, %d,  %d, %d\n", t.size(0), t.size(1), t.size(2), t.size(3), t.stride(0), t.stride(1), t.stride(2), t.stride(3));
+  std::vector<int64_t> nhwc_strides;
   if (overwrite_nhwc_packed) {
-    strides = get_channels_last_strides(t.sizes());
+    nhwc_strides = get_channels_last_strides(t.sizes());
+    strides = nhwc_strides;
   } else {
     strides = t.strides();
   }
-  printf("strides: %d, %d,  %d, %d\n", strides[0], strides[1], strides[2], strides[3]);
   set(getDataType(t), t.sizes(), strides, pad, overwrite_nhwc_packed);
 }
 
