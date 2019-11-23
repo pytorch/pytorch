@@ -39,7 +39,8 @@ class BoundShapeInferencerBase {
   virtual void InferBoundShapeAndType(
       const NetDef& net,
       const std::unordered_map<std::string, ShapeInfo>& info,
-      caffe2::Workspace* ws) = 0;
+      caffe2::Workspace* ws,
+      bool extract_feature_len = false) = 0;
 
   const ShapeInfoMap& shape_info() const {
     return shape_info_;
@@ -62,6 +63,7 @@ class BoundShapeInferencerBase {
  protected:
   const BoundShapeSpec spec_;
   std::unordered_map<std::string, ShapeInfo> shape_info_;
+  bool extract_feature_len_;
 };
 
 class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
@@ -73,7 +75,8 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferBoundShapeAndType(
       const NetDef& net,
       const std::unordered_map<std::string, ShapeInfo>& info,
-      caffe2::Workspace* ws) override;
+      caffe2::Workspace* ws,
+      bool extract_feature_len = false) override;
 
  protected:
   TensorShape& CheckAndSetTensorBoundShape(

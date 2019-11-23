@@ -13,7 +13,7 @@ if not dist.is_available():
 
 
 class TestConfig:
-    __slots__ = ["rpc_backend_name", "build_rpc_agent_options"]
+    __slots__ = ["rpc_backend_name", "build_rpc_backend_options"]
 
     def __init__(self, *args, **kwargs):
         assert len(args) == 0, "TestConfig only takes kwargs."
@@ -86,7 +86,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
                 init_method=self.init_method,
                 rank=self.rank,
                 world_size=self.world_size,
-                rpc_agent_options=self.rpc_agent_options,
+                rpc_backend_options=self.rpc_backend_options,
             )
 
         return_value = old_test_method(self, *arg, **kwargs)
@@ -132,7 +132,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
 
 # Set PROCESS_GROUP as the default RPC backend.
 TEST_CONFIG.rpc_backend_name = "PROCESS_GROUP"
-TEST_CONFIG.build_rpc_agent_options = lambda test_object: rpc.backend_registry.construct_rpc_agent_options(
+TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
     test_object.rpc_backend,
     # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
     num_send_recv_threads=16,
