@@ -105,6 +105,8 @@ class TORCH_API RpcAgent {
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
+  virtual std::vector<WorkerInfo> getWorkerInfos() const = 0;
+
   // Retrieve the timeout for all RPCs.
   inline std::chrono::milliseconds getRpcTimeout() const {
     return rpcTimeout_.load();
@@ -124,11 +126,7 @@ class TORCH_API RpcAgent {
   virtual void sync() = 0;
 
   // start accepting requests
-  virtual void start() = 0;
-
-  // Stop accepting requests and shutdown the RPC framework as soon as possible
-  // by terminating all RPC threads.
-  virtual void shutdown() = 0;
+  virtual void start() {}
 
   // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
