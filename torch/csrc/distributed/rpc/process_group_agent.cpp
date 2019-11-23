@@ -179,6 +179,10 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   return allWorkerInfo_[id];
 }
 
+std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
+  return allWorkerInfo_;
+}
+
 void ProcessGroupAgent::join() {
   // Every process i sends a SHUTDOWN message to process i + 1. This is
   // necessary for now because:

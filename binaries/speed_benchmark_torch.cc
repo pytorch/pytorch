@@ -116,6 +116,7 @@ int main(int argc, char** argv) {
     at::globalContext().setQEngine(at::QEngine::QNNPACK);
   }
   torch::autograd::AutoGradMode guard(false);
+  torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
 
   module.eval();
