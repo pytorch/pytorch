@@ -222,9 +222,10 @@ bool isWeightOfConvOrLinear(Value* v) {
     if (u.user->kind() == Symbol::aten("conv2d") &&
         v == u.user->inputs().at(1)) {
       return true;
-    } else if (u.user->kind() == prim::CallFunction &&
-               getFuncName(u.user->inputs()[0]) == "linear" &&
-               v == u.user->inputs().at(2)) {
+    } else if (
+        u.user->kind() == prim::CallFunction &&
+        getFuncName(u.user->inputs()[0]) == "linear" &&
+        v == u.user->inputs().at(2)) {
       return true;
     }
   }
@@ -246,14 +247,20 @@ graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %g
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
-    auto transposed_value = getIValue("transposed", match_vmap, vmap).value().toBool();
-    auto benchmark_value = getIValue("benchmark", match_vmap, vmap).value().toBool();
-    auto deterministic_value = getIValue("deterministic", match_vmap, vmap).value().toBool();
-    auto cudnn_enabled_value = getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
-    auto output_padding_value = getIValue("output_padding", match_vmap, vmap).value().toIntList();
+    auto transposed_value =
+        getIValue("transposed", match_vmap, vmap).value().toBool();
+    auto benchmark_value =
+        getIValue("benchmark", match_vmap, vmap).value().toBool();
+    auto deterministic_value =
+        getIValue("deterministic", match_vmap, vmap).value().toBool();
+    auto cudnn_enabled_value =
+        getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
+    auto output_padding_value =
+        getIValue("output_padding", match_vmap, vmap).value().toIntList();
 
-    if (!transposed_value && !benchmark_value && !deterministic_value && cudnn_enabled_value
-         && (output_padding_value[0] == 0) && (output_padding_value[1] == 0)) {
+    if (!transposed_value && !benchmark_value && !deterministic_value &&
+        cudnn_enabled_value && (output_padding_value[0] == 0) &&
+        (output_padding_value[1] == 0)) {
       return true;
     }
     return false;
@@ -278,7 +285,9 @@ Node* InsertObserversHelper::insertObserverFor(
 
   script::Module observer_module;
   if (isWeightOfConvOrLinear(v)) {
-    TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -631,8 +640,9 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   IValue qparams = calculate_qparams(std::vector<IValue>());
   checkCalculateQParamsResult(qparams);
   auto scalar_type = om.attr("dtype");
-  TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
-              "dtype of observer can't be undefined");
+  TORCH_CHECK(
+      scalar_type.toScalarType() != at::ScalarType::Undefined,
+      "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
 }
 
@@ -735,8 +745,7 @@ graph(%linear, %a_dequant, %w_quant, %b):
   };
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant,
-                                  linear_with_quant_prepack);
+  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
   rewriter.runOnGraph(graph, filter);
 }
 
@@ -1233,6 +1242,139 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         return (%packed_params))");
 };
+
+  // (is_conv, is_per_channel, pattern, packed_params_module)
+  std::vector<PatternsAndModules> pattern_and_modules = {
+      {false, false, linear_prepack_per_tensor, linear_params_module},
+      {false, true, linear_prepack_per_channel, linear_params_module},
+      {true, false, conv2d_prepack, conv_params_module},
+      {true, true, conv2d_prepack_per_channel, conv_params_module}};
+  for (const auto& pm : pattern_and_modules) {
+    Graph pattern_graph;
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(pm.pattern, &pattern_graph, vmap);
+    const auto& matches = findPatternMatches(pattern_graph, *graph);
+    TORCH_INTERNAL_ASSERT(
+        matches.size() <= 1, "We only support at most one match right now");
+    for (const auto& match : matches) {
+      const auto& match_vmap = match.values_map;
+      auto w_dtype_opt = getIValue("w_dtype", match_vmap, vmap);
+      auto w_scale_opt = getIValue("w_scale", match_vmap, vmap);
+      auto w_zero_point_opt = getIValue("w_zero_point", match_vmap, vmap);
+      if (!w_dtype_opt || !w_scale_opt || !w_zero_point_opt) {
+        GRAPH_DEBUG(
+            "dtype, scale or zero_point for weight(",
+            getValue("w_dtype", match_vmap, vmap)->debugName(),
+            ", ",
+            getValue("w_scale", match_vmap, vmap)->debugName(),
+            ", ",
+            getValue("w_zero_point", match_vmap, vmap)->debugName(),
+            ") is not constant, skipping the match.");
+        continue;
+      }
+      auto w_dtype = w_dtype_opt.value().toScalarType();
+      auto w = module.attr("weight").toTensor().data();
+      at::Tensor w_quant;
+      if (pm.is_per_channel) {
+        auto w_axis_opt = getIValue("w_axis", match_vmap, vmap);
+        if (!w_axis_opt) {
+          GRAPH_DEBUG(
+              "axis for weight ",
+              getValue("w_axis", match_vmap, vmap)->debugName(),
+              " is non-constant, skipping the match");
+          continue;
+        }
+        auto w_scale = w_scale_opt.value().toTensor().to(at::kFloat);
+        auto w_zero_point = w_zero_point_opt.value().toTensor().to(at::kInt);
+        int w_axis = w_axis_opt.value().toInt();
+        TORCH_CHECK(
+            w_scale.sizes() == w_zero_point.sizes(),
+            "scale and zero_point must have the same size");
+        w_quant =
+            at::quantize_per_channel(w, w_scale, w_zero_point, w_axis, w_dtype);
+      } else {
+        auto w_scale = w_scale_opt.value().toDouble();
+        auto w_zero_point = w_zero_point_opt.value().toInt();
+        w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
+      }
+      c10::optional<at::Tensor> b = c10::nullopt;
+      if (hastensor(module, "bias")) {
+        b = module.attr("bias").toTensor().data();
+      }
+      script::Module wrapper_module = pm.packed_params_module.clone();
+      auto set_weight_bias = wrapper_module.get_method("set_weight_bias");
+      std::string module_name_prefix;
+      if (pm.is_conv) {
+        module_name_prefix = "_conv_packed_params_module_for_";
+        auto stride_opt =
+            toTwoElementIntList(getValue("stride", match_vmap, vmap));
+        auto padding_opt =
+            toTwoElementIntList(getValue("padding", match_vmap, vmap));
+        auto dilation_opt =
+            toTwoElementIntList(getValue("dilation", match_vmap, vmap));
+        auto groups_opt = getIValue("groups", match_vmap, vmap);
+        auto set_conv_params = wrapper_module.get_method("set_conv_params");
+        if (!stride_opt || !padding_opt || !dilation_opt) {
+          GRAPH_DEBUG(
+              "Failed to extract two element IntList for stride/padding/dilation, (",
+              getValue("stride", match_vmap, vmap)->debugName(),
+              ", ",
+              getValue("padding", match_vmap, vmap)->debugName(),
+              ", ",
+              getValue("dilation", match_vmap, vmap)->debugName(),
+              ") skipping the match");
+          continue;
+        }
+        set_conv_params(std::vector<IValue>{stride_opt.value(),
+                                            padding_opt.value(),
+                                            dilation_opt.value(),
+                                            groups_opt.value()});
+      } else {
+        module_name_prefix = "_linear_packed_params_module_for_";
+      }
+      set_weight_bias(std::vector<IValue>{IValue(w_quant), IValue(b)});
+      auto w_quant_val = getValue("w_quant", match_vmap, vmap);
+      // unique name for the module based on %w_quant
+      int uid = 0;
+      auto module_name = module_name_prefix + c10::to_string(uid++);
+      while (module.hasattr(module_name)) {
+        module_name_prefix + c10::to_string(uid++);
+      }
+      GRAPH_UPDATE("Adding new module: ", module_name);
+      module.register_module(module_name, wrapper_module);
+
+      // Add GetAttr of the packed module
+      auto packed_params_val = getValue("packed_params", match_vmap, vmap);
+      WithInsertPoint ins(packed_params_val->node());
+      // wrapper_module =
+      // self.{_conv,_linear}_packed_params_module_for_{unique_id}
+      Value* packed_params_module =
+          graph->insertGetAttr(graph->inputs()[0], module_name)
+              ->setType(wrapper_module.type());
+      GRAPH_UPDATE("Adding GetAttr node for the wrapper module");
+
+      // packed_params = wrapper_module._packed_params
+      Value* packed_params_from_attr =
+          graph->insertGetAttr(packed_params_module, "_packed_params");
+      GRAPH_UPDATE(
+          "Adding GetAttr node for _packed_params: ",
+          packed_params_from_attr->debugName());
+      packed_params_val->replaceAllUsesWith(packed_params_from_attr);
+
+      // Delete nodes
+      std::vector<Node*> nodes_to_delete = {w_quant_val->node(),
+                                            packed_params_val->node()};
+      for (auto n : nodes_to_delete) {
+        n->removeAllInputs();
+      }
+      for (auto n : nodes_to_delete) {
+        GRAPH_UPDATE("Deleting node: ", n);
+        n->destroy();
+      }
+    }
+  }
+}
+>>>>>>> clang-format
 
 void FoldPrepackedWeightIntoModule(
     script::Module& module,
