@@ -310,7 +310,6 @@ less_than = _LessThan
 unit_interval = _Interval(0., 1.)
 interval = _Interval
 half_open_interval = _HalfOpenInterval
-open_interval = _OpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
