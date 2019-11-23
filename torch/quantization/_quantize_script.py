@@ -54,40 +54,10 @@ class ConvPackedParams(torch.nn.Module):
                              state[1])
         self.training = state[6]
 
-class LinearPackedParams(torch.nn.Module):
-    def __init__(self):
-        super(LinearPackedParams, self).__init__()
-        wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
-        self.set_weight_bias(wq, None)
-
-    @torch.jit.export
-    def set_weight_bias(self, weight, bias):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
-
-    @torch.jit.export
-    def _weight_bias(self):
-        return torch.ops.quantized.linear_unpack(self._packed_params)
-
-    def forward(self, x):
-        return x
-
-    @torch.jit.export
-    def __getstate__(self):
-        qweight, bias = self._weight_bias()
-        return qweight, bias, self.training
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        # type: (Tuple[Tensor, Optional[Tensor], bool]) -> None
-        self.set_weight_bias(state[0], state[1])
-        self.training = state[2]
-
-
 linear_packed_params = None
 conv_packed_params = None
 if 'fbgemm' in torch.backends.quantized.supported_engines:
-    linear_packed_params = torch.jit.script(LinearPackedParams())._c
+    linear_packed_params = torch.jit.script(torch.nn.quantized.modules.linear.LinearPackedParams())._c
     conv_packed_params = torch.jit.script(ConvPackedParams())._c
 
 def _check_is_script_module(model):
