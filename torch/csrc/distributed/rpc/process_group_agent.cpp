@@ -291,7 +291,8 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     auto futureStartTime =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch());
-    // Set infinite timeout if specified.
+
+    // Prepare timeout.
     auto timeout = rpcTimeout_.load();
     if (timeout.count() == 0) {
       timeout = INFINITE_TIMEOUT;
@@ -299,6 +300,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     std::chrono::milliseconds endTime = timeout == INFINITE_TIMEOUT
         ? INFINITE_TIMEOUT
         : futureStartTime + timeout;
+
     auto futureInfo = FutureInfo(future, endTime, to.id_, timeout);
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
@@ -430,8 +432,9 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               // by the sender who has determined the future has timed out.
               return;
             }
-            std::chrono::milliseconds endTime = futureInfo->second.endTime_;
+            // Use futureInfo before destructing it.
             fm = futureInfo->second.future_;
+            auto endTime = futureInfo->second.endTime_;
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map

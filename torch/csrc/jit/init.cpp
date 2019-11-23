@@ -480,6 +480,9 @@ void initJITBindings(PyObject* module) {
         size_t size;
         std::tie(data, size) = self.getRecord(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_all_records", [](PyTorchStreamReader& self) {
+        return self.getAllRecords();
       });
 
   m.def(
