@@ -512,7 +512,7 @@ void QuantizeHelper::removeObservers() {
 
 void QuantizeHelper::quantizeTensors() {
   for (auto& v : values_to_quantize_) {
-    // add an assert
+    TORCH_INTERNAL_ASSERT(values_to_qparams_.count(v));
     auto tp = values_to_qparams_[v];
     auto qparams = std::get<0>(tp);
     auto scalar_type = std::get<1>(tp);
