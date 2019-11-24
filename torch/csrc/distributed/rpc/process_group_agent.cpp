@@ -254,17 +254,24 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
-  rpcRunning_.store(true);
+  {
+    std::lock_guard<std::mutex> futureLock{futureMutex_};
+    rpcRunning_.store(true);
+  }
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
   futureTimeoutThread_ =
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
 }
 
 void ProcessGroupAgent::shutdown() {
+  LOG(INFO) << "Shutting down ProcessGroupAgent.";
+  std::unique_lock<std::mutex> lock{futureMutex_};
   if (!rpcRunning_.exchange(false)) {
     return;
   }
-  LOG(INFO) << "Stopping ProcessGroupAgent.";
+  lock.unlock();
+  futureTimeoutCV_.notify_one();
+  futureTimeoutThread_.join();
   {
     std::unique_lock<std::mutex> lock(recvWorkMutex_);
     if (recvWork_) {
@@ -273,8 +280,6 @@ void ProcessGroupAgent::shutdown() {
   }
   threadPool_.waitWorkComplete();
   listenerThread_.join();
-  futureTimeoutCV_.notify_one();
-  futureTimeoutThread_.join();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
@@ -499,9 +504,12 @@ void ProcessGroupAgent::listenLoop() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (rpcRunning_.load()) {
-    std::chrono::milliseconds sleepTime;
+  while (true) {
     std::unique_lock<std::mutex> lock{futureMutex_};
+    if (!rpcRunning_.load()) {
+      return;
+    }
+    std::chrono::milliseconds sleepTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
     // if there are no futures or the first future's RPC timeout is set to 0
@@ -519,10 +527,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       futureTimeoutCV_.wait(lock);
     } else {
       futureTimeoutCV_.wait_for(lock, sleepTime);
-    }
-
-    if (!rpcRunning_.load()) {
-      return;
     }
 
     const auto timedOutFutures = processTimedOutFutures();
