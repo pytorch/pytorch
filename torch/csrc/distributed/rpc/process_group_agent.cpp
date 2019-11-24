@@ -302,6 +302,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
         : futureStartTime + timeout;
 
     auto futureInfo = FutureInfo(future, endTime, to.id_, timeout);
+    bool notifyThread = false;
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       futures_[requestId] = futureInfo;
@@ -310,14 +311,18 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       requestIdVec.push_back(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or it has closer end time than other futures in the map.
-      if (futures_.size() == 1 ||
-          (futureTimeouts_.begin()->first == endTime &&
-           (requestIdVec.size() ==
-            1 // Avoid repeatedly waking up the watchdog,
-              // when we set rpcTimeout_ == INFINITE_TIMEOUT.
-            ))) {
-        futureTimeoutCV_.notify_one();
+      if (futureTimeouts_.begin()->first == endTime &&
+          (requestIdVec.size() ==
+           1 // Avoid repeatedly waking up the watchdog,
+             // when we set rpcTimeout_ == INFINITE_TIMEOUT.
+           )) {
+        notifyThread = true;
       }
+    }
+    if (notifyThread) {
+      // Notify the wathdog thread only after releasing the lock,
+      // so watchdog can acquire lock on waking up.
+      futureTimeoutCV_.notify_one();
     }
     message.setId(requestId);
   } else {
@@ -490,6 +495,7 @@ void ProcessGroupAgent::listenLoop() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
+  auto knownEarliestEndTime = INFINITE_TIMEOUT;
   while (!shutdown_.load()) {
     std::chrono::milliseconds sleepTime;
     std::unique_lock<std::mutex> lock{futureMutex_};
@@ -501,18 +507,37 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
         futureTimeouts_.begin()->first == INFINITE_TIMEOUT) {
       sleepTime = INFINITE_TIMEOUT;
     } else {
-      const auto minFutureExpirationTime = futureTimeouts_.begin()->first;
-      const auto remainingTime = getRPCRemainingTime(minFutureExpirationTime);
+      knownEarliestEndTime = futureTimeouts_.begin()->first;
+      const auto remainingTime = getRPCRemainingTime(knownEarliestEndTime);
       sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
     }
 
-    std::cv_status waitStatus = std::cv_status::no_timeout;
+    bool shouldUpdatesleepTime = true;
     if (sleepTime == INFINITE_TIMEOUT) {
-      futureTimeoutCV_.wait(lock);
+      futureTimeoutCV_.wait(lock, [&, this]() {
+        // Do not wait on the cond var if RPC has shutdown.
+        // Notice, whoever modifying `shutdown_`
+        // must acquire lock on `futureMutex_`.
+        if (shutdown_.load()) {
+          return true;
+        }
+        auto earliestEndTimeInMap = futureTimeouts_.begin()->first;
+        return earliestEndTimeInMap < knownEarliestEndTime;
+      });
     } else {
-      waitStatus = futureTimeoutCV_.wait_for(lock, sleepTime);
+      shouldUpdatesleepTime =
+          futureTimeoutCV_.wait_for(lock, sleepTime, [&, this]() {
+            // Do not wait on the cond var if RPC has shutdown.
+            // Notice, whoever modifying `shutdown_`
+            // must acquire lock on `futureMutex_`.
+            if (shutdown_.load()) {
+              return true;
+            }
+            auto earliestEndTimeInMap = futureTimeouts_.begin()->first;
+            return earliestEndTimeInMap < knownEarliestEndTime;
+          });
     }
-    if (waitStatus == std::cv_status::no_timeout) {
+    if (shouldUpdatesleepTime) {
       continue;
     }
 
