@@ -367,7 +367,6 @@ autograd and distributed optimizer is as follows:
       rpc.wait_all_workers()
 
   file_name = NamedTemporaryFile().name
-  processes = []
 
   # Run two workers.
   nprocs = 2
