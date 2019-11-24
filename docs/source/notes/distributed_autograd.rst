@@ -319,7 +319,7 @@ autograd and distributed optimizer is as follows:
 
 .. code::
 
-  import multiprocessing as mp
+  import torch.multiprocessing as mp
   from tempfile import NamedTemporaryFile
   import torch
   import torch.distributed.autograd as dist_autograd
@@ -370,12 +370,7 @@ autograd and distributed optimizer is as follows:
   processes = []
 
   # Run two workers.
-  for i in range(2):
-      p = mp.Process(target=run_process, args=(i, (i + 1) % 2, file_name))
-      p.start()
-      processes.append(p)
-
-  for p in processes:
-      p.join()
+  nprocs = 2
+  mp.spawn(_run_process, args=(i, (i + 1) % 2, file_name), nprocs)
 
 .. _RFC: https://github.com/pytorch/pytorch/issues/23110
