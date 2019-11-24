@@ -484,15 +484,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         params = []
         arg_idx = 0
 
-        _inits = []
-        _actuals = []
-        _params = []
-        _arg_idx = 0
-
-        # for arg in pa.input_args:
-
-        # def add_
-
         for arg in inputs:
             if arg['simple_type'] in ['Type', 'TensorOptions']:
                 pass
@@ -635,7 +626,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         # variable itself.)
         simple_return_type = declaration['return_type'].replace(' &', '')
         if simple_return_type not in SUPPORTED_RETURN_TYPES:
-            raise RuntimeError(f"{declaration['name']} returns unsupported type {simple_return_type}")
+            raise RuntimeError(declaration['name'] + " returns unsupported type " + simple_return_type)
 
         if requires_grad and not has_tensor_options:
             set_requires_grad = '.set_requires_grad({})'.format(requires_grad)
