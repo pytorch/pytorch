@@ -8,8 +8,14 @@
 
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/script.h>
+#include "caffe2/serialize/read_adapter_interface.h"
 
 #include "pytorch_jni_common.h"
+
+#ifdef __ANDROID__
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
+#endif
 
 namespace pytorch_jni {
 
@@ -25,6 +31,31 @@ struct JITCallGuard {
 
 } // namespace
 
+#ifdef __ANDROID__
+class AndroidAssetReadAdapter final
+    : public caffe2::serialize::ReadAdapterInterface {
+ public:
+  explicit AndroidAssetReadAdapter(const void* data, off_t size)
+      : data_(data), size_(size){};
+
+  size_t size() const override {
+    return size_;
+  }
+
+  size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
+      const override {
+    memcpy(buf, (int8_t*)(data_) + pos, n);
+    return n;
+  }
+
+  ~AndroidAssetReadAdapter() {}
+
+ private:
+  const void* data_;
+  off_t size_;
+};
+#endif
+
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
@@ -39,6 +70,13 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     return makeCxxInstance(modelPath);
   }
 
+  static facebook::jni::local_ref<jhybriddata> initHybridAndroidAsset(
+      facebook::jni::alias_ref<jclass>,
+      facebook::jni::alias_ref<jstring> assetName,
+      facebook::jni::alias_ref<jobject> assetManager) {
+    return makeCxxInstance(assetName, assetManager);
+  }
+
 #ifdef TRACE_ENABLED
   static void onFunctionEnter(
       const torch::autograd::profiler::RecordFunction& fn) {
@@ -50,7 +88,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   }
 #endif
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+  void preModuleLoadSetup() {
     auto qengines = at::globalContext().supportedQEngines();
     if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
         qengines.end()) {
@@ -64,13 +102,45 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
         /* sampled */ false);
 #endif
     JITCallGuard guard;
+  }
+
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+    preModuleLoadSetup();
     module_ = torch::jit::load(std::move(modelPath->toStdString()));
     module_.eval();
   }
 
+#ifdef __ANDROID__
+  PytorchJni(
+      facebook::jni::alias_ref<jstring> assetName,
+      facebook::jni::alias_ref<jobject> assetManager) {
+    preModuleLoadSetup();
+    JNIEnv* env = facebook::jni::Environment::current();
+    AAssetManager* mgr = AAssetManager_fromJava(env, assetManager.get());
+    AAsset* asset = AAssetManager_open(
+        mgr, assetName->toStdString().c_str(), AASSET_MODE_BUFFER);
+    if (asset == nullptr) {
+      facebook::jni::throwNewJavaException(
+          facebook::jni::gJavaLangIllegalArgumentException,
+          "Asset '%s' not found",
+          assetName->toStdString().c_str());
+    }
+    const void* data = AAsset_getBuffer(asset);
+    assert(data != nullptr);
+    off_t len = AAsset_getLength(asset);
+    assert(len != 0);
+    module_ = torch::jit::load(
+        torch::make_unique<AndroidAssetReadAdapter>(data, len));
+    AAsset_close(asset);
+    module_.eval();
+  }
+#endif
+
   static void registerNatives() {
     registerHybrid({
         makeNativeMethod("initHybrid", PytorchJni::initHybrid),
+        makeNativeMethod(
+            "initHybridAndroidAsset", PytorchJni::initHybridAndroidAsset),
         makeNativeMethod("forward", PytorchJni::forward),
         makeNativeMethod("runMethod", PytorchJni::runMethod),
     });
