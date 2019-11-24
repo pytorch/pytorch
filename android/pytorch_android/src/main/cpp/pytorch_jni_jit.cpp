@@ -125,12 +125,8 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
           "Asset '%s' not found",
           assetName->toStdString().c_str());
     }
-    const void* data = AAsset_getBuffer(asset);
-    assert(data != nullptr);
-    off_t len = AAsset_getLength(asset);
-    assert(len != 0);
-    module_ = torch::jit::load(
-        torch::make_unique<AndroidAssetReadAdapter>(data, len));
+    module_ = torch::jit::load(torch::make_unique<AndroidAssetReadAdapter>(
+        AAsset_getBuffer(asset), AAsset_getLength(asset)));
     AAsset_close(asset);
     module_.eval();
   }
