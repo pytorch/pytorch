@@ -5,7 +5,6 @@
 #
 from collections import defaultdict, namedtuple
 import re
-from .nested_dict import nested_dict
 from .gen_variable_type import should_trace
 from .utils import write
 
@@ -533,7 +532,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             type_arg = None
         if type_arg and len(outputs) > 1:
-            raise RuntimeError(f"{declaration['name']} type dispatched parameter with multiple outputs not supported")
+            raise RuntimeError(declaration['name'] + ": type dispatched parameter with multiple outputs not supported")
 
         layout = None
         parsed_type_arg = None
@@ -635,7 +634,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         # mutable reference to temporary.  Maybe we could assign it to a
         # variable itself.)
         simple_return_type = declaration['return_type'].replace(' &', '')
-        if not simple_return_type in SUPPORTED_RETURN_TYPES:
+        if simple_return_type not in SUPPORTED_RETURN_TYPES:
             raise RuntimeError(f"{declaration['name']} returns unsupported type {simple_return_type}")
 
         if requires_grad and not has_tensor_options:
