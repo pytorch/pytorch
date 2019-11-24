@@ -81,9 +81,9 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
     ${signatures}
   }, /*traceable=*/${traceable});
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto r = parser.parse(args, kwargs, parsed_args);
 
-  switch (_r.idx) {
+  switch (r.idx) {
     ${dispatch}
   }
 
@@ -105,7 +105,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
     ${signatures}
   }, /*traceable=*/${traceable});
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
+  auto r = parser.parse(args, kwargs, parsed_args);
 
   ${dispatch}
 
@@ -144,7 +144,7 @@ ${call_dispatch}
 # handler for output/no-output overload pair
 # (plugged into PY_VARIABLE_CASE as ${call_dispatch})
 PY_VARIABLE_OUT = CodeTemplate("""\
-if (_r.isNone(${out_idx})) {
+if (r.isNone(${out_idx})) {
   ${call_dispatch}
 }
 else {
@@ -156,13 +156,13 @@ else {
 # variation of output/no-output handler in which tensor options params
 # (if present) are checked against properties of a tensor output param
 PY_VARIABLE_OUT_CHECK_TYPE = CodeTemplate("""\
-if (_r.isNone(${out_idx})) {
+if (r.isNone(${out_idx})) {
   ${call_dispatch}
 }
 else {
-  check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}), _r.isNone(${type_idx}),
-                         _r.layout(${layout_idx}), _r.isNone(${layout_idx}),
-                         _r.device(${device_idx}), _r.isNone(${device_idx}));
+  check_out_type_matches(r.tensor(${out_idx}), r.scalartype(${type_idx}), r.isNone(${type_idx}),
+                         r.layout(${layout_idx}), r.isNone(${layout_idx}),
+                         r.device(${device_idx}), r.isNone(${device_idx}));
   ${call_dispatch_out}
 }
 
@@ -180,7 +180,7 @@ auto dispatch = [](${lambda_params}) {
   ${auto_no_gil}
   return ${dispatch_call}(${dispatch_args});
 };
-return utils::wrap(${namedtuple_typeref}dispatch(${lambda_args})${set_requires_grad});
+return wrap(${namedtuple_typeref}dispatch(${lambda_args})${set_requires_grad});
 """)
 
 PY_VARIABLE_RETURN_VOID = CodeTemplate("""\
@@ -435,7 +435,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
               (TODO hoist/eliminate the inside baseball type conversions here)
             - an expression producing the arg value. if unpack_to_local is true, this will be
               the local's name (i.e., the original arg name), otherwise it'll be an inline
-              expression like `_r.tensor(0)`
+              expression like `r.tensor(0)`
             """
             name = arg['name']
 
@@ -453,10 +453,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     '`{}` type is not supported in python_default_init'.format(typename)
                 unpack_with_default = unpack_with_default_methods.get(typename)
                 default_expr = arg.get('python_default_init')
-                expr = '_r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
+                expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
                 unpack = unpack_methods.get(typename, typename.lower())
-                expr = '_r.{}({})'.format(unpack, arg_index)
+                expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_to_local:
                 # if asked to unpack, add a local and return a reference to that
@@ -514,7 +514,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             actuals.append(arg_expr)
         elif len(outputs) > 1:
             N = len(outputs)
-            inits.append('auto results = _r.tensorlist_n<{}>({});'.format(N, arg_idx))
+            inits.append('auto results = r.tensorlist_n<{}>({});'.format(N, arg_idx))
             for i, arg in enumerate(outputs):
                 params.append('Tensor & {}'.format(arg['name']))
                 actuals.append('results[{}]'.format(i))
