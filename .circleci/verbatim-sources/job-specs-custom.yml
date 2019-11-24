@@ -173,10 +173,10 @@
             export IN_CIRCLECI=1
 
             # Install CUDA 10.0
-            sudo rm -rf ~/cuda_10.0.130_mac_installer.app || true
+            sudo rm -rf ~/CUDAMacOSXInstaller.app || true
             curl https://s3.amazonaws.com/ossci-macos/cuda_10.0.130_mac_installer.zip -o ~/cuda_10.0.130_mac_installer.zip
             unzip ~/cuda_10.0.130_mac_installer.zip -d ~/
-            sudo ~/cuda_10.0.130_mac_installer.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
+            sudo ~/CUDAMacOSXInstaller.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
             sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-10.0/lib/libcuda.dylib
             sudo rm -rf /usr/local/cuda || true
 
