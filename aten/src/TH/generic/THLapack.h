@@ -7,10 +7,6 @@ TH_API void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int
 /* Non-sym eigenvals */
 TH_API void THLapack_(geev)(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info);
 
-/* Positive Definite matrices */
-/* Matrix inverse based on Cholesky factorization */
-TH_API void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info);
-
 /* QR decomposition */
 TH_API void THLapack_(geqrf)(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 /* Build Q from output of geqrf */

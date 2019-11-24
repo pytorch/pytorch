@@ -1272,24 +1272,6 @@
     - bool eigenvectors
 ]]
 [[
-  name: _th_potri
-  cname: potri
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-    - bool upper
-]]
-[[
   name: _th_geqrf
   cname: geqrf
   types:

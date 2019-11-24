@@ -84,6 +84,10 @@ extern "C" void zgetrs_(char *trans, int *n, int *nrhs, std::complex<double> *a,
 extern "C" void cgetrs_(char *trans, int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
 extern "C" void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
 extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
+
+// potri
+extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
+extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 #endif
 
 namespace at {
@@ -126,6 +130,8 @@ void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
 template<class scalar_t>
 void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
+template <class scalar_t>
+void lapackCholeskyInverse(char uplo, int n, scalar_t *a, int lda, int *info);
 
 template<> void lapackSolve<std::complex<double>>(int n, int nrhs, std::complex<double> *a, int lda, int *ipiv, std::complex<double> *b, int ldb, int *info) {
   zgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
@@ -297,6 +303,14 @@ template<> void lapackLuSolve<double>(char trans, int n, int nrhs, double *a, in
 
 template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
   sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template <> void lapackCholeskyInverse<double>(char uplo, int n, double *a, int lda, int *info) {
+  dpotri_(&uplo, &n, a, &lda, info);
+}
+
+template <> void lapackCholeskyInverse<float>(char uplo, int n, float *a, int lda, int *info) {
+  spotri_(&uplo, &n, a, &lda, info);
 }
 #endif
 
@@ -1138,6 +1152,90 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
 
 Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
   Tensor result_tmp = at::lu_solve(self, LU_data, LU_pivots);
+  result.resize_as_(result_tmp).copy_(result_tmp);
+  return result;
+}
+
+template <typename scalar_t>
+static void symmetrize_single(scalar_t* self, int n, bool upper) {
+  if (upper) {
+    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        for (auto j = 0; j < i; j++) {
+          self[i + j * n] = self[j + i * n];
+        }
+      }
+    });
+  } else {
+    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        for (auto j = i; j < n; j++) {
+          self[i + j * n] = self[j + i * n];
+        }
+      }
+    });
+  }
+}
+
+template <typename scalar_t>
+static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t> infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
+#else
+  auto self_data = self.data_ptr<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto batch_size = batchCount(self);
+
+  auto n = self.size(-1);
+  char uplo = upper ? 'U' : 'L';
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    lapackCholeskyInverse<scalar_t>(uplo, n, self_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+
+  
+  at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+    for (auto b = start; b < end; b++) {
+      scalar_t* self_batch = &self_data[b * self_matrix_stride];
+      symmetrize_single<scalar_t>(self_batch, n, upper);
+    }
+  });
+#endif
+}
+
+Tensor _cholesky_inverse_helper_cpu(const Tensor& self, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_inverse_cpu", [&]{
+    apply_cholesky_inverse<scalar_t>(self_working_copy, upper, infos);
+  });
+
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_inverse_cpu");
+  } else {
+    singleCheckErrors(infos[0], "cholesky_inverse_cpu");
+  }
+  return self_working_copy;
+}
+
+Tensor cholesky_inverse(const Tensor& self, bool upper) {
+  if (self.numel() == 0) {
+    return at::empty_like(self);
+  }
+
+  squareCheckInputs(self);
+  return at::_cholesky_inverse_helper(self, upper);
+}
+
+Tensor& cholesky_inverse_out(Tensor& result, const Tensor& self, bool upper) {
+  Tensor result_tmp = at::cholesky_inverse(self, upper);
   result.resize_as_(result_tmp).copy_(result_tmp);
   return result;
 }

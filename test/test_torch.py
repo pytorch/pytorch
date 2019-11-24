@@ -7447,12 +7447,32 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
+    def test_cholesky_inverse_batched(self, device, dtype):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_inverse_test_helper(n, batch_dims, upper):
+            A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
+            L = A.cholesky(upper=upper)
+            cholesky_exp = torch.stack([l.cholesky_inverse(upper=upper) for l in L.reshape(-1, n, n)])
+            cholesky_exp = cholesky_exp.reshape_as(A)
+            self.assertEqual(cholesky_exp, torch.cholesky_inverse(L, upper=upper))
+
+        for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
+            cholesky_inverse_test_helper(3, batchsize, upper)
+
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
     def test_cholesky_inverse(self, device, dtype):
         from common_utils import random_symmetric_pd_matrix
         a = random_symmetric_pd_matrix(5, dtype=dtype, device=device)
 
-        # compute inverse directly
-        inv0 = torch.inverse(a)
+        # compute inverse using cholesky factors and triangular solve
+        chol = torch.cholesky(a)
+        chol_inv = torch.triangular_solve(torch.eye(5, device=device, dtype=dtype),
+                                          chol, upper=False)[0]
+        inv0 = chol_inv.t() @ chol_inv
 
         # default case
         chol = torch.cholesky(a)
