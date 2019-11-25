@@ -143,9 +143,10 @@ UserRRef<T>::~UserRRef() {
                << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
                << ex.what();
   } catch (...) {
+    std::exception_ptr p = std::current_exception();
     LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
                << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-               << "unknown error";
+               << (p ? p.__cxa_exception_type()->name() : "unknown error");
   }
 }
 
