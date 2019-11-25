@@ -1499,5 +1499,6 @@ class TestLRScheduler(TestCase):
 
         self.assertLessEqual(last_lr, max_lr)
 
+
 if __name__ == '__main__':
     run_tests()

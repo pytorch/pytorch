@@ -315,6 +315,19 @@ class SWA(Optimizer):
         model.apply(lambda module: _set_momenta(module, momenta))
         model.train(was_training)
 
+    def swap_swa_sgd_update_bn(self, loader, model, device=None):
+        r"""Swaps variables and swa buffers and updates BatchNorm buffers.
+
+        This method is equivalent to subsequently calling `opt.swap_swa_sgd()` \
+        and `opt.bn_update(loader, model, device)`. It's meant to be called in 
+        the end of training to use the collected swa running averages and update
+        the batchnorm buffers in the model. It can also be used to evaluate the 
+        running averages during training; to continue training `swap_swa_sgd`
+        should be called again.
+        """
+        self.swap_swa_sgd()
+        self.update_bn(loader, model, device)
+
 
 # BatchNorm utils
 def _check_bn_apply(module, flag):
