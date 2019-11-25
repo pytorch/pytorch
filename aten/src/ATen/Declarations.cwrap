@@ -1410,6 +1410,7 @@
     - CPU
   variants:
     - function
+  scalar_check: false
   return: argument 0
   arguments:
     - arg: THTensor* result
