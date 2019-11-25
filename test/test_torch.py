@@ -6136,6 +6136,13 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), (zero_d_int << one_d_int).shape)
         self.assertEqual((1,), (one_d_int << 1).shape)
 
+        # or
+        self.assertEqual((), (zero_d_int | zero_d_int).shape)
+        self.assertEqual((), (zero_d_int | 1).shape)
+        self.assertEqual((1,), (one_d_int | zero_d_int).shape)
+        self.assertEqual((1,), (zero_d_int | one_d_int).shape)
+        self.assertEqual((1,), (one_d_int | 1).shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
