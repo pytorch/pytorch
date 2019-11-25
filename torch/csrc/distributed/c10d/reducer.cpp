@@ -610,10 +610,6 @@ void Reducer::prepare_for_backward(
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
-  AT_ASSERTM(
-      !local_used_maps_reduced_,
-      "local_used_maps should have not been reduced yet at this point");
-
   for (size_t replica_index = 0; replica_index < bucket.replicas.size();
        replica_index++) {
     auto& replica = bucket.replicas[replica_index];
@@ -712,6 +708,15 @@ void Reducer::finalize_backward() {
   // Reset unused parameter accounting.
   for (auto& local_used : local_used_maps_) {
     local_used.fill_(0);
+  }
+  // Due to the lazy wait, it is possible that reduction of the current
+  // iteration is still going when the one for next iteration gets kicked off.
+  // For such case, we want to wait explicitly to make sure the reduction does
+  // complete before kicking off next one. Otherwise the prevous one may
+  // interfere, write to the device-side memory and clobber the content of
+  // local_unused_maps_dev_.
+  if (!local_used_maps_reduced_) {
+    local_used_work_->wait();
   }
   local_used_maps_reduced_ = false;
 }
