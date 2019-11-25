@@ -169,14 +169,14 @@ Reducer::Reducer(
     local_used_maps_dev_.resize(replica_count);
 
     for (size_t i = 0; i < replica_count; i++) {
-      local_used_maps_[i] = at::zeros({static_cast<long>(variable_count)});
-
       at::TensorOptions options;
+      options = options.dtype(at::kInt);
+      local_used_maps_[i] =
+          at::zeros({static_cast<long>(variable_count)}, options);
       // This tensor needs to be on the same device as replica because backend
       // such as NCCL may not support CPU tensors, and hence it might not work
       // if we always put it on CPU.
       options = options.device(replicas_[i][0].device());
-      options = options.dtype(at::kInt);
       local_used_maps_dev_[i] =
           at::empty({static_cast<long>(variable_count)}, options);
     }
@@ -508,9 +508,8 @@ void Reducer::initialize_buckets(
           .bucket_index = bucket_index,
           .intra_bucket_index = intra_bucket_index++,
       };
-
-      bucket.variable_indices.push_back(variable_index);
     }
+    bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
     buckets_.push_back(std::move(bucket));
   }
@@ -611,6 +610,10 @@ void Reducer::prepare_for_backward(
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
+  AT_ASSERTM(
+      !local_used_maps_reduced_,
+      "local_used_maps should have not been reduced yet at this point");
+
   for (size_t replica_index = 0; replica_index < bucket.replicas.size();
        replica_index++) {
     auto& replica = bucket.replicas[replica_index];
@@ -636,6 +639,11 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // a parameter that is locally unused, because we need to check if it's
       // also globally unused.
       size_t variable_index = bucket.variable_indices[intra_bucket_index];
+      // Note: global_unused might not be global yet. As we lazily wait for the
+      // reduction to complete, it becomes really global only if we get to the
+      // point as below where we wait for the reduction work, make D2H copy,
+      // and update global_unused with the real global consensus, i.e.
+      // local_used_maps_reduced_ is true.
       bool global_unused =
           local_used_maps_[replica_index][variable_index].item<int>() == 0;
       if (global_unused && !local_used_maps_reduced_) {
