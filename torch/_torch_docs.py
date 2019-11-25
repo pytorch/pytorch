@@ -4867,7 +4867,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+argsort(input, dim=-1, descending=False) -> LongTensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
