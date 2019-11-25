@@ -112,7 +112,9 @@ class RRefContext {
   void delPendingUser(const ForkId& forkId);
 
   void delUser(
-      const worker_id_t owner, const RRefId& rrefId, const ForkId& forkId);
+      const worker_id_t owner,
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
@@ -161,8 +163,8 @@ class RRefContext {
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
       pendingChildren_;
 
-  static std::mutex destroyedMutex_;
-  static bool destroyed_;
+  std::mutex destroyedMutex_;
+  bool destroyed_;
 };
 
 } // namespace rpc

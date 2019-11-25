@@ -7,9 +7,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::mutex RRefContext::destroyedMutex_;
-bool RRefContext::destroyed_ = false;
-
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
   static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
@@ -34,7 +31,7 @@ void RRefContext::handleException(const Message& message) {
 }
 
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
-    : agent_(std::move(agent)) {}
+    : agent_(std::move(agent)), destroyed_(false) {}
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
@@ -55,14 +52,16 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
     }
 
     if (ignoreRRefLeak) {
-      LOG(WARNING) << "Detected RRef Leaks during shutdown. This usually "
+      LOG(WARNING)
+          << "Detected RRef Leaks during shutdown. This usually "
           << "occurs when the application code still holds references to RRef "
           << "instances when calling shutdown(). If the program has "
           << "completed correctly and the process is exiting, it is OK to "
           << "ignore these leaks. However, if you program will keep running "
           << "after this, these leaks could result in memory leaks on RRef "
           << "owners. Please make sure all RRefs are out of scope and Python "
-          << "GC has deleted them before calling shutdown(): \n" << ss.str();
+          << "GC has deleted them before calling shutdown(): \n"
+          << ss.str();
     } else {
       AT_ERROR(ss.str());
     }
@@ -116,7 +115,9 @@ template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
     const ForkId& forkId);
 
 void RRefContext::delUser(
-    const worker_id_t owner, const RRefId& rrefId, const ForkId& forkId) {
+    const worker_id_t owner,
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(destroyedMutex_);
   if (!destroyed_) {
     auto fm = agent_->send(

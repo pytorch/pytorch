@@ -138,15 +138,15 @@ template <typename T>
 UserRRef<T>::~UserRRef() {
   try {
     RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
-  } catch(const std::exception& ex) {
+  } catch (const std::exception& ex) {
     LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-        << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-        << ex.what();
+               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+               << ex.what();
   } catch (...) {
     std::exception_ptr p = std::current_exception();
     LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-        << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-        << (p ? p.__cxa_exception_type()->name() : "unknown error");
+               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+               << (p ? p.__cxa_exception_type()->name() : "unknown error");
   }
 }
 
