@@ -196,7 +196,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike assert()).
 //
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -238,7 +238,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike CHECK() from glog.)
 //
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -263,7 +263,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK_INDEX(cond, ...)          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \

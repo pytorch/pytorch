@@ -97,7 +97,7 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
 
 static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   AT_ASSERTM(!accumulate, "index_put does not support accumulate=true");
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, iter.dtype(), "index_put", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_put", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_put_kernel_impl<dtype>(iter, index_size, index_stride);
   });
