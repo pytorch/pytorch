@@ -32,7 +32,7 @@ def _set_rpc_done(rank_distance):
 
 def _check_rpc_done(rank_distance):
     while not rpc_done[rank_distance]:
-        time.sleep(0.1)
+        time.sleep(0)
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
@@ -340,7 +340,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker1",
             backend=backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -361,14 +360,13 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )
-        rpc.wait_all_workers()
+        rpc.shutdown()
 
     @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -391,12 +389,10 @@ class RpcTest(RpcAgentTestFixture):
             rpc.init_rpc(
                 name="worker{}".format(self.rank),
                 backend=self.rpc_backend,
-                init_method=self.init_method,
                 rank=self.rank,
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )
-        rpc.wait_all_workers()
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
@@ -465,8 +461,8 @@ class RpcTest(RpcAgentTestFixture):
 
         from torch.distributed.rpc.api import _agent
         self.assertEqual(_agent, None)
-        # wait_all_workers() should not do anything as _agent is None
-        rpc.wait_all_workers()
+        # shutdown() should not do anything as _agent is None
+        rpc.shutdown()
         # We need this barrier here because although init_process_group is
         # blocking, it does not guarantee that all ranks are done with
         # initialization after the call. We did run into issues with it where
@@ -543,12 +539,11 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @dist_init(setup_rpc=False)
-    def test_wait_all_workers(self):
+    def test_shutdown(self):
         # Initialize RPC.
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -562,7 +557,6 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
-        rpc.wait_all_workers()
         rpc.shutdown()
 
         with self.assertRaisesRegex(RuntimeError, "^RPC has not been initialized"):
@@ -572,8 +566,8 @@ class RpcTest(RpcAgentTestFixture):
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
 
-        # it's safe to call wait_all_workers() multiple times
-        rpc.wait_all_workers()
+        # it's safe to call shutdown() multiple times
+        rpc.shutdown()
 
     @dist_init
     def test_expected_src(self):
@@ -1136,10 +1130,10 @@ class RpcTest(RpcAgentTestFixture):
             ],
             rank=self.rank,
             world_size=self.world_size,
-            init_method=self.init_method,
             rpc_backend_options=self.rpc_backend_options,
         )
-        rpc.shutdown()
+        # pass in graceful=False to ensure that we don't wait for other workers.
+        rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -1152,7 +1146,6 @@ class RpcTest(RpcAgentTestFixture):
             ],
             rank=self.rank,
             world_size=self.world_size,
-            init_method=self.init_method,
             rpc_backend_options=self.rpc_backend_options,
         )
         n = self.rank + 1
@@ -1166,12 +1159,13 @@ class RpcTest(RpcAgentTestFixture):
         # too early.
         rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(1,))
         _check_rpc_done(1)
-        rpc.shutdown()
+        # pass in graceful=False to ensure that we don't wait for other workers.
+        rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_wait_all_workers_and_shutdown(self):
-        # This tests ensures that both rpc.wait_all_workers() and rpc.shutdown() can be
+        # This tests ensures that both rpc._wait_all_workers() and rpc.shutdown() can be
         # called without errors being raised due to attempting to shut down
         # multiple times.
         rpc.init_rpc(
@@ -1179,10 +1173,11 @@ class RpcTest(RpcAgentTestFixture):
             backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
             rank=self.rank,
             world_size=self.world_size,
-            init_method=self.init_method,
             rpc_backend_options=self.rpc_backend_options
         )
-        rpc.wait_all_workers()
+        from torch.distributed.rpc.api import _wait_all_workers
+        # intentional call to internal _wait_all_workers
+        _wait_all_workers()
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
@@ -1197,14 +1192,12 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=rpc_backend_options,
         )
         set_timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, set_timeout)
-        rpc.wait_all_workers()
         rpc.shutdown()
 
     @dist_init

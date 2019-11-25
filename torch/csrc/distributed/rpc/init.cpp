@@ -36,7 +36,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout);
+          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
+          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -113,9 +114,9 @@ Otherwise, throws an exception.
                 return PyRRef::unpickle(t);
               }));
 
-  // future.wait() should not be called after wait_all_workers(), e.g.,
-  // pythonRpcHandler is cleaned up in wait_all_workers(), after
-  // wait_all_workers(), python objects returned from rpc python call can not be
+  // future.wait() should not be called after shutdown(), e.g.,
+  // pythonRpcHandler is cleaned up in shutdown(), after
+  // shutdown(), python objects returned from rpc python call can not be
   // resolved.
   auto futureMessage =
       shared_ptr_class_<FutureMessage>(module, "FutureMessage")
