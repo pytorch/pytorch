@@ -130,10 +130,10 @@ inline TypePtr getOrCreateNamedTupleType(
 
   if (auto type = get_python_cu()->get_type(qualName)) {
     TORCH_CHECK(
-        type->isSubtypeOf(named_type),
+        type->isSubtypeOf(named_type) || named_type->isSubtypeOf(type),
         "Can't to redefine NamedTuple: ",
         named_type->python_str());
-        return type;
+    return type;
   }
   // register the newly created named tuple type to the python cu
   get_python_cu()->register_type(named_type);
@@ -238,12 +238,12 @@ inline InferredType tryToInferContainerType(py::handle input) {
     if (isNamedTupleClass(input_type)) {
       // If the tuple is a NamedTuple type
       auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-          py::module::import("torch.jit").attr("_qualified_name")(input.get_type())));
+          py::module::import("torch.jit").attr("_qualified_name")(input_type)));
       c10::TypePtr named_type = getOrCreateNamedTupleType(
-        input_type,
-        qualifiedName,
-        element_types,
-        tracer::getPythonInterpreterSourceRange());
+          input_type,
+          qualifiedName,
+          element_types,
+          tracer::getPythonInterpreterSourceRange());
       return InferredType(named_type);
     }
     return InferredType(TupleType::create(element_types));
