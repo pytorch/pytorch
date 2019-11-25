@@ -278,6 +278,8 @@ _(aten, cudnn_convolution_transpose_backward_weight) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
+_(aten, conv_depthwise3d) \
+_(aten, conv_depthwise3d_backward) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \

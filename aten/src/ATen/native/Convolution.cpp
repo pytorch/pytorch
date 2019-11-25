@@ -210,7 +210,7 @@ auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
   return input.is_cuda() &&
          !transposed &&
-         input.ndimension() == 4 &&
+         (input.ndimension() == 4 || input.ndimension() == 5) &&
          input.size(1) == groups &&
          groups > 1 && // no point if there is only a single group
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
@@ -574,6 +574,14 @@ at::Tensor _convolution(
   }
 
   Tensor output;
+
+  // // check if the convolution is depthwise
+  // if (input.is_cuda() && input.size(1) == params.groups && params.groups > 1) {
+  //   auto kernel_size = weight.sizes().slice(2);
+  //   output = at::conv_depthwise3d(
+  //     input.contiguous(), weight, bias, kernel_size, params.stride, params.padding, params.dilation);
+  // }
+
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
 
@@ -581,15 +589,19 @@ at::Tensor _convolution(
       auto stride = params.stride;
       auto padding = params.padding;
       auto dilation = params.dilation;
-      if (params.use_cudnn_depthwise(input, weight)) {
+      if (params.use_cudnn_depthwise(input, weight) && input.ndimension() != 5) {
         output = at::cudnn_convolution(
             input.contiguous(input.suggest_memory_format()), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
 
-      } else if (params.use_miopen(input)){
+      } else if (params.use_miopen(input) && input.ndimension() != 5){
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+      } else if (input.ndimension() == 5) {
+        output = at::conv_depthwise3d(
+            input.contiguous(), weight, bias, 
+            kernel_size, stride, padding, dilation);
       } else {
           output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
       }
