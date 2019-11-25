@@ -97,7 +97,7 @@ namespace impl {
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(map, self.output_nr()));
     clear_hooks(self);
     add_hook(self, std::make_shared<CppFunctionPreHook>(map, 0));
-    auto fn = self.grad_fn();
+    const auto& fn = self.grad_fn();
     if (fn) {
       fn->add_pre_hook(std::move(hook_ptr));
     }

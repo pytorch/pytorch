@@ -5,7 +5,7 @@
 
 namespace torch { namespace autograd {
 struct CppFunctionPreHook : public FunctionPreHook {
-  CppFunctionPreHook(const std::shared_ptr<hooks_dict> &hooks, int value_idx);
+  CppFunctionPreHook(std::shared_ptr<hooks_dict> hooks, int value_idx);
   variable_list operator()(const variable_list& values) override;
 
   std::shared_ptr<hooks_dict> hooks_;
