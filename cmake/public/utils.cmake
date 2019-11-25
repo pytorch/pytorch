@@ -218,7 +218,7 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 11)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
 
   if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # until they can be unified, keep these lists synced with setup.py
