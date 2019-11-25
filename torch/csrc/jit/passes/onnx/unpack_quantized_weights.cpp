@@ -87,6 +87,10 @@ std::pair<double, int> getScaleFromInput(Node* input_node) {
     return getScaleFromInput(input_node->inputs()[0]->node());
   } else if (input_name == "aten::split_with_sizes") {
     return getScaleFromInput(input_node->inputs()[0]->node());
+  } else if (
+      input_name == "quantized::nchw2nhwc" ||
+      input_name == "quantized::nhwc2nchw") {
+    return getScaleFromInput(input_node->inputs()[0]->node());
   }
   TORCH_INTERNAL_ASSERT(
       false,
@@ -120,58 +124,6 @@ Node* CreateQuantizedBias(
   const_node->f_(Symbol::attr("Y_scale"), scale);
   const_node->is_(Symbol::attr("values"), data);
   return const_node;
-}
-
-Node* CreateNCHW2NHWC(
-    std::shared_ptr<Graph>& graph,
-    Node* op_node,
-    Node* input_node,
-    double scale,
-    int64_t zero_point) {
-  WithInsertPoint ins(op_node);
-
-  Node* dequant_node =
-      graph->create(Symbol::caffe2("Int8Dequantize"), {input_node->output()});
-  Node* permute_node =
-      graph->create(Symbol::caffe2("NCHW2NHWC"), {dequant_node->output()});
-
-  dequant_node->insertBefore(op_node);
-  permute_node->insertBefore(op_node);
-
-  std::vector<Value*> inputs;
-  inputs.push_back(permute_node->output());
-  inputs.push_back(graph->insertConstant(scale));
-  inputs.push_back(graph->insertConstant(zero_point));
-
-  Value* scalar_type_val = graph->insertConstant(IValue(at::ScalarType::Byte));
-  inputs.push_back(scalar_type_val);
-  Node* quant = graph->create(Symbol::aten("quantize_per_tensor"), inputs);
-  return quant;
-}
-
-std::pair<Node*, Node*> CreateNHWC2NCHW(
-    std::shared_ptr<Graph>& graph,
-    Node* op_node,
-    double scale,
-    int64_t zero_point) {
-  Node* dequant_node = graph->create(Symbol::caffe2("Int8Dequantize"), 1);
-  Node* permute_node = graph->create(Symbol::caffe2("NHWC2NCHW"), 1);
-
-  dequant_node->insertAfter(op_node);
-  dequant_node->addInput(op_node->outputs().at(0));
-  permute_node->insertAfter(dequant_node);
-  permute_node->addInput(dequant_node->outputs().at(0));
-
-  std::vector<Value*> inputs;
-  inputs.push_back(permute_node->output());
-  inputs.push_back(graph->insertConstant(scale));
-  inputs.push_back(graph->insertConstant(zero_point));
-
-  Value* scalar_type_val = graph->insertConstant(IValue(at::ScalarType::Byte));
-  inputs.push_back(scalar_type_val);
-  Node* quant = graph->create(Symbol::aten("quantize_per_tensor"), inputs);
-  quant->insertAfter(permute_node);
-  return std::make_pair(quant, dequant_node);
 }
 
 // This is called before the onnx pass. Using pattern matching we
@@ -323,28 +275,19 @@ void insertPermutesHelper(
     auto op_node = match_vmap.at(vmap.at("r"))->node();
     auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
 
-    auto num_inputs = match_vmap.at(vmap.at("r"))->node()->inputs().size();
-
-    auto input_data = getScaleFromInput(input_node);
-
-    Node* permuted_input =
-        CreateNCHW2NHWC(graph, op_node, input_node, input_data.first, input_data.second);
+    Node* permute_node = graph->create(
+        Symbol::fromQualString("quantized::nchw2nhwc"), {input_node->output()});
+    permute_node->insertBefore(op_node);
     op_node->removeInput(0);
-    graph->setInsertPoint(op_node);
-    permuted_input->insertBefore(op_node);
-    op_node->insertInput(0, permuted_input->output());
+    op_node->insertInput(0, permute_node->output());
 
-    auto out_scale = toIValue(op_node->inputs()[num_inputs - 2]);
-    auto out_zp = toIValue(op_node->inputs()[num_inputs - 1]);
-    auto permute_nodes = CreateNHWC2NCHW(
-        graph,
-        op_node,
-        out_scale.value().toDouble(),
-        out_zp.value().toInt());
+    Node* permute_node_after = graph->create(
+        Symbol::fromQualString("quantized::nhwc2nchw"), {input_node->output()});
+    permute_node_after->insertAfter(op_node);
     auto v = op_node->outputs().at(0);
-    v->replaceAllUsesWith(permute_nodes.first->outputs().at(0));
-    permute_nodes.second->removeInput(0);
-    permute_nodes.second->addInput(v);
+    v->replaceAllUsesWith(permute_node_after->outputs().at(0));
+    permute_node_after->removeInput(0);
+    permute_node_after->addInput(v);
   }
 }
 

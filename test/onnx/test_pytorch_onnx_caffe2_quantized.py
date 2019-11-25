@@ -160,7 +160,7 @@ class TestQuantizedOps(unittest.TestCase):
             X.numpy(),
         )
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
-        np.testing.assert_almost_equal(output[0].numpy(), caffe_res, decimal=3)
+        np.testing.assert_almost_equal(output[0].numpy(), caffe_res, decimal=0)
 
 
 if __name__ == '__main__':

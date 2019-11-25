@@ -19,28 +19,27 @@ def register_quantized_ops(domain, version):
             sym_registry.register_op(op[0], op[1], domain, version)
 
 def nchw2nhwc(g, input):
-    quantized_input = input in sym_help._quantized_ops
-    if quantized_input:
-        axes = [0, 2, 3, 1]
-        quant_args = {
-            "axes_i": axes,
-            "Y_scale_f": input.node()["Y_scale"],
-            "Y_zero_point_i": input.node()["Y_zero_point"],
-        }
-        input = g.op("_caffe2::Int8Transpose", input, **quant_args)
-    else:
-        input = g.op("_caffe2::NCHW2NHWC", input)
+    axes = [0, 2, 3, 1]
+
+    quant_args = {
+        "axes_i": axes,
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+    input = g.op("_caffe2::Int8Transpose", input, **quant_args)
+    sym_help._quantized_ops.add(input)
     return input
 
-def nhwc2nchw(g, input, scale, zero_point):
+def nhwc2nchw(g, input):
     axes = [0, 3, 1, 2]
 
     quant_args = {
         "axes_i": axes,
-        "Y_scale_f": scale,
-        "Y_zero_point_i": zero_point,
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
     }
     input = g.op("_caffe2::Int8Transpose", input, **quant_args)
+    sym_help._quantized_ops.add(input)
     return input
 
 def linear_prepack(g, weight, bias):
@@ -82,9 +81,7 @@ def conv2d(g, input, weight, bias, stride, padding, dilation, groups, scale, zer
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8Conv", input, weight, bias, **kwargs)
-    output = nhwc2nchw(g, output, scale, zero_point)
     sym_help._quantized_ops.add(output)
     return output
 
@@ -101,9 +98,7 @@ def conv2d_relu(g, input, weight, bias, stride, padding, dilation, groups, scale
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8ConvRelu", input, weight, bias, **kwargs)
-    output = nhwc2nchw(g, output, scale, zero_point)
     sym_help._quantized_ops.add(output)
     return output
 
@@ -131,7 +126,7 @@ def upsample_nearest2d(g, input, output_size):
 
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8ResizeNearest", input, **kwargs)
-    output = nhwc2nchw(g, output, input.node()["Y_scale"], input.node()["Y_zero_point"])
+    output = nhwc2nchw(g, output)
     sym_help._quantized_ops.add(output)
     return output
 
@@ -181,7 +176,7 @@ def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8AveragePool", input, **kwargs)
-    output = nhwc2nchw(g, output, input.node()["Y_scale"], input.node()["Y_zero_point"])
+    output = nhwc2nchw(g, output)
     sym_help._quantized_ops.add(output)
     return output
 
