@@ -447,7 +447,6 @@ void insertQuantDeQuantCall(
 
   // two passes to insert the dequant for every usage
   // in first pass, identify all the nodes using "v"
-  // in second pass, replace the input "v" with dequant output
   std::vector<Node*> use_nodes;
   for (const auto& use : v->uses()) {
     auto cur = use.user;
@@ -456,6 +455,7 @@ void insertQuantDeQuantCall(
     }
   }
 
+  // in second pass, replace the input "v" with dequant output
   for (size_t i = 0; i < use_nodes.size(); ++i) {
     Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
     dequant->output()->setDebugName(v->debugName() + ".dequant." + std::to_string(i));
