@@ -14,7 +14,7 @@ namespace distributed {
 namespace rpc {
 
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() noexcept = default;
+  ProcessGroupRpcBackendOptions() = default;
   int numSendRecvThreads;
 };
 
