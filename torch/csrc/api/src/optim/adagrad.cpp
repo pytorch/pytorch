@@ -28,7 +28,7 @@ void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
   this->eps(ivalue.toDouble());
 }
 
-void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) {
+void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
   archive.write("learning_rate", IValue(this->learning_rate()));
   archive.write("lr_decay", IValue(this->lr_decay()));
   archive.write("weight_decay", IValue(this->weight_decay()));
@@ -44,7 +44,7 @@ void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
     this->sum(sum_.toTensor());
 }
 
-void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) {
+void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) const {
     archive.write("step", IValue(this->step()));
     archive.write("sum", IValue(this->sum()));
 }
@@ -120,16 +120,11 @@ size_t Adagrad::size() const noexcept {
 }
 
 void Adagrad::save(serialize::OutputArchive& archive) const {
-  optim::serialize(archive, "state", state_);
-  //optim::serialize(archive, "param_groups", param_groups_);
-  //serialize(*this, archive);
+  serialize(*this, archive);
 }
 
 void Adagrad::load(serialize::InputArchive& archive) {
-  optim::serialize(archive, "state", state_);
-  //std::vector<std::pair<std::vector<std::string>, OptimizerOptions>> param_groups;
-  //optim::serialize(archive, "param_groups", param_groups);
-  //serialize(*this, archive);
+  serialize(*this, archive);
 }
 } // namespace optim
 } // namespace torch

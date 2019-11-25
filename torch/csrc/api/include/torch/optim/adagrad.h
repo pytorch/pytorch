@@ -28,17 +28,17 @@ struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOption
 public:
   ~AdagradOptions() = default;
   void serialize(torch::serialize::InputArchive& archive);
-  void serialize(torch::serialize::OutputArchive& archive);
+  void serialize(torch::serialize::OutputArchive& archive) const;
 };
 
 struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<AdagradParamState> {
   TORCH_ARG(torch::Tensor, sum);
   TORCH_ARG(int64_t, step);
-  void serialize(torch::serialize::InputArchive& archive);
-  void serialize(torch::serialize::OutputArchive& archive);
 
 public:
   ~AdagradParamState() = default;
+  void serialize(torch::serialize::InputArchive& archive);
+  void serialize(torch::serialize::OutputArchive& archive) const;
 };
 
 class TORCH_API Adagrad : public Optimizer {
@@ -88,8 +88,9 @@ class TORCH_API Adagrad : public Optimizer {
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    // _TORCH_OPTIM_SERIALIZE(state_);
-    // _TORCH_OPTIM_SERIALIZE(param_groups_);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(state_, AdagradParamState);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(param_groups_, AdagradOptions);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(defaults, AdagradOptions);
   }
 };
 

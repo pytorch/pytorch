@@ -92,7 +92,9 @@ class TORCH_API InputArchive final {
        const std::function<size_t(void)>& size_func,
        c10::optional<torch::Device> device = c10::nullopt);
 
+  //todo description
   std::vector<std::string> keys();
+
   /// Forwards all arguments to `read()`.
   /// Useful for generic code that can be re-used for both `InputArchive` and
   /// `OutputArchive` (where `operator()` forwards to `write()`).
