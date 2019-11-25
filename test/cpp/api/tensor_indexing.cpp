@@ -110,6 +110,10 @@ TEST(TensorIndexingTest, TestMultipleInt) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.idx({4}).sizes(), torch::IntArrayRef({7, 3}));
   ASSERT_EQ(v.idx({4, {}, 1}).sizes(), torch::IntArrayRef({7}));
+
+  // To show that `.idx_put_` works
+  v.idx_put_({4, 3, 1}, 0);
+  ASSERT_EQ(v.idx({4, 3, 1}).item<double>(), 0);
 }
 
 /*
