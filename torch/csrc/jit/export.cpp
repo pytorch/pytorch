@@ -449,7 +449,7 @@ class GraphEncoder : public EncoderBase {
       bool defer_weight_export,
       bool strip_doc,
       bool keep_initializers_as_inputs,
-      std::map<std::string, int> custom_opsets);
+      const std::map<std::string, int>& custom_opsets);
 
   RawDataExportMap get_raw_data_export_map() {
     return raw_data_export_map_;
@@ -474,7 +474,7 @@ GraphEncoder::GraphEncoder(
     bool defer_weight_export,
     bool strip_doc,
     bool keep_initializers_as_inputs,
-    std::map<std::string, int> custom_opsets)
+    const std::map<std::string, int>& custom_opsets)
     : EncoderBase(operator_export_type, strip_doc),
       defer_weight_export_(defer_weight_export) {
   if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
@@ -496,12 +496,14 @@ GraphEncoder::GraphEncoder(
       opset->set_version(1);
     else {
       opset->set_version(it->second);
-      custom_opsets.erase(it);
     }
   }
 
-  if (!custom_opsets.empty()){
-    AT_WARN("Custom opset domain/s provided not in the model. Please verify custom opset domain names.");
+  for (auto const& custom_opset : custom_opsets){
+    if (!std::count(domains_.begin(), domains_.end(), custom_opset.first)) {
+      AT_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
+      "Please verify custom opset domain names.");
+    }
   }
 }
 
@@ -725,7 +727,7 @@ std::string pretty_print_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool google_printer,
     bool keep_initializers_as_inputs,
-    std::map<std::string, int> custom_opsets) {
+    const std::map<std::string, int>& custom_opsets) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
@@ -756,7 +758,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool strip_doc_string,
     bool keep_initializers_as_inputs,
-    std::map<std::string, int> custom_opsets) {
+    const std::map<std::string, int>& custom_opsets) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,

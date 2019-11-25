@@ -235,7 +235,7 @@ void initPythonIRBindings(PyObject* module_) {
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string,
              bool keep_initializers_as_inputs,
-             std::map<std::string, int> custom_opsets) {
+             const std::map<std::string, int>& custom_opsets) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
@@ -280,7 +280,7 @@ void initPythonIRBindings(PyObject* module_) {
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool google_printer,
              bool keep_initializers_as_inputs,
-             std::map<std::string, int> custom_opsets) {
+             const std::map<std::string, int>& custom_opsets) {
             return pretty_print_onnx(
                 g,
                 initializers,

@@ -365,7 +365,6 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         opset_version = _default_onnx_opset_version
     if custom_opsets is None:
         custom_opsets = {}
-    custom_opsets["org.pytorch._caffe2"] = 0
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
     val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
@@ -428,7 +427,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             dynamic_axes = {}
         if custom_opsets is None:
             custom_opsets = {}
-        custom_opsets["org.pytorch._caffe2"] = 0
 
         _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
 
