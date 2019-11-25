@@ -9,7 +9,7 @@ namespace torch { namespace autograd {
 using hooks_dict = c10::OrderedDict<unsigned, std::function<Variable(const Variable&)>>;
 
 struct CppFunctionPreHook : public FunctionPreHook {
-  CppFunctionPreHook(const std::shared_ptr<hooks_dict> &hooks, int value_idx);
+  CppFunctionPreHook(std::shared_ptr<hooks_dict> hooks, int value_idx);
   variable_list operator()(const variable_list& values) override;
 
   std::shared_ptr<hooks_dict> hooks_;
