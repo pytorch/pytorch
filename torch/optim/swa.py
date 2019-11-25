@@ -96,9 +96,13 @@ class SWA(Optimizer):
             Averaging:
             https://arxiv.org/abs/1806.05594
         """
-        self._auto_mode, (self.swa_start, self.swa_freq) = \
+        self._auto_mode, (swa_start, swa_freq) = \
             self._check_params(self, swa_start, swa_freq)
-        self.swa_lr = swa_lr
+        swa_lr = swa_lr
+        swa_defaults = dict(
+            swa_lr=swa_lr,
+            swa_start=swa_start,
+            swa_freq=swa_freq)
 
         if self._auto_mode:
             if swa_start < 0:
@@ -106,26 +110,30 @@ class SWA(Optimizer):
             if swa_freq < 1:
                 raise ValueError("Invalid swa_freq: {}".format(swa_freq))
         else:
-            if self.swa_lr is not None:
+            if swa_lr is not None:
                 warnings.warn(
                     "Some of swa_start, swa_freq is None, ignoring swa_lr")
-            # If not in auto mode make all swa parameters None
-            self.swa_lr = None
-            self.swa_start = None
-            self.swa_freq = None
+            # If not in auto mode set all swa parameters to None
+            swa_lr = None
+            swa_start = None
+            swa_freq = None
 
-        if self.swa_lr is not None and self.swa_lr < 0:
+        if swa_lr is not None and swa_lr < 0:
             raise ValueError("Invalid SWA learning rate: {}".format(swa_lr))
 
-        self.optimizer = optimizer
+        self._optimizer = optimizer
 
-        self.defaults = self.optimizer.defaults
-        self.param_groups = self.optimizer.param_groups
+        self.defaults = self._optimizer.defaults
+        self.defaults.update(swa_defaults)
+        self.param_groups = self._optimizer.param_groups
         self.state = defaultdict(dict)
-        self.opt_state = self.optimizer.state
+        self._opt_state = self._optimizer.state
         for group in self.param_groups:
             group['n_avg'] = 0
             group['step_counter'] = 0
+            group['swa_lr'] = swa_lr
+            group['swa_start'] = swa_start
+            group['swa_freq'] = swa_freq
 
     @staticmethod
     def _check_params(self, swa_start, swa_freq):
@@ -141,11 +149,11 @@ class SWA(Optimizer):
         return not any(params_none), params
 
     def _reset_lr_to_swa(self):
-        if self.swa_lr is None:
-            return
         for param_group in self.param_groups:
-            if param_group['step_counter'] >= self.swa_start:
-                param_group['lr'] = self.swa_lr
+            if param_group['swa_lr'] is None:
+                continue
+            if param_group['step_counter'] >= param_group['swa_start']:
+                param_group['lr'] = param_group['swa_lr']
 
     def update_swa_group(self, group):
         r"""Updates the SWA running averages for the given parameter group.
@@ -212,12 +220,12 @@ class SWA(Optimizer):
         In automatic mode also updates SWA running averages.
         """
         self._reset_lr_to_swa()
-        loss = self.optimizer.step(closure)
+        loss = self._optimizer.step(closure)
         for group in self.param_groups:
             group["step_counter"] += 1
             steps = group["step_counter"]
             if self._auto_mode:
-                if steps > self.swa_start and steps % self.swa_freq == 0:
+                if steps > group['swa_start'] and steps % group['swa_freq'] == 0:
                     self.update_swa_group(group)
         return loss
 
@@ -232,7 +240,7 @@ class SWA(Optimizer):
                 average of the variable
             * param_groups - a dict containing all parameter groups
         """
-        opt_state_dict = self.optimizer.state_dict()
+        opt_state_dict = self._optimizer.state_dict()
         swa_state = {(id(k) if isinstance(k, torch.Tensor) else k): v
                      for k, v in self.state.items()}
         opt_state = opt_state_dict["state"]
@@ -252,8 +260,8 @@ class SWA(Optimizer):
         opt_state_dict = {"state": state_dict["opt_state"],
                           "param_groups": state_dict["param_groups"]}
         super(SWA, self).load_state_dict(swa_state_dict)
-        self.optimizer.load_state_dict(opt_state_dict)
-        self.opt_state = self.optimizer.state
+        self._optimizer.load_state_dict(opt_state_dict)
+        self._opt_state = self._optimizer.state
 
     def add_param_group(self, param_group):
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
@@ -268,7 +276,7 @@ class SWA(Optimizer):
         """
         param_group['n_avg'] = 0
         param_group['step_counter'] = 0
-        self.optimizer.add_param_group(param_group)
+        self._optimizer.add_param_group(param_group)
 
     @staticmethod
     def bn_update(loader, model, device=None):
