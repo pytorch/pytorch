@@ -11,7 +11,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
 {
   THNN_CHECK_SHAPE(input, target);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THTensor_(resizeAs)(output, input);
 
     TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
@@ -28,7 +28,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
                    scalar_t z = log(1. + exp(-*input_data* *target_data));
                    sum += z;)
 
-  if (reduction == Reduction::Mean)
+  if (reduction == at::Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
   THTensor_(set0d)(output, sum);
@@ -55,7 +55,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
     return;
   }
 
-  scalar_t norm = (reduction == Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
+  scalar_t norm = (reduction == at::Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
 
   TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
                    scalar_t z = exp(-*target_data * *input_data);

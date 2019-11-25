@@ -188,14 +188,14 @@ class intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
-      // See comment above about weakcount. As long as refcount>0,
-      // weakcount is one larger than the actual number of weak references.
-      // So we need to decrement it here.
-      auto weak_count = --target_->weakcount_;
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
       const_cast<c10::guts::remove_const_t<TTarget>*>(target_)->release_resources();
-      if (weak_count == 0) {
+
+      // See comment above about weakcount. As long as refcount>0,
+      // weakcount is one larger than the actual number of weak references.
+      // So we need to decrement it here.
+      if (--target_->weakcount_ == 0) {
         delete target_;
       }
     }

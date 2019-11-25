@@ -4,6 +4,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import operator_benchmark as op_bench
+import benchmark_caffe2 as op_bench_c2
+from benchmark_caffe2 import Caffe2BenchmarkBase # noqa
 from caffe2.python import core 
 
 
@@ -29,7 +31,7 @@ add_short_configs = op_bench.config_list(
     tags=["short"], 
 )
 
-class AddBenchmark(op_bench.Caffe2BenchmarkBase):
+class AddBenchmark(op_bench_c2.Caffe2BenchmarkBase):
     def init(self, M, N, K, dtype): 
         self.input_one = self.tensor([M, N, K], dtype) 
         self.input_two = self.tensor([M, N, K], dtype) 
@@ -43,7 +45,7 @@ class AddBenchmark(op_bench.Caffe2BenchmarkBase):
         return op
 
 
-op_bench.generate_c2_test(add_long_configs + add_short_configs, AddBenchmark)
+op_bench_c2.generate_c2_test(add_long_configs + add_short_configs, AddBenchmark)
 
 
 if __name__ == "__main__":

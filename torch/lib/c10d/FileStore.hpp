@@ -2,6 +2,7 @@
 
 #include <sys/types.h>
 
+#include <mutex>
 #include <unordered_map>
 
 #include <c10d/Store.hpp>
@@ -39,6 +40,8 @@ class FileStore : public Store {
   const std::string regularPrefix_;
 
   std::unordered_map<std::string, std::vector<uint8_t>> cache_;
+
+  std::mutex activeFileOpLock_;
 };
 
 } // namespace c10d

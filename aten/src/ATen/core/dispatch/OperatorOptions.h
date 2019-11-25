@@ -12,16 +12,19 @@ enum class AliasAnalysisKind : uint8_t {
   CONSERVATIVE, // The most conservative alias analysis type, assumes
                 // side-effects. This is the default analysis.
   FROM_SCHEMA,
-  PURE
+  PURE_FUNCTION
 };
 
-constexpr inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
+#if !defined(_MSC_VER)
+constexpr // Our current MSVC version has a bug that doesn't allow this to be constexpr.
+#endif
+inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
   return (aliasAnalysisKind == AliasAnalysisKind::CONSERVATIVE)
       ? "CONSERVATIVE"
       : (aliasAnalysisKind == AliasAnalysisKind::FROM_SCHEMA)
           ? "FROM_SCHEMA"
-          : (aliasAnalysisKind == AliasAnalysisKind::PURE)
-              ? "PURE"
+          : (aliasAnalysisKind == AliasAnalysisKind::PURE_FUNCTION)
+              ? "PURE_FUNCTION"
               : (aliasAnalysisKind == AliasAnalysisKind::INTERNAL_SPECIAL_CASE)
                   ? "INTERNAL_SPECIAL_CASE"
                   : "UNKNOWN";
@@ -29,8 +32,14 @@ constexpr inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
 
 struct OperatorOptions final {
 public:
+  bool isDefaultAliasAnalysisKind() const {
+    return aliasAnalysisKind_ == c10::nullopt;
+  }
+
   AliasAnalysisKind aliasAnalysis() const {
-    return aliasAnalysisKind_;
+    return !isDefaultAliasAnalysisKind()
+      ? *aliasAnalysisKind_
+      : AliasAnalysisKind::CONSERVATIVE;
   }
 
   void setAliasAnalysis(AliasAnalysisKind v) {
@@ -46,7 +55,7 @@ public:
   }
 
 private:
- AliasAnalysisKind aliasAnalysisKind_ = AliasAnalysisKind::CONSERVATIVE;
+ c10::optional<AliasAnalysisKind> aliasAnalysisKind_;
 };
 
 } // namespace c10

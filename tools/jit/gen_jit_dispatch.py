@@ -14,8 +14,10 @@ torch/csrc/jit/generated/
 
 import argparse
 import copy
+import re
+import yaml
 from itertools import groupby
-from ..autograd.utils import CodeTemplate, write
+from ..autograd.utils import CodeTemplate, YamlLoader, write
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
@@ -144,7 +146,11 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-auto result_ = torch::${name}(${args_with_tensor_options});
+#ifdef USE_STATIC_DISPATCH
+    auto result_ = at::${name}(${args_with_tensor_options});
+#else
+    auto result_ = torch::${name}(${args_with_tensor_options});
+#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -198,7 +204,8 @@ def is_jit_arg(i, arg):
 
 def is_jit_op(decl):
     # We currently don't support functions that return nothing
-    if all(r['type'] == 'void' for r in decl['returns']):
+    assert all(r['type'] != 'void' for r in decl['returns'])
+    if len(decl['returns']) == 0:
         return False
 
     arguments = decl['arguments']
@@ -234,6 +241,19 @@ def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
 
+# Copied from ..autograd.gen_python_functions.SKIP_PYTHON_BINDINGS
+BACKWARD_OP_PATTERNS = [
+    '.*_backward',
+    '.*_backward_(out|input|weight|bias)',
+]
+
+def is_backward_op(decl):
+    for pattern in BACKWARD_OP_PATTERNS:
+        if re.match('^' + pattern + '$', decl['name']):
+            return True
+    return False
+
+
 # for each argument in decl, the location it should appear in the
 # jit schema declaration. e.g.
 # arguments = [x, y, z] # the order in aten
@@ -244,7 +264,13 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
-def gen_jit_dispatch(declarations, out, template_path):
+def load_op_list(path):
+    with open(path, 'r') as f:
+        op_list = yaml.load(f, Loader=YamlLoader)
+    return op_list
+
+
+def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, selected_op_list_path=None):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -288,6 +314,8 @@ def gen_jit_dispatch(declarations, out, template_path):
         return 'jit_type' in arg and arg['jit_type'] in {"Tensor!", "Tensor(a!)"}
 
     def emit_decl_variant(decl):
+        if ('emit_dummy_placeholder' in decl):
+            return "DUMMY_OPERATION"
         kw_assignments = []
 
         # mutable arguments in aten are passed as non const references
@@ -318,6 +346,16 @@ def gen_jit_dispatch(declarations, out, template_path):
                                              lvalues=lvalues)
         return constructor
 
+    def filter_decls(jit_decls, disable_autograd, selected_op_list):
+        result = []
+        for decl in jit_decls:
+            if disable_autograd and is_backward_op(decl):
+                continue
+            if selected_op_list and signature_without_args(decl) not in selected_op_list:
+                decl['emit_dummy_placeholder'] = True
+            result.append(decl)
+        return result
+
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
     # to accept both Scalar and Tensor, the schema with the Tensor should come first
@@ -343,6 +381,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         return [sorted(g, key=declkey) for g in grouped_decls]
 
     # We need to add methods implemented manually in TensorImpl
+    # TODO: This seems to claim sizes() returns an int64_t.  Really?
     tensor_impl_methods = [{
         'name': name,
         'api_name': name,
@@ -350,7 +389,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
-    } for name in ['sizes', 'strides', 'dim']]
+    } for name in ['sizes', 'strides', 'dim', 'numel']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
@@ -403,6 +442,8 @@ def gen_jit_dispatch(declarations, out, template_path):
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
+    selected_op_list = load_op_list(selected_op_list_path) if selected_op_list_path else None
+    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list)
 
     # Group and sort the generated snippets to ensure that the
     # generation is deterministic
@@ -497,7 +538,7 @@ def signature(decl, should_match_schema=True):
                 .replace('}}', ']') \
                 .replace('true', 'True') \
                 .replace('false', 'False') \
-                .replace('Reduction::Mean', 'Mean') \
+                .replace('at::Reduction::Mean', 'Mean') \
                 .replace('MemoryFormat::Contiguous', 'contiguous_format') \
                 .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
@@ -532,6 +573,12 @@ def signature(decl, should_match_schema=True):
     overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
     constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
     return match_signature(decl, constructed_string, should_match_schema)
+
+
+def signature_without_args(decl):
+    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
+    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
+    return 'aten::{}{}'.format(name, overload_name)
 
 
 def main():

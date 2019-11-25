@@ -2,7 +2,9 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathPairwise.cu"
 #else
 
-int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
+#include <ATen/NamedTensorUtils.h>
+
+static int THCTensor_(equalImpl)(THCState *state, THCTensor *self_, THCTensor *src_)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (!THCTensor_(isSameSizeAs(state, self_, src_))) {
@@ -27,6 +29,16 @@ int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
   THCudaByteTensor_free(state, buf);
 
   return min != 0;
+}
+
+int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_) {
+#ifdef BUILD_NAMEDTENSOR
+  if (!at::namedinference::are_names_equal(self_, src_)) {
+    return 0;
+  }
+  at::NoNamesGuard guard;
+#endif
+  return THCTensor_(equalImpl)(state, self_, src_);
 }
 
 void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
@@ -71,74 +83,7 @@ void THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scala
 #endif
 }
 
-void THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  return THError("bitxor only supported for integer type tensors");
-#else
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitXorConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitXorConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#endif
-}
-
 #if !defined(THC_REAL_IS_BOOL)
-
-void THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorAddConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorAddConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(sub)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorSubConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorSubConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(add_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
-{
-  THCTensor_(add)(state, self_, src_, value * alpha);
-}
-
-void THCTensor_(sub_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
-{
-  THCTensor_(sub)(state, self_, src_, value * alpha);
-}
 
 void THCTensor_(mul)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {

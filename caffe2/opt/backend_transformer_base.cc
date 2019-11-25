@@ -52,6 +52,9 @@ TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
+  for (const auto& dimType : shape_info.getDimType()) {
+    t.add_int32_data(static_cast<int32_t>(dimType));
+  }
   return t;
 }
 
@@ -80,6 +83,9 @@ QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
   t.set_is_signed(0);
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
+  }
+  for (const auto& dimType : shape_info.getDimType()) {
+    t.add_data(static_cast<int32_t>(dimType));
   }
   return t;
 }
@@ -124,16 +130,21 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   // here. For SEQ typed tensors, there are only a few of them and they will be
   // handled by BoundShapeInferencer.
   for (const auto& kv : shape_hints_mapped) {
+    std::vector<TensorBoundShape_DimType> dimType(
+        kv.second.dims_size(), TensorBoundShape_DimType_CONSTANT);
+    if (dimType.size()) {
+      dimType[0] = TensorBoundShape_DimType_BATCH;
+    }
     shape_map.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(kv.first),
-        std::forward_as_tuple(ShapeInfo::DimType::BATCH, kv.second));
+        std::forward_as_tuple(dimType, kv.second));
   }
   // Populate shapes from workplace
   const std::vector<std::string> ws_blobs = ws->Blobs();
   for (const auto& s : ws_blobs) {
     auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
-    if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
+    if (shape_info.dimTypeIsSet()) {
       shape_map.emplace(s, shape_info);
     }
   }
@@ -146,7 +157,7 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
         std::piecewise_construct,
         std::forward_as_tuple(kv.first),
         std::forward_as_tuple(
-            kv.second.dim_type,
+            kv.second.getDimType(),
             kv.second.shape,
             kv.second.is_quantized,
             kv.second.q_info));
@@ -164,11 +175,9 @@ void BackendTransformerBase::addShapeToNet(
   for (const auto& kv : shape_hints) {
     if (!kv.second.is_quantized) {
       auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
-      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
       shape_arg->mutable_tensors()->Add()->CopyFrom(t);
     } else {
       auto t = wrapShapeInfoIntoQTensorProto(kv.first, kv.second);
-      t.add_data(static_cast<int32_t>(kv.second.dim_type));
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }

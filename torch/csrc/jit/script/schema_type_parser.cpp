@@ -33,10 +33,13 @@ namespace script {
 TypeAndAlias SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
+      {"Dimname", StringType::get()},
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
+      {"Storage", IntType::get()},
       {"QScheme", IntType::get()},
+      {"ConstQuantizerPtr", IntType::get()},  // TODO This type should be removed from the schema parser, it should use the custom class mechanism instead. @jerryzh
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
@@ -147,7 +150,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       L.expect('*');
       num_dims++;
     });
-    ptr = at::ProfiledTensorType::create(
+    ptr = at::TensorType::create(
         dtype,
         at::DeviceType::CPU,
         c10::VaryingShape(num_dims),
@@ -166,8 +169,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       dims.push_back(dim);
     });
     at::IntArrayRef dims_ref(dims);
-    ptr = at::ProfiledTensorType::create(
-        dtype, at::DeviceType::CPU, dims_ref, false);
+    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
   }
   return ptr;
 }
@@ -252,6 +254,7 @@ void SchemaTypeParser::parseList(
   if (end != TK_NOTHING)
     L.expect(end);
 }
+
 } // namespace script
 } // namespace jit
 } // namespace torch

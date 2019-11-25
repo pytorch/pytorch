@@ -66,7 +66,7 @@ THCTensor *THCTensor_(new)(THCState *state)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId()
+    at::TensorTypeId::CUDATensorId
   ).release();
 }
 
@@ -83,7 +83,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   }
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId()
+    at::TensorTypeId::CUDATensorId
   ).release();
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -375,28 +375,6 @@ void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int
   self->set_size(dimension2, z);
 }
 
-/* we have to handle the case where the result is a number */
-void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
-{
-  if(!src)
-    src = self;
-
-  THCTensor_(set)(state, self, src);
-
-  std::vector<int64_t> newSize;
-  std::vector<int64_t> newStride;
-  for(int d = 0; d < src->dim(); ++d)
-  {
-    if(src->size(d) != 1)
-    {
-      newSize.push_back(src->size(d));
-      newStride.push_back(src->stride(d));
-    }
-  }
-
-  self->set_sizes_and_strides(newSize, newStride);
-}
-
 void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {
   THCTensor_squeeze1d(state, self, src, dimension);
@@ -410,23 +388,6 @@ void THCTensor_(unsqueeze1d)(THCState *state, THCTensor *self, THCTensor *src, i
 int THCTensor_(isContiguous)(THCState *state, const THCTensor *self)
 {
   return self->is_contiguous();
-}
-
-int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor *src)
-{
-  if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
-      self->storage_offset() == src->storage_offset() &&
-      self->dim() == src->dim())
-  {
-    int d;
-    for (d = 0; d < self->dim(); ++d)
-    {
-      if (self->size(d) != src->size(d) || self->stride(d) != src->stride(d))
-        return 0;
-    }
-    return 1;
-  }
-  return 0;
 }
 
 int THCTensor_(isSameSizeAs)(THCState *state, const THCTensor *self, const THCTensor* src)

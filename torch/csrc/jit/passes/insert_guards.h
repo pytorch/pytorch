@@ -13,8 +13,6 @@
 namespace torch {
 namespace jit {
 
-using ::c10::ProfiledTensorTypePtr;
-
 TORCH_API void InsertGuards(std::shared_ptr<Graph> graph);
 
 } // namespace jit

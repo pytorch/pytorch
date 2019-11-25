@@ -234,9 +234,9 @@
 #       - "Auto" detects local machine GPU compute arch at runtime.
 #       - "Common" and "All" cover common and entire subsets of architectures
 #      ARCH_AND_PTX : NAME | NUM.NUM | NUM.NUM(NUM.NUM) | NUM.NUM+PTX
-#      NAME: Fermi Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal
+#      NAME: Kepler Maxwell Kepler+Tesla Maxwell+Tegra Pascal Volta Turing
 #      NUM: Any number. Only those pairs are currently accepted by NVCC though:
-#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2
+#            3.5 3.7 5.0 5.2 5.3 6.0 6.1 6.2 7.0 7.2 7.5
 #      Returns LIST of flags to be added to CUDA_NVCC_FLAGS in ${out_variable}
 #      Additionally, sets ${out_variable}_readable to the resulting numeric list
 #      Example:
@@ -673,7 +673,7 @@ endif()
 # Search for the cuda distribution.
 if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
   # Search in the CUDA_BIN_PATH first.
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS
       ENV CUDA_TOOLKIT_ROOT
@@ -685,19 +685,22 @@ if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
     )
 
   # Now search default paths
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS /opt/cuda/bin
     PATH_SUFFIXES cuda/bin
     DOC "Toolkit location."
     )
 
-  if (CUDA_TOOLKIT_ROOT_DIR)
+  if (CUDA_TOOLKIT_ROOT_DIR_NVCC)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR "${CUDA_TOOLKIT_ROOT_DIR_NVCC}" DIRECTORY)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR}" DIRECTORY CACHE)
     string(REGEX REPLACE "[/\\\\]?bin[64]*[/\\\\]?$" "" CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR})
     # We need to force this back into the cache.
     set(CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR} CACHE PATH "Toolkit location." FORCE)
     set(CUDA_TOOLKIT_TARGET_DIR ${CUDA_TOOLKIT_ROOT_DIR})
   endif()
+  unset(CUDA_TOOLKIT_ROOT_DIR_NVCC CACHE)
 
   if (NOT EXISTS ${CUDA_TOOLKIT_ROOT_DIR})
     if(CUDA_FIND_REQUIRED)
@@ -1632,6 +1635,11 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(verbose_output ON)
       elseif(CMAKE_GENERATOR MATCHES "Makefiles")
         set(verbose_output "$(VERBOSE)")
+      # This condition lets us also turn on verbose output when someone
+      # specifies CMAKE_VERBOSE_MAKEFILE, even if the generator isn't
+      # the Makefiles generator (this is important for us, Ninja users.)
+      elseif(CMAKE_VERBOSE_MAKEFILE)
+        set(verbose_output ON)
       else()
         set(verbose_output OFF)
       endif()
