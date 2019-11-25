@@ -24,6 +24,7 @@ import inspect
 import math
 import os
 import pickle
+import re
 import sys
 import textwrap
 import warnings
@@ -562,15 +563,21 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(traced_func.graph)
+            torch._C._jit_pass_inline(mod_canonicalized)
             torch._C._jit_pass_erase_shape_information(mod_canonicalized)
+            mod_str = str(mod_canonicalized)
+            mod_str = re.sub(r'___torch_mangle_[0-9]+\.', '', mod_str)
             check_canonicalized = torch._C._jit_pass_canonicalize(check_mod_func.graph)
+            torch._C._jit_pass_inline(check_canonicalized)
             torch._C._jit_pass_erase_shape_information(check_canonicalized)
+            check_str = str(check_canonicalized)
+            check_str = re.sub(r'___torch_mangle_[0-9]+\.', '', check_str)
 
             graph_diff_errors = None
-            if str(mod_canonicalized) != str(check_canonicalized):
+            if mod_str != check_str:
                 import difflib
-                graph_diff = difflib.ndiff(str(mod_canonicalized).splitlines(True),
-                                           str(check_canonicalized).splitlines(True))
+                graph_diff = difflib.ndiff(mod_str.splitlines(True),
+                                           check_str.splitlines(True))
                 graph_diff_errors = 'Graph diff:\n' + indent(''.join(graph_diff)) + '\n'
 
                 for n_mod, n_check in zip(mod_canonicalized.nodes(), check_canonicalized.nodes()):
@@ -1627,9 +1634,9 @@ if _enabled:
 
         @property
         def original_name(self):
-            if type(self) == self._c.name:
+            if type(self) == str(self._c._type().name()):
                 return ''
-            return self._c.name
+            return str(self._c._type().name())
 
         def define(self, src):
             # We use frames_up=1 to get to the proper surrounding scope. The stack
@@ -1689,6 +1696,9 @@ if _enabled:
 
         def copy(self):
             return torch.jit._recursive.wrap_cpp_module(self._c._clone())
+
+        def copy_instance(self):
+            return torch.jit._recursive.wrap_cpp_module(self._c._clone_instance())
 
         def __getstate__(self):
             raise pickle.PickleError(
@@ -1824,7 +1834,7 @@ class TracedModule(ScriptModule):
         # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module_for_tracing(tmp_module, ())
 
-        self.__dict__['_name'] = 'TracedModule[' + type(orig).__name__ + ']'
+        self.__dict__['_name'] = type(orig).__name__
         self.__dict__['_actual_script_module'] = script_module
         for name in ("_parameters", "_buffers", "_modules"):
             delattr(self, name)
@@ -1844,6 +1854,9 @@ class TracedModule(ScriptModule):
 
     def _get_name(self):
         return self._name
+
+    def extra_repr(self):
+        return 'original_name={}'.format(self._name)
 
 
 if _enabled:

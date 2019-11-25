@@ -7,7 +7,6 @@ include(../cmake/Codegen.cmake)
 if (INTERN_BUILD_ATEN_OPS)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-  set(AT_LINK_STYLE INTERFACE)
   add_subdirectory(../aten aten)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
@@ -297,6 +296,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
+      $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h"
@@ -444,6 +444,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/object.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
@@ -456,6 +457,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
     )
 
   if (NOT INTERN_BUILD_MOBILE)
@@ -484,15 +486,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
     if (USE_DISTRIBUTED)
       list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
@@ -565,6 +569,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/normalization.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/instancenorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/distance.cpp
@@ -582,11 +587,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/embedding.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/instancenorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/linear.cpp
-      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/padding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
@@ -660,64 +665,9 @@ if (NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch Caffe2_PROTO)
 endif()
 
+torch_compile_options(torch)  # see cmake/public/utils.cmake
+
 if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-
-  # until they can be unified, keep these lists synced with setup.py
-  if(MSVC)
-
-    if (MSVC_Z7_OVERRIDE)
-      set(MSVC_DEBINFO_OPTION "/Z7")
-    else()
-      set(MSVC_DEBINFO_OPTION "/Zi")
-    endif()
-
-    target_compile_options(torch PUBLIC
-      ${MSVC_RUNTIME_LIBRARY_OPTION}
-      ${MSVC_DEBINFO_OPTION}
-      /EHa
-      /DNOMINMAX
-      /wd4267
-      /wd4251
-      /wd4522
-      /wd4522
-      /wd4838
-      /wd4305
-      /wd4244
-      /wd4190
-      /wd4101
-      /wd4996
-      /wd4275
-      /bigobj
-      )
-  else()
-    target_compile_options(torch PUBLIC
-      #    -std=c++11
-      -Wall
-      -Wextra
-      -Wno-unused-parameter
-      -Wno-missing-field-initializers
-      -Wno-write-strings
-      -Wno-unknown-pragmas
-      # Clang has an unfixed bug leading to spurious missing braces
-      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-      -Wno-missing-braces
-      )
-
-    if(NOT APPLE)
-      target_compile_options(torch PRIVATE
-        # Considered to be flaky.  See the discussion at
-        # https://github.com/pytorch/pytorch/pull/9608
-        -Wno-maybe-uninitialized)
-    endif()
-
-  endif()
-
-  if (MSVC)
-  elseif (WERROR)
-    target_compile_options(torch PRIVATE -Werror -Wno-strict-overflow)
-  endif()
-
-
   if (NOT NO_API)
     target_include_directories(torch PRIVATE
       ${TORCH_SRC_DIR}/csrc/api
@@ -784,9 +734,6 @@ ENDIF()
 
   target_include_directories(torch PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.0.8)
-
-
-  set_property(TARGET torch PROPERTY CXX_STANDARD 11)
 
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
@@ -874,7 +821,9 @@ if (NOT NO_API)
 endif()
 
 
-find_package(OpenMP QUIET)
+if(USE_OPENMP)
+  find_package(OpenMP QUIET)
+endif()
 if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
@@ -895,18 +844,6 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
-endif()
-
-
-if (NOT WIN32 AND NOT USE_ASAN)
-  # Enable hidden visibility by default to make it easier to debug issues with
-  # TORCH_API annotations. Hidden visibility with selective default visibility
-  # behaves close enough to Windows' dllimport/dllexport.
-  #
-  # Unfortunately, hidden visibility messes up some ubsan warnings because
-  # templated classes crossing library boundary get duplicated (but identical)
-  # definitions. It's easier to just disable it.
-  target_compile_options(torch PRIVATE "-fvisibility=hidden")
 endif()
 
 if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
@@ -1046,8 +983,6 @@ if (MSVC AND BUILD_SHARED_LIBS)
   # to be used externally. Make sure that references match the export.
   target_compile_options(torch PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
-# Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-target_compile_options(torch PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
 
 install(TARGETS torch EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
@@ -1118,11 +1053,6 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch INTERFACE $<INSTALL_INTERFACE:include>)
-endif()
-
-# ---[ Check if warnings should be errors.
-if (WERROR)
-  target_compile_options(torch PRIVATE -Werror)
 endif()
 
 # ---[ Test binaries.
