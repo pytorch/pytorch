@@ -1189,3 +1189,25 @@ class RpcTest(RpcAgentTestFixture):
         with _use_rpc_pickler(test_pickler):
             self.assertTrue(torch.distributed.rpc.api._default_pickler is test_pickler)
         self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
+
+    def test_default_rpc_backend_options_init(self):
+        # tests that if rpc_backend_options are not passed in, a default set
+        # is constructed.
+        rpc.init_rpc(
+            name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=None,
+        )
+        default_options = rpc.backend_registry.construct_rpc_backend_options(
+            self.rpc_backend
+        )
+        # We should have the default timeout that is present in the default opts.
+        self.assertEqual(default_options.rpc_timeout, rpc.get_rpc_timeout())
+        rpc.wait_all_workers()
+
+
+
+
