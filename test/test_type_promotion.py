@@ -431,7 +431,7 @@ class TestTypePromotion(TestCase):
         a = torch.tensor([[True, True], [False, True]], device=device)
         self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
 
-    def get_sparse_tensors(self, device, dtype, coalesced, zeros=True):
+    def _test_sparse_op_input_tensors(self, device, dtype, coalesced, zeros=True):
         t = self._get_test_tensor(device, dtype, not zeros)
         if coalesced:
             s = t.to_sparse()
@@ -441,6 +441,7 @@ class TestTypePromotion(TestCase):
             values = torch.cat((s.values(), s.values()), 0)
             s = torch.sparse_coo_tensor(indices=indices, values=values, size=s.size(), dtype=dtype, device=device)
             t = s.to_dense()
+        self.assertEqual(s.is_coalesced(), coalesced)
         return (t, s)
 
     def _get_precision(self, dtype, coalesced):
@@ -462,8 +463,8 @@ class TestTypePromotion(TestCase):
 
         add_sub = op_name == 'add' or op_name == 'sub'
 
-        (dense1, sparse1) = self.get_sparse_tensors(device, dtype1, coalesced)
-        (dense2, sparse2) = self.get_sparse_tensors(device, dtype2, coalesced, op_name != 'div')
+        (dense1, sparse1) = self._test_sparse_op_input_tensors(device, dtype1, coalesced)
+        (dense2, sparse2) = self._test_sparse_op_input_tensors(device, dtype2, coalesced, op_name != 'div')
         common_dtype = torch.result_type(dense1, dense2)
         if self.device_type == 'cpu' and common_dtype == torch.half:
             self.assertRaises(RuntimeError, lambda: op(s1, d2))
