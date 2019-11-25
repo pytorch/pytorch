@@ -104,6 +104,8 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
   }
 }
 
+// This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)` branch
+// in `TestCase.assertNotEqual` in test/common_utils.py
 inline void assert_tensor_not_equal(at::Tensor x, at::Tensor y) {
   if (x.sizes() != y.sizes()) {
     return;
