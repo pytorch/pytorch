@@ -105,3 +105,72 @@ TEST(TensorIndexingTest, TensorIndex) {
 
   ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, 3, 2}})), c10::str("(1:3:2)"));
 }
+
+TEST(TensorIndexingTest, TestAdvancedIndexingWithArrayRefOfTensor) {
+  {
+    torch::Tensor tensor = torch::randn({20, 20});
+    torch::Tensor index = torch::arange(10, torch::kLong).cpu();
+    torch::Tensor result_with_array_ref = tensor.index(at::ArrayRef<torch::Tensor>({index}));
+    torch::Tensor result_with_init_list = tensor.index({index});
+    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+  }
+  {
+    torch::Tensor tensor = torch::randn({20, 20});
+    torch::Tensor index = torch::arange(10, torch::kLong).cpu();
+    torch::Tensor result_with_array_ref = tensor.index_put_(at::ArrayRef<torch::Tensor>({index}), torch::ones({20}));
+    torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({20}));
+    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+  }
+  {
+    torch::Tensor tensor = torch::randn({20, 20});
+    torch::Tensor index = torch::arange(10, torch::kLong).cpu();
+    torch::Tensor result_with_array_ref = tensor.index_put_(at::ArrayRef<torch::Tensor>({index}), torch::ones({1, 20}));
+    torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({1, 20}));
+    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+  }
+}
+
+// TODO: I will remove the Python tests in the comments once the PR is approved.
+
+/*
+class TestIndexing(TestCase):
+    def test_single_int(self):
+        v = torch.randn(5, 7, 3)
+        self.assertEqual(v[4].shape, (7, 3))
+*/
+TEST(TensorIndexingTest, TestSingleInt) {
+  auto v = torch::randn({5, 7, 3});
+  ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
+}
+
+/*
+    def test_multiple_int(self):
+        v = torch.randn(5, 7, 3)
+        self.assertEqual(v[4].shape, (7, 3))
+        self.assertEqual(v[4, :, 1].shape, (7,))
+*/
+TEST(TensorIndexingTest, TestMultipleInt) {
+  auto v = torch::randn({5, 7, 3});
+  ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
+  ASSERT_EQ(v.index({4, {}, 1}).sizes(), torch::IntArrayRef({7}));
+
+  // To show that `.index_put_` works
+  v.index_put_({4, 3, 1}, 0);
+  ASSERT_EQ(v.index({4, 3, 1}).item<double>(), 0);
+}
+
+/*
+    def test_none(self):
+        v = torch.randn(5, 7, 3)
+        self.assertEqual(v[None].shape, (1, 5, 7, 3))
+        self.assertEqual(v[:, None].shape, (5, 1, 7, 3))
+        self.assertEqual(v[:, None, None].shape, (5, 1, 1, 7, 3))
+        self.assertEqual(v[..., None].shape, (5, 7, 3, 1))
+*/
+TEST(TensorIndexingTest, TestNone) {
+  auto v = torch::randn({5, 7, 3});
+  ASSERT_EQ(v.index({None}).sizes(), torch::IntArrayRef({1, 5, 7, 3}));
+  ASSERT_EQ(v.index({{}, None}).sizes(), torch::IntArrayRef({5, 1, 7, 3}));
+  ASSERT_EQ(v.index({{}, None, None}).sizes(), torch::IntArrayRef({5, 1, 1, 7, 3}));
+  ASSERT_EQ(v.index({"...", None}).sizes(), torch::IntArrayRef({5, 7, 3, 1}));
+}

@@ -29,17 +29,16 @@ std::ostream& operator<<(std::ostream& stream, const Slice& slice) {
 
 // This mirrors `__PySlice_Unpack` in torch/csrc/utils/python_compat.h
 Slice unpackSlice(
-    c10::optional<int64_t> start_index = at::indexing::None,
-    c10::optional<int64_t> stop_index = at::indexing::None,
-    c10::optional<int64_t> step_index = at::indexing::None) {
+    c10::optional<int64_t> start_index,
+    c10::optional<int64_t> stop_index,
+    c10::optional<int64_t> step_index) {
   int64_t start, stop, step;
   if (!step_index.has_value()) {
     step = 1;
   } else {
     step = step_index.value();
-    if (step == 0) {
-      TORCH_CHECK(false, "slice step cannot be zero");
-    }
+    TORCH_CHECK_VALUE(step != 0, "slice step cannot be zero");
+
     // Here step might be -INDEX_MAX-1; in this case we replace it
     // with -INDEX_MAX.  This doesn't affect the semantics, and it
     // guards against later undefined behaviour resulting from code that
@@ -63,25 +62,24 @@ Slice unpackSlice(
 TensorIndex::TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
 TensorIndex::TensorIndex(at::indexing::EllipsisIndexType) : type_(TensorIndexType::Ellipsis) {}
 TensorIndex::TensorIndex(const char *str) : TensorIndex(at::indexing::Ellipsis) {
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
     strcmp(str, "...") == 0,
     "Expected \"...\" to represent an ellipsis index, but got \"", str, "\"");
 }
 TensorIndex::TensorIndex(int64_t integer) : integer_(integer), type_(TensorIndexType::Integer) {}
 TensorIndex::TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
-TensorIndex::TensorIndex(std::initializer_list<c10::optional<int64_t>> init_list)
-    : type_(TensorIndexType::Slice) {
-  if (init_list.size() == 0) {
-    slice_ = unpackSlice();
-  } else if (init_list.size() == 2) {
-    slice_ = unpackSlice(*init_list.begin(), *(init_list.begin() + 1));
-  } else if (init_list.size() == 3) {
-    slice_ = unpackSlice(*init_list.begin(), *(init_list.begin() + 1), *(init_list.begin() + 2));
+TensorIndex::TensorIndex(std::initializer_list<c10::optional<int64_t>> slice) : type_(TensorIndexType::Slice) {
+  if (slice.size() == 0) {
+    slice_ = unpackSlice(c10::nullopt, c10::nullopt, c10::nullopt);
+  } else if (slice.size() == 2) {
+    slice_ = unpackSlice(*slice.begin(), *(slice.begin() + 1), c10::nullopt);
+  } else if (slice.size() == 3) {
+    slice_ = unpackSlice(*slice.begin(), *(slice.begin() + 1), *(slice.begin() + 2));
   } else {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
       false,
       "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got ",
-      init_list.size(),
+      slice.size(),
       " element(s)");
   }
 }
@@ -154,5 +152,189 @@ std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& t
   return stream;
 }
 
+// This mirrors `count_specified_dimensions` in torch/csrc/autograd/python_variable_indexing.cpp
+int64_t count_specified_dimensions(ArrayRef<TensorIndex> indices) {
+  // Count the number of indexed dimensions (everything but ellipsis and None)
+  int64_t count = 0;
+  size_t size = indices.size();
+  for (size_t i = 0; i < size; i++) {
+    auto& obj = indices[i];
+    if (obj.is_tensor()) {
+      auto& tensor = obj.tensor();
+      if (tensor.scalar_type() == kByte || tensor.scalar_type() == kBool) {
+        count += tensor.dim();
+      } else {
+        count++;
+      }
+    } else if (!obj.is_none() && !obj.is_ellipsis() && !obj.is_boolean()) {
+      count++;
+    }
+  }
+  return count;
+}
+
+// This mirrors `applySlicing` in torch/csrc/autograd/python_variable_indexing.cpp
+Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vector<Tensor>& outIndices) {
+  int64_t size = indices.size();
+  int64_t dim = 0;
+  int64_t specified_dims = count_specified_dimensions(indices);
+
+  TORCH_CHECK_INDEX(specified_dims <= self.dim(), "too many indices for tensor of dimension ", (int)self.dim());
+
+  Tensor result = self;
+  for (int64_t i = 0; i < size; i++) {
+    auto& obj = indices[i];
+    if (obj.is_integer()) {
+      result = handleInteger(result, dim, obj.integer(), i);
+    } else if (obj.is_slice()) {
+      result = handleSlice(result, dim, obj.slice().start(), obj.slice().stop(), obj.slice().step());
+    } else if (obj.is_ellipsis()) {
+      handleEllipsis(self, dim, specified_dims);
+    } else if (obj.is_none()) {
+      result = handleNone(result, dim);
+    } else if (obj.is_boolean()) {
+      result = handleBoolean(result, obj.boolean(), outIndices, dim);
+    } else if (obj.is_tensor()) {
+      result = handleTensor(result, obj.tensor(), outIndices, dim, i);
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Invalid TensorIndex type");
+    }
+  }
+  return result;
+}
+
+// This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
+Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
+  OptionalDeviceGuard device_guard(device_of(self));
+
+  // handle simple types: integers, slices, ellipsis
+  if (indices.size() == 1) {
+    const TensorIndex& index = indices[0];
+    if (index.is_none()) {
+      return handleNoneSingleDim(self);
+    } else if (index.is_ellipsis()) {
+      return handleEllipsisSingleDim(self);
+    } else if (index.is_integer()) {
+      return handleIntegerSingleDim(self, index.integer());
+    } else if (index.is_slice()) {
+      return handleSliceSingleDim(
+        self,
+        index.slice().start(),
+        index.slice().stop(),
+        index.slice().step(),
+        true);
+    }
+  }
+
+  std::vector<Tensor> tensorIndices;
+  Tensor sliced = applySlicing(self, indices, tensorIndices);
+  if (tensorIndices.empty()) {
+    if (sliced.is_same(self)) {
+      // ensure we return a shallow copy for things like x[...]
+      sliced = sliced.alias();
+    }
+    return sliced;
+  }
+
+  // indexing by tensors ("advanced" indexing)
+  return dispatch_index(sliced, tensorIndices);
+}
+
+// This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
+// for "the assigned value is a Tensor" case
+void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) {
+  OptionalDeviceGuard device_guard(device_of(self));
+
+  // handle simple types: integers, slices, ellipsis, bool
+  if (indices.size() == 1) {
+    const TensorIndex& index = indices[0];
+    if (index.is_boolean() && !index.boolean()) {
+      // do nothing for false (technically we should check the size, but we don't have
+      // real 0-sized shapes.
+      return;
+    } else if (index.is_ellipsis()) {
+      copy_to(self, value);
+      return;
+    } else if (index.is_none() || (index.is_boolean() && index.boolean())) {
+      copy_to(handleNoneSingleDim(self), value);
+      return;
+    } else if (index.is_integer()) {
+      copy_to(handleIntegerSingleDim(self, index.integer()), value);
+      return;
+    } else if (index.is_slice()) {
+      copy_to(handleSliceSingleDim(
+        self,
+        index.slice().start(),
+        index.slice().stop(),
+        index.slice().step(),
+        false), value);
+      return;
+    }
+  }
+
+  std::vector<Tensor> tensorIndices;
+  Tensor sliced = applySlicing(self, indices, tensorIndices);
+  if (tensorIndices.empty()) {
+    copy_to(sliced, value);
+    return;
+  }
+
+  IntArrayRef slicedValueSizes = slicePrefix1sSize(value.sizes());
+  Tensor valuesSliced;
+  if (!value.sizes().equals(slicedValueSizes)) {
+    valuesSliced = value.view(slicedValueSizes);
+  } else {
+    valuesSliced = value;
+  }
+  dispatch_index_put_(sliced, tensorIndices, valuesSliced);
+  return;
+}
+
+// This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
+// for "the assigned value is a Scalar" case
+void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v) {
+  OptionalDeviceGuard device_guard(device_of(self));
+  Tensor value;
+
+  // TODO: This qint special case looks very suspicious...
+  if (isQIntType(self.scalar_type())) {
+    value = at::native::scalar_tensor(v, device(kCPU).dtype(kFloat));
+  } else {
+    value = at::native::scalar_tensor(v, self.options());
+  }
+
+  return set_item(self, indices, value);
+}
+
 } // namespace indexing
+
+Tensor Tensor::index(ArrayRef<at::indexing::TensorIndex> indices) const {
+  return at::indexing::get_item(*this, indices);
+}
+Tensor Tensor::index(std::initializer_list<at::indexing::TensorIndex> indices) const {
+  return index(ArrayRef<at::indexing::TensorIndex>(indices));
+}
+
+Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs) {
+  at::indexing::set_item(*this, indices, rhs);
+  return *this;
+}
+Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor && rhs) {
+  at::indexing::set_item(*this, indices, rhs);
+  return *this;
+}
+Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v) {
+  at::indexing::set_item(*this, indices, v);
+  return *this;
+}
+Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs) {
+  return index_put_(ArrayRef<at::indexing::TensorIndex>(indices), rhs);
+}
+Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor && rhs) {
+  return index_put_(ArrayRef<at::indexing::TensorIndex>(indices), rhs);
+}
+Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v) {
+  return index_put_(ArrayRef<at::indexing::TensorIndex>(indices), v);
+}
+
 } // namespace at

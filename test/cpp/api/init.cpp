@@ -100,6 +100,14 @@ TEST(InitTest, ProducesPyTorchValues_KaimingUniform) {
   check_initializer_against_baseline(initializer, expected);
 }
 
+TEST(InitTest, ProducesPyTorchValues_Sparse) {
+  auto expected = expected_parameters::Sparse();
+  auto initializer = [](torch::Tensor tensor) {
+    torch::nn::init::sparse_(tensor, 0.5);
+  };
+  check_initializer_against_baseline(initializer, expected);
+}
+
 TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
   auto tensor = torch::empty({3, 4}, torch::requires_grad());
   ASSERT_THROWS_WITH(
