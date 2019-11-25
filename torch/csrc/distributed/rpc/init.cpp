@@ -36,7 +36,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout);
+          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
+          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
