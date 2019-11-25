@@ -12,6 +12,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
+  # TODO move this to docker
+  pip_install unittest-xml-reporting
+
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
@@ -150,7 +153,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
+  pip_install --user git+https://github.com/pytorch/vision.git@44a5bae933655ed7ff798669a43452b833f9ce01
 }
 
 test_libtorch() {

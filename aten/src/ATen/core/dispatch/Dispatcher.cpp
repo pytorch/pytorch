@@ -31,6 +31,7 @@ OpRegistrationListener::~OpRegistrationListener() {}
 Dispatcher::Dispatcher()
 : operators_()
 , operatorLookupTable_()
+, backendFallbackKernels_()
 , listeners_(guts::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
@@ -59,8 +60,14 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
       str << schema << " vs " << found->schema();
       TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
     }
-    if (found->options() != options) {
-      TORCH_CHECK(false, "Tried to register multiple operators with the same schema but different options: ", toString(schema));
+    if (options.isDefaultAliasAnalysisKind()) {
+      // just do nothing and let it pass.
+    } else if (found->options().isDefaultAliasAnalysisKind()) {
+      found->operatorIterator_->op.updateOptionsAliasAnalysis(options.aliasAnalysis());
+    } else {
+      TORCH_CHECK(
+        found->options() == options,
+        "Tried to register multiple operators with the same schema but different options: ", toString(schema));
     }
     return *found;
   }
@@ -114,6 +121,24 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName&
       operatorLookupTable.erase(op_name);
     });
   }
+}
+
+RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(TensorTypeId dispatchKey, KernelFunction kernel) {
+  backendFallbackKernels_.write([&] (ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) {
+    auto inserted = backendFallbackKernels.emplace(dispatchKey, std::move(kernel));
+    TORCH_CHECK(inserted.second, "Tried to register a backend fallback kernel for ", dispatchKey, " but there was already one registered.");
+  });
+
+  return RegistrationHandleRAII([this, dispatchKey] {
+    deregisterBackendFallbackKernel_(dispatchKey);
+  });
+}
+
+void Dispatcher::deregisterBackendFallbackKernel_(TensorTypeId dispatchKey) {
+  backendFallbackKernels_.write([&] (ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) {
+    size_t numRemoved = backendFallbackKernels.erase(dispatchKey);
+    TORCH_INTERNAL_ASSERT(1 == numRemoved, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
+  });
 }
 
 RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel) {

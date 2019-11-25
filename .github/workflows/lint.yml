@@ -1,0 +1,210 @@
+name: Lint
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+
+jobs:
+  quick-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Ensure consistent CircleCI YAML config
+        run: |
+          pip install -r requirements.txt
+          cd .circleci && ./ensure-consistency.py
+      - name: Ensure Docker version is correctly deployed
+        run: .circleci/validate-docker-version.py
+      - name: Shellcheck Jenkins scripts
+        run: |
+          sudo apt-get install -y shellcheck
+          .jenkins/run-shellcheck.sh
+      - name: Ensure no tabs
+        run: |
+          (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+      - name: Ensure C++ source files are not executable
+        run: |
+          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
+      - name: MyPy typecheck
+        run: |
+          pip install mypy mypy-extensions
+          mypy @mypy-files.txt
+      - name: C++ docs check
+        run: |
+          sudo apt-get install -y doxygen && pip install -r requirements.txt
+          cd docs/cpp/source && ./check-doxygen.sh
+
+  flake8-py3:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@master
+      - name: Checkout PR tip
+        run: |
+          set -eux
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
+            # Check out the actual tip of the branch.
+            git checkout ${{ github.event.pull_request.head.sha }}
+          fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        id: get_pr_tip
+      - name: Run flake8
+        run: |
+          set -eux
+          pip install flake8
+          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
+          cat ${GITHUB_WORKSPACE}/flake8-output.txt
+      - name: Add annotations
+        uses: pytorch/add-annotations-github-action@master
+        with:
+          check_name: 'flake8-py3'
+          linter_output_path: 'flake8-output.txt'
+          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  flake8-py2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 2.x
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@master
+      - name: Checkout PR tip
+        run: |
+          set -eux
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
+            # Check out the actual tip of the branch.
+            git checkout ${{ github.event.pull_request.head.sha }}
+          fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        id: get_pr_tip
+      - name: Run flake8
+        run: |
+          set -eux
+          pip install flake8
+          rm -rf .circleci
+          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
+          cat ${GITHUB_WORKSPACE}/flake8-output.txt
+      - name: Add annotations
+        uses: pytorch/add-annotations-github-action@master
+        with:
+          check_name: 'flake8-py2'
+          linter_output_path: 'flake8-output.txt'
+          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  clang-tidy:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Checkout PR tip
+        run: |
+          set -eux
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
+            # Check out the actual tip of the branch.
+            git checkout ${{ github.event.pull_request.head.sha }}
+          fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        id: get_pr_tip
+      - name: Install dependencies
+        run: |
+          set -eux
+          # Install CUDA
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/cuda-ubuntu1804.pin
+          sudo mv cuda-ubuntu1804.pin /etc/apt/preferences.d/cuda-repository-pin-600
+          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
+          sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
+          sudo apt-get update
+          sudo apt-get --no-install-recommends -y install cuda
+          # Install dependencies
+          pip install pyyaml
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-8
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-8 1000
+      - name: Run clang-tidy
+        run: |
+          set -eux
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream "$GITHUB_BASE_REF"
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
+
+          if [[ ! -d build ]]; then
+            git submodule update --init --recursive
+
+            export USE_NCCL=0
+            # We really only need compile_commands.json, so no need to build!
+            time python setup.py --cmake-only build
+
+            # Generate ATen files.
+            time python aten/src/ATen/gen.py \
+              -s aten/src/ATen \
+              -d build/aten/src/ATen \
+              aten/src/ATen/Declarations.cwrap \
+              aten/src/THNN/generic/THNN.h \
+              aten/src/THCUNN/generic/THCUNN.h \
+              aten/src/ATen/nn.yaml \
+              aten/src/ATen/native/native_functions.yaml
+
+            # Generate PyTorch files.
+            time python tools/setup_helpers/generate_code.py            \
+              --declarations-path build/aten/src/ATen/Declarations.yaml \
+              --nn-path aten/src
+          fi
+
+          # Run Clang-Tidy
+          # The negative filters below are to exclude files that include onnx_pb.h or
+          # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
+          python tools/clang_tidy.py                  \
+            --verbose                                 \
+            --paths torch/csrc/                       \
+            --diff "$MERGE_BASE"                      \
+            -g"-torch/csrc/jit/export.cpp"            \
+            -g"-torch/csrc/jit/import.cpp"            \
+            -g"-torch/csrc/jit/netdef_converter.cpp"  \
+            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
+
+          cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
+      - name: Add annotations
+        uses: suo/add-annotations-github-action@master
+        with:
+          check_name: 'clang-tidy'
+          linter_output_path: 'clang-tidy-output.txt'
+          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -32,11 +32,11 @@ fi
 export DOCKER_IMAGE=${DOCKER_IMAGE:-}
 if [[ -z "$DOCKER_IMAGE" ]]; then
   if [[ "$PACKAGE_TYPE" == conda ]]; then
-    export DOCKER_IMAGE="soumith/conda-cuda"
+    export DOCKER_IMAGE="pytorch/conda-cuda"
   elif [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="soumith/manylinux-cuda100"
+    export DOCKER_IMAGE="pytorch/manylinux-cuda100"
   else
-    export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+    export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
   fi
 fi
 
@@ -62,6 +62,27 @@ else
 fi
 export PYTORCH_BUILD_NUMBER=1
 
+
+JAVA_HOME=
+BUILD_JNI=OFF
+if [[ "$PACKAGE_TYPE" == libtorch ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      JAVA_HOME="$JH"
+      BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
+  fi
+fi
+
 cat >>"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 export TZ=UTC
@@ -85,6 +106,8 @@ export TORCH_PACKAGE_NAME='torch'
 export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 
 export USE_FBGEMM=1
+export JAVA_HOME=$JAVA_HOME
+export BUILD_JNI=$BUILD_JNI
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
 export DOCKER_IMAGE="$DOCKER_IMAGE"
 

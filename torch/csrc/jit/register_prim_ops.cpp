@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/vararg_functions.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -105,11 +106,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
-    auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    c10::List<dtype> vals =
-        c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
-    drop(stack, num_inputs);
-    push(stack, std::move(vals));
+    listConstructFunc<dtype>(num_inputs, stack);
     return 0;
   };
 }
@@ -662,11 +659,11 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? keep_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor[]",
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
          [](Stack& stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
-           auto keep_graph = pop(stack).toOptional<bool>();
+           auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_outputs = pop(stack);
            auto inputs = pop(stack).toTensorList();
            auto outputs = pop(stack).toTensorList();
@@ -685,12 +682,15 @@ RegisterOperators reg(
                output_vars,
                input_vars,
                gradients,
-               keep_graph,
+               retain_graph,
                create_graph,
                allow_unused);
 
-           std::vector<at::Tensor> res_tensors(res.begin(), res.end());
-           push(stack, c10::impl::toList<at::Tensor>(std::move(res_tensors)));
+           c10::impl::GenericList res_list{OptionalType::ofTensor()};
+           for (const at::Tensor& t : res) {
+             res_list.emplace_back(t.defined() ? t : IValue());
+           }
+           push(stack, res_list);
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -704,9 +704,9 @@ RegisterOperators reg(
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_tensors = pop(stack);
-           auto tensors = pop(stack).toTensorList();
+           auto outputs = pop(stack).toTensorList();
            std::vector<torch::autograd::Variable> output_vars(
-               tensors.begin(), tensors.end());
+               outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
 
            if (!grad_tensors.isNone()) {
@@ -1015,18 +1015,7 @@ RegisterOperators reg(
          [](const Node* node) -> Operation {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
-             auto tuple = pop(stack).toTuple();
-             if (tuple->elements().size() != num_elems) {
-               AT_ERROR(
-                   "Expected a tuple of ",
-                   num_elems,
-                   " elements, but got ",
-                   tuple->elements().size());
-             }
-             stack.insert(
-                 stack.end(),
-                 tuple->elements().begin(),
-                 tuple->elements().end());
+             tupleUnpackFunc(num_elems, stack);
              return 0;
            };
          },
@@ -1195,14 +1184,7 @@ RegisterOperators reg(
              return listConstruct<bool>(num_inputs);
            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
              return [=](Stack& stack) {
-               const size_t stack_size = stack.size();
-               c10::List<at::Tensor> vals;
-               vals.reserve(num_inputs);
-               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                 vals.emplace_back(std::move(stack[i]).toTensor());
-               }
-               drop(stack, num_inputs);
-               push(stack, std::move(vals));
+               tensorListConstructFunc(num_inputs, stack);
                return 0;
              };
            } else {
@@ -2430,12 +2412,12 @@ RegisterOperators reg2({
           listSelect<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::append( " decl_type "[](a!) self, " decl_type                \
+          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type                \
           "(c -> *) el) -> " decl_type "[](a!)",                              \
           listAppend<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::reverse( " decl_type "[](a!) self) -> ()",                   \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",                   \
           listReverse<value_type>,                                            \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
@@ -2505,7 +2487,7 @@ RegisterOperators reg2({
           maxList<value_type>,                                                 \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
-          "aten::append(" decl_type "[](a!) self, " decl_type                  \
+          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type                  \
           " el) -> " decl_type "[](a!)",                                       \
           listAppend<value_type>,                                              \
           aliasAnalysisFromSchema()),                                          \
