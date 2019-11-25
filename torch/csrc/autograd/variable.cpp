@@ -21,8 +21,6 @@
 #include <vector>
 #include <typeinfo>
 
-using namespace torch::utils;
-
 namespace torch {
 namespace autograd {
 
@@ -348,7 +346,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
   }
 }
 
-hooks::RemovableHandle VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
+torch::utils::hooks::RemovableHandle VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
@@ -357,7 +355,7 @@ hooks::RemovableHandle VariableHooks::_register_hook(const Tensor& self, std::fu
     torch::autograd::impl::create_cpp_hook(self);
   }
 
-  auto handle = hooks::RemovableHandle(map);
+  auto handle = torch::utils::hooks::RemovableHandle(map);
   map->insert(handle.id(), hook);
   return handle;
 }
