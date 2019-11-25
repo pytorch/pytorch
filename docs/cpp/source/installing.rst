@@ -140,8 +140,9 @@ should now merrily print the tensor (exact output subject to randomness):
 
 .. tip::
   On Windows, debug and release builds are not ABI-compatible. If you plan to
-  build your project in debug mode, we recommend
-  `building PyTorch from source <https://github.com/pytorch/pytorch#from-source>`_.
+  build your project in debug mode, please try the debug version of LibTorch.
+  Also, make sure you specify the correct configuration in the ``cmake --build .``
+  line below.
 
 Support
 -------
