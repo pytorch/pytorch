@@ -14,11 +14,12 @@ RRefContext& RRefContext::getInstance() {
 }
 
 void RRefContext::destroyInstance(bool ignoreRRefLeak) {
+  auto& ctx = RRefContext::getInstance();
   {
-    std::lock_guard<std::mutex> lock(RRefContext::destroyedMutex_);
-    RRefContext::destroyed_ = true;
+    std::lock_guard<std::mutex> lock(ctx.destroyedMutex_);
+    ctx.destroyed_ = true;
   }
-  RRefContext::getInstance().checkRRefLeaks(ignoreRRefLeak);
+  ctx.checkRRefLeaks(ignoreRRefLeak);
 }
 
 void RRefContext::handleException(const Message& message) {
