@@ -288,6 +288,8 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
   END_HANDLE_TH_ERRORS
 }
 
+// bound here bc it is more performant to construct the tensor while recursing through
+// python object
 static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -296,6 +298,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
+// binded in python layer here because PyObject currently not natively declarable
 static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -355,6 +358,8 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
   END_HANDLE_TH_ERRORS
 }
 
+// bound here bc it is more performant to construct the tensor while recursing through
+// python object
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS

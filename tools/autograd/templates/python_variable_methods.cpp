@@ -59,6 +59,7 @@ static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+// binded here bc no support for first-class functions in native_functions.yaml
 static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -139,6 +140,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
+// bound here to avoid dispatch overhead
 static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -157,6 +159,7 @@ static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
 }
 #endif
 
+// Bound here to avoid dispatch overhead
 static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -165,6 +168,7 @@ static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+// Bound here to avoid dispatch overhead
 static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -173,6 +177,7 @@ static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+// Bound here to avoid dispatch overhead
 static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
@@ -181,6 +186,7 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+// Bound here to avoid dispatch overhead
 static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
@@ -553,6 +559,7 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+// binded here bc PyObject not declarable in native_functions.yaml
 static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -607,6 +614,7 @@ inline bool dispatch_is_contiguous(Tensor & self, MemoryFormat memory_format) {
   return self.is_contiguous(memory_format);
 }
 
+// bound here to avoid dispatch overhead
 static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -621,6 +629,7 @@ static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
+// bound here to avoid dispatch overhead
 static PyObject * THPVariable_item(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -638,6 +647,7 @@ static PyObject * THPVariable_item(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+// binded in python layer bc no support for first class functions in native_functions.yaml
 static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -655,6 +665,7 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
+// binded in python layer bc no support for first class functions in native_functions.yaml
 static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -746,6 +757,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   END_HANDLE_TH_ERRORS
 }
 
+// binded here b/c arbitrarily nested list not declarable in native_functions.yaml
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -830,6 +842,7 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
 // Any new ops added here should be accompanied with a commment why they are not
 // being registered through native_functions.yaml, and include reviwers from C++/JIT
 PyMethodDef variable_methods[] = {
+  // magic method bound here to wrap NotImplementedError
   {"__add__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__radd__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__iadd__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add_>, METH_VARARGS | METH_KEYWORDS, NULL},
