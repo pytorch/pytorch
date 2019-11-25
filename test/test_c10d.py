@@ -323,6 +323,38 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
         return c10d.PrefixStore(self.prefix, self.tcpstore)
 
 
+class MyPythonStore(c10d.Store):
+    def __init__(self):
+        super(MyPythonStore, self).__init__()
+        self.store = dict()
+
+    def set(self, key, value):
+        self.store[key] = value
+
+    def get(self, key):
+        return self.store.get(key, "")
+
+    def add(self, key, value):
+        new = int(self.store.get(key, 0)) + value
+        self.set(key, str(new))
+        return new
+
+
+class PythonStoreTest(TestCase):
+    def setUp(self):
+        super(PythonStoreTest, self).setUp()
+
+    def test_set_get(self):
+        # If we were to inherit from StoreTestBase and try to use
+        # its test_set_get function, we would exercise the Python
+        # API directly, instead of going through the C++ trampoline.
+        # We care about testing the C++ trampoline, so run the
+        # equivalent of StoreTestBase.test_set_get from C++.
+        # See `torch/csrc/distributed/c10d/init.cpp` for the definition
+        # of this test function.
+        c10d._test_python_store(MyPythonStore())
+
+
 class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):

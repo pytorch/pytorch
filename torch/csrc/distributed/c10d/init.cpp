@@ -50,6 +50,56 @@ std::vector<std::string> split(char separator, const std::string& string) {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
+// PythonStore is a pybind11 trampoline class to allow a Python
+// class to inherit from c10d.Store and implement its interface.
+class PythonStore : public ::c10d::Store {
+ public:
+  using ::c10d::Store::Store;
+
+  // Note: this function manually calls the Python-side overload
+  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // macros. This is done so that we can call the Python-side
+  // function with a std::string instead of a std::vector<uint8_t>.
+  void set(const std::string& key, const std::vector<uint8_t>& value) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function overload =
+        pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "set");
+    TORCH_INTERNAL_ASSERT(overload);
+    overload(key, std::string(value.begin(), value.end()));
+  }
+
+  // Note: this function manually calls the Python-side overload
+  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // macros. This is done so that the Python-side function can
+  // return a std::string instead of a std::vector<uint8_t>.
+  std::vector<uint8_t> get(const std::string& key) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function overload =
+        pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "get");
+    TORCH_INTERNAL_ASSERT(overload);
+    auto str = pybind11::detail::cast_safe<std::string>(overload(key));
+    return std::vector<uint8_t>(str.begin(), str.end());
+  }
+
+  int64_t add(const std::string& key, int64_t value) override {
+    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
+  }
+
+  bool check(const std::vector<std::string>& keys) override {
+    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
+  }
+
+  void wait(const std::vector<std::string>& keys) override {
+    PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys);
+  }
+
+  void wait(
+      const std::vector<std::string>& keys,
+      const std::chrono::milliseconds& timeout) override {
+    PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
+  }
+};
+
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -148,7 +198,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
 
   auto store =
-      shared_ptr_class_<::c10d::Store>(module, "Store")
+      py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
+          module, "Store")
+          // Default constructor.
+          .def(py::init<>())
           // Convert from std::string to std::vector<uint8>.
           .def(
               "set",
@@ -603,6 +656,58 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_test_python_store",
+      // Define a function that takes a c10d store and runs a few tests.
+      // This is used by the PythonStore tests, which we cannot test from the
+      // Python side of the world. Calling Python functions on a Python object
+      // completely bypasses pybind11. We need to test that the overloaded
+      // functions call into Python and behave like we expect.
+      [](std::shared_ptr<::c10d::Store> store) {
+        auto add = [&store](const std::string& key, int64_t value) {
+          store->add(key, value);
+        };
+
+        auto set = [&store](const std::string& key, const std::string& value) {
+          std::vector<uint8_t> value_(value.begin(), value.end());
+          store->set(key, value_);
+        };
+
+        auto get = [&store](const std::string& key) {
+          auto value = store->get(key);
+          return std::string(value.begin(), value.end());
+        };
+
+        add("key", 1);
+        add("key", 2);
+        add("key", 3);
+        set("key0", "value0");
+        add("key3", 1);
+        set("key1", "value1");
+        add("key3", 2);
+        set("key2", "value2");
+        add("key3", 3);
+        add("key3", 4);
+        add("key3", 5);
+        add("key3", 6);
+        if (get("key") != "6") {
+          throw std::runtime_error("assertion failed");
+        }
+        if (get("key0") != "value0") {
+          throw std::runtime_error("assertion failed");
+        }
+        if (get("key1") != "value1") {
+          throw std::runtime_error("assertion failed");
+        }
+        if (get("key2") != "value2") {
+          throw std::runtime_error("assertion failed");
+        }
+        if (get("key3") != "21") {
+          throw std::runtime_error("assertion failed");
+        }
+      },
       py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
