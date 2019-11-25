@@ -10,9 +10,9 @@ import torch
 
 # Configs for PT add operator
 add_long_configs = op_bench.cross_product_configs(
-    M=[8, 64, 128],
-    N=range(2, 128, 64),
-    K=[8 ** x for x in range(0, 3)],
+    M=[8, 128],
+    N=[32, 64],
+    K=[256, 512],
     device=['cpu', 'cuda'],
     tags=["long"]
 )

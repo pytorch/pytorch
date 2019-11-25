@@ -268,7 +268,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_lower_graph",
           [](std::shared_ptr<Graph>& graph, const script::Module& self) {
-            return LowerGraph(*graph, self.module_object());
+            return LowerGraph(*graph, self._ivalue());
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -364,7 +364,15 @@ void initJITBindings(PyObject* module) {
                 UnpackQuantizedWeights(graph, paramsDict);
                 return paramsDict;
              },
+             pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                insertPermutes(graph, paramsDict);
+                return paramsDict;
+             },
              pybind11::return_value_policy::move);
+
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

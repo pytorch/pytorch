@@ -24,14 +24,14 @@ public:
   Vec256() {}
   Vec256(__m256d v) : values(v) {}
   Vec256(std::complex<double> val) {
-    double real_value = std::real(val);
-    double imag_value = std::imag(val);
+    double real_value = val.real();
+    double imag_value = val.imag();
     values = _mm256_setr_pd(real_value, imag_value,
                             real_value, imag_value);
   }
   Vec256(std::complex<double> val1, std::complex<double> val2) {
-    values = _mm256_setr_pd(std::real(val1), std::imag(val1),
-                            std::real(val2), std::imag(val2));
+    values = _mm256_setr_pd(val1.real(), val1.imag(),
+                            val2.real(), val2.imag());
   }
   operator __m256d() const {
     return values;

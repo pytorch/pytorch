@@ -22,10 +22,15 @@ cd $BUILD_ROOT
 
 CMAKE_ARGS=()
 CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
 CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
 CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
+# custom build with selected ops
+if [ -n "${SELECTED_OP_LIST}" ]; then
+  CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+fi
 
 # If Ninja is installed, prefer it to Make
 if [ -x "$(command -v ninja)" ]; then

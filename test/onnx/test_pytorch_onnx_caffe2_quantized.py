@@ -122,13 +122,10 @@ class TestQuantizedOps(unittest.TestCase):
         input_names = ["x"]
         onnx_model = self.export_to_onnx(model, x, input_names)
 
-        # Permute the input as caffe2 expects NHWC
-        x_c2 = np.transpose(x_numpy, [0, 2, 3, 1])
-        y = np.expand_dims(x_c2, axis=0)
+        y = np.expand_dims(x_numpy, axis=0)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, y)))[0]
 
-        # Permute pytorch output to NHWC
-        np.testing.assert_almost_equal(outputs.permute(0, 2, 3, 1).numpy(), caffe_res, decimal=3)
+        np.testing.assert_almost_equal(outputs, caffe_res, decimal=3)
 
     def test_upsample(self):
         class QUpsampleModule(torch.nn.Module):
@@ -146,7 +143,7 @@ class TestQuantizedOps(unittest.TestCase):
 
     def test_quantized_ts(self):
         torch.backends.quantized.engine = "qnnpack"
-        module_quant = torch.jit.load("/home/supriyar/pytorch/quantized_ts_V4.pt")
+        module_quant = torch.jit.load("/home/supriyar/pytorch/quantized_ts.pt")
 
         input_img = torch.from_numpy(np.random.random((1, 3, 48, 64)).astype("float32"))
         input_fp = torch.from_numpy(np.random.random((1, 12, 48, 64)).astype("float32"))
@@ -163,6 +160,8 @@ class TestQuantizedOps(unittest.TestCase):
             X.numpy(),
         )
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
+        np.testing.assert_almost_equal(output[0].numpy(), caffe_res, decimal=3)
+
 
 if __name__ == '__main__':
     unittest.main()

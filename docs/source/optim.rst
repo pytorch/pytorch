@@ -100,6 +100,8 @@ Example::
             return loss
         optimizer.step(closure)
 
+.. _optimizer-algorithms:
+
 Algorithms
 ----------
 

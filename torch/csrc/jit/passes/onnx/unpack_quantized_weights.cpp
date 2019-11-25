@@ -27,15 +27,16 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
 // 2. For ops with no output scale in op signature (like quantized::relu)
 // we traverse up the graph to get the scale from its input until we hit a node
 // where scale is explicitly specified.
-double getScaleFromInput(Node* input_node) {
-  c10::optional<IValue> scale;
+std::pair<double, int> getScaleFromInput(Node* input_node) {
+  c10::optional<IValue> scale, zero_point;
   std::string input_name = input_node->kind().toQualString();
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,
         "aten::quantize_per_tensor expected scale to be 2nd input");
     scale = toIValue(input_node->inputs()[1]);
-    return scale.value().toDouble();
+    zero_point = toIValue(input_node->inputs()[2]);
+    return std::make_pair(scale.value().toDouble(), zero_point.value().toInt());
   } else if (input_name == "quantized::linear") {
     // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale,
     // %w_zero_point)
@@ -43,7 +44,8 @@ double getScaleFromInput(Node* input_node) {
         input_node->inputs().size() > 3,
         "quantized::linear expected scale to be 4th input");
     scale = toIValue(input_node->inputs()[3]);
-    return scale.value().toDouble();
+    zero_point = toIValue(input_node->inputs()[4]);
+    return std::make_pair(scale.value().toDouble(), zero_point.value().toInt());
   } else if (input_name == "quantized::conv2d") {
     // %r = quantized::conv2d(%input, %unpacked_weight, %bias, %stride,
     // %padding, %dilation, %groups, %w_scale, %w_zero_point)
@@ -52,7 +54,8 @@ double getScaleFromInput(Node* input_node) {
         "quantized::conv2d expected scale to be 8th input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
-    return scale.value().toDouble();
+    zero_point = toIValue(input_node->inputs()[num_inputs - 1]);
+    return std::make_pair(scale.value().toDouble(), zero_point.value().toInt());
   } else if (input_name == "quantized::conv2d_relu") {
     // %r = quantized::conv2d_relu(%input, %unpacked_weight, %stride,
     // %padding, %dilation, %groups, %w_scale, %w_zero_point)
@@ -61,14 +64,16 @@ double getScaleFromInput(Node* input_node) {
         "quantized::conv2d_relu expected scale to be 7th input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
-    return scale.value().toDouble();
+    zero_point = toIValue(input_node->inputs()[num_inputs - 1]);
+    return std::make_pair(scale.value().toDouble(), zero_point.value().toInt());
   } else if (input_name == "quantized::add") {
     // %r = quantized::add(%input_a, %input_b, %w_scale, %w_zero_point)
     TORCH_CHECK(
         input_node->inputs().size() > 2,
         "quantized::add expected scale to be 3rd input");
     scale = toIValue(input_node->inputs()[2]);
-    return scale.value().toDouble();
+    zero_point = toIValue(input_node->inputs()[3]);
+    return std::make_pair(scale.value().toDouble(), zero_point.value().toInt());
   }
   // For the ops below the scale is not part of the op signature, so we traverse
   // up the graph to get the scale from its input when defined in the graph.
@@ -83,7 +88,10 @@ double getScaleFromInput(Node* input_node) {
   } else if (input_name == "aten::split_with_sizes") {
     return getScaleFromInput(input_node->inputs()[0]->node());
   }
-  TORCH_INTERNAL_ASSERT(false, "Unrecognized quantized operator while trying to compute q_scale for operator ", input_name);
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Unrecognized quantized operator while trying to compute q_scale for operator ",
+      input_name);
 }
 
 Node* CreateQuantizedWeights(
@@ -112,6 +120,58 @@ Node* CreateQuantizedBias(
   const_node->f_(Symbol::attr("Y_scale"), scale);
   const_node->is_(Symbol::attr("values"), data);
   return const_node;
+}
+
+Node* CreateNCHW2NHWC(
+    std::shared_ptr<Graph>& graph,
+    Node* op_node,
+    Node* input_node,
+    double scale,
+    int64_t zero_point) {
+  WithInsertPoint ins(op_node);
+
+  Node* dequant_node =
+      graph->create(Symbol::caffe2("Int8Dequantize"), {input_node->output()});
+  Node* permute_node =
+      graph->create(Symbol::caffe2("NCHW2NHWC"), {dequant_node->output()});
+
+  dequant_node->insertBefore(op_node);
+  permute_node->insertBefore(op_node);
+
+  std::vector<Value*> inputs;
+  inputs.push_back(permute_node->output());
+  inputs.push_back(graph->insertConstant(scale));
+  inputs.push_back(graph->insertConstant(zero_point));
+
+  Value* scalar_type_val = graph->insertConstant(IValue(at::ScalarType::Byte));
+  inputs.push_back(scalar_type_val);
+  Node* quant = graph->create(Symbol::aten("quantize_per_tensor"), inputs);
+  return quant;
+}
+
+std::pair<Node*, Node*> CreateNHWC2NCHW(
+    std::shared_ptr<Graph>& graph,
+    Node* op_node,
+    double scale,
+    int64_t zero_point) {
+  Node* dequant_node = graph->create(Symbol::caffe2("Int8Dequantize"), 1);
+  Node* permute_node = graph->create(Symbol::caffe2("NHWC2NCHW"), 1);
+
+  dequant_node->insertAfter(op_node);
+  dequant_node->addInput(op_node->outputs().at(0));
+  permute_node->insertAfter(dequant_node);
+  permute_node->addInput(dequant_node->outputs().at(0));
+
+  std::vector<Value*> inputs;
+  inputs.push_back(permute_node->output());
+  inputs.push_back(graph->insertConstant(scale));
+  inputs.push_back(graph->insertConstant(zero_point));
+
+  Value* scalar_type_val = graph->insertConstant(IValue(at::ScalarType::Byte));
+  inputs.push_back(scalar_type_val);
+  Node* quant = graph->create(Symbol::aten("quantize_per_tensor"), inputs);
+  quant->insertAfter(permute_node);
+  return std::make_pair(quant, dequant_node);
 }
 
 // This is called before the onnx pass. Using pattern matching we
@@ -201,7 +261,7 @@ void unpackQuantizedWeightsHelper(
         input_val->type()->str());
 
     auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
-    auto input_scale = getScaleFromInput(input_node);
+    auto input_scale = getScaleFromInput(input_node).first;
     auto q_bias = at::quantize_per_tensor(
         original_bias, weight_scale * input_scale, 0, at::kQInt32);
 
@@ -246,6 +306,62 @@ void UnpackQuantizedWeights(
       graph, paramsDict, qconv, "quantized::conv_unpack");
   unpackQuantizedWeightsHelper(
       graph, paramsDict, qconv_relu, "quantized::conv_unpack");
+}
+
+void insertPermutesHelper(
+    std::shared_ptr<Graph>& graph,
+    std::map<std::string, at::Tensor>& paramsDict,
+    const std::string& pattern) {
+  Graph pattern_graph;
+  std::unordered_map<std::string, Value*> vmap;
+  script::parseIR(pattern, &pattern_graph, vmap);
+
+  const auto& matches = findPatternMatches(pattern_graph, *graph);
+
+  for (const auto& match : matches) {
+    auto match_vmap = match.values_map;
+    auto op_node = match_vmap.at(vmap.at("r"))->node();
+    auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
+
+    auto num_inputs = match_vmap.at(vmap.at("r"))->node()->inputs().size();
+
+    auto input_data = getScaleFromInput(input_node);
+
+    Node* permuted_input =
+        CreateNCHW2NHWC(graph, op_node, input_node, input_data.first, input_data.second);
+    op_node->removeInput(0);
+    graph->setInsertPoint(op_node);
+    permuted_input->insertBefore(op_node);
+    op_node->insertInput(0, permuted_input->output());
+
+    auto out_scale = toIValue(op_node->inputs()[num_inputs - 2]);
+    auto out_zp = toIValue(op_node->inputs()[num_inputs - 1]);
+    auto permute_nodes = CreateNHWC2NCHW(
+        graph,
+        op_node,
+        out_scale.value().toDouble(),
+        out_zp.value().toInt());
+    auto v = op_node->outputs().at(0);
+    v->replaceAllUsesWith(permute_nodes.first->outputs().at(0));
+    permute_nodes.second->removeInput(0);
+    permute_nodes.second->addInput(v);
+  }
+}
+
+void insertPermutes(
+    std::shared_ptr<Graph>& graph,
+    std::map<std::string, at::Tensor>& paramsDict) {
+  std::string qconv = R"(
+  graph(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
+        %r = quantized::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+        return (%r) )";
+  std::string qconv_relu = R"(
+  graph(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
+        %r = quantized::conv2d_relu(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)
+        return (%r) )";
+
+  insertPermutesHelper(graph, paramsDict, qconv);
+  insertPermutesHelper(graph, paramsDict, qconv_relu);
 }
 
 } // namespace jit

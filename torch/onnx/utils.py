@@ -128,7 +128,22 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
             torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
+            '''
+            torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
+            print("Graph after adding permute ", graph)
 
+            torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+            graph(%Pi, %Px, %Py, %Pz, %Pa, %Pb, %Pc):
+                %Pq = _caffe2::Int8Dequantize(%Pi)
+                %Pr = _caffe2::NHWC2NCHW(%Pq)
+                %Ps = aten::quantize_per_tensor(%Pr, %Px, %Py, %Pz)
+                %Pt = _caffe2::Int8Dequantize(%Ps)
+                %Pu = _caffe2::NCHW2NHWC(%Pt)
+                %Pv = aten::quantize_per_tensor(%Pu, %Pa, %Pb, %Pc)
+                return (%Pv)""", """
+            graph(%Ri, %Rx, %Ry, %Rz, %Ra, %Rb, %Rc):
+                return (%Ri)""", graph)
+            '''
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
 

@@ -21,25 +21,27 @@ def register_quantized_ops(domain, version):
 def nchw2nhwc(g, input):
     quantized_input = input in sym_help._quantized_ops
     if quantized_input:
+        axes = [0, 2, 3, 1]
         quant_args = {
+            "axes_i": axes,
             "Y_scale_f": input.node()["Y_scale"],
             "Y_zero_point_i": input.node()["Y_zero_point"],
         }
-        input = g.op("_caffe2::Int8Dequantize", input)
-    input = g.op("_caffe2::NCHW2NHWC", input)
-    if quantized_input:
-        input = g.op("_caffe2::Int8Quantize", input, **quant_args)
+        input = g.op("_caffe2::Int8Transpose", input, **quant_args)
+    else:
+        input = g.op("_caffe2::NCHW2NHWC", input)
     return input
 
-def nhwc2nchw(g, output, scale, zero_point):
-    dequant = g.op("_caffe2::Int8Dequantize", output)
-    output = g.op("_caffe2::NHWC2NCHW", dequant)
+def nhwc2nchw(g, input, scale, zero_point):
+    axes = [0, 3, 1, 2]
+
     quant_args = {
+        "axes_i": axes,
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    output = g.op("_caffe2::Int8Quantize", output, **quant_args)
-    return output
+    input = g.op("_caffe2::Int8Transpose", input, **quant_args)
+    return input
 
 def linear_prepack(g, weight, bias):
     # Mapping to a dummy caffe2 prepack node.
@@ -80,11 +82,9 @@ def conv2d(g, input, weight, bias, stride, padding, dilation, groups, scale, zer
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8Conv", input, weight, bias, **kwargs)
     output = nhwc2nchw(g, output, scale, zero_point)
-
     sym_help._quantized_ops.add(output)
     return output
 
@@ -101,11 +101,9 @@ def conv2d_relu(g, input, weight, bias, stride, padding, dilation, groups, scale
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8ConvRelu", input, weight, bias, **kwargs)
     output = nhwc2nchw(g, output, scale, zero_point)
-
     sym_help._quantized_ops.add(output)
     return output
 
@@ -167,20 +165,6 @@ def dequantize(g, input):
 @parse_args('v', 't', 't', 't', 't', 't', 't', 't')
 def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
     return input
-
-# FIXME hack to convert clamp operator to caffe2.
-# The op defined in sym_opset9 does not convert the args correctly
-@parse_args('v', 'f', 'f')
-def clamp(g, input, min, max):
-    # min or max may be None that we need to dispatch to
-    # Clip separately, as ONNX does not have None syntax
-
-    kwargs = {
-        "min_f": min,
-        "max_f": max,
-    }
-    return g.op("_caffe2::Clip", input, **kwargs)
-
 
 @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
 def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):

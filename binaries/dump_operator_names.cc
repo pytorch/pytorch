@@ -44,7 +44,7 @@ void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opna
     }
   }
   for (const auto& sub_m : m.children()) {
-    std::cout << "sub module name: " << sub_m.name().qualifiedName() << std::endl;
+    std::cout << "sub module name: " << sub_m.type()->name()->qualifiedName() << std::endl;
     dump_opnames(sub_m, opnames);
   }
 }
