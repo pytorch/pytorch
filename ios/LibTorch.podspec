@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
     s.name             = 'LibTorch'
-    s.version          = '1.3.1'
+    s.version          = '1.4.0'
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
@@ -24,7 +24,7 @@ Pod::Spec.new do |s|
     end
     s.user_target_xcconfig = {
         'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"', 
-        'OTHER_LDFLAGS' => '-force_load "$(PODS_ROOT)/LibTorch/install/lib/libtorch.a" -force_load "$(PODS_ROOT)/LibTorch/install/lib/libtorch_cpu.a"',
+        'OTHER_LDFLAGS' => '-force_load "$(PODS_ROOT)/LibTorch/install/lib/libtorch.a"',
         'CLANG_CXX_LANGUAGE_STANDARD' => 'c++11',
         'CLANG_CXX_LIBRARY' => 'libc++'
     }

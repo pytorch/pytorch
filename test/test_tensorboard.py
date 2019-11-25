@@ -72,10 +72,12 @@ class BaseTestCase(TestCase):
 
 
 if TEST_TENSORBOARD:
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard import _caffe2_graph as c2_graph
+    from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
 
@@ -213,6 +215,10 @@ class TestTensorBoardWriter(BaseTestCase):
             sample_rate = 44100
 
             n_iter = 0
+            writer.add_hparams(
+                {'lr': 0.1, 'bsize': 1},
+                {'hparam/accuracy': 10, 'hparam/loss': 10}
+            )
             writer.add_scalar('data/scalar_systemtime', 0.1, n_iter)
             writer.add_scalar('data/scalar_customtime', 0.2, n_iter, walltime=n_iter)
             writer.add_scalars('data/scalar_group', {
@@ -501,6 +507,23 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
         with self.createSummaryWriter() as w:
             w.add_graph(myLinear(), dummy_input)
+
+        actual_proto, _ = graph(myLinear(), dummy_input)
+
+        expected_str = read_expected_content(self)
+        expected_proto = GraphDef()
+        text_format.Parse(expected_str, expected_proto)
+
+        self.assertEquals(len(expected_proto.node), len(actual_proto.node))
+        for i in range(len(expected_proto.node)):
+            expected_node = expected_proto.node[i]
+            actual_node = actual_proto.node[i]
+            self.assertEquals(expected_node.name, actual_node.name)
+            self.assertEquals(expected_node.op, actual_node.op)
+            self.assertEquals(expected_node.input, actual_node.input)
+            self.assertEquals(expected_node.device, actual_node.device)
+            self.assertEquals(
+                sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
     def test_mlp_graph(self):
         dummy_input = (torch.zeros(2, 1, 28, 28),)

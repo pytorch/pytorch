@@ -23,6 +23,22 @@
 namespace torch {
 namespace jit {
 
+void writeArchiveAndTensors(
+    const std::string& archive_name,
+    const char* data,
+    size_t size,
+    const std::vector<WriteableTensorData>& tensors,
+    caffe2::serialize::PyTorchStreamWriter& out) {
+  std::string prefix = archive_name + "/";
+  size_t i = 0;
+  for (const auto& td : tensors) {
+    std::string fname = prefix + std::to_string(i++);
+    out.writeRecord(fname, td.data(), td.sizeInBytes());
+  }
+  std::string fname = archive_name + ".pkl";
+  out.writeRecord(fname, data, size);
+}
+
 namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;

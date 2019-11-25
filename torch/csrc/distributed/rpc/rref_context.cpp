@@ -31,7 +31,7 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    pybind11::gil_scoped_acquire ag;
+    AutoGIL ag;
     owners_.clear();
   }
 }
@@ -341,7 +341,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     }
   }
   if (deletedRRef && deletedRRef->isPyObj()) {
-    pybind11::gil_scoped_acquire ag;
+    AutoGIL ag;
     deletedRRef.reset();
   }
 }
