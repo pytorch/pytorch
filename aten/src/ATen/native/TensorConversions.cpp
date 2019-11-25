@@ -23,7 +23,8 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
 
-  if (self.options() == options && !copy &&
+  if (self.dtype() == options.dtype() && self.layout() == options.layout() &&
+      self.device() == options.device() && !copy &&
       (memory_format == MemoryFormat::Preserve ||
        self.suggest_memory_format() == memory_format)) {
     return self;

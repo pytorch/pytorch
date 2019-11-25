@@ -195,7 +195,7 @@ Tensor& upsample_nearest1d_out_cuda(
 }
 
 Tensor upsample_nearest1d_cuda(const Tensor& input, IntArrayRef output_size) {
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_nearest1d_out_cuda_template(output, input, output_size);
   return output;
 }
@@ -214,7 +214,7 @@ Tensor upsample_nearest1d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size) {
-  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
+  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_nearest1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size);
   return grad_input;
