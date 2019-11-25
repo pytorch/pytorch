@@ -16,5 +16,4 @@ TH_API void THFloatVector_normal_fill_AVX2(float *data,
                                     at::Generator *generator,
                                     const float mean,
                                     const float stddev);
-TH_API void THFloatVector_sigmoid_AVX2(float *y, const float *x, const ptrdiff_t n);
 #endif

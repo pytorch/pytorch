@@ -11,12 +11,14 @@ from torch.quantization import \
     QConfigDynamic, get_observer_dict, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver,\
-    RecordingObserver, MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver, \
-    QuantWrapper, default_eval_fn
+    default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
+    PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
+    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
+from torch.quantization import default_observer
+from torch.quantization import default_per_channel_weight_observer
 from torch.quantization._quantize_script import quantize_script
 
 from common_utils import run_tests
@@ -501,6 +503,31 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+    def test_per_channel_quantize(self):
+        r"""Test quantization for per_channel dynamic quantization
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            torch.nn.Linear: per_channel_dynamic_qconfig
+        }
+
+        prepare_dynamic(model, qconfig_dict)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
+
+        checkQuantized(model)
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
     def test_quantized_rnn(self):
         d_in, d_hid = 2, 2
         model = LSTMDynamicModel().eval()
@@ -766,30 +793,38 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         """
         # eager mode
         annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
-        qconfig = QConfig(
-            activation=default_histogram_observer,
-            weight=default_weight_observer)
-        annotated_linear_model.qconfig = qconfig
-        linear_model = SingleLayerLinearModel().eval()
-        # copy the weight from eager mode so that we can
-        # compare the result of the two quantized models later
-        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
-        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-        model_eager = quantize(annotated_linear_model, test_only_eval_fn,
-                               self.calib_data)
+        for qconfig in [
+                QConfig(
+                    activation=default_observer,
+                    weight=default_weight_observer),
+                QConfig(
+                    activation=default_histogram_observer,
+                    weight=default_weight_observer),
+                QConfig(
+                    activation=default_observer,
+                    weight=default_per_channel_weight_observer),
+        ]:
+            annotated_linear_model.qconfig = qconfig
+            linear_model = SingleLayerLinearModel().eval()
+            # copy the weight from eager mode so that we can
+            # compare the result of the two quantized models later
+            linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+            linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+            model_eager = quantize(annotated_linear_model, test_only_eval_fn,
+                                   self.calib_data)
 
-        qconfig_dict = {
-            '': qconfig
-        }
-        model_script = quantize_script(
-            torch.jit.script(linear_model),
-            qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
-            inplace=False)
-        result_eager = model_eager(self.calib_data[0][0])
-        result_script = get_forward(model_script._c)(self.calib_data[0][0])
-        self.assertEqual(result_eager, result_script)
+            qconfig_dict = {
+                '': qconfig
+            }
+            model_script = quantize_script(
+                torch.jit.script(linear_model),
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            result_eager = model_eager(self.calib_data[0][0])
+            result_script = get_forward(model_script._c)(self.calib_data[0][0])
+            self.assertEqual(result_eager, result_script)
 
     @_tmp_donotuse_dont_inline_everything
     def test_conv(self):
@@ -807,15 +842,17 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         qconfig_dict = {
             '': default_qconfig
         }
-        model_script = quantize_script(
-            torch.jit.script(conv_model_to_script),
-            qconfig_dict,
-            default_eval_fn,
-            [self.img_data],
-            inplace=False)
+        model_traced = torch.jit.trace(conv_model_to_script, self.img_data[0][0])
+        model_script = torch.jit.script(conv_model_to_script)
         result_eager = model_eager(self.img_data[0][0])
-        result_script = model_script(self.img_data[0][0])
-        self.assertEqual(result_eager, result_script)
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                default_eval_fn,
+                [self.img_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.img_data[0][0]), result_eager)
 
     @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
     def test_conv_bn(self):
