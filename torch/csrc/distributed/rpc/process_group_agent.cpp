@@ -529,6 +529,10 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       futureTimeoutCV_.wait_for(lock, sleepTime);
     }
 
+    if (!rpcRunning_.load()) {
+      return;
+    }
+
     const auto timedOutFutures = processTimedOutFutures();
 
     // Do not hold the lock while marking futures completed, as markCompleted()
