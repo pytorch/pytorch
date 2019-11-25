@@ -199,8 +199,3 @@ def is_in_onnx_export():
 def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     from torch.onnx import utils
     return utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)
-
-
-def set_custom_domain_version(domain, version):
-    import torch.onnx.symbolic_registry as sym_registry
-    return sym_registry.set_custom_domain_version(domain, version)
