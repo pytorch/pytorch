@@ -4,21 +4,6 @@
 
 #include <ATen/core/Reduction.h>
 
-THC_API void THNN_(AbsCriterion_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *output,
-                  int64_t reduction);
-
-THC_API void THNN_(AbsCriterion_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t reduction);
-
 THC_API void THNN_(BCECriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -282,17 +267,6 @@ THC_API void THNN_(RReLU_updateGradInput)(
                   double upper,
                   bool train,
                   bool inplace);
-
-THC_API void THNN_(Sigmoid_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output);
-
-THC_API void THNN_(Sigmoid_updateGradInput)(
-                  THCState *state,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *output);
 
 THC_API void THNN_(SoftMarginCriterion_updateOutput)(
                   THCState *state,

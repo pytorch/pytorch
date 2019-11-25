@@ -81,7 +81,9 @@ struct const_value_list_with_types {
       : values(values), delim(std::move(delim_)) {}
 };
 
-std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
+std::ostream& operator<<(
+    std::ostream& out,
+    const const_value_list_with_types& l) {
   size_t i = 0;
   for (auto n : l.values) {
     if (i++ > 0) {
@@ -585,7 +587,22 @@ void Graph::dump() const {
   std::cout << *this << "\n";
 }
 
-void LintGraph(std::shared_ptr<Graph>& graph) {
+void Graph::push_scope(const std::string& scope_name) {
+  current_scope_ = current_scope_->push(Symbol::scope(scope_name));
+  Node* block_node = insertNode(create(prim::TracedModuleForward, 0));
+  block_node->s_(attr::scope, scope_name);
+  Block* b = block_node->addBlock();
+  setInsertPoint(b);
+}
+void Graph::pop_scope() {
+  current_scope_ = current_scope_->parent();
+  if (insertPoint()->owningBlock()->owningNode()->kind() ==
+      prim::TracedModuleForward) {
+    setInsertPoint(insertPoint()->owningBlock()->owningNode()->next());
+  }
+}
+
+void LintGraph(const std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
@@ -1047,6 +1064,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
+      callstack_(c10::nullopt),
       op_(nullptr),
       topo_position_(0) {
   graph_->all_nodes.emplace(this);
@@ -1098,6 +1116,7 @@ void Node::cloneFrom(Node* s) {
     scope_ = s->scope_;
   }
   copyAttributes(*s);
+  callstack_ = s->callstack_;
 }
 
 void Node::replaceAllUsesWith(Node* n) {
@@ -1328,6 +1347,51 @@ void Node::removeFromList() {
   this->prev() = nullptr;
 }
 
+Block* Node::findCommonAncestorBlockWith(Node* n) {
+  if (n->owningBlock() == owningBlock()) {
+    return owningBlock();
+  }
+
+  Node* n1 = this;
+  Node* n2 = n;
+
+  size_t d_1 = n1->blocksFromGraphBlock();
+  size_t d_2 = n2->blocksFromGraphBlock();
+
+  for (; d_1 > d_2; --d_1) {
+    n1 = n1->owningBlock()->owningNode();
+    // n2 contains n1
+  }
+
+  for (; d_2 > d_1; --d_2) {
+    n2 = n2->owningBlock()->owningNode();
+  }
+
+  // Now they are the same numer of blocks from the graph block,
+  // recurse upwards, checking if they are on the same block
+  while (true) {
+    if (n1->owningBlock() == n2->owningBlock()) {
+      return n1->owningBlock();
+    }
+
+    n1 = n1->owningBlock()->owningNode();
+    n2 = n2->owningBlock()->owningNode();
+
+    AT_ASSERT(n1 != nullptr);
+    AT_ASSERT(n2 != nullptr);
+  }
+}
+
+size_t Node::blocksFromGraphBlock() {
+  Node* n = this;
+  size_t dist = 0;
+  while (n->owningBlock()->owningNode()) {
+    n = n->owningBlock()->owningNode();
+    ++dist;
+  }
+  return dist;
+}
+
 inline const SourceRange& fakeRange() {
   static SourceRange range(std::make_shared<Source>(""), 0, 1);
   return range;
@@ -1531,10 +1595,10 @@ Node* Graph::createIsInstance(
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
   std::vector<std::string> kinds;
   if (is_list) {
-    kinds.push_back("list");
+    kinds.emplace_back("list");
   }
   if (is_tuple) {
-    kinds.push_back("tuple");
+    kinds.emplace_back("tuple");
   }
   n->ss_(attr::kinds, std::move(kinds));
   n->tys_(attr::types, types.vec());
@@ -1554,7 +1618,7 @@ Value* Graph::insertFunctionCall(
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
                            ->output()
-                           ->setType(FunctionType::create(std::move(callee)));
+                           ->setType(FunctionType::create(callee));
   std::vector<Value*> inputs = {fn_constant};
   inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
   Value* result = insertNode(create(prim::CallFunction, inputs))
@@ -1595,11 +1659,10 @@ Node* Graph::createClone(
 }
 
 Value* Graph::insertConstant(
-    IValue val,
+    const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+  return jit::insertConstant(*this, val, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString(bool print_source_locations) const {
@@ -1650,12 +1713,46 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-std::vector<Value*> inlineCallTo(
-    Node* to_replace,
-    Graph& callee) {
+std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
-  auto new_outputs =
-      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  std::unordered_map<Value*, Value*> value_map;
+  auto new_outputs = insertGraph(
+      *to_replace->owningGraph(),
+      *(callee->optimized_graph()),
+      to_replace->inputs(),
+      value_map);
+
+  std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
+      new_callstack_entries;
+
+  // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
+  // are missing nodes without outputs (e.g. prim::Print).
+  std::unordered_set<Node*> updated_nodes;
+  for (const auto& kv : value_map) {
+    Node* new_node = kv.second->node();
+    if (!updated_nodes.insert(new_node).second) {
+      continue;
+    }
+
+    auto new_node_cs = new_node->callstack();
+
+    InlinedCallStack* raw_callstack_ptr =
+        new_node_cs ? new_node_cs->get() : nullptr;
+
+    if (!new_callstack_entries.count(raw_callstack_ptr)) {
+      if (new_node_cs) {
+        new_callstack_entries[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                *new_node_cs, callee, to_replace->sourceRange());
+      } else {
+        new_callstack_entries[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                callee, to_replace->sourceRange());
+      }
+    }
+    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
+  }
+
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
@@ -1691,8 +1788,8 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
 std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs) {
-  std::unordered_map<Value*, Value*> value_map;
+    ArrayRef<Value*> inputs,
+    std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -1711,6 +1808,14 @@ std::vector<Value*> insertGraph(
   }
 
   return outputs;
+}
+
+std::vector<Value*> insertGraph(
+    Graph& g,
+    Graph& callee,
+    ArrayRef<Value*> inputs) {
+  std::unordered_map<Value*, Value*> value_map;
+  return insertGraph(g, callee, inputs, value_map);
 }
 
 void ProfileOp::cloneFrom(Node* other_) {

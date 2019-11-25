@@ -145,19 +145,26 @@ class LpNorm(Regularizer):
 
 
 class L0ApproxNorm(Regularizer):
-    def __init__(self, reg_lambda, alpha=0.01):
+    def __init__(self, reg_lambda, alpha=0.01, budget=0):
         """
         reg_lambda: parameter to scale regularization by
 
         alpha:      hyper parameter to tune that is only used in the calculation
-                    of approxiamte L0 norm.
+                    of approxiamte L0 norm
+
+        budget:     desired number of features. If the number of features is greater
+                    than the budget amount, then the least important features will
+                    be penalized. If there are fewer features than the desired
+                    budget, no penalization will be applied. Optional parameter, if
+                    0, then no budget is used
         """
         super(L0ApproxNorm, self).__init__()
         assert reg_lambda > 0, "factor ahead of regularization should be greater than 0"
         assert alpha > 0, "alpha factor must be a positive value greater than 0"
+        assert budget >= 0, "budget factor must be greater than or equal to 0"
         self.reg_lambda = reg_lambda
         self.alpha = alpha
-
+        self.budget = float(budget)  # budget must be float for future calculations
 
     def _run_on_loss(self, net, param_init_net, param, grad=None):
         # TODO: the second dim (num of input nodes) of param is after feature preproc,
@@ -170,16 +177,26 @@ class L0ApproxNorm(Regularizer):
 
         # compute approximate L0 norm
         # sum_i ( min ( abs (theta_i), alpha))) / alpha
-        l0_abs = net.Abs(
-            [grouped_feature_weight_vec], [net.NextScopedBlob("l0_abs")]
-        )
+        l0_abs = net.Abs([grouped_feature_weight_vec], [net.NextScopedBlob("l0_abs")])
         l0_min = net.Clip([l0_abs], [net.NextScopedBlob("l0_min")], max=self.alpha)
         l0_summed = net.ReduceFrontSum([l0_min], [net.NextScopedBlob("l0_summed")])
         l0_norm = net.Scale(
             [l0_summed], [net.NextScopedBlob("l0_norm")], scale=(1 / self.alpha)
         )
 
-        net.Scale([l0_norm], [output_blob], scale=self.reg_lambda)
+        # incorporate budget factor
+        # regularization = reg_lambda * max(0, l0_norm - budget)
+        if self.budget:
+            budget_blob = net.ConstantFill([], "budget", shape=[1], value=self.budget)
+            l0_sub_budget = net.Sub(
+                [l0_norm, budget_blob], [net.NextScopedBlob("l0_budget")]
+            )
+            relu_l0_sub_budget = net.Relu(
+                [l0_sub_budget], [net.NextScopedBlob("relu_l0_sub_budget")]
+            )
+            net.Scale([relu_l0_sub_budget], [output_blob], scale=self.reg_lambda)
+        else:
+            net.Scale([l0_norm], [output_blob], scale=self.reg_lambda)
         return output_blob
 
 class L1NormTrimmed(Regularizer):

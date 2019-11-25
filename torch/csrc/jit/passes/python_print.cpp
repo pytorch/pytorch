@@ -300,7 +300,6 @@ struct PythonPrintImpl {
         return i;
       }
     }
-    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }
@@ -1280,7 +1279,11 @@ struct PythonPrintImpl {
       }
     } else if (auto interfaceType = type->cast<InterfaceType>()) {
       body_ << "class " << interfaceType->name()->name();
-      body_ << "(Interface):\n";
+      if (interfaceType->is_module()) {
+        body_ << "(ModuleInterface):\n";
+      } else {
+        body_ << "(Interface):\n";
+      }
       {
         auto guard = WithIndented();
         for (const FunctionSchema& method : interfaceType->methods()) {

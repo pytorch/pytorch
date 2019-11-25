@@ -210,7 +210,10 @@ public:
 
 inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   auto p = device_guard_impl_registry[static_cast<size_t>(type)].load();
-  AT_ASSERTM(p, "DeviceGuardImpl for ", type, " is not available");
+  // This seems to be the first place where you make use of a device
+  // when you pass devices to factory functions.  Give a nicer error
+  // message in this case.
+  TORCH_CHECK(p, "PyTorch is not linked with support for ", type, " devices");
   return p;
 }
 

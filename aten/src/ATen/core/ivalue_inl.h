@@ -344,6 +344,11 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_.at(slot);
   }
 
+  void unsafeRemoveSlot(size_t slot) {
+    TORCH_CHECK(slot < slots_.size());
+    slots_.erase(slots_.begin() + slot);
+  }
+
   /**
    * Attribute API.
    *
@@ -356,6 +361,15 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
    */
   IValue getAttr(const std::string& name) const;
   void setAttr(const std::string& name, IValue v);
+  // Remove attribute by name, caller is responsible for
+  // the safety of this operation
+  // We didn't remove the attribute in the type because the type
+  // might be shared by multiple objects.
+  // Therefore after removing attribute, the object is in an inconsistent
+  // state where it has more attribute types in its Type than
+  // the attribute slots it has, user needs to make sure the object
+  // has consistent by removing the attribute in type as well
+  void unsafeRemoveAttr(const std::string& name);
 
   std::string name() const;
 
@@ -456,7 +470,8 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
-C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+// TODO this is deprecated but we don't throw a warning because a lot of ops in native_functions.yaml still return std::vector.
+//C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {

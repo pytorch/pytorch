@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -135,8 +135,14 @@ class TestQuantizedOps(TestCase):
         }
 
         for name, op in ops_under_test.items():
-            qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+            for inplace in (True, False):
+                if hasattr(op, 'inplace'):
+                    op.inplace = inplace
+                    qY_hat = op(qX)
+                else:
+                    qY_hat = op(qX, inplace=inplace)
+                self.assertEqual(qY, qY_hat,
+                                 message="{} relu failed".format(name))
 
     """Tests the correctness of the scalar addition."""
     @no_deadline
@@ -656,6 +662,7 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
+    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
@@ -1104,6 +1111,82 @@ class TestDynamicQuantizedLinear(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
+    """Tests the correctness of the legacy dynamic quantized linear op."""
+    @no_deadline
+    @given(
+        batch_size=st.integers(1, 4),
+        input_channels=st.integers(16, 32),
+        output_channels=st.integers(4, 8),
+    )
+    def test_qlinear_legacy(self, batch_size, input_channels, output_channels):
+        X_scale = 1.0
+        X_zp = 0
+        X_value_min = 0
+        X_value_max = 255
+        X_q0 = np.round(np.random.rand(batch_size, input_channels) * (
+            X_value_max - X_value_min) + X_value_min
+        ).astype(np.uint8)
+        X_q0[0, 0] = X_value_min
+        X_q0[0, 1] = X_value_max
+
+        W_scale = 1.0
+        W_zp = 0
+        W_value_min = -128
+        W_value_max = 127
+        W_q0 = np.round(
+            np.random.rand(output_channels, input_channels)
+            * (W_value_max - W_value_min)
+            + W_value_min
+        ).astype(np.int8)
+        W_q0[0, 0] = W_value_min
+        W_q0[1, 0] = W_value_max
+
+        b_value_min = -10
+        b_value_max = 10
+        b_q0 = np.round(
+            np.random.rand(output_channels) * (b_value_max - b_value_min) +
+            b_value_min
+        ).astype(np.int32)
+
+        avoid_vpmaddubsw_overflow_linear(
+            batch_size,
+            input_channels,
+            output_channels,
+            X_q0,
+            X_value_min,
+            X_value_max,
+            W_q0,
+            W_value_min,
+            W_value_max,
+        )
+
+        X_fp32 = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
+        W_fp32 = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
+        b_fp32 = torch.from_numpy(
+            _dequantize(b_q0, X_scale * W_scale, 0)
+        ).to(dtype=torch.float)
+
+        W_scale, W_zp = _calculate_dynamic_qparams(W_fp32, torch.qint8)
+        W_q = torch.quantize_per_tensor(W_fp32, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+
+        # Observe X_fp32 and determine X_scale and X_zero_point, this should match
+        # internals of dynamic linear.
+        X_scale, X_zp = _calculate_dynamic_qparams(X_fp32, torch.quint8)
+        X_q = torch.quantize_per_tensor(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+
+        W_int8, col_offsets, W_scale, W_zp = torch.fbgemm_linear_quantize_weight(W_q.dequantize())
+        W_prepack = torch.fbgemm_pack_quantized_matrix(W_int8.clone(), W_int8.size(1), W_int8.size(0))
+        # Quantized Linear operator with prepacked weight
+        Y_fp32 = torch.fbgemm_linear_int8_weight(
+            X_q.dequantize(), W_q.dequantize(), W_prepack, col_offsets,
+            W_scale, W_zp, b_fp32)
+
+        Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
+        # Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+
+        self.assertEqual(Y_fp32, Y_fp32_ref,
+                         message="torch.ops.quantized.fbgemm_linear_dynamic results are off")
+
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @no_deadline
@@ -1121,7 +1204,8 @@ class TestQuantizedLinear(unittest.TestCase):
             return
         decimal_val = 4
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK qlinear is flaky on MACOS. Issue #27326
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
             use_multi_dim_input = False
@@ -1488,7 +1572,8 @@ class TestQuantizedConv(unittest.TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK qconv is flaky on MACOS. Issue #27326
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
 
@@ -1503,7 +1588,7 @@ class TestQuantizedConv(unittest.TestCase):
             qconv = torch.ops.quantized.conv2d
             if use_relu:
                 qconv = torch.ops.quantized.conv2d_relu
-            qconv_prepack = torch.ops.quantized.conv_prepack
+            qconv_prepack = torch.ops.quantized.conv2d_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels,
                 output_channels,
@@ -1551,8 +1636,8 @@ class TestQuantizedConv(unittest.TestCase):
             channelwise = False
 
         with override_quantized_engine(qengine):
-            qconv_prepack = torch.ops.quantized.conv_prepack
-            qconv_unpack = torch.ops.quantized.conv_unpack
+            qconv_prepack = torch.ops.quantized.conv2d_prepack
+            qconv_unpack = torch.ops.quantized.conv2d_unpack
             self._test_qconv_unpack_impl(
                 qconv_prepack, qconv_unpack, inputs, (stride_h, stride_w),
                 (pad_h, pad_w), channelwise)
@@ -1688,6 +1773,7 @@ class TestQuantizedConv(unittest.TestCase):
 @unittest.skipIf(TEST_WITH_UBSAN,
                  "QNNPACK does not play well with UBSAN at the moment,"
                  " so we skip the test if we are in a UBSAN environment.")
+@unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),

@@ -164,7 +164,7 @@ PyTypeObject THCPEventType = {
   sizeof(THCPEvent),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THCPEvent_dealloc,         /* tp_dealloc */
-  0,                                     /* tp_print */
+  0,                                     /* tp_vectorcall_offset */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */
