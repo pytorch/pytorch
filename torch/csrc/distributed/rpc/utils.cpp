@@ -126,43 +126,48 @@ parseWireSections(const void* data, size_t data_size) {
   const char* ptr = static_cast<const char*>(data);
   const char* endp = ptr + data_size;
 
-  std::vector<std::pair<std::string, size_t>> header_ents;
+  std::vector<std::pair<std::string, size_t>> headerEnts;
   bool ok = false;
   while (ptr != endp) {
     if (*ptr == '\n') {
-      ok = true;
+      ok = true; // The only "correct" exit point.
+      ++ptr;
       break;
     }
-    const char* num_ptr = ptr;
+    // Parse name
+    const char* namePtr = ptr;
     while (*ptr != ' ' && ptr != endp) {
       ptr++;
     }
     if (ptr == endp) {
       break;
     }
-    std::string name(num_ptr, ptr - num_ptr);
+    std::string name(namePtr, ptr - namePtr);
     if (++ptr == endp) {
       break; // past the ' '
     }
-    const char* size_ptr = ptr;
+    // Parse size
+    const char* sizePtr = ptr;
     while (*ptr != '\n' && ptr != endp) {
       ptr++;
     }
     if (ptr == endp) {
       break;
     }
-    size_t sz = c10::stoll(std::string(size_ptr, ptr - size_ptr));
-    header_ents.emplace_back(std::make_pair(name, sz));
+    size_t sz = c10::stoll(std::string(sizePtr, ptr - sizePtr));
+    headerEnts.emplace_back(std::make_pair(name, sz));
     ++ptr; // past the '\n'
   }
-  ++ptr; // past the final \n
+  if (!ok) {
+    throw std::runtime_error("failed parse");
+  }
 
   std::unordered_map<std::string, std::pair<const char*, size_t>> out;
-  for (const auto& header_ent : header_ents) {
-    out[header_ent.first] = {ptr, header_ent.second};
-    ptr += header_ent.second;
+  for (const auto& headerEnt : headerEnts) {
+    out[headerEnt.first] = {ptr, headerEnt.second};
+    ptr += headerEnt.second;
   }
-  if (!ok || ptr != endp) {
+  if (ptr != endp) {
     throw std::runtime_error("failed bounds");
   }
   return out;
@@ -231,32 +236,32 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
   auto sections = parseWireSections(data, data_size);
 
   std::vector<char> payload;
-  auto payload_it = sections.find(kPayload);
-  if (payload_it != sections.end() && payload_it->second.second != 0) {
+  auto payloadIt = sections.find(kPayload);
+  if (payloadIt != sections.end() && payloadIt->second.second != 0) {
     payload.assign(
-        payload_it->second.first,
-        payload_it->second.first + payload_it->second.second);
+        payloadIt->second.first,
+        payloadIt->second.first + payloadIt->second.second);
   }
 
   std::vector<at::Tensor> tensors;
-  auto meta_it = sections.find(kMeta);
-  if (meta_it != sections.end()) {
-    const auto& meta_data = meta_it->second;
-    size_t meta_data_pos = 0;
-    auto meta_data_read_func = [&](char* buf, size_t n) -> size_t {
-      if (meta_data_pos >= meta_data.second || n == 0) {
+  auto metaIt = sections.find(kMeta);
+  if (metaIt != sections.end()) {
+    const auto& metaData = metaIt->second;
+    size_t metaDataPos = 0;
+    auto metaDataReadFunc = [&](char* buf, size_t n) -> size_t {
+      if (metaDataPos >= metaData.second || n == 0) {
         return 0;
       }
-      size_t to_copy =
-          std::min(meta_data_pos + n, meta_data.second) - meta_data_pos;
-      memcpy(buf, meta_data.first + meta_data_pos, to_copy);
-      meta_data_pos += to_copy;
-      return to_copy;
+      size_t toCopy =
+        std::min(metaDataPos + n, metaData.second) - metaDataPos;
+      memcpy(buf, metaData.first + metaDataPos, toCopy);
+      metaDataPos += toCopy;
+      return toCopy;
     };
-    auto section_read_func = [&](const std::string& fname) -> at::DataPtr {
-      auto it = sections.find(fname);
+    auto sectionReadFunc = [&](const std::string& ename) -> at::DataPtr {
+      auto it = sections.find(ename);
       if (it == sections.end()) {
-        throw std::runtime_error("Couldn't find file " + fname);
+        throw std::runtime_error("Couldn't find entity " + ename);
       }
       const auto& idat = it->second;
       auto dptr = at::getCPUAllocator()->allocate(idat.second);
@@ -267,7 +272,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     };
 
     torch::jit::Unpickler unpickler(
-        meta_data_read_func, nullptr, nullptr, section_read_func, {});
+        metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
     auto ival = unpickler.parse_ivalue();
     for (auto&& t : ival.toTensorList()) {
       tensors.emplace_back(std::move(t));
