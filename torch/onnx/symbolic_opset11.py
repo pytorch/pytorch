@@ -5,7 +5,6 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_helper import _black_list_in_opset
 from torch.onnx.symbolic_opset9 import expand
 from torch.nn.modules.utils import _single, _pair, _triple
 
@@ -15,13 +14,17 @@ from torch.nn.modules.utils import _single, _pair, _triple
 
 # This file exports ONNX ops for opset 11
 
-black_listed_operators = [
-    "hardtanh"
-]
 
-
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+@parse_args('v', 'f', 'f')
+def hardtanh(g, self, min_val, max_val):
+    dtype = self.type().scalarType()
+    if dtype is not None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    max_val = g.op("Constant", value_t=torch.tensor(max_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    return g.op("Clip", self, min_val, max_val)
 
 
 def clamp(g, self, min, max):
@@ -293,6 +296,11 @@ def det(g, self):
     return g.op("Det", self)
 
 
+def logdet(g, input):
+    from torch.onnx.symbolic_opset9 import log
+    return log(g, det(g, input))
+
+
 def arange(g, *args):
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')
@@ -371,3 +379,41 @@ def index_copy(g, self, dim, index, source):
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
+
+
+def __rshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    if self.type().scalarType() == 'Byte':
+        return g.op('BitShift', self, other, direction_s="RIGHT")
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    rshift = g.op('Div', self, two_pow)
+    return rshift
+
+
+def __lshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    if self.type().scalarType() == 'Byte':
+        return g.op('BitShift', self, other, direction_s="LEFT")
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    lshift = g.op('Mul', self, two_pow)
+    return lshift
