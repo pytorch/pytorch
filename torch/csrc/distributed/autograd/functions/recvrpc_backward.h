@@ -9,6 +9,7 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
+// Forward declarations.
 class DistAutogradContext;
 
 // As part of our distributed autograd implementation, whenever we receive an
@@ -20,7 +21,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
  public:
   explicit RecvRpcBackward(
       const AutogradMetadata& autogradMetadata,
-      DistAutogradContext& autogradContext,
+      std::shared_ptr<DistAutogradContext> autogradContext,
       rpc::worker_id_t fromWorkerId);
 
   torch::autograd::variable_list apply(
@@ -30,7 +31,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
   const AutogradMetadata autogradMetadata_;
 
   // Hold a reference to the autograd context.
-  DistAutogradContext& autogradContext_;
+  std::shared_ptr<DistAutogradContext> autogradContext_;
 
   // The worker id from which the RPC was received. During the backward pass,
   // we need to propagate the gradients to this workerId.
