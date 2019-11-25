@@ -655,4 +655,87 @@ void checkNoAny(const Type& base, const char* what, const std::string& attrname,
       "' but it contains an Any type. Any types cannot be members of modules, classes, or named tuples.");
 }
 
+namespace {
+bool isSpecialChar(char a) {
+  return a == '[' || a == ',' || a == ']';
+}
+
+class TypeParser {
+ public:
+  explicit TypeParser(const std::string& pythonStr)
+    : pythonStr_(pythonStr), start_(0) {}
+    
+  TypePtr parse() {
+    std::string token;
+    for (; start_ < pythonStr_.size() && !isSpecialChar(pythonStr_[start_]);
+           ++start_) {
+      if (pythonStr_[start_] != ' ') {
+        token += pythonStr_[start_];
+      }
+    }
+    if (token == "int") {
+      return IntType::create();
+    } else if (token == "float") {
+      return FloatType::create();
+    } else if (token == "bool") {
+      return BoolType::create();
+    } else if (token == "str") {
+      return StringType::create();
+    } else if (token == "Any") {
+      return AnyType::create();
+    } else if (token == "Tensor") {
+      return TensorType::create(
+          {},
+          {},
+          VaryingShape{c10::optional<size_t>()},
+          VaryingShape{c10::optional<size_t>()},
+          {});
+    } else if (token == "List") {
+      checkAndInc('[');
+      auto result = ListType::create(parse());
+      checkAndInc(']');
+      return result;
+    } else if (token == "Optional") {
+      checkAndInc('[');
+      auto result = OptionalType::create(parse());
+      checkAndInc(']');
+      return result;
+    } else if (token == "Future") {
+      checkAndInc('[');
+      auto result = FutureType::create(parse());
+      checkAndInc(']');
+      return result;
+    } else if (token == "Dict") {
+      checkAndInc('[');
+      auto key = parse();
+      checkAndInc(',');
+      auto val = parse();
+      checkAndInc(']');
+      return DictType::create(key, val);
+    } else if (token == "Tuple") {
+      std::vector<TypePtr> types;
+      while (start_ < pythonStr_.size() && pythonStr_[start_] != ']') {
+        ++start_; // skip '[' or ','
+        types.emplace_back(parse());
+      }
+      checkAndInc(']');
+      return TupleType::create(types);
+    }
+  }
+ private:
+  void checkAndInc(char a) {
+    if (start_ >= pythonStr_.size() || pythonStr_[start_] != a) {
+      AT_ERROR("Error when parsing type ", pythonStr_);
+    }
+    ++start_;
+  }
+  std::string pythonStr_;
+  size_t start_;
+};
+} // namespace
+
+TORCH_API TypePtr parseType(const std::string& pythonStr) {
+  TypeParser paser(pythonStr);
+  return paser.parse();
+}
 } // namespace c10
