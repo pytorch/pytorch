@@ -142,25 +142,13 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
-C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals}) const {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op${method_actuals_with_comma_prefix});
-#endif
-}
-""")
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op${method_actuals_with_comma_prefix});
+    return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -173,18 +161,6 @@ DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
 C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add method definition in Functions.h
-C10_UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
-#endif
-}
-""")
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
@@ -192,8 +168,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
+    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -229,19 +204,6 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 """)
 
 # special method definition for factory functions in Functions.h that initializes backends
-C10_UNBOXEDONLY_FACTORY_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
-    static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
-#endif
-}
-""")
 C10_FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
@@ -250,8 +212,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
+    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -586,6 +547,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'cpu_bfloat16': bool,
+    'cuda_bfloat16': bool,
     'deprecated': bool,
     'cpu_bool': bool,
     'cuda_bool': bool,
@@ -603,7 +565,6 @@ FunctionOption = TypedDict('FunctionOption', {
     # TypeExtendedInterface
     'extended_method': bool,
     'method_actuals': List[str],
-    'method_actuals_with_comma_prefix': str,
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
     'method_prefix_derived': str,
@@ -614,7 +575,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'operator_name': str,
     'overload_name': str,
     'native_actuals': List[str],
-    'native_actuals_with_comma_prefix': str,
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
@@ -1127,10 +1087,6 @@ def create_generic(top_env, declarations):
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
         option['native_actuals'] = [f['name'] for f in option['formals_list']]
-        if len(option['native_actuals']) == 0:
-            option['native_actuals_with_comma_prefix'] = ''
-        else:
-            option['native_actuals_with_comma_prefix'] = ', ' + ', '.join(option['native_actuals'])
 
         option['formals_types_with_return'] = [option['return_type']]
         if len(option['formals_types']) > 0:
@@ -1144,10 +1100,6 @@ def create_generic(top_env, declarations):
         # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
-        if len(option['method_actuals']) == 0:
-            option['method_actuals_with_comma_prefix'] = ''
-        else:
-            option['method_actuals_with_comma_prefix'] = ', ' + ', '.join(option['method_actuals'])
 
         def find_formal(formal_name, formals):
             for formal in formals:
@@ -1198,11 +1150,7 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
-            if option['use_c10_dispatcher'] == 'unboxed_only':
-                method_definition = C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION
-            else:
-                assert option['use_c10_dispatcher'] == 'full'
-                method_definition = C10_TENSOR_METHOD_DEFINITION
+            method_definition = C10_TENSOR_METHOD_DEFINITION
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
@@ -1234,21 +1182,11 @@ def create_generic(top_env, declarations):
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                if option['use_c10_dispatcher'] == 'unboxed_only':
-                    fn_definition = C10_UNBOXEDONLY_FACTORY_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
-                else:
-                    assert option['use_c10_dispatcher'] == 'full'
-                    fn_definition = C10_FACTORY_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
+                fn_definition = C10_FACTORY_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body)
             else:
-                if option['use_c10_dispatcher'] == 'unboxed_only':
-                    fn_definition = C10_UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
-                else:
-                    assert option['use_c10_dispatcher'] == 'full'
-                    fn_definition = C10_FUNCTION_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
+                fn_definition = C10_FUNCTION_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
@@ -1279,10 +1217,6 @@ def create_generic(top_env, declarations):
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
         option['native_actuals'] = [f['name'] for f in formals]
-        if len(option['native_actuals']) == 0:
-            option['native_actuals_with_comma_prefix'] = ''
-        else:
-            option['native_actuals_with_comma_prefix'] = ', ' + ', '.join(option['native_actuals'])
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
@@ -1690,7 +1624,7 @@ def create_derived(backend_type_env, declarations):
                     arguments_indices = ret['arguments']
                     arguments = [option['arguments'][argi]
                                  for argi in arguments_indices]
-                    if scalar_check is not None:
+                    if scalar_check is not None and scalar_check != 'false':
                         if not isinstance(scalar_check, dict):
                             if len(arguments) > 1:
                                 case_body.append("bool maybe_scalar = {};".format(scalar_check))
@@ -1698,7 +1632,8 @@ def create_derived(backend_type_env, declarations):
                         for arg in arguments:
                             scalar_check_arg = (scalar_check if not isinstance(scalar_check, dict)
                                                 else scalar_check.get(arg['name']))  # type: ignore
-                            if scalar_check_arg is not None:
+                            # maybe_zero_dim(false) is a no-op
+                            if scalar_check_arg is not None and scalar_check_arg != 'false':
                                 stmt = "{}_->maybe_zero_dim({});".format(arg['name'], scalar_check_arg)
                                 if nullable_argument(arg):
                                     stmt = "if ({}_) {}".format(arg['name'], stmt)
