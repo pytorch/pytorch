@@ -56,7 +56,7 @@ if is_available():
 
         if not rpc_backend_options:
             # default construct a set of RPC backend options.
-            rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
+            rpc_backend_options = backend_registry.construct_rpc_backend_options(
                 backend
             )
 
