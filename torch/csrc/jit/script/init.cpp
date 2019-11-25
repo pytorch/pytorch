@@ -347,6 +347,19 @@ static Decl computeOverloadDecl(
       overload_decl.return_type());
 }
 
+void checkSchema(const FunctionSchema& schema, const SourceRange& range) {
+  bool seen_default_arg = false;
+  for (const auto& arg : schema.arguments()) {
+    if (arg.default_value()) {
+      seen_default_arg = true;
+    } else if (seen_default_arg && !arg.kwarg_only()) {
+      throw ErrorReport(range)
+          << "Non-default positional argument follows default argument. Parameter "
+          << arg.name() << " in " << schema;
+    }
+  }
+}
+
 static StrongFunctionPtr script_compile_overloaded_function(
     const c10::QualifiedName& name,
     const Decl& overload_decl,
@@ -372,6 +385,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
       defined->getSchema(),
       new_def.name().name(),
       updated_defaults));
+  checkSchema(defined->getSchema(), overload_decl.range());
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
@@ -393,6 +407,7 @@ static StrongFunctionPtr script_compile_function(
   auto& defined = defined_functions[0];
   defined->setSchema(getSchemaWithNameAndDefaults(
       def.range(), defined->getSchema(), def.name().name(), defaults));
+  checkSchema(defined->getSchema(), def.range());
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
