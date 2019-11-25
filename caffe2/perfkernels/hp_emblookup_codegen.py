@@ -1,4 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+from typing import List
+from typing import Any
 
 import argparse
 import sys
@@ -7,8 +9,8 @@ import sys
 sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1}
 
 
-def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
-    def compute(regid, InType, use_weights, isa, prefetch):
+def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets) -> List[Any]:
+    def compute(regid, InType, use_weights, isa, prefetch) -> List[Any]:
         code = []
 
         if InType == "float":
@@ -55,7 +57,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
         code.append(
             "    for ("
             + IndexType
-            + " rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {"
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
         )
     else:
         code.append(
@@ -186,8 +188,8 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
     return code
 
 
-def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
-    def compute(InType, use_weights, isa):
+def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets) -> List[Any]:
+    def compute(InType, use_weights, isa) -> List[Any]:
         code = []
         if InType == "float":
             code.append(
@@ -236,7 +238,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
         code.append(
             "    for ("
             + IndexType
-            + " rangeIndex = 0; rangeIndex < output_size - 1; ++rangeIndex) {"
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
         )
     else:
         code.append(
@@ -460,6 +462,8 @@ for o in options:
     args.append("    " + OutType + "* out) {")
     code += args
 
+    # code.append("  std::cout << \"" + fn_base + "\" << std::endl;")
+
     code.append("  const " + IndexType + " prefdist_T0 = 16;")
     # block_size is the number of elements and fused_block_size is the size of
     # an entire row, including scale and bias.
@@ -468,7 +472,7 @@ for o in options:
         "  const {} fused_block_size = block_size + {};".format(IndexType, offset)
     )
     if opts.use_offsets:
-        code.append("  int64_t dataInd = 0;")
+        code.append("  int64_t dataInd = offsets[0];")
     else:
         code.append("  " + IndexType + " dataInd = 0;")
 

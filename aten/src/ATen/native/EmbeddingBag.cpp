@@ -84,7 +84,7 @@ void index_select_add<float>(const Tensor &select_indices,
 
   if (isFastPathIndexSelect(src, output)) {
     if (new_offsets) {
-      auto output_size = offsets.numel();
+      auto output_size = offsets.numel() - 1;
       at::parallel_for(
           0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
             caffe2::EmbeddingLookupIdx(
@@ -93,8 +93,7 @@ void index_select_add<float>(const Tensor &select_indices,
                 /*index_size=*/select_indices.numel(),
                 /*data_size=*/src.size(0),
                 /*input=*/src_data,
-                /*indices=*/select_indices_data +
-                    offsets.data_ptr<int64_t>()[start_idx],
+                /*indices=*/select_indices_data,
                 /*offsets=*/offsets.data_ptr<int64_t>() + start_idx,
                 /*weights=*/nullptr,
                 /*scale_bias=*/nullptr,
@@ -110,7 +109,7 @@ void index_select_add<float>(const Tensor &select_indices,
       offsets_new[offsets.numel()] = select_indices.numel();
       caffe2::EmbeddingLookupIdx(
           /*block_size=*/ddim,
-          /*output_size=*/offsets.numel() + 1,
+          /*output_size=*/offsets.numel(),
           /*index_size=*/select_indices.numel(),
           /*data_size=*/src.size(0),
           /*input=*/src_data,
@@ -194,7 +193,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
     if (new_offsets) {
-      auto output_size = offsets.numel();
+      auto output_size = offsets.numel() - 1;
       at::parallel_for(
           0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
             caffe2::EmbeddingLookupIdx(
@@ -203,10 +202,9 @@ void index_select_scale_add<float>(const Tensor &select_indices,
                 /*index_size=*/select_indices.numel(),
                 /*data_size=*/src.size(0),
                 /*input=*/src_data,
-                /*indices=*/select_indices_data +
-                    offsets.data_ptr<int64_t>()[start_idx],
+                /*indices=*/select_indices_data,
                 /*offsets=*/offsets.data_ptr<int64_t>() + start_idx,
-                /*weights=*/scale_data + start_idx,
+                /*weights=*/scale_data,
                 /*scale_bias=*/nullptr,
                 /*normalize_by_lengths=*/false,
                 /*out=*/output_data + start_idx * ddim);
@@ -220,7 +218,7 @@ void index_select_scale_add<float>(const Tensor &select_indices,
       offsets_new[offsets.numel()] = select_indices.numel();
       caffe2::EmbeddingLookupIdx(
           /*block_size=*/ddim,
-          /*output_size=*/offsets.numel() + 1,
+          /*output_size=*/offsets.numel(),
           /*index_size=*/select_indices.numel(),
           /*data_size=*/src.size(0),
           /*input=*/src_data,

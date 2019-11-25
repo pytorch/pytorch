@@ -122,6 +122,11 @@ std::vector<Dimname> compute_bmm_outnames(
 
 std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor);
 
+std::vector<Dimname> compute_diagonal_outnames(
+    const Tensor& tensor,
+    int64_t dim1,
+    int64_t dim2);
+
 // TensorImpl* overloads for Legacy TH/THC code. Use these sparingly.
 
 TensorImpl* propagate_names_if_nonempty(

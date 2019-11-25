@@ -28,8 +28,8 @@ static bool EmbeddingLookupGenericSlowIdx(
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
     OutType* out) {
-  int64_t current = 0;
-  for (int m = 0; m < output_size - 1; ++m) {
+  int64_t current = offsets[0];
+  for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current != offsets[m]) {
       return false;
@@ -71,7 +71,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     }
     out += block_size;
   }
-  return current == index_size;
+  return true;
 }
 
 // Proxy back to generic implementation
