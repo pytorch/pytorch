@@ -720,7 +720,10 @@ class TypeParser {
       }
       checkAndInc(']');
       return TupleType::create(types);
+    } else {
+      AT_ERROR("Type ", token, " is not supported in the parser yet.");
     }
+    return AnyType::create();
   }
  private:
   void checkAndInc(char a) {
