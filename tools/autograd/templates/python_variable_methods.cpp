@@ -847,7 +847,7 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
 PyMethodDef variable_methods[] = {
-  // magic method bound here to wrap NotImplementedError
+  // These magic methods are all implemented on python object to wrap NotImplementedError
   {"__add__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__radd__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__iadd__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add_>, METH_VARARGS | METH_KEYWORDS, NULL},
