@@ -22,9 +22,9 @@ namespace native {
 // Returns:
 // A tuple with references to scaled_grad, which is now unscaled in place, and found_inf,
 // which is now guaranteed to contain 1.0 if an inf or NaN was found in scaled_grad.
-std::tuple<Tensor&, Tensor&> _amp_non_finite_check_and_unscale_cuda(const Tensor& inv_scale,
-                                                                    Tensor& scaled_grad,
-                                                                    Tensor& found_inf)
+const Tensor& _amp_non_finite_check_and_unscale_cuda(Tensor& scaled_grad,
+                                                     Tensor& found_inf,
+                                                     const Tensor& inv_scale)
 {
   TORCH_CHECK(scaled_grad.is_cuda(), "scaled_grad must be a CUDA tensor.");
   TORCH_CHECK(inv_scale.is_cuda(), "inv_scale must be a CUDA tensor.");
@@ -56,7 +56,7 @@ std::tuple<Tensor&, Tensor&> _amp_non_finite_check_and_unscale_cuda(const Tensor
         });
     });
 
-  return std::tuple<Tensor&, Tensor&>{scaled_grad, found_inf};
+  return scaled_grad;
 }
 
 
