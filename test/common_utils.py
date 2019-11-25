@@ -155,6 +155,13 @@ def repeat_test_for_types(dtypes):
         return call_helper
     return repeat_helper
 
+# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
+IN_CIRCLECI = bool(os.environ.get('IN_CIRCLECI'))
+TEST_REPORT_SOURCE_OVERRIDE = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
+
+PY3 = sys.version_info > (3, 0)
+PY34 = sys.version_info >= (3, 4)
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
@@ -179,17 +186,31 @@ def run_tests(argv=UNITTEST_ARGS):
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     else:
-        unittest.main(argv=argv)
+        if IN_CIRCLECI:
+            # import here so that non-CI doesn't need xmlrunner installed
+            import xmlrunner
+            # allow users to override the test file location. We need this
+            # because the distributed tests run the same test file multiple
+            # times with different configurations.
+            if TEST_REPORT_SOURCE_OVERRIDE is not None:
+                test_source = TEST_REPORT_SOURCE_OVERRIDE
+            else:
+                test_source = 'python-unittest'
 
-PY3 = sys.version_info > (3, 0)
-PY34 = sys.version_info >= (3, 4)
+            test_report_path = os.path.join('test-reports', test_source)
+            if PY3:
+                os.makedirs(test_report_path, exist_ok=True)
+            else:
+                if not os.path.exists(test_report_path):
+                    os.makedirs(test_report_path)
+
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path))
+        else:
+            unittest.main(argv=argv)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
-
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
 
 if IS_WINDOWS:
     @contextmanager
@@ -724,6 +745,9 @@ class TestCase(expecttest.TestCase):
                     if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
                         # CPU half and bfloat16 tensors don't have the methods we need below
                         a = a.to(torch.float32)
+                    if (a.device.type == 'cuda' and a.dtype == torch.bfloat16):
+                        # CUDA bfloat16 tensors don't have the methods we need below
+                        a = a.to(torch.float32)
                     b = b.to(a)
 
                     if (a.dtype == torch.bool) != (b.dtype == torch.bool):
@@ -1011,6 +1035,10 @@ class TestCase(expecttest.TestCase):
                 self.assertMultiLineEqual(expected, s)
             else:
                 self.assertEqual(s, expected)
+
+    def assertExpectedStripMangled(self, s, subname=None):
+        s = re.sub(r'__torch__[^ ]+', '', s)
+        self.assertExpected(s, subname)
 
     # returns captured stderr
     @staticmethod

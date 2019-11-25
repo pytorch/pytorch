@@ -32,8 +32,14 @@ inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
 
 struct OperatorOptions final {
 public:
+  bool isDefaultAliasAnalysisKind() const {
+    return aliasAnalysisKind_ == c10::nullopt;
+  }
+
   AliasAnalysisKind aliasAnalysis() const {
-    return aliasAnalysisKind_;
+    return !isDefaultAliasAnalysisKind()
+      ? *aliasAnalysisKind_
+      : AliasAnalysisKind::CONSERVATIVE;
   }
 
   void setAliasAnalysis(AliasAnalysisKind v) {
@@ -49,7 +55,7 @@ public:
   }
 
 private:
- AliasAnalysisKind aliasAnalysisKind_ = AliasAnalysisKind::CONSERVATIVE;
+ c10::optional<AliasAnalysisKind> aliasAnalysisKind_;
 };
 
 } // namespace c10
