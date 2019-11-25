@@ -790,6 +790,12 @@ class TestCuda(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             _ = torch.load(buf)
 
+    def test_specify_improper_device_name(self):
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save([torch.nn.Parameter(torch.randn(1000, 1000))], f)
+            with self.assertRaisesRegex(ValueError, "Expected a cuda device"):
+                torch.load(f, 'cuda0')
+
     def test_serialization_array_with_empty(self):
         x = [torch.randn(4, 4).cuda(), torch.cuda.FloatTensor()]
         with tempfile.NamedTemporaryFile() as f:
