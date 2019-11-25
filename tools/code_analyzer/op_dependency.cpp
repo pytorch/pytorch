@@ -175,7 +175,8 @@ static RegexOpt FunctionSchemaPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
     "op_schema_pattern",
     cl::desc("Op schema regex pattern. "
-             "Example: -op_schema_pattern '(^aten::[^ ]+)|(^quantized::[^ ]+)'"),
+             "Example: -op_schema_pattern "
+             "'(^aten::[^ ]+)|(^quantized::[^ ]+)'"),
     cl::location(FunctionSchemaPatternLoc),
     cl::Required,
     cl::ValueRequired);
@@ -184,7 +185,8 @@ static RegexOpt OpRegistrationPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
     "op_register_pattern",
     cl::desc("Op registration signature regex pattern. "
-             "Example: -op_register_pattern " "'^c10::RegisterOperators::Options::schema'"),
+             "Example: -op_register_pattern "
+             "'^c10::RegisterOperators::Options::schema'"),
     cl::location(OpRegistrationPatternLoc),
     cl::Required,
     cl::ValueRequired);
@@ -226,8 +228,17 @@ static cl::opt<RegexOpt, true, cl::parser<std::string>> DebugFilter(
     cl::ZeroOrMore,
     cl::ValueRequired);
 
+static cl::opt<bool> DebugPath(
+    "debug_path",
+    cl::desc("Output path between two nodes."),
+    cl::init(false));
+
 typedef std::set<std::string> SET;
 typedef std::unordered_map<std::string, std::set<std::string>> GRAPH;
+
+// SRC -> (DEST -> PREV)
+typedef std::unordered_map<std::string,
+                           std::unordered_map<std::string, std::string>> PATH;
 
 // Referenced the logic in llvm-cxxfilt.cpp.
 std::string demangle(const std::string& mangled) {
@@ -303,12 +314,13 @@ public:
     mergeGraph(functionToFunctions, &input);
 
     // Calculate transitive closure and remove non-key nodes.
-    simplifyGraph(input, keyNodes, &result);
+    std::shared_ptr<PATH> path = DebugPath ? std::make_shared<PATH>() : nullptr;
+    simplifyGraph(input, keyNodes, &result, path);
 
     if (OutputFormat == OutputFormatType::Dot) {
       printAsDot(std::cout, keyNodes, result);
     } else if (OutputFormat == OutputFormatType::YAML) {
-      printAsYAML(std::cout, keyNodes, result);
+      printAsYAML(std::cout, keyNodes, result, path);
     }
 
     return false;
@@ -383,6 +395,10 @@ private:
     for (Instruction* cur = getNextInstruction(I);
          cur;
          cur = getNextInstruction(*cur)) {
+      if (Verbose > 2) {
+        std::cerr << "[DEBUG][INST] " << schemaStr << " => "
+                  << *cur << std::endl;
+      }
       // Check pattern to call registered ops.
       if (checkInstructionCalledFunction(
               *cur, *OpInvocationPatternLoc.pattern)) {
@@ -412,10 +428,6 @@ private:
                       << demangle(func->getName()) << std::endl;
           }
         };
-        if (Verbose > 2) {
-          std::cerr << "[DEBUG][OP_REG] " << schemaStr << " [INST] "
-                    << *cur << std::endl;
-        }
         scanReferredFunctionsFromOperands(*cur, cb);
       }
     }
@@ -448,7 +460,8 @@ private:
   }
 
   // Calculate transitive closure and remove non-key nodes.
-  static void simplifyGraph(GRAPH& input, SET& keyNodes, GRAPH* output) {
+  static void simplifyGraph(GRAPH& input, SET& keyNodes, GRAPH* output,
+      std::shared_ptr<PATH> path) {
     // Starting from every key node, use BFS to traverse all nodes that are
     // transitively reachable from the node in the sparse graph.
     for (auto& key : keyNodes) {
@@ -458,6 +471,7 @@ private:
         if (!expanded.insert(curNode).second) return;
         for (auto& next : input[curNode]) {
           queue.emplace_back(next);
+          if (path) (*path)[key].emplace(next, curNode); // don't replace
         }
       };
 
@@ -501,17 +515,6 @@ private:
     return nextBlock ? &nextBlock->front() : nullptr;
   }
 
-  // Referenced the logic in llvm::CallGraph.
-  static Function* getCalledFunction(Instruction& I) {
-    auto CS = CallSite(&I);
-    if (!CS) return nullptr;
-    Function* callee = CS.getCalledFunction();
-    if (!callee || callee->isIntrinsic()) {
-      return nullptr;
-    }
-    return callee;
-  }
-
   // CallGraph only searches for CallSites (call/invoke instructions). However
   // functions can be referenced in other instructions as well (being passed
   // as function pointer).
@@ -548,9 +551,19 @@ private:
     }
   }
 
+  // Directly called function might be in ConstExpr as well, e.g.:
+  // invoke void bitcast (
+  //    void (ty1*, ...)* @c10::Dispatcher::findSchema(...) to
+  //    void (ty2*, ...)*)(...)
+  //
+  // In above case, "CallSite(I).getCalledFunction()" won't return "findSchema"
+  // as it's nested in "bitcast" instruction.
   static bool checkInstructionCalledFunction(Instruction& I, Regex& pattern) {
-    Function* callee = getCalledFunction(I);
-    return callee && pattern.match(demangle(callee->getName()));
+    bool called = false;
+    scanReferredFunctionsFromOperands(I, [&](Function* func) -> void {
+      called |= pattern.match(demangle(func->getName()));
+    });
+    return called;
   }
 
   static void mergeGraph(GRAPH& src, GRAPH* dest) {
@@ -576,7 +589,8 @@ private:
     out << "}" << std::endl;
   }
 
-  static void printAsYAML(std::ostream& out, SET& keys, GRAPH& graph) {
+  static void printAsYAML(std::ostream& out, SET& keys, GRAPH& graph,
+      std::shared_ptr<PATH> path) {
     for (const auto& K : keys) {
       out << "- name: " << demangle(K) << std::endl;
       auto& values = graph[K];
@@ -584,6 +598,16 @@ private:
       out << "  depends:" << std::endl;
       for (const auto& value : values) {
         out << "  - name: " << demangle(value) << std::endl;
+        if (path) {
+          std::vector<std::string> rpath;
+          for (std::string prev = value;
+               rpath.emplace_back(prev), prev != K;
+               prev = (*path)[K][prev]);
+          out << "    path:" << std::endl;
+          for (auto it = rpath.rbegin(); it != rpath.rend(); ++it) {
+            out << "    - " << demangle(*it) << std::endl;
+          }
+        }
       }
     }
   }
