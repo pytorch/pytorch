@@ -50,6 +50,12 @@ class TORCH_API SGD : public Optimizer {
 
   /// Counts how often `step()` is called, for dampening.
   int64_t iteration_{0};
+
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    _TORCH_OPTIM_SERIALIZE(momentum_buffers);
+    _TORCH_OPTIM_SERIALIZE(iteration);
+  }
 };
 } // namespace optim
 } // namespace torch
