@@ -140,6 +140,7 @@
   name: _th_clone
   cname: newClone
   return: THTensor*
+  scalar_check: false
   variants:
     - function
   cpu_half: True
@@ -313,6 +314,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: bitand
       arguments:
