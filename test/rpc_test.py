@@ -452,17 +452,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(_agent, None)
         # wait_all_workers() should not do anything as _agent is None
         rpc.wait_all_workers()
-        # We need this barrier here because although init_process_group is
-        # blocking, it does not guarantee that all ranks are done with
-        # initialization after the call. We did run into issues with it where
-        # rank 3 crashed with "connection closed by peer" RuntimeError, which is
-        # caused by other ranks exit before rank 3 is ready. This can be fixed
-        # by adding a collective call to sync all processes.
-        #
-        # We decided not fixing this issue in init_process_group because it
-        # would add extra overhead to the call, and normal use cases won't
-        # create a progress group and exit without doing anything. Hence, it is
-        # not worthy to introduce the overhead just for this test case.
 
     @dist_init
     def test_add(self):
