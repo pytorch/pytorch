@@ -240,7 +240,7 @@ class ConvBnReLU2d(ConvBn2d):
                                            qconfig)
 
     def forward(self, input):
-        return self.activation_post_process(F.relu(self._forward(input)))
+        return self.activation_post_process(F.relu(ConvBn2d._forward(self, input)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
