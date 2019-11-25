@@ -1208,13 +1208,8 @@ graph(%x : Tensor,
                 weight=observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        data = torch.randn(1, 3, 10, 10, dtype=torch.float)
-        weight = torch.randn(3, 3, 3, 3, dtype=torch.float)
-
-        get_forward(m._c)(data, weight, weight, weight)
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
-        get_forward(m._c)(data, weight, weight, weight)
         # we just check we have one dequant on every op input, even input
         # is sharded as multi uses
         FileCheck().check_count("aten::dequantize", 8, exactly=True) \
