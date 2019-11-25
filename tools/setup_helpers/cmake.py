@@ -234,6 +234,8 @@ class CMake:
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',
+             'Numa_INCLUDE_DIR',
+             'Numa_LIBRARIES',
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',

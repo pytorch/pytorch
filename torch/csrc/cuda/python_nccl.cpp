@@ -1,6 +1,5 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
-#include <pybind11/pybind11.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -57,10 +56,7 @@ static void destroy_nccl_comm(PyObject* capsule) {
 
   HANDLE_TH_ERRORS
   ncclComm_t comm = unpack_nccl_comm(capsule);
-  {
-    pybind11::gil_scoped_release no_gil;
-    ncclCommDestroy(comm);
-  }
+  with_no_gil([&] { ncclCommDestroy(comm); });
   END_HANDLE_TH_ERRORS_RET()
 }
 
@@ -122,10 +118,8 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   ncclUniqueId commId;
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
   ncclComm_t comm;
-  {
-    pybind11::gil_scoped_release no_gil;
-    NCCL_CHECK(ncclCommInitRank(&comm, nranks, commId, rank));
-  }
+  with_no_gil(
+      [&] { NCCL_CHECK(ncclCommInitRank(&comm, nranks, commId, rank)); });
   return PyCapsule_New(comm, COMM_CAPSULE_NAME, &destroy_nccl_comm);
   END_HANDLE_TH_ERRORS
 }
@@ -159,10 +153,9 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   std::vector<c10::optional<at::cuda::CUDAStream>> streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  {
-    pybind11::gil_scoped_release no_gil;
+  with_no_gil([&] {
     torch::cuda::nccl::reduce(inputs, outputs, root, op, streams, user_comms);
-  }
+  });
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -191,8 +184,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  {
-    pybind11::gil_scoped_release no_gil;
+  with_no_gil([&] {
     check_inputs(inputs, outputs, 1, 1);
     size_t len = inputs.size();
 
@@ -218,7 +210,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
           comms[i],
           stream));
     }
-  }
+  });
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -244,10 +236,8 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  {
-    pybind11::gil_scoped_release no_gil;
-    torch::cuda::nccl::broadcast(inputs, streams, user_comms);
-  }
+  with_no_gil(
+      [&] { torch::cuda::nccl::broadcast(inputs, streams, user_comms); });
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -273,8 +263,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  {
-    pybind11::gil_scoped_release no_gil;
+  with_no_gil([&] {
     size_t len = inputs.size();
     check_inputs(inputs, outputs, len, 1);
 
@@ -309,7 +298,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
           stream));
 #endif
     }
-  }
+  });
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -336,8 +325,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  {
-    pybind11::gil_scoped_release no_gil;
+  with_no_gil([&] {
     size_t len = inputs.size();
     check_inputs(inputs, outputs, 1, len);
 
@@ -363,7 +351,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
           comms[i],
           stream));
     }
-  }
+  });
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
