@@ -236,10 +236,8 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;
@@ -265,25 +263,6 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.generator(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   } else if (r.idx == 1) {
-    if (r.isNone(2)) {
-      auto high = r.toInt64(0);
-      auto size = r.intlist(1);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(3, at::ScalarType::Long);
-      auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(6));
-      return wrap(dispatch_randint(high, size, options));
-    } else {
-      check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
-                             r.layout(4), r.isNone(4),
-                             r.device(5), r.isNone(5));
-      return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.tensor(2)).set_requires_grad(r.toBool(6)));
-    }
-  } else if (r.idx == 2) {
     if (r.isNone(4)) {
       auto low = r.toInt64(0);
       auto high = r.toInt64(1);
@@ -303,26 +282,6 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
                              r.layout(6), r.isNone(6),
                              r.device(7), r.isNone(7));
       return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.generator(3), r.tensor(4)).set_requires_grad(r.toBool(8)));
-    }
-  } else if (r.idx == 3) {
-    if (r.isNone(3)) {
-      auto low = r.toInt64(0);
-      auto high = r.toInt64(1);
-      auto size = r.intlist(2);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
-      auto device = r.device(6);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(7));
-      return wrap(dispatch_randint(low, high, size, options));
-    } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.isNone(5),
-                             r.device(6), r.isNone(6));
-      return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   }
   Py_RETURN_NONE;

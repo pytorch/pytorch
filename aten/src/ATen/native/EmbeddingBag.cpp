@@ -26,7 +26,7 @@ namespace native {
 
 static void make_offset2bag(const Tensor &offsets, const Tensor &indices, Tensor& offset2bag) {
   offset2bag.index_add_(
-      0, offsets, at::ones_like(offsets, at::MemoryFormat::Contiguous)); // offset2bag = [1 0 1 0 1]
+      0, offsets, at::ones_like(offsets, LEGACY_CONTIGUOUS_MEMORY_FORMAT)); // offset2bag = [1 0 1 0 1]
   offset2bag[0] -= 1;                     // offset2bag = [0 0 1 0 1]
   offset2bag = offset2bag.cumsum(0);     // offset2bag = [0 0 1 1 2]
 }
@@ -220,7 +220,7 @@ static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
       auto bag_size_ = std::max(indices.size(0), static_cast<int64_t>(1));
       output /= bag_size_;
     } else {
-      auto bag_size_ = at::max(bag_size, at::ones_like(bag_size, at::MemoryFormat::Contiguous))
+      auto bag_size_ = at::max(bag_size, at::ones_like(bag_size, LEGACY_CONTIGUOUS_MEMORY_FORMAT))
                            .to(output.options())
                            .unsqueeze(1)
                            .expand_as(output);
