@@ -445,18 +445,21 @@ void insertQuantDeQuantCall(
   quant->output()->setDebugName(v->debugName() + ".quant");
   g->insertNode(quant);
 
-  std::vector<Node*> use_of_node_to_be_removed;
+  // two passes to insert the dequant for every usage
+  // in first pass, identify all the nodes using "v"
+  // in second pass, replace the input "v" with dequant output
+  std::vector<Node*> use_nodes;
   for (const auto& use : v->uses()) {
     auto cur = use.user;
     if(cur != quant) {
-      use_of_node_to_be_removed.push_back(cur);
+      use_nodes.push_back(cur);
     }
   }
 
-  for (size_t i = 0; i < use_of_node_to_be_removed.size(); ++i) {
+  for (size_t i = 0; i < use_nodes.size(); ++i) {
     Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
     dequant->output()->setDebugName(v->debugName() + ".dequant." + std::to_string(i));
-    use_of_node_to_be_removed[i]->replaceInputWith(v, dequant->output());
+    use_nodes[i]->replaceInputWith(v, dequant->output());
     g->insertNode(dequant);
   }
 }

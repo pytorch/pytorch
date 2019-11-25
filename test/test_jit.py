@@ -1215,6 +1215,8 @@ graph(%x : Tensor,
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
         get_forward(m._c)(data, weight, weight, weight)
+        # we just check we have one dequant on every op input, even input
+        # is sharded as multi uses
         FileCheck().check_count("aten::dequantize", 8, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
