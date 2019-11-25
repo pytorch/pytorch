@@ -11,8 +11,8 @@ void THCTensor_(topk)(THCState* state,
                       int64_t k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  int64_t dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
+  THArgCheck(THCTensor_(nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  int64_t dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   int numDims = THCTensor_(nDimensionLegacyNoScalars)(state, input_);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
@@ -176,6 +176,12 @@ void THCTensor_(topk)(THCState* state,
     }
   }
 
+  // scalar_check: this is a bit arbitrary, but it matches the CPU implementation and "sort"
+  // when the input is 0-dimensional.
+  if (input->dim() == 0) {
+    THTensor_wrap(topK).resize_({});
+    THTensor_wrap(indices).resize_({});
+  }
   THCudaLongTensor_free(state, input);
 
   THCudaCheck(cudaGetLastError());
