@@ -191,9 +191,9 @@ static void upsample_nearest3d_out_cuda_template(
             output_height,
             output_width,
             odata,
-            scales_1,
-            scales_2,
-            scales_3);
+            depth_scale,
+            height_scale,
+            width_scale);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
