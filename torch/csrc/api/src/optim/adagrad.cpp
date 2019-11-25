@@ -120,11 +120,16 @@ size_t Adagrad::size() const noexcept {
 }
 
 void Adagrad::save(serialize::OutputArchive& archive) const {
-  serialize(*this, archive);
+  optim::serialize(archive, "state", state_);
+  //optim::serialize(archive, "param_groups", param_groups_);
+  //serialize(*this, archive);
 }
 
 void Adagrad::load(serialize::InputArchive& archive) {
-  serialize(*this, archive);
+  optim::serialize(archive, "state", state_);
+  //std::vector<std::pair<std::vector<std::string>, OptimizerOptions>> param_groups;
+  //optim::serialize(archive, "param_groups", param_groups);
+  //serialize(*this, archive);
 }
 } // namespace optim
 } // namespace torch

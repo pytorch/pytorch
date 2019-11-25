@@ -2,8 +2,7 @@
 
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
-#include <torch/optim/optimizer.h> //todo-change the include after moving OptimizerParamState to another file
-
+#include <torch/optim/optimizer.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -65,6 +64,12 @@ void serialize(
   const std::string& key,
   std::vector<std::pair<std::vector<std::string>, OptimizerOptions>>& param_groups);
 
+//todo-description
+void serialize(
+  serialize::InputArchive& archive,
+  const std::string& key,
+  std::vector<OptimizerParamGroup> param_groups);
+
 /// Utility function to save a vector of buffers.
 template <typename BufferContainer>
 void serialize(
@@ -98,6 +103,5 @@ void serialize(
 
 #define _TORCH_OPTIM_SERIALIZE(name) \
   torch::optim::serialize(archive, #name, self.name)
-
 } // namespace optim
 } // namespace torch

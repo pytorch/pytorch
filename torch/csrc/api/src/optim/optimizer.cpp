@@ -2,7 +2,6 @@
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/ordered_dict.h>
-#include <torch/serialize/archive.h>
 #include <torch/types.h>
 
 #include <string>
@@ -11,6 +10,32 @@
 
 namespace torch {
 namespace optim {
+
+bool OptimizerParamGroup::has_options() const {
+  return options_ != nullptr;
+}
+
+OptimizerOptions& OptimizerParamGroup::options() {
+  TORCH_CHECK(has_options());
+  return *options_.get();
+}
+
+const OptimizerOptions& OptimizerParamGroup::options() const {
+  TORCH_CHECK(has_options());
+  return *options_.get();
+}
+
+void OptimizerParamGroup::set_options(std::unique_ptr<OptimizerOptions> options) {
+  options_ = std::move(options);
+}
+
+std::vector<Tensor>& OptimizerParamGroup::params() {
+  return params_;
+}
+
+const std::vector<Tensor>& OptimizerParamGroup::params() const {
+  return params_;
+}
 
 std::unique_ptr<OptimizerParamState> OptimizerParamState::clone() const {
   TORCH_CHECK(false,
@@ -27,10 +52,23 @@ std::unique_ptr<OptimizerOptions> OptimizerOptions::clone() const {
 }
 
 namespace detail {
-
 OptimizerBase::OptimizerBase(std::vector<Tensor> parameters)
     : parameters_(std::move(parameters)) {}
 
+void OptimizerBase::add_param_group(const OptimizerParamGroup& param_group) {
+  for (const auto& param : param_group.params()) {
+    TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
+  }
+
+OptimizerParamGroup param_group_(param_group.params());
+  if (!param_group.has_options()) {
+    param_group_.set_options(defaults_->clone());
+  } else {
+    param_group_.set_options(param_group.options().clone());
+  }
+  // TODO: check "some parameters appear in more than one parameter group"
+  param_groups_.push_back(std::move(param_group_));
+}
 void OptimizerBase::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }

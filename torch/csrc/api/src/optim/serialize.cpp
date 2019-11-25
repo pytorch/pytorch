@@ -56,19 +56,18 @@ void serialize(
     serialize::OutputArchive& archive,
     const std::string& key,
     const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state) {
+
   serialize::OutputArchive state_archive;
   for (const auto& item : state) {
     serialize::OutputArchive param_state_archive; // For each OptimizerParamState
     std::string tensorimpl = item.first;
     const DerivedOptimizerParamState& curr_state = static_cast<const DerivedOptimizerParamState&>(*(item.second.get()));
     curr_state.serialize(param_state_archive);
-    state_archive.write(key + "/" + tensorimpl, param_state_archive);
+    state_archive.write(tensorimpl, param_state_archive);
   }
-  //serialize param_groups "params"->vector<string>, "options" -> options
   archive.write(key, state_archive);
 }
 
-//edit the input functions similarly
 template <typename DerivedOptimizerParamState>
 void serialize(
     serialize::InputArchive& archive,
@@ -77,14 +76,25 @@ void serialize(
 
   serialize::InputArchive state_archive;
   archive.read(key, state_archive);
-  std::vector<std::string> tensorimpl_keys = state_archive.keys(); //make sure we are getting a vector of tensorimpl_keys
+  std::vector<std::string> tensorimpl_keys = state_archive.keys();
   for (const std::string& tensorimpl_key : tensorimpl_keys) {
     serialize::InputArchive param_state_archive;
-    archive.read(key + "/" + tensorimpl_key, param_state_archive);
+    archive.read(tensorimpl_key, param_state_archive);
     DerivedOptimizerParamState param_state;
     param_state.serialize(param_state_archive);
     state[tensorimpl_key] = c10::guts::make_unique<DerivedOptimizerParamState>(param_state);
   }
+}
+
+void serialize(
+  serialize::InputArchive& archive,
+  const std::string& key,
+  std::vector<OptimizerParamGroup> param_groups_) {
+  std::vector<std::pair<std::vector<std::string>, OptimizerOptions>> param_groups;
+  // for(size_t i=0; i<param_groups.size(); i++) {
+  //   param_groups.push_back()
+  // }
+  serialize(archive, key, param_groups);
 }
 
 template <typename DerivedOptimizerParamOptions>
@@ -93,22 +103,21 @@ void serialize(
     const std::string& key,
     const std::vector<OptimizerParamGroup>& param_groups) {
 
-  int64_t idx=0;
   serialize::OutputArchive param_groups_archive;
-  for (const auto& param_group : param_groups) {
+  for (size_t i = 0; i < param_groups.size(); i++) {
     serialize::OutputArchive param_group_archive; // For each OptimizerParamState
-    std::vector<Tensor> params = param_group.params();
+    std::vector<Tensor> params = param_groups[i].params();
     param_group_archive.write(
         "params/size", torch::tensor(static_cast<int64_t>(params.size())));
     for(size_t index = 0; index < params.size(); index++) {
       param_group_archive.write(
-          "params/" + c10::to_string(index), IValue(c10::guts::to_string(params[index].unsafeGetTensorImpl())));
+          "params/" + c10::guts::to_string(index), IValue(c10::guts::to_string(params[index].unsafeGetTensorImpl())));
     }
 
-    const DerivedOptimizerParamOptions& param_group_options = static_cast<const DerivedOptimizerParamOptions&>(param_group.options());
+    const DerivedOptimizerParamOptions& param_group_options = static_cast<const DerivedOptimizerParamOptions&>(param_groups[i].options());
     param_group_options.serialize(param_group_archive);
     param_group_archive.write("options", param_group_archive);
-    param_groups_archive.write(key + "/" + c10::guts::to_string(idx++), param_group_archive);
+    param_groups_archive.write(key + "/" + c10::guts::to_string(i), param_group_archive);
   }
   //serialize param_groups "params"->vector<string>, "options" -> options
   archive.write(key, param_groups_archive);
@@ -136,7 +145,8 @@ void serialize(
       IValue ivalue;
       param_group_archive.read(
         "params/" + c10::to_string(index), ivalue);
-      params.push_back(elem);
+      std::string element = ivalue.toStringRef();
+      params.push_back(element);
     }
     DerivedOptimizerParamOptions param_group_options;
     param_group_options.serialize(param_groups_archive);

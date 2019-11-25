@@ -5,7 +5,6 @@
 #include <c10/util/Exception.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/serialize/archive.h>
 
 #include <algorithm>
 #include <functional>
@@ -69,32 +68,15 @@ class TORCH_API OptimizerParamGroup {
   OptimizerParamGroup(const OptimizerParamGroup& param_group) : params_(param_group.params()), options_(param_group.has_options() ? param_group.options().clone() : nullptr) {}
   OptimizerParamGroup(std::vector<Tensor> params) : params_(params) {}
   OptimizerParamGroup(std::vector<Tensor> params, std::unique_ptr<OptimizerOptions> options) : params_(params), options_(std::move(options)) {}
-
-  bool has_options() const {
-    return options_ != nullptr;
+  OptimizerParamGroup() : options_(nullptr) { //remove later
+    params_ = {};
   }
-
-  OptimizerOptions& options() {
-    TORCH_CHECK(has_options());
-    return *options_.get();
-  }
-
-  const OptimizerOptions& options() const {
-    TORCH_CHECK(has_options());
-    return *options_.get();
-  }
-
-  void set_options(std::unique_ptr<OptimizerOptions> options) {
-    options_ = std::move(options);
-  }
-
-  std::vector<Tensor>& params() {
-    return params_;
-  }
-
-  const std::vector<Tensor>& params() const {
-    return params_;
-  }
+  bool has_options() const;
+  OptimizerOptions& options();
+  const OptimizerOptions& options() const;
+  void set_options(std::unique_ptr<OptimizerOptions> options);
+  std::vector<Tensor>& params();
+  const std::vector<Tensor>& params() const;
 
  protected:
   std::vector<Tensor> params_;
@@ -123,20 +105,7 @@ class TORCH_API OptimizerBase {
     }
   }
 
-  void add_param_group(const OptimizerParamGroup& param_group) {
-    for (const auto& param : param_group.params()) {
-      TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
-    }
-
-    OptimizerParamGroup param_group_(param_group.params());
-    if (!param_group.has_options()) {
-      param_group_.set_options(defaults_->clone());
-    } else {
-      param_group_.set_options(param_group.options().clone());
-    }
-    // TODO: check "some parameters appear in more than one parameter group"
-    param_groups_.push_back(std::move(param_group_));
-  }
+  void add_param_group(const OptimizerParamGroup& param_group);
 
   virtual ~OptimizerBase() = default;
 
@@ -173,6 +142,9 @@ class TORCH_API OptimizerBase {
   /// Deserializes the optimizer state from the given `archive`.
   virtual void load(serialize::InputArchive& archive);
 
+  std::vector<OptimizerParamGroup> param_groups_;
+  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
+  std::unique_ptr<OptimizerOptions> defaults_;
  protected:
   OptimizerBase() = default;
 
@@ -195,11 +167,6 @@ class TORCH_API OptimizerBase {
 
   /// The parameters this optimizer optimizes.
   std::vector<Tensor> parameters_;
-
-  //to do-description
-  std::unique_ptr<OptimizerOptions> defaults_;
-  std::vector<OptimizerParamGroup> param_groups_;
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
