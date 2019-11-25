@@ -1,4 +1,4 @@
-#include <ATen/native/Indexing.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
