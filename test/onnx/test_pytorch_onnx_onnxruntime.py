@@ -1065,6 +1065,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
 
+    def test_logsoftmax(self):
+        for i in range(7)[2:]:
+            model = torch.nn.LogSoftmax(dim=i - 1)
+            dims = [2] * (i - 2) + [3, 4]
+            input = torch.ones(*dims, requires_grad=True)
+            self.run_test(model, input)
+
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = torch.nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_test(model, input)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm(self):
         model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
