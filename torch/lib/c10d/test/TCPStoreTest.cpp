@@ -19,7 +19,7 @@ void testHelper(int port, const std::string& prefix = "") {
   auto serverThread =
       std::thread([&serverTCPStore, &serverStore, &prefix, &numWorkers, &port] {
         serverTCPStore = std::make_unique<c10d::TCPStore>(
-            "127.0.0.1", port, numWorkers, true);
+            "127.0.0.1", port, numWorkers, true, std::chrono::seconds(30));
         serverStore =
             std::make_unique<c10d::PrefixStore>(prefix, *serverTCPStore);
 

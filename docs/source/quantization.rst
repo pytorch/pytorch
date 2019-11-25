@@ -42,6 +42,27 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
 
   Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`) supports both CPU and CUDA.
 
+
+.. note::
+
+   When preparing a quantized model, it is necessary to ensure that qconfig and the engine used for quantized computations match 
+   the backend on which the model will be executed. Quantization currently supports two backends: fbgemm (for use on x86, 
+   `<https://github.com/pytorch/FBGEMM>`_) and qnnpack (for use on the ARM QNNPACK library `<https://github.com/pytorch/QNNPACK>`_). 
+   For example, if you are interested in quantizing a model to run on ARM, it is recommended to set the qconfig by calling:
+
+   ``qconfig = torch.quantization.get_default_qconfig('qnnpack')``
+
+   for post training quantization and
+
+   ``qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')``
+
+   for quantization aware training.
+
+   In addition, the torch.backends.quantized.engine parameter should be set to match the backend. For using qnnpack for inference, the 
+   backend is set to qnnpack as follows
+
+   ``torch.backends.quantized.engine = 'qnnpack'``
+
 Quantized Tensors
 ---------------------------------------
 
@@ -111,7 +132,7 @@ Operations that are available from the ``torch`` namespace or as methods on Tens
 
 * :func:`~torch.quantize_per_tensor` - Convert float tensor to quantized tensor with per-tensor scale and zero point
 * :func:`~torch.quantize_per_channel` - Convert float tensor to quantized tensor with per-channel scale and zero point
-* View-based operations like :meth:`~torch.Tensor.view`, :meth:`~torch.Tensor.as_strided`, :meth:`~torch.Tensor.expand`, :meth:`~torch.Tensor.flatten`, :meth:`~torch.Tensor.slice`, python-style indexing, etc - work as on regular tensor (if quantization is not per-channel)
+* View-based operations like :meth:`~torch.Tensor.view`, :meth:`~torch.Tensor.as_strided`, :meth:`~torch.Tensor.expand`, :meth:`~torch.Tensor.flatten`, :meth:`~torch.Tensor.select`, python-style indexing, etc - work as on regular tensor (if quantization is not per-channel)
 * Comparators
     * :meth:`~torch.Tensor.ne` — Not equal
     * :meth:`~torch.Tensor.eq` — Equal
@@ -132,12 +153,24 @@ Operations that are available from the ``torch`` namespace or as methods on Tens
 * :meth:`~torch.Tensor.q_per_channel_scales` — Returns the scales of the per-channel quantized tensor
 * :meth:`~torch.Tensor.q_per_channel_zero_points` — Returns the zero points of the per-channel quantized tensor
 * :meth:`~torch.Tensor.q_per_channel_axis` — Returns the channel axis of the per-channel quantized tensor
-* :meth:`~torch.Tensor.relu` — Rectified linear unit (copy)
-* :meth:`~torch.Tensor.relu_` — Rectified linear unit (inplace)
 * :meth:`~torch.Tensor.resize_` — In-place resize
 * :meth:`~torch.Tensor.sort` — Sorts the tensor
 * :meth:`~torch.Tensor.topk` — Returns k largest values of a tensor
 
+``torch.nn.functional``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Basic activations are supported.
+
+* :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
+* :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
+* :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling 
+* :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
+* :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
+* :meth:`~torch.nn.functional.interpolate` - Interpolation
+* :meth:`~torch.nn.functional.upsample` - Upsampling
+* :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling 
+* :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
 
 ``torch.nn.intrinsic``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -432,7 +465,7 @@ Debugging utilities
 .. autofunction:: get_observer_dict
 .. autoclass:: RecordingObserver
 
-torch.nn.instrinsic
+torch.nn.intrinsic
 --------------------------------
 
 This module implements the combined (fused) modules conv + relu which can be then quantized.
@@ -546,6 +579,13 @@ Functional interface
 .. autofunction:: conv2d
 .. autofunction:: conv3d
 .. autofunction:: max_pool2d
+.. autofunction:: adaptive_avg_pool2d
+.. autofunction:: avg_pool2d
+.. autofunction:: interpolate
+.. autofunction:: upsample
+.. autofunction:: upsample_bilinear
+.. autofunction:: upsample_nearest
+
 
 .. automodule:: torch.nn.quantized
 

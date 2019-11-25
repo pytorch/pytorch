@@ -390,6 +390,17 @@ class deviceCountAtLeast(object):
 
         return multi_fn
 
+# Only runs the test on the CPU and CUDA (the native device types)
+def onlyOnCPUAndCUDA(fn):
+    @wraps(fn)
+    def only_fn(self, device, *args, **kwargs):
+        if self.device_type != 'cpu' and self.device_type != 'cuda':
+            reason = "Doesn't run on {0}".format(self.device_type)
+            raise unittest.SkipTest(reason)
+
+        return fn(self, device, *args, **kwargs)
+
+    return only_fn
 
 # Specifies per-dtype precision overrides.
 # Ex.
