@@ -10,7 +10,7 @@ static inline Tensor repeat_interleave_common(const Tensor &repeats) {
     TORCH_CHECK(repeats.scalar_type() == at::kLong, "repeats has to be Long tensor");
     TORCH_CHECK((repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
     if (repeats.size(0) == 0) {
-        return at::empty_like(repeats, at::MemoryFormat::Contiguous);
+        return at::empty_like(repeats, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     Tensor repeats_ = repeats.contiguous();
     Tensor cumsum = repeats.cumsum(0);
