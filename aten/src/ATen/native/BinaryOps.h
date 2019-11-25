@@ -7,7 +7,7 @@ namespace at { struct TensorIterator; }
 
 namespace at { namespace native {
 
-static inline void alpha_check(const ScalarType dtype, Scalar alpha) {
+inline void alpha_check(const ScalarType dtype, Scalar alpha) {
   TORCH_CHECK(! alpha.isBoolean() || dtype == ScalarType::Bool,
               "Boolean alpha only supported for Boolean results.");
   TORCH_CHECK(isFloatingType(dtype) || alpha.isIntegral(true),
@@ -15,7 +15,7 @@ static inline void alpha_check(const ScalarType dtype, Scalar alpha) {
 }
 
 // Basic checking for all sub functions.
-static inline void sub_check(const Tensor& self, const Tensor& other) {
+inline void sub_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
               "Subtraction, the `-` operator, with two bool tensors is not supported. "
               "Use the `^` or `logical_xor()` operator instead.")

@@ -302,8 +302,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     r = at::empty_like(dense, r_.options().dtype(commonDtype));
   }
 
-  Tensor dense_buffer = maybe_promoted_tensor(dense, commonDtype);
-  Tensor values = maybe_promoted_tensor(sparse._values(), commonDtype);
+  Tensor dense_buffer = dense.to(commonDtype);
+  Tensor values = sparse._values().to(commonDtype);
 
   if (is_same_tensor(r, dense_buffer)) {
     TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
@@ -426,8 +426,8 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   LongTensor t_indices_ = t._indices();
   LongTensor s_indices_ = src._indices();
 
-  Tensor t_values_ = maybe_promoted_tensor(t._values(), commonDtype);
-  Tensor s_values_ = maybe_promoted_tensor(src._values(), commonDtype);
+  Tensor t_values_ = t._values().to(commonDtype);
+  Tensor s_values_ = src._values().to(commonDtype);
 
   AT_DISPATCH_ALL_TYPES_AND(
     at::ScalarType::Half, commonDtype, "add_out_sparse_cuda", [&] {
@@ -495,13 +495,13 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   auto commonDtype = at::result_type(t, src);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
   LongTensor t_indices_ = t._indices();
-  Tensor t_values_ = maybe_promoted_tensor(t._values(), commonDtype);
+  Tensor t_values_ = t._values().to(commonDtype);
   LongTensor s_indices_ = src._indices();
-  Tensor s_values_ = maybe_promoted_tensor(src._values(), commonDtype);
+  Tensor s_values_ = src._values().to(commonDtype);
   LongTensor r_indices_ = at::empty({sparse_dim, max_nnz}, t_indices_.options());
   r_.resize_as_(src);
 
-  Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz, commonDtype).zero_();
+  Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
 
   int64_t valueSize = t_values_.stride(0);
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
@@ -530,7 +530,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
             static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz), reinterpret_cast<uint64_t*>(resultNnz.data_ptr()));
         THCudaCheck(cudaGetLastError());
       });
-  r_values_ = maybe_promoted_tensor(r_values_, r_.scalar_type());
+  r_values_ = r_values_.to(r_.scalar_type());
   get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
 
   // sync!  (surely there is a more idiomatic way to do this...)
