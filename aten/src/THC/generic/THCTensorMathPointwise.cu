@@ -224,30 +224,6 @@ void THCTensor_(crossKernel)(THCState *state, THCTensor *self, THCTensor *x, THC
   THCTensor_(free)(state, nself);
 }
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-
-void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorSigmoidOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src, TensorSigmoidOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(self_, src);
-#endif
-}
-
-#endif
-
 namespace {
 c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl> retainTensorImpl(THCTensor* self) {
   c10::raw::intrusive_ptr::incref(self);

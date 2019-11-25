@@ -772,8 +772,8 @@ Tensor& slow_conv_transpose2d_out_cuda(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor columns = at::empty_like(input, at::MemoryFormat::Contiguous);
-  Tensor ones = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   slow_conv_transpose2d_out_cuda_template(
       output,
@@ -800,9 +800,9 @@ Tensor slow_conv_transpose2d_cuda(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
-  Tensor columns = at::empty_like(input, at::MemoryFormat::Contiguous);
-  Tensor ones = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor columns = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor ones = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   slow_conv_transpose2d_out_cuda_template(
       output,
