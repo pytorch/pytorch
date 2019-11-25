@@ -1690,7 +1690,16 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     at::Half* y,
     CUDAContext* context) {
 #if defined(__HIP_PLATFORM_HCC__)
-  CAFFE_THROW("HIP currently does not support FP16 completely yet.");
+  CUBLAS_ENFORCE(cublasSetPointerMode(
+      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
+  CUBLAS_ENFORCE(rocblas_hdot(
+      context->cublas_handle(),
+      n,
+      reinterpret_cast<const rocblas_half*>(a),
+      1,
+      reinterpret_cast<const rocblas_half*>(b),
+      1,
+      reinterpret_cast<rocblas_half*>(y)));
 #else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(

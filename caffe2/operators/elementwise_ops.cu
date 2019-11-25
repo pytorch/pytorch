@@ -116,8 +116,27 @@ void device_reduce<at::Half>(
     int N,
     Tensor* buffer,
     CUDAContext* context) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
+#if defined(__HIPCC__)
+  auto buffer_size = 1;
+
+  if (buffer->numel() != buffer_size) {
+    buffer->Resize(buffer_size);
+
+    math::Set<at::Half, CUDAContext>(
+        N,
+        convert::To<float, at::Half>(1.),
+        buffer->template mutable_data<at::Half>(),
+        context);
+  }
+
+  CUBLAS_ENFORCE(rocblas_hdot(
+      context->cublas_handle(),
+      N,
+      reinterpret_cast<const rocblas_half*>(in),
+      1,
+      reinterpret_cast<const rocblas_half*>(buffer->data<at::Half>()),
+      0,
+      reinterpret_cast<rocblas_half*>(out)));
 #else
   auto buffer_size = 1;
 
