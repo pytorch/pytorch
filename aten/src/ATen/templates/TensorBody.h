@@ -46,7 +46,7 @@ namespace torch { namespace utils { namespace hooks {
 /// A handle which provides the capability to remove a hook.
 struct CAFFE2_API RemovableHandle {
  public:
-  explicit RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> hooks_dict);
+  explicit RemovableHandle(const std::shared_ptr<torch::autograd::hooks_dict>& hooks_dict);
   void remove() const;
   unsigned id() const;
 

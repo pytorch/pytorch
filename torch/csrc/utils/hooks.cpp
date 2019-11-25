@@ -6,7 +6,7 @@ namespace hooks {
 
 std::atomic<unsigned> RemovableHandle::next_id{0};
 
-RemovableHandle::RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> hooks_dict)
+RemovableHandle::RemovableHandle(const std::shared_ptr<torch::autograd::hooks_dict>& hooks_dict)
   : hooks_dict_ref_(hooks_dict),
     id_(RemovableHandle::next_id.load()) {
   RemovableHandle::next_id++;
