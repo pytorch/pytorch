@@ -11,12 +11,12 @@ void testTypeParser() {
   std::string int_ps("int");
   auto int_tp = c10::parseType(int_ps);
   std::string int_tps = int_tp->python_str();
-  AT_ASSERT(int_ps == int_tps);
+  ASSERT_EQ(int_ps, int_tps);
 
   std::string tuple_ps("Tuple[str, Optional[float], Dict[str, List[Tensor]], int]");
   auto tuple_tp = c10::parseType(tuple_ps);
   std::string tuple_tps = tuple_tp->python_str();
-  AT_ASSERT(tuple_ps == tuple_tps);
+  ASSERT_EQ(tuple_ps, tuple_tps);
 }
 } // namespace torch
 } // namespace jit
