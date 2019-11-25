@@ -56,7 +56,6 @@ This library provides primitives allowing users to create and modify references
 .. autofunction:: remote
 .. autofunction:: get_worker_info
 .. autofunction:: wait_all_workers
-.. autofunction:: shutdown
 
 Distributed Autograd Framework
 ------------------------------
