@@ -456,7 +456,7 @@ void insertQuantDeQuantCall(
   }
 
   // in second pass, replace the input "v" with dequant output
-  for (size_t i = 0; i < use_nodes.size(); ++i) {
+  for (int i = 0; i < use_nodes.size(); ++i) {
     Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
     dequant->output()->setDebugName(v->debugName() + ".dequant." + std::to_string(i));
     use_nodes[i]->replaceInputWith(v, dequant->output());
