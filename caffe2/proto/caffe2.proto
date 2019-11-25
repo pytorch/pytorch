@@ -158,6 +158,40 @@ message TensorShapes {
   repeated TensorShape shapes = 1;
 }
 
+// TensorBoundShape is used to save bound shape inference result for a tensor.
+// TensorBoundShape.shape is inferred shape for this tensor.
+// TensorBoundShape.dimType contains dim_type for every dimension.
+// eg: for dimension i, shape.dims[i] is the inferred shape and
+// dim_type[i] is corresponding dim_type.
+message TensorBoundShape {
+  optional TensorShape shape = 1;
+  enum DimType {
+    UNKNOWN = 0;   // unknown
+    CONSTANT  = 1; // constant
+    // batch, corresponding dimension is batch_size
+    BATCH = 2;
+    // batch_of_feature_max,
+    // corresponding shape is inferred_feature_length * batch_size
+    BATCH_OF_FEATURE_MAX = 3;
+    // batch_of_feature_max_default
+    // corresponding shape is default_feature_length * batch_size
+    BATCH_OF_FEATURE_MAX_DEFAULT = 4;
+    // feature_max, corresponding shape is inferred_feature_length
+    FEATURE_MAX = 5;
+    // feature_max_default, corresponding shape is default_feature_length
+    FEATURE_MAX_DEFAULT = 6;
+
+  }
+  repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
+  optional string name = 3;
+}
+
+message TensorBoundShapes {
+  repeated TensorBoundShape shapes = 1;
+  optional int64 max_batch_size = 2;
+  optional int64 max_feature_len = 3;
+}
+
 // A named argument containing either singular float, integer and string
 // values, or repeated float, int and string arrays.
 message Argument {

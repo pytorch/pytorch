@@ -252,7 +252,7 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *v
 
     THCTensor_(freeCopyTo)(state, cr, r_);
   }
-#elif defined(THC_REAL_IS_HALF)  || defined(THC_REAL_IS_BFLOAT16)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   // currently no Hger/SgerEx in Cublas.
   THCTensor *vec2T = THCTensor_(newWithTensor)(state, vec2);
   THCTensor_(resize2d)(state, vec2T, vec2_size, 1);
@@ -405,6 +405,7 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
                    THCTensor_(data)(state, r__),
                    r__->stride((transpose_r == 'n' ? 1 : 0)));
 #elif defined(THC_REAL_IS_BFLOAT16)
+#if defined(__HIP_PLATFORM_HCC__)
   THCudaBlas_Bgemm(state,
                    transpose_m1,
                    transpose_m2,
@@ -419,6 +420,9 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
                    beta,
                    THCTensor_(data)(state, r__),
                    r__->stride((transpose_r == 'n' ? 1 : 0)));
+#else
+  TORCH_CHECK(false, "Bgemm not supported on at::BFloat16 type");
+#endif // __HIP_PLATFORM_HCC__
 #elif defined(THC_REAL_IS_DOUBLE)
   THCudaBlas_Dgemm(state,
                    transpose_m1,
@@ -788,10 +792,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
 #endif //CUDA_VERSION
 
 #elif defined(THC_REAL_IS_BFLOAT16)
-
-#ifndef __HIP_PLATFORM_HCC__
-  TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
-#endif
+#if defined(__HIP_PLATFORM_HCC__)
   THCudaBlas_BgemmStridedBatched(
       state,
       transpose_batch1,
@@ -805,8 +806,10 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
       beta,
       THCTensor_(data)(state, result_), ldc, result_->stride(0),
       num_batches);
-
-#endif // THC_REAL_IS_BFLOAT16
+#else
+  TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
+#endif // __HIP_PLATFORM_HCC__
+#endif
 
   if (batch1_ != batch1) {
     THCTensor_(free)(state, batch1_);

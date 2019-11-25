@@ -300,7 +300,6 @@ struct PythonPrintImpl {
         return i;
       }
     }
-    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }

@@ -19,9 +19,9 @@
 namespace torch {
 namespace jit {
 
-#ifdef FBCODE_CAFFE2
-static std::atomic<bool> profiling_mode{false};
+#if defined (FBCODE_CAFFE2) || defined (C10_MOBILE)
 static std::atomic<bool> executor_mode{false};
+static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{true};
@@ -62,9 +62,10 @@ std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph)
-    : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
+    : GraphExecutorImplBase(graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
+  std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
   if (optimized_plan_) {
     return *optimized_plan_;

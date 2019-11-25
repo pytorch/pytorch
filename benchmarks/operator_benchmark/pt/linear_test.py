@@ -36,9 +36,7 @@ linear_configs_long = op_bench.cross_product_configs(
 class LinearBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT, device):
         self.input_one = torch.rand(N, IN, device=device)
-        self.linear = nn.Linear(IN, OUT)
-        if device == 'cuda': 
-            self.linear = self.linear.cuda()
+        self.linear = nn.Linear(IN, OUT).to(device=device)
         self.set_module_name("linear")
 
     def forward(self):
