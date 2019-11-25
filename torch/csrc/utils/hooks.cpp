@@ -4,12 +4,12 @@ namespace torch {
 namespace utils {
 namespace hooks {
 
-unsigned RemovableHandle::next_id = 0;
+std::atomic<unsigned> RemovableHandle::next_id{0};
 
 RemovableHandle::RemovableHandle(std::shared_ptr<torch::autograd::hooks_dict> hooks_dict)
   : hooks_dict_ref_(hooks_dict),
-    id_(RemovableHandle::next_id) {
-  RemovableHandle::next_id++;  // yf225 TODO: we need to protect this with atomic variable, otherwise there can be race condition!
+    id_(RemovableHandle::next_id.load()) {
+  RemovableHandle::next_id++;
 }
 
 void RemovableHandle::remove() const {

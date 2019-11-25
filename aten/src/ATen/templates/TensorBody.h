@@ -53,7 +53,7 @@ struct CAFFE2_API RemovableHandle {
  private:
   std::weak_ptr<torch::autograd::hooks_dict> hooks_dict_ref_;
   unsigned id_;
-  static unsigned next_id;
+  static std::atomic<unsigned> next_id;
 };
 
 }}} // namespace torch::utils::hooks
