@@ -690,8 +690,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
         set("key2", "value2");
         add("key3", 3);
         add("key3", 4);
-        add("key3", 5);
-        add("key3", 6);
+        add("key3", 3);
+        add("key3", 2);
         if (get("key") != "6") {
           throw std::runtime_error("assertion failed");
         }
@@ -704,7 +704,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
         if (get("key2") != "value2") {
           throw std::runtime_error("assertion failed");
         }
-        if (get("key3") != "21") {
+        if (get("key3") != "15") {
           throw std::runtime_error("assertion failed");
         }
       },
