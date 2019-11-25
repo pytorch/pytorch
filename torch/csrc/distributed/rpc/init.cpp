@@ -34,9 +34,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(rpc_module).cast<py::module>();
 
-  auto rpcAgentOptions =
-      shared_ptr_class_<RpcAgentOptions>(module, "RpcAgentOptions")
-          .def_readwrite("rpc_timeout", &RpcAgentOptions::rpcTimeout);
+  auto rpcBackendOptions =
+      shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
+          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -60,8 +60,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
-              "sync",
-              &RpcAgent::sync,
+              "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_worker_infos",
+              &RpcAgent::getWorkerInfos,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
@@ -122,12 +124,12 @@ Otherwise, throws an exception.
               [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
               py::call_guard<py::gil_scoped_release>());
 
-  shared_ptr_class_<ProcessGroupRpcAgentOptions>(
-      module, "ProcessGroupRpcAgentOptions", rpcAgentOptions)
+  shared_ptr_class_<ProcessGroupRpcBackendOptions>(
+      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
       .def(py::init<>())
       .def_readwrite(
           "num_send_recv_threads",
-          &ProcessGroupRpcAgentOptions::numSendRecvThreads);
+          &ProcessGroupRpcBackendOptions::numSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
@@ -149,6 +151,11 @@ Otherwise, throws an exception.
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
               ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_infos",
+          (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
+              ProcessGroupAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "join",

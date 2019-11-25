@@ -707,7 +707,8 @@ void initJitScriptBindings(PyObject* module) {
             return pp.str();
           })
       .def("apply", &Module::apply)
-      .def("_clone", &Module::clone);
+      .def("_clone", &Module::clone)
+      .def("_clone_instance", &Module::clone_instance);
 
   slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
