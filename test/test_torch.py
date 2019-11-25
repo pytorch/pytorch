@@ -6045,7 +6045,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.fmod(zero_d, one_d).shape)
         self.assertEqual((1,), torch.fmod(one_d, zero_d).shape)
 
-        # exp, cos, cosh, tan, atan, tanh, erf, erfc
+        # exp, cos, cosh, tan, atan, tanh, erf, erfc, reciprocal
         self.assertEqual((), torch.exp(zero_d).shape)
         self.assertEqual((), torch.cos(zero_d).shape)
         self.assertEqual((), torch.cosh(zero_d).shape)
@@ -6054,6 +6054,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.tanh(zero_d).shape)
         self.assertEqual((), torch.erf(zero_d).shape)
         self.assertEqual((), torch.erfc(zero_d).shape)
+        self.assertEqual((), torch.reciprocal(zero_d).shape)
         self.assertEqual((1,), torch.exp(one_d).shape)
         self.assertEqual((1,), torch.cos(one_d).shape)
         self.assertEqual((1,), torch.cosh(one_d).shape)
@@ -6062,6 +6063,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.tanh(one_d).shape)
         self.assertEqual((1,), torch.erf(one_d).shape)
         self.assertEqual((1,), torch.erfc(one_d).shape)
+        self.assertEqual((1,), torch.reciprocal(one_d).shape)
 
         # clamp
         self.assertEqual((), torch.clamp(zero_d, min=0, max=1).shape)
