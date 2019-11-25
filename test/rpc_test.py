@@ -1207,7 +1207,3 @@ class RpcTest(RpcAgentTestFixture):
         # We should have the default timeout that is present in the default opts.
         self.assertEqual(default_options.rpc_timeout, rpc.get_rpc_timeout())
         rpc.wait_all_workers()
-
-
-
-
