@@ -7997,7 +7997,7 @@ class TestNNDeviceType(NNTestCase):
         if 'cuda' in device:
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
-    def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self):
+    def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
         x = torch.rand(10)[None,:,None]
         with self.assertRaises(ValueError):
             torch.nn.InstanceNorm1d(10)(x)
