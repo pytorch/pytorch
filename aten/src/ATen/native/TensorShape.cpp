@@ -259,6 +259,11 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
   int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
   TORCH_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
+  NoNamesGuard no_names_guard;
+#endif
+
   int64_t diag_size;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
@@ -297,8 +302,30 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   strides.push_back(self.stride(dim1)+self.stride(dim2));
 
   // return view with new parameters
-  return self.as_strided(sizes, strides, storage_offset);
+  auto result = self.as_strided(sizes, strides, storage_offset);
+
+#ifdef BUILD_NAMEDTENSOR
+  no_names_guard.reset();
+  namedinference::propagate_names_if_nonempty(result, outnames);
+#endif
+  return result;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor diagonal(const Tensor& self, Dimname outdim, Dimname dim1, Dimname dim2, int64_t offset) {
+  auto result = at::diagonal(
+      self,
+      offset,
+      dimname_to_position(self, dim1),
+      dimname_to_position(self, dim2));
+  // This is slower than it needs to be because there is no way to modify
+  // the names of a tensor in-place right now. In the future we should consider
+  // offering that functionality.
+  std::vector<Dimname> new_names = result.names().vec();
+  new_names[new_names.size() - 1] = outdim;
+  return result.refine_names(new_names);
+}
+#endif
 
 Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
   int64_t nDims = self.dim() + 1;
@@ -496,7 +523,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   }
 
   if (THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    // `THTensor_compute_stride` returns the proper strides to use if this 
+    // `THTensor_compute_stride` returns the proper strides to use if this
     // `reshape` can be just a view.
     //
     // NB: Even though we have viewable geometry and the target strides here,
@@ -794,7 +821,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto row1 = indices.select(0, dim1);
 
     // swap row0 and row1
-    auto tmp = at::zeros_like(row0);
+    auto tmp = at::zeros_like(row0, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     tmp.copy_(row0);
     row0.copy_(row1);
     row1.copy_(tmp);
