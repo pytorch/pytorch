@@ -56,7 +56,7 @@ class FakeQuantize(Module):
         self.zero_point = None
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
-        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else 0
+        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else None
 
     def enable_fake_quant(self, enabled=True):
         self.fake_quant_enabled = enabled
@@ -78,8 +78,7 @@ class FakeQuantize(Module):
     def forward(self, X):
         if self.observer_enabled:
             self.activation_post_process(X.detach())
-            qparams = self.calculate_qparams()
-            self.scale, self.zero_point = qparams[0], qparams[1]
+            self.scale, self.zero_point = self.calculate_qparams()
         if self.fake_quant_enabled:
             if self.qscheme == torch.per_channel_symmetric or self.qscheme == torch.per_channel_affine:
                 X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
