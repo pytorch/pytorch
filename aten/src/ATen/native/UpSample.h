@@ -3,6 +3,35 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 
+
+/**
+ * Note [compute_scales_value]
+ * Note [area_pixel_compute_scale]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Computing the scales for upsample/interpolate has changed
+ * in 1.4.0 when scale_factors is provided.
+ * Before 1.4.0, when the scale_factors provided by the user,
+ * they were used to calculate the output size. The input size
+ * and the computed output_size were then used to infer new values for
+ * the scales which were used in the interpolation.
+ * In 1.4.0, the behavior is changed and now follows opencv logic, and
+ * the scales provided by the user (if provided) are the ones used in
+ * the interpolation calculations.
+ *
+ * If the scales are not available, it is computed from the input size and
+ * the output size like previously;
+ * We view each pixel as an area, idx + 0.5 as its center index.
+ * Here is an example formula in 1D case.
+ * if align_corners: center of two corner pixel areas are preserved,
+ *     (0.5, 0.5) -> (0.5, 0.5),
+ *     (input_size - 0.5, 0.5) -> (output_size - 0.5)
+ *     scale = (input_size - 0.5 - 0.5) / (output_size - 0.5 - 0.5)
+ *     src_index + 0.5 - 0.5 = scale * (dst_index + 0.5 - 0.5)
+ * if not align_corners: the whole range is scaled accordingly
+ *     scale = input_size / output_size
+ *     src_idx + 0.5 = scale * (dst_index + 0.5)
+ */
+
 namespace at {
 namespace native {
 
@@ -116,6 +145,7 @@ static inline scalar_t compute_scales_value(
     const double scale,
     int64_t input_size,
     int64_t output_size) {
+      // see Note [compute_scales_value]
       return (scale > 0.)
           ? static_cast<scalar_t>(1.0 / scale)
           : (static_cast<scalar_t>(input_size) / output_size);
@@ -127,17 +157,7 @@ static inline scalar_t area_pixel_compute_scale(
     int64_t output_size,
     bool align_corners,
     const double scale=-1.0) {
-  /* We view each pixel as an area, idx + 0.5 as its center index.
-   * Here is an example formula in 1D case.
-   * if align_corners: center of two corner pixel areas are preserved,
-   *     (0.5, 0.5) -> (0.5, 0.5),
-   *     (input_size - 0.5, 0.5) -> (output_size - 0.5)
-   *     scale = (input_size - 0.5 - 0.5) / (output_size - 0.5 - 0.5)
-   *     src_index + 0.5 - 0.5 = scale * (dst_index + 0.5 - 0.5)
-   * if not align_corners: the whole range is scaled accordingly
-   *     scale = input_size / output_size
-   *     src_idx + 0.5 = scale * (dst_index + 0.5)
-   */
+  // see Note [area_pixel_compute_scale]
   if (output_size > 1) {
     return align_corners
         ? static_cast<scalar_t>(input_size - 1) / (output_size - 1)
