@@ -233,9 +233,9 @@ void initPythonIRBindings(PyObject* module_) {
              const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
-             const std::map<std::string, int>& registered_domain_version,
              bool strip_doc_string,
-             bool keep_initializers_as_inputs) {
+             bool keep_initializers_as_inputs,
+             std::map<std::string, int> custom_opsets) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
@@ -245,9 +245,9 @@ void initPythonIRBindings(PyObject* module_) {
                 dynamic_axes,
                 defer_weight_export,
                 operator_export_type,
-                registered_domain_version,
                 strip_doc_string,
-                keep_initializers_as_inputs);
+                keep_initializers_as_inputs,
+                custom_opsets);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -268,9 +268,9 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("defer_weight_export") = false,
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
-          py::arg("registered_domain_version"),
           py::arg("strip_doc_string") = true,
-          py::arg("keep_initializers_as_inputs") = true)
+          py::arg("keep_initializers_as_inputs") = true,
+          py::arg("custom_opsets"))
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
@@ -278,27 +278,27 @@ void initPythonIRBindings(PyObject* module_) {
              int64_t onnx_opset_version,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
-             const std::map<std::string, int>& registered_domain_version,
              bool google_printer,
-             bool keep_initializers_as_inputs) {
+             bool keep_initializers_as_inputs,
+             std::map<std::string, int> custom_opsets) {
             return pretty_print_onnx(
                 g,
                 initializers,
                 onnx_opset_version,
                 defer_weight_export,
                 operator_export_type,
-                registered_domain_version,
                 google_printer,
-                keep_initializers_as_inputs);
+                keep_initializers_as_inputs,
+                custom_opsets);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
           py::arg("defer_weight_export") = false,
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
-          py::arg("registered_domain_version"),
           py::arg("google_printer") = false,
-          py::arg("keep_initializers_as_inputs") = true)
+          py::arg("keep_initializers_as_inputs") = true,
+          py::arg("custom_opsets"))
       .def(
           "inputs",
           [](Graph& g) {
