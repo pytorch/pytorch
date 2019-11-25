@@ -90,12 +90,6 @@ struct PythonResolver : public Resolver {
     return toSugaredValue(obj, m, loc);
   }
 
-  static bool isNamedTupleClass(py::object obj) {
-    auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-    return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-        py::hasattr(obj, "_fields");
-  }
-
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       override {
     if (classType_ && name == classname_) {
@@ -115,46 +109,7 @@ struct PythonResolver : public Resolver {
         py::module::import("torch.jit").attr("_qualified_name")(obj)));
 
     if (isNamedTupleClass(obj)) {
-      // Currently don't support default values
-      if (py::hasattr(obj, "_field_defaults")) {
-        auto default_dict = py::cast<std::map<std::string, py::object>>(
-            py::getattr(obj, "_field_defaults"));
-        if (default_dict.size()) {
-          std::string error_msg =
-              "Default values are currently not supported"
-              " on NamedTuple fields in TorchScript. Fields "
-              "with default values: [";
-          bool first = true;
-          for (const auto& kv : default_dict) {
-            if (!first) {
-              error_msg += ", ";
-            }
-            error_msg += kv.first;
-          }
-          error_msg += "]";
-          throw ErrorReport(loc) << error_msg;
-        }
-      }
-
-      py::object props = py::module::import("torch.jit")
-                             .attr("_get_named_tuple_properties")(obj);
-      std::string unqualName;
-      std::vector<std::string> fields;
-      std::vector<TypePtr> annotations;
-      std::tie(unqualName, fields, annotations) = py::cast<
-          std::tuple<std::string, decltype(fields), decltype(annotations)>>(
-          props);
-
-      auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
-      if (auto type = get_python_cu()->get_type(qualifiedName)) {
-        TORCH_CHECK(
-            type->isSubtypeOf(tt),
-            "Can't to redefine NamedTuple: ",
-            tt->python_str());
-            return type;
-      }
-      get_python_cu()->register_type(tt);
-      return tt;
+      return getOrCreateNamedTupleType(obj, qualifiedName, {}, loc);
     }
     return get_python_cu()->get_type(qualifiedName);
   }
@@ -707,7 +662,8 @@ void initJitScriptBindings(PyObject* module) {
             return pp.str();
           })
       .def("apply", &Module::apply)
-      .def("_clone", &Module::clone);
+      .def("_clone", &Module::clone)
+      .def("_clone_instance", &Module::clone_instance);
 
   slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");

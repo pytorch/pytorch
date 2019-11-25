@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
@@ -74,6 +75,69 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
+}
+
+inline bool isNamedTupleClass(py::object obj) {
+  auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
+  return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
+      py::hasattr(obj, "_fields");
+}
+
+inline TypePtr getOrCreateNamedTupleType(
+  py::object obj,
+  const c10::QualifiedName& qualName,
+  c10::optional<std::vector<TypePtr>> element_types,
+  const SourceRange& loc) {
+  // Currently don't support default values
+  if (py::hasattr(obj, "_field_defaults")) {
+    auto default_dict = py::cast<std::map<std::string, py::object>>(
+        py::getattr(obj, "_field_defaults"));
+    if (default_dict.size()) {
+      std::string error_msg =
+          "Default values are currently not supported"
+          " on NamedTuple fields in TorchScript. Fields "
+          "with default values: [";
+      bool first = true;
+      for (const auto& kv : default_dict) {
+        if (!first) {
+          error_msg += ", ";
+        }
+        error_msg += kv.first;
+      }
+      error_msg += "]";
+      throw script::ErrorReport(loc) << error_msg;
+    }
+  }
+
+  std::string unqualName;
+  std::vector<std::string> fields;
+  c10::NamedTypePtr named_type;
+  py::object props;
+  if (element_types.has_value()) {
+    props = py::module::import("torch.jit")
+                .attr("_get_named_tuple_properties")(obj, /*need_types=*/false);
+    std::tie(unqualName, fields) = py::cast<
+        std::tuple<std::string, decltype(fields)>>(props);
+    named_type = TupleType::createNamed(qualName, fields, element_types.value());
+  } else {
+    std::vector<TypePtr> annotations;
+    props = py::module::import("torch.jit")
+                .attr("_get_named_tuple_properties")(obj, /*need_types=*/true);
+    std::tie(unqualName, fields, annotations) = py::cast<
+        std::tuple<std::string, decltype(fields), decltype(annotations)>>(props);
+    named_type = TupleType::createNamed(qualName, fields, annotations);
+  }
+
+  if (auto type = get_python_cu()->get_type(qualName)) {
+    TORCH_CHECK(
+        type->isSubtypeOf(named_type),
+        "Can't to redefine NamedTuple: ",
+        named_type->python_str());
+        return type;
+  }
+  // register the newly created named tuple type to the python cu
+  get_python_cu()->register_type(named_type);
+  return named_type;
 }
 
 inline c10::optional<TypePtr> unifyOrInitializeType(
@@ -170,24 +234,17 @@ inline InferredType tryToInferContainerType(py::handle input) {
         return type_match.reason();
       }
     }
-    if (py::hasattr(input, "_fields")) {
+    py::object input_type =py::cast<py::object>(input.get_type());
+    if (isNamedTupleClass(input_type)) {
       // If the tuple is a NamedTuple type
       auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
           py::module::import("torch.jit").attr("_qualified_name")(input.get_type())));
-      auto PyCu = get_python_cu();
-      c10::NamedTypePtr named_tuple_type = PyCu->get_named_tuple(qualifiedName);
-      if (named_tuple_type != nullptr) {
-        // If the python_cu already contains the type, just return it
-        return InferredType(named_tuple_type);
-      } else {
-        // Otherwise fetch the names correspondingly and create a new NamedTuple type
-        std::vector<std::string> fields
-          = py::cast<std::vector<std::string>>(input.get_type().attr("_fields"));
-        c10::NamedTypePtr named_tuple = TupleType::createNamed(qualifiedName, fields, element_types);
-        // register the named tuple type to the python cu to share with scripting
-        PyCu->register_type(named_tuple);
-        return InferredType(named_tuple);
-      }
+      c10::TypePtr named_type = getOrCreateNamedTupleType(
+        input_type,
+        qualifiedName,
+        element_types,
+        tracer::getPythonInterpreterSourceRange());
+      return InferredType(named_type);
     }
     return InferredType(TupleType::create(element_types));
   } else if (PyDict_Check(input.ptr())) {

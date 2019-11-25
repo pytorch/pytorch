@@ -1,11 +1,18 @@
-from . import _invoke_rpc_builtin, _invoke_rpc_python_udf
-from . import _invoke_remote_builtin, _invoke_remote_python_udf
-from . import _start_rpc_agent
-from . import _destroy_rref_context, _cleanup_python_rpc_handler
-from . import WorkerInfo
-from . import backend_registry
+from . import (
+    RpcBackendOptions,
+    WorkerInfo,
+    _cleanup_python_rpc_handler,
+    _destroy_rref_context,
+    _invoke_remote_builtin,
+    _invoke_remote_python_udf,
+    _invoke_rpc_builtin,
+    _invoke_rpc_python_udf,
+    _start_rpc_agent,
+    backend_registry,
+)
 from .internal import _internal_rpc_pickler, PythonUDF
 
+import contextlib
 import functools
 import numbers
 import sys
@@ -15,6 +22,19 @@ import torch.distributed as dist
 
 _agent = None
 
+_default_pickler = _internal_rpc_pickler
+
+@contextlib.contextmanager
+def _use_rpc_pickler(rpc_pickler):
+    r"""
+    rpc_pickler: (.internal._InternalRPCPickler) Overrides the default RPC pickler
+    """
+    global _default_pickler
+    _default_pickler = rpc_pickler
+    try:
+        yield
+    finally:
+        _default_pickler = _internal_rpc_pickler
 
 def _require_initialized(func):
     @functools.wraps(func)
@@ -70,34 +90,19 @@ def _init_rpc_backend(
     name=None,
     rank=-1,
     world_size=-1,
-    rpc_agent_options=None,
+    rpc_backend_options=None,
 ):
-    from . import RpcAgentOptions
 
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
-    if not isinstance(backend, backend_registry.BackendType):
-        raise RuntimeError("`backend` must be a `backend_registry.BackendType`.")
-
-    if not isinstance(store, dist.Store):
-        raise RuntimeError("`store` must be a `c10d::Store`. {}".format(store))
-
-    if not isinstance(name, str):
-        raise RuntimeError("`name` must be a string. {}".format(name))
-
-    if not isinstance(rank, numbers.Integral):
-        raise RuntimeError("`rank` must be an integer. {}".format(rank))
-
-    if not isinstance(world_size, numbers.Integral):
-        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
-
-    if not isinstance(rpc_agent_options, RpcAgentOptions):
-        raise RuntimeError(
-            "`rpc_agent_options` must be an `RpcAgentOptions`. {}".format(
-                rpc_agent_options
-            )
+    if not rpc_backend_options:
+        # default construct a set of RPC agent options.
+        rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
+            backend
         )
+
+    _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
     global _agent
 
@@ -111,7 +116,7 @@ def _init_rpc_backend(
         name=name,
         rank=rank,
         world_size=world_size,
-        rpc_agent_options=rpc_agent_options,
+        rpc_backend_options=rpc_backend_options,
     )
     _start_rpc_agent(_agent)
 
@@ -146,6 +151,23 @@ def _to_worker_info(name_or_info):
     else:
         raise ValueError("Cannot get WorkerInfo from name".format(name_or_info))
 
+def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
+    type_mapping = {
+        backend: backend_registry.BackendType,
+        store: dist.Store,
+        name: str,
+        rank: numbers.Integral,
+        world_size: numbers.Integral,
+        rpc_backend_options: RpcBackendOptions,
+    }
+    for arg, arg_type in type_mapping.items():
+        if not isinstance(arg, arg_type):
+            raise RuntimeError(
+                "Argument {} must be of type {} but got type {}".format(
+                    arg, arg_type, type(arg)
+                )
+            )
+
 
 @_require_initialized
 def remote(to, func, args=None, kwargs=None):
@@ -176,15 +198,14 @@ def remote(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_info("worker1")
-        >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
+        >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
         >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     qualified_name = torch.jit._find_builtin(func)
@@ -197,7 +218,7 @@ def remote(to, func, args=None, kwargs=None):
         return _invoke_remote_builtin(
             _agent, info, qualified_name, *args, **kwargs)
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         return _invoke_remote_python_udf(
             _agent, info, pickled_python_udf, tensors)
@@ -218,7 +239,7 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
             _agent, info, qualified_name, *args, **kwargs
         )
     else:
-        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+        (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = _invoke_rpc_python_udf(
             _agent, info, pickled_python_udf, tensors)
@@ -253,7 +274,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
@@ -286,15 +307,14 @@ def rpc_async(to, func, args=None, kwargs=None):
         On worker 0:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> worker1 = rpc.get_worker_id("worker1")
-        >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
+        >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> fut2 = rpc.rpc_async("worker1", min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
         >>> rpc.wait_all_workers()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=0, world_size=2)
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.wait_all_workers()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
