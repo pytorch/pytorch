@@ -124,65 +124,35 @@ class _ObserverBase(ObserverBase):
             torch.quint8,
         ), "Default Observer only works for qint8 and quint8 data type"
 
-    def _calculate_per_channel_qparams(self, min_vals, max_vals):
-        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
+    @torch.jit.export
+    def _calculate_qparams(self, min_val, max_val):
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor, int]
         r"""Calculates the per channel quantization parameters, given min and max
         value tensors.
 
         Args:
-            min_vals: Minimum values per channel
-            max_vals: Maximum values per channel
+            min_val: Minimum values per channel
+            max_val: Maximum values per channel
 
         Returns:
             scales: Per channel scales tensor of shape (#channels,)
             zero_points: Per channel zero points tensor of shape (#channels,)
         """
-        if min_vals is None or max_vals is None:
+        if min_val is None or max_val is None:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
             return torch.tensor([1.0]), torch.tensor([0])
 
-        for i in range(len(min_vals)):
-            assert (
-                min_vals[i] <= max_vals[i]
-            ), "min {} should be less than max {}".format(min_vals[i], max_vals[i])
-
-        scales = torch.empty(min_vals.size(), dtype=torch.float32)
-        zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
-
-        for i in range(len(scales)):
-            qparam = self._calculate_qparams(
-                min_vals[i], max_vals[i]
+        if min_val.dim() == 0 or max_val.dim() == 0:
+            assert min_val <= max_val, "min {} should be less than max {}".format(
+                min_val, max_val
             )
-            scales[i] = float(qparam[0])
-            zero_points[i] = int(qparam[1])
-
-        return scales, zero_points
-
-    @torch.jit.export
-    def _calculate_qparams(self, min_val, max_val):
-        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
-        r"""Calculates the per tensor quantization parameters, given the min/max.
-
-        Args:
-            min_val: Per tensor minimum value
-            max_val: Per tensor maximum value
-
-        Returns:
-            scale: Scale as a tensor of shape (1,)
-            zero_point: Zero point as a tensor of shape (1,)
-        """
-
-        if max_val is None or min_val is None:
-            warnings.warn("Must run observer before calling calculate_qparams.\
-                           Returning default scale and zero point.")
-            return torch.tensor([1.0]), torch.tensor([0])
-
-        assert min_val <= max_val, "min {} should be less than max {}".format(
-            min_val, max_val
-        )
+        else:
+            assert torch.sum(min_val < max_val) == len(min_val), "min {} should be less than max {}".format(
+                min_val, max_val
+            )
 
         if self.dtype == torch.qint8:
             if self.reduce_range:
@@ -195,27 +165,26 @@ class _ObserverBase(ObserverBase):
             else:
                 qmin, qmax = 0, 255
 
-        max_val, min_val = float(max_val), float(min_val)
-        min_val = min(0.0, min_val)
-        max_val = max(0.0, max_val)
-        if max_val == min_val:
-            scale = 1.0
-            zero_point = 0
-        else:
-            if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
-                max_val = max(-min_val, max_val)
-                scale = max_val / ((qmax - qmin) / 2)
-                scale = max(scale, self.eps)
-                zero_point = 0 if self.dtype == torch.qint8 else 128
-            else:
-                scale = (max_val - min_val) / float(qmax - qmin)
-                scale = max(scale, self.eps)
-                zero_point = qmin - round(min_val / scale)
-                zero_point = max(qmin, zero_point)
-                zero_point = min(qmax, zero_point)
-                zero_point = int(zero_point)
+        min_val = torch.min(min_val, torch.zeros_like(min_val))
+        max_val = torch.max(max_val, torch.zeros_like(max_val))
 
-        return torch.tensor([scale]), torch.tensor([zero_point])
+        scale = torch.ones(min_val.size(), dtype=torch.float32)
+        zero_point = torch.zeros(min_val.size(), dtype=torch.int64)
+
+        if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
+            max_val = torch.max(-min_val, max_val)
+            scale = max_val / (float(qmax - qmin) / 2)
+            scale = torch.max(scale, torch.tensor(1.0).new_full(scale.size(), self.eps))
+            if self.dtype == torch.quint8:
+                zero_point = zero_point.new_full(zero_point.size(), 128)
+        else:
+            scale = (max_val - min_val) / float(qmax - qmin)
+            scale = torch.max(scale, torch.tensor(1.0).new_full(scale.size(), self.eps))
+            zero_point = qmin - torch.round(min_val / scale)
+            zero_point = torch.max(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmin))
+            zero_point = torch.min(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmax))
+
+        return scale, zero_point
 
     @torch.jit.export
     def get_qparams(self):
@@ -488,7 +457,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
+        return self._calculate_qparams(self.min_vals, self.max_vals)
 
     @torch.jit.export
     def get_qparams(self):
