@@ -9,11 +9,11 @@ write more efficient, cleaner programs, and can aid you in debugging.
 
 TL-DR:
 
-- Mathematical formulation: we compute vector-Jacobian products using the chain rule. We support inplace operations using hidden versioning of the Tensors.
+- Mathematical formulation: we compute vector-Jacobian products using the chain rule. We support in-place operations using hidden versioning of the Tensors.
 - Non-gradients: we provide helper functions to be able to compute a result that is not the gradient of the user's whole program.
-- Will inplace operation work?: Because they modify the original value, if anything needs this value for the backward, the backward pass will fail.
-- Gradients of 0 vs independent of the input: We don't see the difference.
-- Gradients of 0: They can be represented by a Tensor full of ``0`` s, ``None`` in python, undefined tensor in c++ or and error for ``autograd.grad(allow_unused=False)``.
+- Will in-place operation work?: Because they modify the original value, if anything needs this value for the backward, the backward pass will fail.
+- Gradients of zero vs independent of the input: We don't see the difference.
+- Gradients of zero: They can be represented by a Tensor full of ``0`` s, ``None`` in python, undefined tensor in c++ or and error for ``autograd.grad(allow_unused=False)``.
 - Non-differentiable functions: We do not provide anyone guarantee, but we have fixed rules on what each elementary operation's backward pass should compute which should cover most cases reasonably.
 - Implementation details: Only if you want to understand the current implementation at a high level.
 
@@ -25,11 +25,11 @@ Mathematical formulation
 What does the autograd package do
 """""""""""""""""""""""""""""""""
 
-The autograd package allows to use automatic differentiation techniques on top of PyTorch Tensors.
-Automatic differentiation allows to compute dot product between a given vector and the Jacobian of a user-defined function.
+The autograd package allows to use automatic differentiation techniques on top of tensors.
+Automatic differentiation computes the dot product between a given vector and the Jacobian of a user-defined function.
 In this document, we will consider the function :math:`f: x \rightarrow y` where :math:`x` is a vector of size :math:`I` and :math:`y` is a vector of size :math:`O`.
 For simplicity, in this document, we will always consider inputs and ouputs to be 1D, in practice, they can be Tensors with an arbitrary number of dimensions.
-The jacobian matrix associated with this function is that matrix :math:`J_f` of size :math:`O \times I` such that each entry is
+The Jacobian matrix associated with this function is that matrix :math:`J_f` of size :math:`(O, I)` such that each entry is
 given by :math:`(J_f)_{ij} = \dfrac{\partial{x_j}}{\partial{y_i}}`. For simplicity, we will write :math:`J_f = \dfrac{\partial{y}}{\partial{x}}`.
 
 Currently, PyTorch only implements reverse mode automatic differentiation which, given
@@ -54,8 +54,8 @@ The gradient of the original function is the computed by using the chain rule on
 For example, if we split :math:`f` into two elementary operations, namely :math:`y = op_2(op_1(x))`,
 the automatic differentiation will compute :math:`v^T J_f = (v^T J_{op_2}) J_{op_1} =  v^T J_{op_2} J_{op_1}`.
 
-Link with the code
-""""""""""""""""""
+What is your code computing
+"""""""""""""""""""""""""""
 
 The tensors for which the user want to compute the gradients can be marked using the :code:`.requires_grad_()` function.
 The user can then use any pytorch function on this tensor to compute the final value of its function.
@@ -93,16 +93,17 @@ Adding a new operation as follows:
 
 Will change the computation to: :math:`v^T J_f = v^T J_{op_3} J_{op_2} J_{op_1} = v^T \dfrac{\partial{z}}{\partial{y}} \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{z}}{\partial{w}}`.
 
-Handling inplace operations
+Handling in-place operations
 """""""""""""""""""""""""""
 
-The only special case that needs to be considered here are inplace operations.
-The main reason to use inplace operations is to preserve side effects and prevent additional memory requirements.
-The first point means that if a tensor is referenced in different places, the inplace operation should modify all these references.
-The second point means that no extra memory allocation should be done under the hood otherwise it would defeat the purpose of inplace operations.
+The only special case that needs to be considered here are in-place operations.
+The main reason to use in-place operations is to preserve side effects and prevent additional memory requirements.
 
-To be able to fulfill these two needs, we make inplace operations actually be inplace during the forward pass giving exactly the same behavior
-as any other non-autograd library that provides inplace operations.
+- The first point means that if a tensor is referenced in different places, the in-place operation should modify all these references.
+- The second point means that no extra memory allocation should be done under the hood otherwise it would defeat the purpose of in-place operations.
+
+To be able to fulfill these two needs, we make in-place operations actually be in-place during the forward pass giving exactly the same behavior
+as any other non-autograd library that provides in-place operations.
 To be able to compute the gradients, we consider that there are different versions of the tensor that existed and that the user tensor always points to the latest version.
 This allows us to write the automatic differentiation rules as before.
 
@@ -168,7 +169,7 @@ This means that however :code:`y` is used, the contribution via :code:`y` to the
 The backward pass will compute the following for a given vector :math:`v`: :math:`v^T J_f = v^T J_{detach} J_{op_1} = v^T \bm{0} \dfrac{\partial{z}}{\partial{x}} = \bm{0}`.
 
 Note that the new Tensor shares the same data as the original one (it is a view).
-This means that inplace operations on :code:`y` will change values in :code:`x` .
+This means that in-place operations on :code:`y` will change values in :code:`x` .
 
 Disable gradient computation
 """"""""""""""""""""""""""""
@@ -194,7 +195,8 @@ Note that for the context manager version, outputs are all the variables that ar
         z = foo(x, y)
         w = 3 * z
 
-
+This is particularly useful to perform operations for which gradients are not needed or that the user does not want as part of the gradient computation.
+This can range from model forward pass when doing inference to optimizer update of the parameters of a network.
 
 Hooks
 """""
@@ -269,7 +271,7 @@ detach and no_grad can be implemented using the others as follows:
         return z, w
 
 
-Will inplace ops work?
+Will in-place ops work?
 ^^^^^^^^^^^^^^^^^^^^^^
 
 We repeat the example from above here for clarity:
@@ -283,9 +285,9 @@ We repeat the example from above here for clarity:
         # z points to z_1
         return z
 
-The main limitation of our inplace operation strategy is that in this example, if :code:`op_1` needs the value of its output :code:`z_0` to compute :math:`J_{op_1}`, then the autograd computation cannot be performed correctly anymore.
+The main limitation of our in-place operation strategy is that in this example, if :code:`op_1` needs the value of its output :code:`z_0` to compute :math:`J_{op_1}`, then the autograd computation cannot be performed correctly anymore.
 Because we do not want to hide memory allocation from the user, the backward pass will raise an error.
-In such a case, to be able to perform this backward pass we need to either replace :code:`op_2_` with an equivalent out-of-place operation or make sure :code:`op_2_` modifies inplace a copy of :code:`z` by adding a :code:`.clone()` for example.
+In such a case, to be able to perform this backward pass we need to either replace :code:`op_2_` with an equivalent out-of-place operation or make sure :code:`op_2_` modifies in-place a copy of :code:`z` by adding a :code:`.clone()` for example.
 
 Gradient of 0 vs independent of the input
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -324,7 +326,7 @@ To try and reduce the impact of this limitation, we define the gradients of the 
 
 #. If the function is not defined (:math:`sqrt(-1)` or :math:`log(-1)` for example) then this is undefined. Most function will return :math:`nan`, but for performance reasons, some functions will return not-nan values (:math:`log(-1)` for example).
 #. If a gradient exist at the current point, return it.
-#. If the function is convex, return one of it's subgradients at the current point, if more than one exists, return the subgradient with minimum norm (As it is always a descent direction, see "Convex Optimization Algorithms" by Dimitri Bertsekas, Proposition 4.3.1 for a proof).
+#. If the function is convex, return one of it's subgradients at the current point, if more than one exists, return the subgradient with minimum norm (as it is always a descent direction, see "Convex Optimization Algorithms" by Dimitri Bertsekas, Proposition 4.3.1 for a proof).
 #. Define the gradient at the current point by continuity (note that :math:`inf` is possible here). If multiple values are possible, pick one arbitrarily.
 
 .. note::
@@ -367,34 +369,34 @@ Not Gradients
 The operations that do not compute gradients that are presented above are implemented as follows to obtain the behavior described above.
 
 ``detach`` is returning a new Tensor object that shares the same Storage.
-The Tensor is the same except that it does not require gradient and its grad_fn is always ``None``.
+The Tensor is the same except that it does not require gradient and its grad_fn is ``None``.
 
 ``torch.no_grad`` simply prevents any :code:`Node` from being added to the graph.
 
 
-Inplace handling
+In-place handling
 """"""""""""""""
 
-To get the required behavior for inplace operations, two things are needed.
+To get the required behavior for in-place operations, two things are needed.
 First, to be able to ensure correctness, we need to track the versions of the different Tensors to make sure that a :code:`Node` has access to the version it needs, not a modified one.
 Second, we need to build a graph that will perform the correct backward computation.
 
-From the python api, the current version of a Tensor can be queried with :code:`._version` .
+From the Python api, the current version of a Tensor can be queried with :code:`._version` .
 The :code:`Function` wrapper takes care of managing this version by using the information provided by the :code:`.mark_dirty()` method available on the context.
-It also takes care of making sure that the Tensors given to the :code:`.backward()` function have not been modified inplace.
+It also takes care of making sure that the Tensors given to the :code:`.backward()` function have not been modified in-place.
 
-Building the graph in the absence of any views is simple as all the inplace operations can be "reinterpreted" as out of place.
-The inplace operations will only create a linear chain of :code:`Node` s as if :code:`x.op_()` was written :code:`x = x.op()` (assuming corresponding out of place operation exists).
+Building the graph in the absence of any views is simple as all the in-place operations can be "reinterpreted" as out of place.
+The in-place operations will only create a linear chain of :code:`Node` s as if :code:`x.op_()` was written :code:`x = x.op()` (assuming corresponding out of place operation exists).
 
-Building the graph is more complex as we allow both views and inplace operations.
+Building the graph is more complex as we allow both views and in-place operations.
 Here, the view operations are responsible to mark any views that they make as being linked to the input.
 You can check if a Tensor is a view with :code:`._is_view` and query the Tensor it is a view of with :code:`._base` .
 Two case can happen then:
 
-- If this Tensor is not modified inplace, then its :code:`.grad_fn` is the :code:`Node` associated with the view operation. And the base's :code:`.grad_fn` is the :code:`Node` that corresponds to its forward function.
-- If this Tensor is modified inplace, its graph is "rebased". This has a few effects:
+- If this Tensor is not modified in-place, then its :code:`.grad_fn` is the :code:`Node` associated with the view operation. And the base's :code:`.grad_fn` is the :code:`Node` that corresponds to its forward function.
+- If this Tensor is modified in-place, its graph is "rebased". This has a few effects:
 
-  - The base :code:`.grad_fn` becomes a :code:`CopySlices` . This special :code:`Node` is a wrapper around the :code:`Node` corresponding to the inplace operations and apply it to the subset of the base on which the inplace operation was performed (through the view).
+  - The base :code:`.grad_fn` becomes a :code:`CopySlices` . This special :code:`Node` is a wrapper around the :code:`Node` corresponding to the in-place operations and apply it to the subset of the base on which the in-place operation was performed (through the view).
   - All the views' :code:`.grad_fn` become :code:`AsStridedBackard` s that point to the newly created :code:`CopySlices` from the base.
 
 This is repeated every time an inplace operation is performed on a view and so the base's backward graph can contain a chain of :code:`CopySlices` before finally getting to the :code:`Node` that corresponds to its forward function.
