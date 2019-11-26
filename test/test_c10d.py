@@ -343,7 +343,7 @@ class MyPythonStore(c10d.Store):
 
     def add(self, key, value):
         new = int(self.store.get(key, 0)) + value
-        self.set(key, bytes(str(new), "utf-8"))
+        self.set(key, bytes(str(new).encode("utf-8")))
         return new
 
 
