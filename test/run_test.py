@@ -148,6 +148,9 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
+    DISTRIBUTED_TESTS_CONFIG['test'] = {
+        'WORLD_SIZE': '1'
+    }
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3',
