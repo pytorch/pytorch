@@ -2522,7 +2522,7 @@ add_docstr_all('argsort',
                r"""
 argsort(dim=-1, descending=False) -> LongTensor
 
-See :func: `torch.argsort`
+See :func:`torch.argsort`
 """)
 
 add_docstr_all('sparse_dim',
