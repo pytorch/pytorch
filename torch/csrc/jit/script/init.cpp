@@ -782,6 +782,13 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "dump_op_names",
+          [](Module& m,
+             const std::string& filename) {
+            m.dump_op_names(filename);
+          },
+          py::arg("filename"))
       .def_property_readonly(
           "graph",
           [](const StrongFunctionPtr& self) { return self.function_->graph(); })

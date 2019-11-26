@@ -70,6 +70,8 @@ TORCH_API void writeArchiveAndTensors(
     const std::vector<WriteableTensorData>& tensors,
     caffe2::serialize::PyTorchStreamWriter& out);
 
+TORCH_API void export_opnames(const script::Module& m, std::unordered_set<std::string>& opnames);
+
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.
 using ExportModuleExtraFilesHook =
