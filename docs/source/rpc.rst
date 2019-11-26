@@ -11,8 +11,33 @@ machines.
 .. warning::
   The RPC API is experimental and subject to change.
 
-RPC and RRef Framework
-----------------------
+
+Basics
+------
+
+The distributed RPC framework makes it easy to run functions remotely, access
+remote objects, and have autograd and optimizer marching through those
+functions. This will be especially helpful if the forward pass needs to span
+multiple machines when conducting, e.g., distributed model parallel training,
+parameter-server training, etc. This framework contains four main sets of APIs.
+
+1) **Remote Procedure Call (RPC)** allows run a function on the specified
+   destination worker with given arguments and get (RRef of) the return value
+   back.
+2) **Remote Reference (RRef)** serves as a distributed shared pointer to a local
+   or remote object. It can be shared with other workers and reference counting
+   will be handled transparently.
+3) **Distributed Autograd** stitches together local autograd engines on all the
+   workers involved in the forward pass, and automatically reach out to them
+   during the backward pass to compute gradients.
+4) **Distributed Optimizer** takes a list of parameter RRefs in the constructor
+   and updates them all accordingly when running `step()`.
+
+
+.. _rpc:
+
+RPC
+---
 
 Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
@@ -26,7 +51,16 @@ for communication.
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
 
-.. _rref:
+The following APIs provide primitives allowing users to remotely execute
+functions as well as create (RRefs) to remote data objects.
+
+.. automodule:: torch.distributed.rpc
+.. autofunction:: rpc_sync
+.. autofunction:: rpc_async
+.. autofunction:: remote
+.. autofunction:: get_worker_info
+.. autofunction:: wait_all_workers
+
 
 RRef
 ----
@@ -44,18 +78,6 @@ details.
 .. autoclass:: RRef
     :members:
 
-RPC and RRef primitives
------------------------
-
-This library provides primitives allowing users to create and modify references
-(RRefs) to remote data as well as remotely execute functions.
-
-.. automodule:: torch.distributed.rpc
-.. autofunction:: rpc_sync
-.. autofunction:: rpc_async
-.. autofunction:: remote
-.. autofunction:: get_worker_info
-.. autofunction:: wait_all_workers
 
 Distributed Autograd Framework
 ------------------------------
