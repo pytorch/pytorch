@@ -240,6 +240,23 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 //    ...
 //    %16 : Float(2) = aten::index_put(%11, %13, %14, %15)
 // The aten::index_put node alone does not contain any indices (%13 : Tensor?[] = prim::ListConstruct()).
+//    ...
+//    # Below constructs index from slice node.
+//    %23 : Long() = aten::size(%0, %4)
+//    %28 : Tensor = aten::arange(%23, %24, %25, %26, %27)
+//    %33 : Tensor = aten::slice(%28, %4, %5, %6, %7)
+//    %39 : int[] = prim::Constant[value=[-1, 1]]()
+//    %40 : Tensor = aten::view(%33, %39)
+//    ...
+//    # Below constructs index from select node.
+//    %36 : int = prim::Constant[value=0]()
+//    %37 : Tensor = aten::unsqueeze(%10, %36)
+//    %42 : int[] = prim::Constant[value=[-1]]()
+//    %43 : Tensor = aten::view(%37, %42)
+//    ...
+//    # Adding the above two indices to index_put
+//    %44 : Tensor?[] = prim::ListConstruct(%40, %43)
+//    %45 : Float(2, 5) = aten::index_put(%0, %44, %14, %15)
 void SquashSliceAndSelect(Node* index_put_node) {
   auto graph = index_put_node->owningGraph();
 

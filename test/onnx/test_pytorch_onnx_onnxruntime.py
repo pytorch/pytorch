@@ -697,6 +697,15 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.tensor([10, 15]).view(2, 1)
         self.run_test(IndexPutModel5(), (x, update))
 
+        class IndexPutModel6(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:3, 0] = update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.arange(2*5).to(torch.float).view(2, 5)
+        self.run_test(IndexPutModel6(), (x, update))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_ellipsis(self):
         class IndexPutModel(torch.nn.Module):
