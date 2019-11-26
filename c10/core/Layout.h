@@ -38,4 +38,10 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
   }
 }
 
+inline std::string layout_str(at::Layout layout) {
+  std::ostringstream stream;
+  stream << layout;
+  return stream.str();
+}
+  
 } // namespace c10

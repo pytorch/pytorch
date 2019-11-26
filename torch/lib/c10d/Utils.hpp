@@ -45,7 +45,7 @@ inline void assertSameType(
   for (size_t i = 0; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
       const std::string expected = type.toString();
-      const std::string actual = tensors[i].type().toString();
+      const std::string actual = tensors[i].toString();
       throw std::invalid_argument(
           "mixed types (" + expected + " and " + actual + ")");
     }
