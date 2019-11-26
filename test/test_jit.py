@@ -15206,7 +15206,7 @@ a")
             pass
 
         @torch.jit._overload  # noqa: F811
-        def my_conv(x, y=2.0):  # noqa: F811
+        def my_conv(x, y):  # noqa: F811
             # type: (float, float) -> (float)
             pass
 
