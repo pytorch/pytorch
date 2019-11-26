@@ -202,7 +202,7 @@ graph(%input, %weight, %bias, %4):
       matmul_add};
 };
 
-// Check if node is an aten function of name `func_name` and if value
+// Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument of the function
 bool isAtenFuncNthArg(
     Value* v,
@@ -212,7 +212,7 @@ bool isAtenFuncNthArg(
   return use->kind() == Symbol::aten(func_name) && v == use->inputs().at(n);
 }
 
-// Check if node is a CallFunction of name `func_name` and if value
+// Check if `use` is a CallFunction of name `func_name` and if value
 // `v` is the nth argument of the function
 bool isCallFunctionNthArg(
     Value* v,
