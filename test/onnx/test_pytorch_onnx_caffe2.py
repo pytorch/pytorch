@@ -151,7 +151,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                       example_outputs=example_outputs,
                                       do_constant_folding=False,
                                       opset_version=self.opset_version,
-                                      keep_initializers_as_inputs=True)
+                                      keep_initializers_as_inputs=True,
+                                      add_node_names=False)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
