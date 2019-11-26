@@ -136,9 +136,9 @@ static TensorIterator make_reduction(
   for (const Tensor *t: {&result1, &result2}) {
     const Tensor& result = *t;
     TORCH_CHECK(
-        !result.defined() || result.type().scalarType() == dtype,
+        !result.defined() || result.scalar_type() == dtype,
         name, ": provided dtype must match dtype of result. Got ",
-        toString(result.type().scalarType()),
+        toString(result.scalar_type()),
         " and ",
         toString(dtype),
         ".");
@@ -161,8 +161,8 @@ static TensorIterator make_reduction(
   // efficiency.
   // We don't generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  if (self.type().scalarType() == dtype ||
-      (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
+  if (self.scalar_type() == dtype ||
+      (self.is_cuda() && self.scalar_type() == kHalf && dtype == kFloat)) {
     return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
@@ -715,15 +715,13 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 
 static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(at::isFloatingType(self.type().scalarType()) || at::isComplexType(self.scalar_type()),
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-           fname, " only support CPU AND CUDA backend, got: ", toString(self.options().backend()));
-              fname, " only support floating-point dtypes");
-  TORCH_CHECK(result1.type().scalarType() == result2.type().scalarType(),
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()), fname, " only support floating-point dtypes");
+  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA, fname, " only support CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(result1.scalar_type() == result2.scalar_type(),
            "provided by result1 dtype must match dtype of result2. Got ",
-           toString(result1.type().scalarType()),
+           toString(result1.scalar_type()),
            " and ",
-           toString(result2.type().scalarType()),
+           toString(result2.scalar_type()),
            ".");
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}, true));
