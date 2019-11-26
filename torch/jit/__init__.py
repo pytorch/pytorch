@@ -2029,17 +2029,20 @@ def _compile_function_with_overload(qual_name, impl_fn, overload_decl):
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
-def _check_no_signature_and_default_args(func):
+def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func, None, None)
     if signature is None:
         qual_name = _qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+
+def _check_no_default_args(func):
     if get_default_args(func):
         qual_name = _qualified_name(func)
         raise RuntimeError("Overloaded default args must be on the implementation function: {}".format(qual_name))
 
 def _get_overload_decl(func):
-    _check_no_signature_and_default_args(func)
+    _check_no_signature(func)
+    _check_no_default_args(func)
     return torch.jit.get_jit_def(func).decl()
 
 def _get_overloads(obj):
