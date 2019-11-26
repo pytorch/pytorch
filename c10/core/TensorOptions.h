@@ -292,6 +292,10 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
+  // For compatibility with legacy tensor.type() comparisons
+  bool type_equal(const TensorOptions& other) const {
+    return layout_ == other.layout() && dtype_ == other.dtype() && device_ == other.device();
+  }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.

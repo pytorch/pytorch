@@ -43,7 +43,7 @@ inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
-    if (tensors[i].type() != type) {
+    if (!tensors[i].options().type_equal(type.options())) {
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
       throw std::invalid_argument(
@@ -72,14 +72,12 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 
   // Ensure all tensors have identical type and shape
-  auto type = tensors[0].type();
+  auto options = tensors[0].options();
   auto sizes = tensors[0].sizes();
   for (size_t i = 1; i < tensors.size(); i++) {
-    if (tensors[i].type() != type) {
-      const std::string expected = type.toString();
-      const std::string actual = tensors[i].type().toString();
+    if (!tensors[i].options().type_equal(options)) {
       throw std::invalid_argument(
-          "argument contains mixed types (" + expected + " and " + actual +
+          "argument contains mixed types (" + options + " and " + tensors[i].options() +
           ")");
     }
     if (!tensors[i].sizes().equals(sizes)) {

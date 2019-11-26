@@ -134,7 +134,7 @@ void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   TORCH_CHECK(
-    t1->type() == t2->type(),
+    t1->options().type_equal(t2->options()),
     "Expected tensor for ", t1, " to have the same type as tensor for ", t2,
     "; but type ", t1->toString(), " does not equal ", t2->toString(),
     " (while checking arguments for ", c, ")");

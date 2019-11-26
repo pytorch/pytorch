@@ -66,7 +66,7 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
   if (self.options().backend() != Backend::CPU) {
     throw TypeError("map_ is only implemented on CPU tensors");
   }
-  if (other_.type() != self.type()) {
+  if (!other_.options().type_equal(self.options())) {
     throw TypeError("map_: expected %s for 'other' (got %s)",
         self.toString().c_str(), other_.toString().c_str());
   }
@@ -81,11 +81,11 @@ Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn
   if (self.options().backend() != Backend::CPU || x_.options().backend() != Backend::CPU || y_.options().backend() != Backend::CPU) {
     throw TypeError("map2_ is only implemented on CPU tensors");
   }
-  if (x_.type() != self.type()) {
+  if (!x_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'x' (got %s)",
         self.toString().c_str(), x_.toString().c_str());
   }
-  if (y_.type() != self.type()) {
+  if (!y_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'y' (got %s)",
         self.toString().c_str(), y_.toString().c_str());
   }
