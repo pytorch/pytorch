@@ -282,12 +282,12 @@ class ChunkDataset(IterableDataset):
     (or simply the size) is unknown. Only the number of chunks is known for the dataset.
 
     In a distributed setup, each `DataLoader` worker has an instance of ``ChunkDataset`` that uses
-    ``DistributedChunkSampler`` sampler to select chunks based on their global worker rank.
+    ``DistributedSampler`` sampler to select chunks based on their global worker rank.
     Once a chunk index has been selected, it is passed to ``ChunkDataReader`` that will load
     data into the ``ChunkDataset`` internal cache. Only then ``ChunkDataset`` returns batches.
 
     Arguments:
-        chunk_sampler (DistributedSampler or DistributedChunkSampler): Draw indices for chunks.
+        chunk_sampler (DistributedSampler): Draw indices for chunks.
             Typically used to split data amongst dataloader workers (first level of sampling)
         chunk_reader (ChunkDataReader): Specialized reader for a given input type
         shuffle_cache (bool): Setting `True` trigger shuffling of the internal chunk cache
