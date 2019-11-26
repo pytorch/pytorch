@@ -1,7 +1,7 @@
 .. _autograd-mechanics:
 
-Autograd
-========
+Advanced autograd
+=================
 
 This note presents advanced informations about the autograd in pytorch.
 The reader is assumed to be familiar with the `autograd introduction <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_ already.
