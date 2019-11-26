@@ -180,7 +180,7 @@ def warn_on_static_input_change(input_states):
                 warnings.warn(warning)
 
 
-def _decide_arg_by_export_type(arg_bool_value, arg_name, operator_export_type):
+def _decide_args_by_export_type(arg_name, arg_bool_value, operator_export_type):
     # This helper method disables the arguments not supported if export_type != operator_export_type.ONNX
     if operator_export_type is not operator_export_type.ONNX:
         if arg_bool_value is True:
@@ -218,6 +218,14 @@ def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type
     if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
         val_keep_init_as_ip = False
     return val_keep_init_as_ip
+
+
+def _decide_add_node_names(add_node_names, operator_export_type):
+    return _decide_args_by_export_type("add_node_names", add_node_names, operator_export_type)
+
+
+def _decide_constant_folding(do_constant_folding, operator_export_type):
+    return _decide_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
 
 
 def _trace(func, args, operator_export_type, return_outs=False):
@@ -379,9 +387,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                      operator_export_type,
                                                      opset_version)
-    val_add_node_names = _decide_arg_by_export_type(add_node_names, 'add_node_names', operator_export_type)
-    val_do_constant_folding = _decide_arg_by_export_type(do_constant_folding, 'do_constant_folding',
-                                                         operator_export_type)
+    val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
+    val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -429,10 +436,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
-        val_add_node_names = _decide_arg_by_export_type(add_node_names, 'add_node_names', operator_export_type)
-        val_do_constant_folding = _decide_arg_by_export_type(do_constant_folding, 'do_constant_folding',
-                                                             operator_export_type)
-
+        val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
+        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
