@@ -1117,24 +1117,18 @@ def _write_ninja_file(path,
     # Turn into absolute paths so we can emit them into the ninja build
     # file wherever it is.
     sources = [os.path.abspath(file) for file in sources]
-    user_includes = [os.path.abspath(file) for file in extra_include_paths]
+    includes = [os.path.abspath(file) for file in extra_include_paths]
 
     # include_paths() gives us the location of torch/extension.h
-    system_includes = include_paths(with_cuda)
+    includes += include_paths(with_cuda)
     # sysconfig.get_paths()['include'] gives us the location of Python.h
-    system_includes.append(sysconfig.get_paths()['include'])
-
-    # Windows does not understand `-isystem`.
-    if IS_WINDOWS:
-        user_includes += system_includes
-        system_includes.clear()
+    includes.append(sysconfig.get_paths()['include'])
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
     if BUILD_NAMEDTENSOR:
         common_cflags.append('-DBUILD_NAMEDTENSOR')
-    common_cflags += ['-I{}'.format(include) for include in user_includes]
-    common_cflags += ['-isystem {}'.format(include) for include in system_includes]
+    common_cflags += ['-I{}'.format(include) for include in includes]
 
     common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
