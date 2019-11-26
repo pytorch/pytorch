@@ -183,7 +183,7 @@ void trunc_kernel_cuda(TensorIterator& iter) {
 
 void reciprocal_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "reciprocal_cuda", [&]() {
-    using acc_t = acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, /*is_cuda=*/true>;
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return static_cast<acc_t>(1) / a;
     });
