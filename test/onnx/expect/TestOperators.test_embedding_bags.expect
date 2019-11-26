@@ -17,6 +17,11 @@ graph {
       type: INT
     }
     attribute {
+      name: "new_offsets"
+      i: 0
+      type: INT
+    }
+    attribute {
       name: "operator"
       s: "embedding_bag"
       type: STRING
