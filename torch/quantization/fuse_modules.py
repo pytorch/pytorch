@@ -9,7 +9,7 @@ def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
 
     Args:
-        conv: Module instance of type conv2d
+        conv: Module instance of type conv2d/conv3d
         bn: Spatial BN instance that needs to be fused with the conv
 
     Examples::
@@ -26,7 +26,10 @@ def fuse_conv_bn(conv, bn):
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
-        return torch.nn.intrinsic.ConvBn2d(conv, bn)
+        if isinstance(conv, torch.nn.Conv3d):
+            return torch.nn.intrinsic.ConvBn3d(conv, bn)
+        else:
+            return torch.nn.intrinsic.ConvBn2d(conv, bn)
     else:
         return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
 
@@ -34,7 +37,7 @@ def fuse_conv_bn_relu(conv, bn, relu):
     r"""Given the conv and bn modules, fuses them and returns the fused module
 
     Args:
-        conv: Module instance of type conv2d
+        conv: Module instance of type conv2d/conv3d
         bn: Spatial BN instance that needs to be fused with the conv
 
     Examples::
@@ -45,12 +48,19 @@ def fuse_conv_bn_relu(conv, bn, relu):
     """
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
-
     if conv.training:
-        return torch_fused.ConvBnReLU2d(conv, bn, relu)
+        assert not relu.inplace, 'We only support fusion of non-inplace ReLU.'
+        if isinstance(conv, torch.nn.Conv3d):
+            return torch_fused.ConvBnReLU3d(conv, bn, relu)
+        else:
+            return torch_fused.ConvBnReLU2d(conv, bn, relu)
     else:
-        return torch_fused.ConvReLU2d(
-            torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
+        if isinstance(conv, torch.nn.Conv3d):
+            return torch_fused.ConvReLU3d(
+                torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
+        else:
+            return torch_fused.ConvReLU2d(
+                torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
 
 # Generalization of getattr
 def _get_module(model, submodule_key):
@@ -86,8 +96,13 @@ def fuse_known_modules(mod_list):
     OP_LIST_TO_FUSER_METHOD = {
         (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
         (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
+        (torch.nn.Conv3d, torch.nn.BatchNorm3d): fuse_conv_bn,
+        (torch.nn.Conv3d, torch.nn.BatchNorm3d, torch.nn.ReLU): fuse_conv_bn_relu,
         (torch.nn.Conv2d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU2d,
-        (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU
+        (torch.nn.Conv3d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU3d,
+        (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU,
+        (torch.nn.BatchNorm2d, torch.nn.ReLU): torch.nn.intrinsic.BNReLU2d,
+        (torch.nn.BatchNorm3d, torch.nn.ReLU): torch.nn.intrinsic.BNReLU3d,
     }
 
     types = tuple(type(m) for m in mod_list)
@@ -120,15 +135,10 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
-
-    * conv, bn
-
-    * conv, bn, relu
-
-    * conv, relu
-
-    * linear, relu
-
+    conv, bn
+    conv, bn, relu
+    conv, relu
+    linear, relu
     All other sequences are left unchanged.
     For these sequences, replaces the first item in the list
     with the fused module, replacing the rest of the modules

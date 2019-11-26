@@ -1120,6 +1120,8 @@ class FusionTest(QuantizationTestCase):
             self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
             self.assertEqual(type(model.bn1), nn.Identity)
             self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.conv2), nniq.ConvReLU3d)
+            self.assertEqual(type(model.relu2), nn.Identity)
             self.assertEqual(type(model.sub1.conv), nnq.Conv2d)
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
@@ -1138,6 +1140,7 @@ class FusionTest(QuantizationTestCase):
         model = ModelForFusion(default_qconfig)
         model.eval()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'] ,
+                             ['conv2', 'relu2'],
                              ['sub1.conv', 'sub1.bn']])
         self.assertEqual(type(model.conv1), nni.ConvReLU2d,
                          "Fused Conv + BN + Relu first layer (BN is folded)")
@@ -1148,6 +1151,14 @@ class FusionTest(QuantizationTestCase):
         self.assertEqual(type(model.bn1), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped BN)")
         self.assertEqual(type(model.relu1), nn.Identity,
+                         "Fused Conv + BN + Relu second layer (Skipped Relu)")
+        self.assertEqual(type(model.conv2), nni.ConvReLU3d,
+                         "Fused Conv + BN + Relu first layer (BN is folded)")
+        self.assertEqual(type(model.conv2[0]), nn.Conv3d,
+                         "Fused Conv + BN + Relu (Conv + folded BN only)")
+        self.assertEqual(type(model.conv2[1]), nn.ReLU,
+                         "Fused Conv + BN + Relu second layer (Relu only)")
+        self.assertEqual(type(model.relu2), nn.Identity,
                          "Fused Conv + BN + Relu second layer (Skipped Relu)")
 
         self.assertEqual(type(model.sub1.conv), nn.Conv2d,
@@ -1177,6 +1188,7 @@ class FusionTest(QuantizationTestCase):
 
         model = ModelForFusion(default_qconfig).eval()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
+                             ['conv2', 'relu2'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize(model, test_only_eval_fn, self.img_data)
         checkQuantized(model)
