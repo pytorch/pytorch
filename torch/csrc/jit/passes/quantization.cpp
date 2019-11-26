@@ -202,15 +202,48 @@ graph(%input, %weight, %bias, %4):
       matmul_add};
 };
 
-bool isBiasOfConvOrLinear(Value* v) {
+// Check if `use` is an aten function of name `func_name` and if value
+// `v` is the nth argument of the function
+bool isAtenFuncNthArg(
+    Value* v,
+    Node* use,
+    const std::string& func_name,
+    int n) {
+  return use->kind() == Symbol::aten(func_name) && v == use->inputs().at(n);
+}
+
+// Check if `use` is a CallFunction of name `func_name` and if value
+// `v` is the nth argument of the function
+bool isCallFunctionNthArg(
+    Value* v,
+    Node* use,
+    const std::string& func_name,
+    int n) {
+  return use->kind() == prim::CallFunction &&
+      getFuncName(use->inputs()[0]) == func_name && v == use->inputs().at(n);
+}
+
+struct FuncArg {
+  std::string func_name;
+  int arg_index;
+};
+
+// Check any use of `v` matches the aten function call
+// or CallFunction patterns
+bool matchArgPattern(
+    Value* v,
+    const std::vector<FuncArg>& aten_func_args,
+    const std::vector<FuncArg>& call_func_args) {
   for (const Use& u : v->uses()) {
-    if (u.user->kind() == Symbol::aten("conv2d")) {
-      if (v == u.user->inputs().at(2)) {
+    for (const auto& func_arg : aten_func_args) {
+      if (isAtenFuncNthArg(v, u.user, func_arg.func_name, func_arg.arg_index)) {
         return true;
       }
-    } else if (u.user->kind() == prim::CallFunction) {
-      auto func_name = getFuncName(u.user->inputs()[0]);
-      if (func_name == "linear" && v == u.user->inputs().at(3)) {
+    }
+
+    for (const auto& func_arg : call_func_args) {
+      if (isCallFunctionNthArg(
+              v, u.user, func_arg.func_name, func_arg.arg_index)) {
         return true;
       }
     }
@@ -218,19 +251,12 @@ bool isBiasOfConvOrLinear(Value* v) {
   return false;
 }
 
+bool isBiasOfConvOrLinear(Value* v) {
+  return matchArgPattern(v, {{"conv2d", 2}, {"linear", 2}}, {{"linear", 3}});
+}
+
 bool isWeightOfConvOrLinear(Value* v) {
-  for (const Use& u : v->uses()) {
-    if (u.user->kind() == Symbol::aten("conv2d") &&
-        v == u.user->inputs().at(1)) {
-      return true;
-    } else if (
-        u.user->kind() == prim::CallFunction &&
-        getFuncName(u.user->inputs()[0]) == "linear" &&
-        v == u.user->inputs().at(2)) {
-      return true;
-    }
-  }
-  return false;
+  return matchArgPattern(v, {{"conv2d", 1}, {"linear", 1}}, {{"linear", 2}});
 }
 
 void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
@@ -281,6 +307,8 @@ Node* InsertObserversHelper::insertObserverFor(
     const QConfig& qconfig) {
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
+    TORCH_CHECK(
+        v->uses().size() == 1, "We only support bias being used by one node.");
     return nullptr;
   }
 
@@ -546,7 +574,7 @@ class QuantizeHelper {
   std::vector<std::string> observer_modules_to_remove_;
   std::vector<Node*> nodes_to_destroy_;
   std::vector<Value*> values_to_quantize_;
-  std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
+  std::unordered_map<Value*, std::tuple<IValue, IValue>> values_to_qparams_;
 };
 
 void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
