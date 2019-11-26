@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/quantization.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -202,12 +202,23 @@ graph(%input, %weight, %bias, %4):
       matmul_add};
 };
 
-bool isAtenFuncNthArg(Value* v, Node* use, const std::string& func_name, int arg_index) {
-  return use->kind() == Symbol::aten(func_name) && v == use->inputs().at(arg_index);
+// Check if node is an aten function of name `func_name` and if value `v` is
+// the nth argument of the function
+bool isAtenFuncNthArg(
+    Value* v,
+    Node* use,
+    const std::string& func_name,
+    int n) {
+  return use->kind() == Symbol::aten(func_name) && v == use->inputs().at(n);
 }
 
-bool isCallFunctionNthArg(Value* v, Node* use, const std::string& func_name, int arg_index) {
-  return use->kind() == prim::CallFunction && getFuncName(use->inputs()[0]) == func_name && v == use->inputs().at(arg_index);
+bool isCallFunctionNthArg(
+    Value* v,
+    Node* use,
+    const std::string& func_name,
+    int n) {
+  return use->kind() == prim::CallFunction &&
+      getFuncName(use->inputs()[0]) == func_name && v == use->inputs().at(n);
 }
 
 struct FuncArg {
@@ -215,16 +226,20 @@ struct FuncArg {
   int arg_index;
 };
 
-bool matchArgPattern(Value* v, const std::vector<FuncArg> aten_func_args, const std::vector<FuncArg>& call_func_args) {
+bool matchArgPattern(
+    Value* v,
+    const std::vector<FuncArg> aten_func_args,
+    const std::vector<FuncArg>& call_func_args) {
   for (const Use& u : v->uses()) {
     for (const auto& func_arg : aten_func_args) {
       if (isAtenFuncNthArg(v, u.user, func_arg.func_name, func_arg.arg_index)) {
-          return true;
+        return true;
       }
     }
 
     for (const auto& func_arg : call_func_args) {
-      if (isCallFunctionNthArg(v, u.user, func_arg.func_name, func_arg.arg_index)) {
+      if (isCallFunctionNthArg(
+              v, u.user, func_arg.func_name, func_arg.arg_index)) {
         return true;
       }
     }
@@ -542,9 +557,8 @@ class QuantizeHelper {
   std::vector<std::string> observer_modules_to_remove_;
   std::vector<Node*> nodes_to_destroy_;
   std::vector<Value*> values_to_quantize_;
-  std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
+  std::unordered_map<Value*, std::tuple<IValue, IValue>> values_to_qparams_;
 };
-
 
 void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   auto observer_name = findObserverName(v);
@@ -600,8 +614,8 @@ void QuantizeHelper::quantizeTensors() {
     dequant = insertQuantDeQuantCall(v, qparams, scalar_type);
     v->replaceAllUsesWith(dequant->output());
     Node* q = dequant->input(0)->node();
-    // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the one
-    // used in quant node. Restore it here:
+    // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the
+    // one used in quant node. Restore it here:
     q->replaceInputWith(dequant->output(), v);
   }
   // no need to clear the vector or map
