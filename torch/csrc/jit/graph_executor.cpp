@@ -652,6 +652,10 @@ GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
 }
 
+std::shared_ptr<Graph> GraphExecutor::getProfiledGraph() {
+  return pImpl->_getProfiledGraph();
+}
+
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes

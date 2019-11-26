@@ -67,6 +67,9 @@ struct GraphExecutorImplBase {
       size_t remaining_bailout_depth) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
+  virtual std::shared_ptr<Graph> _getProfiledGraph() {
+    return {nullptr};
+  }
 
  protected:
   friend struct GraphExecutor;

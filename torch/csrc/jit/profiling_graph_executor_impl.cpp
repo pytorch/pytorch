@@ -180,6 +180,14 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   return *optimized_plan_;
 }
 
+std::shared_ptr<Graph> ProfilingGraphExecutorImpl::_getProfiledGraph() {
+  if (!pr_ || !optimized_plan_) {
+    return {nullptr};
+  }
+
+  return optimized_plan_->graph->copy();
+}
+
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   GraphExecutorState state;
   TORCH_INTERNAL_ASSERT(optimized_plan_);
