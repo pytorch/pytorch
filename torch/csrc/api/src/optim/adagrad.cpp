@@ -100,7 +100,7 @@ void Adagrad::step() {
 }
 
 void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.push_back(std::move(OptimizerParamGroup(parameters, defaults_->clone())));
+  param_groups_.push_back(OptimizerParamGroup(parameters, defaults_->clone()));
 }
 
 const std::vector<Tensor>& Adagrad::parameters() const noexcept {
@@ -124,7 +124,19 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 }
 
 void Adagrad::load(serialize::InputArchive& archive) {
-  serialize(*this, archive);
+  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state;
+  torch::optim::serialize<AdagradParamState>(archive, "state_", state);
+  std::vector<std::pair<std::vector<std::string>, OptimizerOptions>> param_groups;
+  torch::optim::serialize<AdagradOptions>(archive, "param_groups_", param_groups);
+  TORCH_CHECK(param_groups.size() == param_groups_.size(), "loaded state dict has a different number of parameter groups");
+  for(size_t i=0; i<param_groups.size(); i++) {
+    std::vector<std::string> saved_group_keys = param_groups[i].first;
+    std::vector<Tensor> params = param_groups_[i].params();
+    TORCH_CHECK(saved_group_keys.size() == params.size(), "loaded state dict contains a parameter group that doesn't match the size of optimizer's group");
+    for(size_t idx = 0; idx<params.size(); idx++) {
+      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())]=std::move(state[saved_group_keys[idx]]);
+    }
+  }
 }
 } // namespace optim
 } // namespace torch

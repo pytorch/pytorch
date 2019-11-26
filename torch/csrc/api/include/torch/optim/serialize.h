@@ -49,10 +49,10 @@ void serialize(
   serialize::OutputArchive state_archive;
   for (const auto& item : state) {
     serialize::OutputArchive param_state_archive; // For each OptimizerParamState
-    std::string tensorimpl = item.first;
+    std::string tensorimpl_key = item.first;
     const DerivedOptimizerParamState& curr_state = static_cast<const DerivedOptimizerParamState&>(*(item.second.get()));
     curr_state.serialize(param_state_archive);
-    state_archive.write(tensorimpl, param_state_archive);
+    state_archive.write(tensorimpl_key, param_state_archive);
   }
   archive.write(key, state_archive);
 }
@@ -75,20 +75,6 @@ void serialize(
   }
 }
 
-//todo-description
-template <typename DerivedOptimizerParamOptions>
-void serialize(
-  serialize::InputArchive& archive,
-  const std::string& key,
-  std::vector<OptimizerParamGroup> param_groups_) {
-  std::vector<std::pair<std::vector<std::string>, OptimizerOptions>> param_groups;
-  // for(size_t i=0; i<param_groups.size(); i++) {
-  //   param_groups.push_back()
-  // }
-  serialize<DerivedOptimizerParamOptions>(archive, key, param_groups);
-}
-
-
 template <typename DerivedOptimizerParamOptions>
 void serialize(
     serialize::OutputArchive& archive,
@@ -107,8 +93,10 @@ void serialize(
     }
 
     const DerivedOptimizerParamOptions& param_group_options = static_cast<const DerivedOptimizerParamOptions&>(param_groups[i].options());
-    param_group_options.serialize(param_group_archive);
-    param_group_archive.write("options", param_group_archive);
+
+    serialize::OutputArchive param_group_options_archive;
+    param_group_options.serialize(param_group_options_archive);
+    param_group_archive.write("options", param_group_options_archive);
     param_groups_archive.write(key + "/" + c10::guts::to_string(i), param_group_archive);
   }
   //serialize param_groups "params"->vector<string>, "options" -> options

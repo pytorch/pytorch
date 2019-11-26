@@ -64,7 +64,7 @@ class TORCH_API Adagrad : public Optimizer {
   // TODO: we might want to replace `std::vector<Tensor>` with `ParameterContainer` at some point
   explicit Adagrad(
       std::vector<Tensor> params,
-      AdagradOptions defaults) : Adagrad({OptimizerParamGroup(params)}, defaults) {}
+      AdagradOptions defaults) : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   void step() override;
 
@@ -90,7 +90,6 @@ class TORCH_API Adagrad : public Optimizer {
   static void serialize(Self& self, Archive& archive) {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(state_, AdagradParamState);
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(param_groups_, AdagradOptions);
-    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(defaults, AdagradOptions);
   }
 };
 
