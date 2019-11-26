@@ -180,7 +180,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   return *optimized_plan_;
 }
 
-std::shared_ptr<Graph> ProfilingGraphExecutorImpl::_getProfiledGraph() {
+std::shared_ptr<Graph> ProfilingGraphExecutorImpl::_getProfiledGraph() const {
   if (!pr_ || !optimized_plan_) {
     return {nullptr};
   }
