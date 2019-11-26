@@ -1526,6 +1526,28 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.broadcast(tensor, root=0).wait()
             self.assertEqual(torch.full([100, 100], 0), tensor)
 
+    def test_round_robin_create_destroy(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+
+        def create(num, prefix):
+            return c10d._round_robin_process_groups([
+                c10d.ProcessGroupGloo(
+                    c10d.PrefixStore("%s/%d" % (prefix, i), store),
+                    self.rank,
+                    self.world_size)
+                for i in range(num)
+            ])
+
+        # Run create/use/destroy twice
+        for i in range(2):
+            num_process_groups = 2
+            pg = create(num=num_process_groups, prefix=i)
+            for _ in range(3):
+                tensor = torch.ones([10, 10])
+                pg.allreduce(tensor).wait()
+                self.assertEqual(torch.full([10, 10], self.world_size), tensor)
+            del pg
+
 
 @requires_nccl()
 class ProcessGroupNCCLTest(TestCase):
