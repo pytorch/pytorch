@@ -104,7 +104,7 @@ class TestQuantizedOps(unittest.TestCase):
             def __init__(self):
                 super(ConvModel, self).__init__()
                 self.qconfig = torch.quantization.default_qconfig
-                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=False).to(dtype=torch.float))
+                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
 
             def forward(self, x):
                 x = self.fc1(x)
@@ -140,10 +140,10 @@ class TestQuantizedOps(unittest.TestCase):
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
         self.generic_test(QUpsampleModule(), (x,), input_names=["x"])
-
+    '''
     def test_quantized_ts(self):
         torch.backends.quantized.engine = "qnnpack"
-        module_quant = torch.jit.load("/home/supriyar/pytorch/quantized_ts.pt")
+        module_quant = torch.jit.load("/home/supriyar/pytorch/quantized_ts_V6.pt")
 
         input_img = torch.from_numpy(np.random.random((1, 3, 48, 64)).astype("float32"))
         input_fp = torch.from_numpy(np.random.random((1, 12, 48, 64)).astype("float32"))
@@ -151,17 +151,40 @@ class TestQuantizedOps(unittest.TestCase):
         module_quant.eval()
         output = module_quant(input_img, input_fp, X)
         torch.set_default_tensor_type(torch.FloatTensor)
-        torch.onnx.export(module_quant, (input_img, input_fp, X), 'quant.onnx', verbose=True, example_outputs=output, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK, opset_version=9)
-        onnx_model = onnx.load('quant.onnx')
         input_names = ["img", "fp", "ang"]
+        f = io.BytesIO()
+        torch.onnx.export(module_quant, (input_img, input_fp, X), f, verbose=False, input_names=input_names, example_outputs=output, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK, opset_version=9)
+        f.seek(0)
+        onnx_model = onnx.load(f)
         sample_inputs = (
             input_img.numpy(),
             input_fp.numpy(),
             X.numpy(),
         )
-        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
-        np.testing.assert_almost_equal(output[0].numpy(), caffe_res, decimal=0)
 
+        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
+        np.testing.assert_almost_equal(output[0].numpy(), np.squeeze(caffe_res), decimal=3)
+
+    def test_quantized_fbn(self):
+        torch.backends.quantized.engine = "qnnpack"
+        module_quant = torch.jit.load("/home/supriyar/pytorch/fbn.pt")
+
+        x_numpy = np.random.random((2, 3, 8, 8)).astype("float32")
+        X = torch.from_numpy(x_numpy)
+        module_quant.eval()
+        output = module_quant(X)
+        torch.set_default_tensor_type(torch.FloatTensor)
+        input_names = ["x"]
+        f = io.BytesIO()
+        torch.onnx.export(module_quant, (X), f, verbose=False, example_outputs=output, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK, opset_version=9)
+        f.seek(0)
+        onnx_model = onnx.load('quant.onnx')
+        sample_inputs = (
+            x_numpy,
+        )
+        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
+        np.testing.assert_almost_equal(output.numpy(), caffe_res, decimal=3)
+    '''
 
 if __name__ == '__main__':
     unittest.main()

@@ -127,6 +127,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            torch.onnx.symbolic_helper._quantized_ops.clear()
             torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
 
             torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
