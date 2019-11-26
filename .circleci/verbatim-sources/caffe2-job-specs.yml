@@ -124,7 +124,7 @@
   caffe2_macos_build:
     <<: *caffe2_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
