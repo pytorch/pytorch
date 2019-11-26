@@ -109,11 +109,7 @@ inline bool THPUtils_checkDouble(PyObject* obj) {
 #ifdef USE_NUMPY
   is_numpy_double = torch::utils::is_numpy_scalar(obj) && ! torch::utils::is_numpy_int(obj);
 #endif
-#if PY_MAJOR_VERSION == 2
   return PyFloat_Check(obj) || is_numpy_double;
-#else
-  return PyFloat_Check(obj) || is_numpy_double;
-#endif
 }
 
 inline bool THPUtils_checkScalar(PyObject* obj) {
