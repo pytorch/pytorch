@@ -2412,6 +2412,22 @@ Example::
     tensor(1.9073e-06)
 """.format(**common_args))
 
+add_docstr(torch.isfinite,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
+
+    Example::
+
+        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([True,  False,  True,  False,  False])
+""")
+
 add_docstr(torch.isnan,
            r"""
 Returns a new tensor with boolean elements representing if each element is `NaN` or not.
@@ -4851,7 +4867,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+argsort(input, dim=-1, descending=False) -> LongTensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.

@@ -104,7 +104,7 @@ COMMON_NVCC_FLAGS = [
 
 # See comment in load_inline for more information
 # The goal is to be able to call the safe version of the
-# function exactely as if it was the original one.
+# function exactly as if it was the original one.
 # We need to create a pointer to this new function to give
 # it to pybind later.
 
