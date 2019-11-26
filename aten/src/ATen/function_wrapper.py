@@ -1659,7 +1659,7 @@ def create_derived(backend_type_env, declarations):
 
                     if ret['type'] in ALLOC_WRAP.keys():
                         maybe_scalar = "->maybe_zero_dim({})".format(scalar_check) \
-                                       if scalar_check is not None \
+                                       if scalar_check is not None and scalar_check != 'false' \
                                        else ""
                         wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(
                             case_env, arguments=[call])

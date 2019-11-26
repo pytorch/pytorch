@@ -4867,7 +4867,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+argsort(input, dim=-1, descending=False) -> LongTensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -5199,6 +5199,9 @@ i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
 
+.. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
+          then the singular values of each matrix in the batch is returned in descending order.
+
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
           `gesdd` as well.
@@ -5278,6 +5281,9 @@ Since the input matrix :attr:`input` is supposed to be symmetric,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
+
+.. note:: The eigenvalues are returned in ascending order. If :attr:`input` is a batch of matrices,
+          then the eigenvalues of each matrix in the batch is returned in ascending order.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
