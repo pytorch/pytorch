@@ -58,12 +58,17 @@ def register_backend(
 
 
 def construct_rpc_backend_options(
-    backend, rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT, **kwargs
+    backend,
+    rpc_timeout=rpc_constants.DEFAULT_RPC_TIMEOUT,
+    init_method=rpc_constants.DEFAULT_INIT_METHOD,
+    **kwargs
 ):
     if not isinstance(rpc_timeout, datetime.timedelta):
         raise RuntimeError("`rpc_timeout` must be a `datetime.timedelta`.")
 
-    return backend.value.construct_rpc_backend_options_handler(rpc_timeout, **kwargs)
+    return backend.value.construct_rpc_backend_options_handler(
+        rpc_timeout, init_method, **kwargs
+    )
 
 
 def init_backend(backend, *args, **kwargs):
@@ -71,12 +76,16 @@ def init_backend(backend, *args, **kwargs):
 
 
 def _process_group_construct_rpc_backend_options_handler(
-    rpc_timeout, num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS, **kwargs
+    rpc_timeout,
+    init_method,
+    num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS,
+    **kwargs
 ):
     from . import ProcessGroupRpcBackendOptions
 
     rpc_backend_options = ProcessGroupRpcBackendOptions()
     rpc_backend_options.rpc_timeout = rpc_timeout
+    rpc_backend_options.init_method = init_method
     rpc_backend_options.num_send_recv_threads = num_send_recv_threads
     return rpc_backend_options
 
@@ -102,9 +111,7 @@ def _process_group_init_backend_handler(
 
         if (rank != -1) and (rank != group.rank()):
             raise RuntimeError(
-                "rank argument {} doesn't match pg rank {}".format(
-                    rank, group.rank()
-                )
+                "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
             )
         if (world_size != -1) and (world_size != group.size()):
             raise RuntimeError(
