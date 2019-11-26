@@ -772,15 +772,17 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                                self.calib_data)
 
         qconfig_dict = {'': default_qconfig}
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
         model_script = torch.jit.script(linear_model)
         result_eager = model_eager(self.calib_data[0][0])
-        model_quantized = quantize_script(
-            model_script,
-            qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
-            inplace=False)
-        self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
     def test_observer_with_ignored_function(self):
         r"""Test observers with ignored fucntion and make sure it works in
@@ -809,15 +811,17 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                                    self.calib_data)
 
             qconfig_dict = {'': qconfig}
+            model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
             model_script = torch.jit.script(linear_model)
             result_eager = model_eager(self.calib_data[0][0])
-            model_quantized = quantize_script(
-                model_script,
-                qconfig_dict,
-                test_only_eval_fn,
-                [self.calib_data],
-                inplace=False)
-            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+            for model_under_test in [model_traced, model_script]:
+                model_quantized = quantize_script(
+                    model_under_test,
+                    qconfig_dict,
+                    test_only_eval_fn,
+                    [self.calib_data],
+                    inplace=False)
+                self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
     def test_conv(self):
         r"""Compare the result of quantizing conv layer in
@@ -892,15 +896,17 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             'sub2.fc1': default_per_channel_qconfig,
             'fc3': default_qconfig
         }
+        model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
         model_script = torch.jit.script(script_model)
         result_eager = model_eager(self.calib_data[0][0])
-        model_quantized = quantize_script(
-            model_script,
-            qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
-            inplace=False)
-        self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
 
 class FunctionalModuleTest(QuantizationTestCase):
