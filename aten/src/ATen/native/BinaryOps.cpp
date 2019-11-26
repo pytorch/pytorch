@@ -10,10 +10,8 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(add_stub);
-DEFINE_DISPATCH(sub_stub);
-DEFINE_DISPATCH(mul_stub);
-DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(logical_xor_stub);
 DEFINE_DISPATCH(max_stub);
 DEFINE_DISPATCH(lt_stub);
@@ -22,6 +20,9 @@ DEFINE_DISPATCH(gt_stub);
 DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
+DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(remainder_stub)
+DEFINE_DISPATCH(sub_stub);
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -93,6 +94,21 @@ static inline void sub_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
               "Subtraction, the `-` operator, with a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor remainder(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty_like(self);
+  return native::remainder_out(result, self, other);
+}
+
+Tensor& remainder_(Tensor& self, const Tensor& other) {
+  return native::remainder_out(self, self, other);
 }
 
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
@@ -202,6 +218,18 @@ Tensor mul(const Tensor& self, Scalar other) {
 
 Tensor& mul_(Tensor& self, Scalar other) {
   return native::mul_(self, wrapped_scalar_tensor(other));
+}
+
+Tensor remainder(const Tensor& self, Scalar other) {
+  return native::remainder(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& remainder_(Tensor& self, Scalar other) {
+  return native::remainder_(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
