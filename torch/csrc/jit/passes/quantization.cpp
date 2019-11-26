@@ -202,8 +202,8 @@ graph(%input, %weight, %bias, %4):
       matmul_add};
 };
 
-// Check if node is an aten function of name `func_name` and if value `v` is
-// the nth argument of the function
+// Check if node is an aten function of name `func_name` and if value
+// `v` is the nth argument of the function
 bool isAtenFuncNthArg(
     Value* v,
     Node* use,
@@ -212,6 +212,8 @@ bool isAtenFuncNthArg(
   return use->kind() == Symbol::aten(func_name) && v == use->inputs().at(n);
 }
 
+// Check if node is a CallFunction of name `func_name` and if value
+// `v` is the nth argument of the function
 bool isCallFunctionNthArg(
     Value* v,
     Node* use,
@@ -226,6 +228,8 @@ struct FuncArg {
   int arg_index;
 };
 
+// Check any use of `v` matches the aten function call
+// or CallFunction patterns
 bool matchArgPattern(
     Value* v,
     const std::vector<FuncArg> aten_func_args,
@@ -303,6 +307,8 @@ Node* InsertObserversHelper::insertObserverFor(
     const QConfig& qconfig) {
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
+    TORCH_CHECK(
+        v->uses().size() == 1, "We only support bias being used by one node.");
     return nullptr;
   }
 
