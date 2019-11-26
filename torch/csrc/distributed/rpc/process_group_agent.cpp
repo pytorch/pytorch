@@ -468,17 +468,14 @@ void ProcessGroupAgent::listenLoop() {
   while (rpcRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
+    auto work = pg_->recvAnysource(preamble, pg_->getRank());
     {
       std::lock_guard<std::mutex> guard(recvWorkMutex_);
-      recvWork_ = pg_->recvAnysource(preamble, pg_->getRank());
+      recvWork_ = work;
     }
 
-    if (!rpcRunning_.load()) {
+    if (!rpcRunning_.load() || !work->wait() /* aborted */) {
       return;
-    }
-    bool aborted = !recvWork_->wait();
-    if (aborted) {
-      continue;
     }
 
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
