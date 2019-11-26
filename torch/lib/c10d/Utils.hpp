@@ -303,7 +303,7 @@ inline std::vector<std::vector<int64_t>> getSizes(
 
 inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
-  if (tensors[0].type().is_cuda()) {
+  if (tensors[0].device().is_cuda()) {
     for (size_t i = 0; i < tensors.size(); i++) {
       devices[i] = tensors[i].storage().device().index();
     }

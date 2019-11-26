@@ -6,7 +6,7 @@ namespace torch {
 namespace jit {
 
 int device(const autograd::Variable& v) {
-  return v.type().is_cuda() ? v.get_device() : -1;
+  return v.device().is_cuda() ? v.get_device() : -1;
 }
 
 bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {

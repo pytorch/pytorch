@@ -210,9 +210,9 @@ void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backe
 
 void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
   TORCH_CHECK(
-      !t.defined() || t.type().device_type() == device_type,
+      !t.defined() || t.device().type() == device_type,
       "Expected tensor to have ", device_type,
-      " DeviceType, but got tensor with ", t.type().device_type(), " DeviceType ",
+      " DeviceType, but got tensor with ", t.device().type(), " DeviceType ",
       "(while checking arguments for ", c, ")");
 }
 

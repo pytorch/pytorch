@@ -809,7 +809,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     at::DeprecatedTypeProperties* type = torch::utils::type_from_string(type_name);
     scalar_type = type->scalarType();
-    auto device_type = backendToDeviceType(type->backend());
+    auto device_type = options.device().type();
     if (device_type != device.type()) {
       device = at::Device(device_type);
     }
