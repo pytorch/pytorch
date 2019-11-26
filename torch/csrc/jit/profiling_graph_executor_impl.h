@@ -10,6 +10,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ExecutionPlan getPlanFor(Stack& stack) override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
+  std::shared_ptr<Graph> _getProfiledGraph() override;
 
  private:
   std::shared_ptr<Graph> prepareGraph(
