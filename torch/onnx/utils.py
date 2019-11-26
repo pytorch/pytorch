@@ -89,8 +89,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # Inline everyting
     torch._C._jit_pass_inline(graph)
 
-    if operator_export_type != OperatorExportTypes.RAW:
-        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_dce(graph)
@@ -116,6 +114,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
+        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
+
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lower_all_tuples(graph)
         torch._C._jit_pass_peephole(graph, True)
