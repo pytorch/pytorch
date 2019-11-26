@@ -13,6 +13,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
+#include <c10/util/any.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ordered_dict.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
@@ -37,7 +38,7 @@ namespace torch { namespace autograd {
 
 struct Node;
 
-using hooks_dict = c10::OrderedDict<unsigned, std::function<at::Tensor(const at::Tensor&)>>;
+using hooks_dict = c10::OrderedDict<unsigned, c10::any>;
 
 }} // namespace torch::autograd
 
