@@ -95,11 +95,23 @@ inline void assertTypeMatch(
     const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
-  if (tensors[index].type() != type) {
+  if (!tensors[index].options().type_equal(type.options())) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
-       type.toString() + ", got " + tensors[index].type().toString() + ")");
+       type.toString() + ", got " + tensors[index].toString() + ")");
   }
 }
+
+inline void assertTypeMatch(
+    std::function<void(const std::string&)> fn,
+    const at::TensorOptions& options,
+    const at::ArrayRef<at::Tensor>& tensors,
+    size_t index) {
+  if (tensors[index].options().type_equal(options)) {
+    fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
+       options + ", got " + tensors[index].options() + ")");
+  }
+}
+
 
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
@@ -228,10 +240,21 @@ inline void assertTypeAndSizesMatch(
 
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors,
+    const at::TensorOptions& options,
+    const at::IntArrayRef& sizes) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    assertTypeMatch(fn, options, tensors, i);
+    assertSizesMatch(fn, sizes, tensors, i);
+  }
+}
+
+inline void assertTypeAndSizesMatch(
+    std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors) {
-  const auto& type = tensors[0].type();
+  const auto& options = tensors[0].options();
   const auto sizes = tensors[0].sizes();
-  assertTypeAndSizesMatch(fn, tensors.slice(1), type, sizes);
+  assertTypeAndSizesMatch(fn, tensors.slice(1), options, sizes);
 }
 
 // Copied from ATen/core/functional.h.
