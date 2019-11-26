@@ -413,6 +413,9 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
 
 ${py_methods}
 
+// XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
+// Any new ops added here should be accompanied with a comment why they are not
+// being registered through native_functions.yaml, and be tagged cpp / JIT
 static PyMethodDef torch_functions[] = {
   {"arange", (PyCFunction)(void(*)(void))THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"as_tensor", (PyCFunction)(void(*)(void))THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

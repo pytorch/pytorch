@@ -826,6 +826,9 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
   return ret;
 }
 
+// XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
+// Any new ops added here should be accompanied with a comment why they are not
+// being registered through native_functions.yaml, and be tagged cpp / JIT
 PyMethodDef variable_methods[] = {
   {"__add__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__radd__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_add>, METH_VARARGS | METH_KEYWORDS, NULL},
