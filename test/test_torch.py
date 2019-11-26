@@ -5221,6 +5221,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 self.assertTrue(r2.dtype == t_dtype)
                 self.assertTrue(r2.requires_grad)
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_parse_numpy_int(self):
+        # https://github.com/pytorch/pytorch/issues/29252
+        np_val = np.ones(1, dtype=np.int64)[0]
+        self.assertEqual(type(np_val), np.int64)
+        th_val = torch.ones(size=(1,), dtype=torch.long)
+        self.assertEqual((np_val + th_val).dtype, torch.long)
+        self.assertEqual((th_val + np_val).dtype, torch.long)
+
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
                 RuntimeError,

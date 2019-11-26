@@ -138,13 +138,21 @@ bool FunctionParameter::check(PyObject* obj) {
       return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
+      if (THPUtils_checkScalar(obj)) {
+        return true;
+      }
+      if (THPVariable_Check(obj)) {
+        auto & var = ((THPVariable*)obj)->cdata;
+        return !var.requires_grad() && var.dim() == 0;
+      }
+      return false;
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
       }
       // fallthrough
     case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj)) {
+      if (THPUtils_checkDouble(obj) || THPUtils_checkLong(obj)) {
         return true;
       }
       if (THPVariable_Check(obj)) {
@@ -654,10 +662,12 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
-  }else if (PyComplex_Check(obj)) {
+  } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  }else if (THPUtils_checkDouble(obj)) {
+  } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
+  } else if (THPUtils_checkLong(obj)) {
+    scalar = at::Scalar(THPUtils_unpackLong(obj));
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add

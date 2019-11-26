@@ -10,6 +10,9 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
 at::Tensor tensor_from_numpy(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
+bool is_numpy_int(PyObject* obj) {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
 bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
@@ -225,6 +228,10 @@ ScalarType numpy_dtype_to_aten(int dtype) {
       "can't convert np.ndarray of type %s. The only supported types are: "
       "float64, float32, float16, int64, int32, int16, int8, uint8, and bool.",
       ((PyTypeObject*)pytype.get())->tp_name);
+}
+
+bool is_numpy_int(PyObject* obj) {
+  return PyArray_IsIntegerScalar(obj) && ! PyBool_Check(obj);
 }
 
 bool is_numpy_scalar(PyObject* obj) {
