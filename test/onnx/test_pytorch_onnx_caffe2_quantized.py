@@ -188,19 +188,6 @@ class TestQuantizedOps(unittest.TestCase):
         np.testing.assert_almost_equal(output.numpy(), caffe_res, decimal=3)
 
     '''
-    def test_upsample(self):
-        class QUpsampleModule(torch.nn.Module):
-            def __init__(self):
-                super(QUpsampleModule, self).__init__()
-                self.quant1 = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
-
-            def forward(self, x):
-                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode='nearest')
-                return self.dequant(res)
-
-        x = np.random.rand(1, 2, 3, 4).astype("float32")
-        self.generic_test(QUpsampleModule(), (x,), input_names=["x"])
 
 if __name__ == '__main__':
     unittest.main()
