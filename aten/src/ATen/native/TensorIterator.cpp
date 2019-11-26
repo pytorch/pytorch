@@ -96,7 +96,7 @@ static std::tuple<Device, ScalarType, bool> compute_common_type_(at::ArrayRef<Op
     if (!op.tensor.defined()) continue;
     //don't handle scalars
     if (op.tensor.dim() > 0){
-      ScalarType current = op.tensor.scalar_type();
+      ScalarType current = op.current_dtype;
       if (current == ScalarType::Undefined){
         all_same_type = false;
         break;
@@ -114,11 +114,13 @@ static std::tuple<Device, ScalarType, bool> compute_common_type_(at::ArrayRef<Op
   if (all_same_type) {
     return std::make_tuple(device, common_type, true);
   }
-  //TODO refactor so that no tensor copies are done
-  std::vector<Tensor> tensors;
-  std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
-                  [](const OperandInfo& op) { return op.tensor; });
-  auto dtype = at::native::result_type(tensors);
+
+  at::native::ResultTypeState state = {};
+  for (const auto& op : operands) {
+    state = at::native::update_result_type_state(op.tensor, state);
+  }
+  auto dtype = at::native::result_type(state);
+
   auto result = std::make_tuple(device, dtype, false);
   TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
   return result;
@@ -135,23 +137,23 @@ static void validate_dtype(OperandInfo& op, ScalarType common_dtype, CommonDType
     // For binary_ops, we follow casting rules. For unary/nullary types
     // we require the type to match.
     if (op.is_output && check_output) {
-      if (!canCast(common_dtype, op.tensor.scalar_type()))
+      if (!canCast(common_dtype, op.current_dtype))
       {
         AT_ERROR("result type ", common_dtype,
           " can't be cast to the desired output type ",
-          op.tensor.scalar_type());
+          op.current_dtype);
       }
     }
-    if (!promoting && op.dtype != op.tensor.scalar_type()) {
-      AT_ERROR("expected dtype ", op.dtype, " but got dtype ", op.tensor.scalar_type());
+    if (!promoting && op.target_dtype != op.current_dtype) {
+      AT_ERROR("expected dtype ", op.target_dtype, " but got dtype ", op.current_dtype);
     }
   }
 }
 
 static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType common_dtype) {
-  if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
+  if (op.tensor.defined() && op.current_dtype != common_dtype)
   {
-    op.dtype = common_dtype;
+    op.target_dtype = common_dtype;
     op.original_tensor = op.tensor;
     if (!op.is_output) {
       op.tensor = op.tensor.to(common_dtype);
@@ -159,6 +161,7 @@ static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType commo
       op.tensor =
           at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
+    op.current_dtype = common_dtype;
   }
 }
 
@@ -196,30 +199,30 @@ void TensorIterator::compute_types() {
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
         op.device = common_device;
-        op.dtype = common_dtype_;
+        op.target_dtype = common_dtype_;
       } else if (compute_common_dtype &&
-                 (op.device != common_device || op.dtype != common_dtype_)) {
+                 (op.device != common_device || op.target_dtype != common_dtype_)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
             common_device_is_cuda && op.tensor.device().is_cpu() &&
             !has_cpu_scalar) {
           // don't cast CPU scalars in CUDA ops that directly support them.
           op.device = op.tensor.device();
-          op.dtype = op.tensor.scalar_type();
+          op.target_dtype = op.current_dtype;
           has_cpu_scalar = true;
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
             !op.is_output &&
-            op.tensor.scalar_type() == kHalf && common_dtype_ == kFloat &&
+            op.current_dtype == kHalf && common_dtype_ == kFloat &&
             op.tensor.device().is_cuda() && common_device_is_cuda) {
           // allow input tensor type upcasting for fp16 to fp32 in fused kernel
           // on GPU
           op.device = op.tensor.device();
-          op.dtype = op.tensor.scalar_type();
+          op.target_dtype = op.current_dtype;
         } else {
           op.device = common_device;
           if (compute_common_dtype_only_for_inputs && op.is_output) {
-            op.dtype = op.tensor.scalar_type();
+            op.target_dtype = op.current_dtype;
           } else {
-            op.dtype = common_dtype_;
+            op.target_dtype = common_dtype_;
           }
         }
       }
@@ -227,15 +230,18 @@ void TensorIterator::compute_types() {
   }
 
   for (auto &op : operands_) {
+    bool skip_output = compute_common_dtype_only_for_inputs && op.is_output;
+    bool is_different = op.tensor.defined() && op.current_dtype != common_dtype_;
+
     if (may_have_differing_types) {
       validate_dtype(op, common_dtype_, common_dtype_strategy_);
-      bool cast_by_copy = compute_common_dtype && !common_device_is_cuda && (!compute_common_dtype_only_for_inputs || !op.is_output);
+      bool cast_by_copy = compute_common_dtype && !common_device_is_cuda && !skip_output;
       if (cast_by_copy) {
         maybe_copy_casting_to_common_dtype(op, common_dtype_);
       }
     }
 
-    if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype_) {
+    if (is_different && !skip_output) {
       have_differing_types_ = true;
     }
 
@@ -289,7 +295,7 @@ void TensorIterator::allocate_outputs() {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-      int element_size = elementSize(op.dtype);
+      int element_size = elementSize(op.target_dtype);
       if (requires_channels_last_output_ && ndim() == 4) {
         auto tensor_shape = invert_perm(shape_);
         op.tensor = at::empty(tensor_shape, op.options());
@@ -324,6 +330,7 @@ void TensorIterator::allocate_outputs() {
               at::empty_strided(tensor_shape, tensor_stride, op.options());
         }
       }
+      op.current_dtype = op.target_dtype;
     }
   }
 }
@@ -626,9 +633,8 @@ void TensorIterator::remove_operand(int arg) {
   operands_.erase(operands_.begin() + arg);
 }
 
-void TensorIterator::replace_operand(int arg, void* data, IntArrayRef stride) {
+void TensorIterator::unsafe_replace_operand(int arg, void* data) {
   operands_[arg].data = data;
-  operands_[arg].stride_bytes = stride;
 }
 
 void TensorIterator::remove_dimension(int dim) {
@@ -683,6 +689,7 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.allow_cpu_scalars_ = true;
   iter.compute_common_dtype_only_for_inputs();
   iter.build();
+  iter.dynamic_cast_if(iter.dtype() != kBool);
   return iter;
 }
 
@@ -921,6 +928,7 @@ void TensorIterator::fast_set_up() {
         TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
         op.tensor = at::empty(shape_, op.options());
       }
+      op.current_dtype = op.target_dtype;
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){

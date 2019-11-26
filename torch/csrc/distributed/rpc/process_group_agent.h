@@ -13,6 +13,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
+  ProcessGroupRpcBackendOptions() = default;
+  int numSendRecvThreads;
+};
+
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {
@@ -45,6 +50,8 @@ class ProcessGroupAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
   const WorkerInfo& getWorkerInfo(worker_id_t id) const override;
+
+  std::vector<WorkerInfo> getWorkerInfos() const override;
 
   void join() override;
 

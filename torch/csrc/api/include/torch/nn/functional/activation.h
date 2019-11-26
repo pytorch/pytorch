@@ -20,7 +20,7 @@ inline Tensor elu(Tensor& input, double alpha, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor elu(Tensor& input, const ELUFuncOptions& options = {}) {
+inline Tensor elu(Tensor input, const ELUFuncOptions& options = {}) {
   return detail::elu(input, options.alpha(), options.inplace());
 }
 
@@ -36,7 +36,7 @@ inline Tensor selu(Tensor& input, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor selu(Tensor& input, const SELUFuncOptions& options = {}) {
+inline Tensor selu(Tensor input, const SELUFuncOptions& options = {}) {
   return detail::selu(input, options.inplace());
 }
 
@@ -69,7 +69,7 @@ inline Tensor hardtanh(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor hardtanh(Tensor& input, const HardtanhFuncOptions& options = {}) {
+inline Tensor hardtanh(Tensor input, const HardtanhFuncOptions& options = {}) {
   return detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
 }
 
@@ -87,7 +87,7 @@ inline Tensor leaky_relu(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor leaky_relu(Tensor& input, const LeakyReLUFuncOptions& options = {}) {
+inline Tensor leaky_relu(Tensor input, const LeakyReLUFuncOptions& options = {}) {
   return detail::leaky_relu(input, options.negative_slope(), options.inplace());
 }
 
@@ -225,7 +225,7 @@ inline Tensor relu(Tensor& input, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor relu(Tensor& input, const ReLUFuncOptions& options = {}) {
+inline Tensor relu(Tensor input, const ReLUFuncOptions& options = {}) {
   return detail::relu(input, options.inplace());
 }
 
@@ -237,14 +237,13 @@ inline Tensor relu6(Tensor& input, bool inplace) {
 }
 } // namespace detail
 
-inline Tensor relu6(Tensor& input, const ReLU6FuncOptions& options = {}) {
+inline Tensor relu6(Tensor input, const ReLU6FuncOptions& options = {}) {
   return detail::relu6(input, options.inplace());
 }
 
 // ============================================================================
 
 namespace detail {
-
 inline Tensor rrelu(Tensor& input,
                     double lower,
                     double upper,
@@ -258,7 +257,7 @@ inline Tensor rrelu(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor rrelu(Tensor& input, const RReLUFuncOptions& options = {}) {
+inline Tensor rrelu(Tensor input, const RReLUFuncOptions& options = {}) {
   return detail::rrelu(input, options.lower(), options.upper(), options.training(), options.inplace());
 }
 
@@ -276,7 +275,7 @@ inline Tensor celu(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor celu(Tensor& input, const CELUFuncOptions& options = {}) {
+inline Tensor celu(Tensor input, const CELUFuncOptions& options = {}) {
   return detail::celu(input, options.alpha(), options.inplace());
 }
 
@@ -337,7 +336,7 @@ inline Tensor threshold(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor threshold(Tensor& input, const ThresholdFuncOptions& options) {
+inline Tensor threshold(Tensor input, const ThresholdFuncOptions& options) {
   return detail::threshold(input, options.threshold(), options.value(), options.inplace());
 }
 
