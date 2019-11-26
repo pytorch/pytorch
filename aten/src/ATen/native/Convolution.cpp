@@ -179,7 +179,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
     return false;
   }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
-    (input.type().backend() == at::Backend::CPU &&
+    (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !is_dilated() && // doesn't support dilation
      !transposed && // or transposed tensors
@@ -190,7 +190,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
   return at::_nnpack_available() &&
-         input.type().backend() == at::Backend::CPU &&
+         input.options().backend() == at::Backend::CPU &&
          input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors

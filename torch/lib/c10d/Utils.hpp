@@ -198,7 +198,7 @@ inline void assertCPU(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors) {
   const auto& device = tensors[0].device();
-  if (device.type() != at::kCPU) {
+  if (device.options().backend() != at::kCPU) {
     fn("only supports CPU tensors");
   }
 }

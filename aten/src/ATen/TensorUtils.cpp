@@ -196,9 +196,9 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
 
 void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   TORCH_CHECK(
-    !t.defined() || t.type().backend() == backend,
+    !t.defined() || t.options().backend() == backend,
     "Expected tensor to have ", toString(backend),
-    " Backend, but got tensor with ", toString(t.type().backend()), " Backend ",
+    " Backend, but got tensor with ", toString(t.options().backend()), " Backend ",
     "(while checking arguments for ", c, ")");
 }
 
