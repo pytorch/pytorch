@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Sin_0"
     op_type: "Sin"
   }
   name: "torch-jit-export"

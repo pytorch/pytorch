@@ -234,7 +234,8 @@ void initPythonIRBindings(PyObject* module_) {
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string,
-             bool keep_initializers_as_inputs) {
+             bool keep_initializers_as_inputs,
+             bool add_node_names) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
@@ -245,7 +246,8 @@ void initPythonIRBindings(PyObject* module_) {
                 defer_weight_export,
                 operator_export_type,
                 strip_doc_string,
-                keep_initializers_as_inputs);
+                keep_initializers_as_inputs,
+                add_node_names);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -267,7 +269,8 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("strip_doc_string") = true,
-          py::arg("keep_initializers_as_inputs") = true)
+          py::arg("keep_initializers_as_inputs") = true,
+          py::arg("add_node_names") = true)
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
@@ -276,7 +279,8 @@ void initPythonIRBindings(PyObject* module_) {
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool google_printer,
-             bool keep_initializers_as_inputs) {
+             bool keep_initializers_as_inputs,
+             bool add_node_names) {
             return pretty_print_onnx(
                 g,
                 initializers,
@@ -284,7 +288,8 @@ void initPythonIRBindings(PyObject* module_) {
                 defer_weight_export,
                 operator_export_type,
                 google_printer,
-                keep_initializers_as_inputs);
+                keep_initializers_as_inputs,
+                add_node_names);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
@@ -292,7 +297,8 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("google_printer") = false,
-          py::arg("keep_initializers_as_inputs") = true)
+          py::arg("keep_initializers_as_inputs") = true,
+          py::arg("add_node_names") = true)
       .def(
           "inputs",
           [](Graph& g) {
