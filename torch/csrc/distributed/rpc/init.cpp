@@ -36,7 +36,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout);
+          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
+          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -60,8 +61,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
-              "sync",
-              &RpcAgent::sync,
+              "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_worker_infos",
+              &RpcAgent::getWorkerInfos,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
@@ -151,12 +154,13 @@ Otherwise, throws an exception.
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "join",
-          &ProcessGroupAgent::join,
+          "get_worker_infos",
+          (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
+              ProcessGroupAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "shutdown",
-          &ProcessGroupAgent::shutdown,
+          "join",
+          &ProcessGroupAgent::join,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "sync",
@@ -168,8 +172,8 @@ Otherwise, throws an exception.
     agent->start();
   });
 
-  module.def("_destroy_rref_context", []() {
-    RRefContext::getInstance().destroyInstance();
+  module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
+    RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
   });
 
   module.def("_cleanup_python_rpc_handler", []() {
