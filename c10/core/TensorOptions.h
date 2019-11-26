@@ -335,14 +335,16 @@ struct C10_API TensorOptions {
     switch (layout()) {
       case Layout::Strided:
         switch (device().type()) {
-          case DeviceType::CPU:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
+          case DeviceType::CPU: {
+            auto dtype_tmp = typeMetaToScalarType(dtype());
+            if (isComplexType(dtype_tmp)) {
               return TensorTypeId::ComplexCPUTensorId;
             }
-            if (isQIntType(typeMetaToScalarType(dtype()))) {
+            if (isQIntType(dtype_tmp)) {
               return TensorTypeId::QuantizedCPUTensorId;
             }
             return TensorTypeId::CPUTensorId;
+            }
           case DeviceType::CUDA:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
               return TensorTypeId::ComplexCUDATensorId;

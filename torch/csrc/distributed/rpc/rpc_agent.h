@@ -12,9 +12,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct RpcAgentOptions {
-  RpcAgentOptions() noexcept = default;
+struct RpcBackendOptions {
+  RpcBackendOptions() = default;
   std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
 };
 
 // A globally unique ID to identify an RpcAgent
@@ -104,6 +105,8 @@ class TORCH_API RpcAgent {
       const std::string& workerName) const = 0;
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
+
+  virtual std::vector<WorkerInfo> getWorkerInfos() const = 0;
 
   // Retrieve the timeout for all RPCs.
   inline std::chrono::milliseconds getRpcTimeout() const {
