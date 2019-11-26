@@ -232,7 +232,7 @@ struct FuncArg {
 // or CallFunction patterns
 bool matchArgPattern(
     Value* v,
-    const std::vector<FuncArg> aten_func_args,
+    const std::vector<FuncArg>& aten_func_args,
     const std::vector<FuncArg>& call_func_args) {
   for (const Use& u : v->uses()) {
     for (const auto& func_arg : aten_func_args) {
