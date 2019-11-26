@@ -3812,7 +3812,7 @@ class TestTransforms(TestCase):
                                cache_size=cache_size),
                 PowerTransform(exponent=torch.tensor(5.).normal_(),
                                cache_size=cache_size),
-                SigmoidTransform(cache_size=cache_size), 
+                SigmoidTransform(cache_size=cache_size),
                 TanhTransform(cache_size=cache_size),
                 AffineTransform(0, 1, cache_size=cache_size),
                 AffineTransform(1, -2, cache_size=cache_size),
