@@ -180,7 +180,7 @@ def warn_on_static_input_change(input_states):
                 warnings.warn(warning)
 
 
-def _decide_args_by_export_type(arg_name, arg_bool_value, operator_export_type):
+def _disable_args_by_export_type(arg_name, arg_bool_value, operator_export_type):
     # This helper method disables the arguments not supported if export_type != operator_export_type.ONNX
     if operator_export_type is not operator_export_type.ONNX:
         if arg_bool_value is True:
@@ -221,11 +221,11 @@ def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type
 
 
 def _decide_add_node_names(add_node_names, operator_export_type):
-    return _decide_args_by_export_type("add_node_names", add_node_names, operator_export_type)
+    return _disable_args_by_export_type("add_node_names", add_node_names, operator_export_type)
 
 
 def _decide_constant_folding(do_constant_folding, operator_export_type):
-    return _decide_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
+    return _disable_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
 
 
 def _trace(func, args, operator_export_type, return_outs=False):
