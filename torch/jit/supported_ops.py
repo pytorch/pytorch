@@ -190,7 +190,11 @@ def _get_global_builtins():
     op_renames = {
         'bool': 'aten::Bool',
         'int': 'aten::Int',
-        'float': 'aten::Float'
+        'float': 'aten::Float',
+        'abs': 'prim::abs',
+        'max': 'prim::max',
+        'min': 'prim::min',
+        'range': 'fake::does_not_exist',
     }
 
     schemaless_op_explanations = {
@@ -201,6 +205,7 @@ def _get_global_builtins():
         'isinstance': 'Result is static',
         'zip': 'Arguments must be lists',
         'enumerate': 'Arguments must be lists',
+        'range': 'Can only be used as an iterator in a for loop',
     }
 
     magic_methods = [
@@ -269,11 +274,11 @@ def _list_supported_ops():
 
     body = ''
     op_gathering_fns = (
-        _get_tensor_ops,
-        _get_nn_functional_ops,
-        _get_torchscript_builtins,
+        # _get_tensor_ops,
+        # _get_nn_functional_ops,
+        # _get_torchscript_builtins,
         _get_global_builtins,
-        _get_math_builtins,
+        # _get_math_builtins,
     )
     for fn in op_gathering_fns:
         header, items = fn()
