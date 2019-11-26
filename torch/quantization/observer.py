@@ -341,9 +341,14 @@ class MinMaxObserver(_ObserverBase):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
 
-        self.min_val = state_dict.pop(prefix + 'min_val')
-        self.max_val = state_dict.pop(prefix + 'max_val')
-        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        local_state = ['min_val', 'max_val']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                setattr(self, name, state_dict.pop(key))
+            elif strict:
+                missing_keys.append(key)
+        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                           missing_keys, unexpected_keys, error_msgs)
 
 
@@ -500,9 +505,14 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.min_vals = state_dict.pop(prefix + 'min_vals')
-        self.max_vals = state_dict.pop(prefix + 'max_vals')
-        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        local_state = ['min_vals', 'max_vals']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                setattr(self, name, state_dict.pop(key))
+            elif strict:
+                missing_keys.append(key)
+        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                                     missing_keys, unexpected_keys, error_msgs)
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -836,9 +846,15 @@ class HistogramObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.min_val = state_dict.pop(prefix + 'min_val')
-        self.max_val = state_dict.pop(prefix + 'max_val')
-        super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+
+        local_state = ['min_val', 'max_val']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                setattr(self, name, state_dict.pop(key))
+            elif strict:
+                missing_keys.append(key)
+        super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                              missing_keys, unexpected_keys, error_msgs)
 
 class RecordingObserver(_ObserverBase):
