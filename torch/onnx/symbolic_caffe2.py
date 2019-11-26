@@ -13,7 +13,7 @@ def register_quantized_ops(domain, version):
     quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
-            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'slice', 'clamp', 'reshape']
+            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'slice', 'reshape']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -26,9 +26,9 @@ def nchw2nhwc(g, input):
         "Y_scale_f": input.node()["Y_scale"],
         "Y_zero_point_i": input.node()["Y_zero_point"],
     }
-    input = g.op("_caffe2::Int8Transpose", input, **quant_args)
-    sym_help._quantized_ops.add(input)
-    return input
+    output = g.op("_caffe2::Int8Transpose", input, **quant_args)
+    sym_help._quantized_ops.add(output)
+    return output
 
 def nhwc2nchw(g, input):
     axes = [0, 3, 1, 2]
@@ -38,9 +38,9 @@ def nhwc2nchw(g, input):
         "Y_scale_f": input.node()["Y_scale"],
         "Y_zero_point_i": input.node()["Y_zero_point"],
     }
-    input = g.op("_caffe2::Int8Transpose", input, **quant_args)
-    sym_help._quantized_ops.add(input)
-    return input
+    output = g.op("_caffe2::Int8Transpose", input, **quant_args)
+    sym_help._quantized_ops.add(output)
+    return output
 
 def linear_prepack(g, weight, bias):
     # Mapping to a dummy caffe2 prepack node.
