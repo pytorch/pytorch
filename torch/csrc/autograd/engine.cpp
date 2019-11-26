@@ -414,7 +414,7 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
 static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
   // Types are compatible if they exactly match or if the gradient is a sparse
   // version of the expected type.
-  return expected.type_equal(actual) || (actual.is_sparse() && expected.device() == actual.device());
+  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
 }
 
 void validate_outputs(
