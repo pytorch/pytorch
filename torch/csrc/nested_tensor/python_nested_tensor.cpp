@@ -12,6 +12,8 @@ namespace nested_tensor {
 using namespace at;
 using namespace torch::autograd;
 using namespace torch::autograd::utils;
+using namespace torch::jit;
+using namespace torch::jit::script;
 namespace py = pybind11;
 
 PyObject* _ListNestedTensorVariableClass = nullptr;
@@ -208,10 +210,38 @@ static _NestedNode apply_jit_function(
     PyObject* child = THPVariable_Wrap(child_variable);
     pybind11::object self =
         pybind11::reinterpret_borrow<pybind11::object>(child);
-    py::object result = invokeScriptFunctionFromPython(
-        fn, torch::jit::tuple_slice(py::make_tuple(self)), py::dict());
-    return _NestedNode(result.cast<Variable>());
 
+    auto args = (torch::jit::tuple_slice(py::make_tuple(self)));
+    auto kwargs = py::dict();
+    auto tracing_state = tracer::getTracingState();
+    c10::optional<IValue> no_opt = c10::nullopt;
+    if (!tracing_state) {
+      auto stack = createStackForSchema(
+          fn.getSchema(),
+          std::move(args),
+          std::move(kwargs),
+          std::move(no_opt));
+      py::gil_scoped_release release;
+      fn.run(stack);
+      py::gil_scoped_acquire acquire;
+      TORCH_CHECK(
+          stack.size() > 0,
+          "Expected values in the stack after execution but found none");
+      py::object result = toPyObject(std::move(stack.back()));
+      auto result_node =  _NestedNode(result.cast<Variable>());
+      return result_node;
+
+    } else {
+      py::object result = runAndInsertCall(
+          fn,
+          args,
+          kwargs,
+          no_opt,
+          [&](Graph& graph, const script::MatchedSchema& match) {
+            return graph.insertFunctionCall(&fn, match);
+          });
+      return _NestedNode(result.cast<Variable>());
+    }
   } else {
     std::vector<_NestedNode> result;
     for (size_t i = 0; i < nested_node._children.size(); i++) {
