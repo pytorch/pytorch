@@ -1398,6 +1398,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_getitem(self):
+        class GetItemModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z, ind):
+                # this will create prim::ListConstruct(x, y, z) + aten::__getitem__
+                arr = [x, y, z]
+                return arr[ind]
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(1, 4, 5)
+        z = torch.randn(2, 4, 5)
+        ind = torch.tensor(1, dtype=torch.long)
+        self.run_test(GetItemModel(), (x, y, z, ind))
+
+        ind = torch.tensor(-2, dtype=torch.long)
+        self.run_test(GetItemModel(), (x, y, z, ind))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
@@ -1413,6 +1431,65 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5)
         self.run_test(UnbindModel2(), x)
+
+        class UnbindModel3(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(-2)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel3(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unbind_dynamic(self):
+        class UnbindModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.unbind()[1]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel(), x)
+
+        class UnbindModel2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.unbind(-1)[1]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel2(), x)
+
+    def test_split(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 2])
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+        class SplitModel2(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 1], -2)
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_dynamic(self):
+        class SplitModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.split(2)[1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+        class SplitModel2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.split(2, -3)[1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel2(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
