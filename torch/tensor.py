@@ -422,7 +422,7 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        return self.floor_divide(other)
+        return other.floor_divide(self)
 
     __neg__ = _C._TensorBase.neg
 
