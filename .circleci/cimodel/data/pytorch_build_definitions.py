@@ -251,7 +251,13 @@ def instantiate_configs():
             parallel_backend=parallel_backend,
         )
 
-        if distro_name == 'xenial' and fc.find_prop("pyver") == '2.7.9' and cuda_version is None:
+        # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
+        # should run on a CPU-only build that runs on all PRs.
+        if distro_name == 'xenial' and fc.find_prop("pyver") == '3.6' \
+                and cuda_version is None \
+                and parallel_backend is None \
+                and compiler_name == 'gcc' \
+                and fc.find_prop('compiler_version') == '5.4':
             c.dependent_tests = gen_docs_configs(c)
 
         if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
