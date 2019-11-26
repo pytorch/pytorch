@@ -207,6 +207,17 @@ def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type
         val_keep_init_as_ip = False
     return val_keep_init_as_ip
 
+def _decide_add_node_names(add_node_names, operator_export_type):
+    if operator_export_type is not operator_export_type.ONNX:
+        if add_node_names is True:
+            warnings.warn("`add_node_names` can be set to True only when 'operator_export_type' is "
+                          "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
+                          "`add_node_names` argument will be ignored and node anme will"
+                          " not be added.")
+        return False  # Node name will not be added.
+    return add_node_names
+
+
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -355,7 +366,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
-                             do_constant_folding=False, keep_initializers_as_inputs=None, fixed_batch_size=False):
+                             do_constant_folding=False, keep_initializers_as_inputs=None,
+                             fixed_batch_size=False, add_node_names=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -365,6 +377,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                      operator_export_type,
                                                      opset_version)
+    val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -373,7 +386,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 
     return graph._pretty_print_onnx(params_dict, opset_version, False,
                                     operator_export_type, google_printer,
-                                    val_keep_init_as_ip)
+                                    val_keep_init_as_ip, val_add_node_names)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -384,7 +397,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
-            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None, fixed_batch_size=False):
+            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
+            fixed_batch_size=False, add_node_names=True):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -408,6 +422,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
+        val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
@@ -425,11 +440,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         if export_params:
             proto, export_map = graph._export_onnx(
                 params_dict, opset_version, dynamic_axes, defer_weight_export,
-                operator_export_type, strip_doc_string, val_keep_init_as_ip)
+                operator_export_type, strip_doc_string, val_keep_init_as_ip,
+                val_add_node_names)
         else:
             proto, export_map = graph._export_onnx(
                 {}, opset_version, dynamic_axes, False, operator_export_type,
-                strip_doc_string, val_keep_init_as_ip)
+                strip_doc_string, val_keep_init_as_ip, val_add_node_names)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
