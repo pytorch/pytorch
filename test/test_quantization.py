@@ -38,9 +38,6 @@ from common_quantization import QuantizationTestCase, \
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
-from jit_utils import _tmp_donotuse_dont_inline_everything
-from jit_utils import get_forward
-
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis_utils import no_deadline
