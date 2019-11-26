@@ -1,4 +1,4 @@
-import sys
+22import sys
 import io
 import inspect
 import os
@@ -6239,10 +6239,10 @@ class TestTorchDeviceType(TestCase):
         # normal
         # out shape matches shape of mean
         self.assertEqual((), torch.normal(zero_d, zero_d).shape)
-        #self.assertEqual((), torch.normal(zero_d, one_d).shape)
+        # self.assertEqual((), torch.normal(zero_d, one_d).shape)
         self.assertEqual((1,), torch.normal(one_d, zero_d).shape)
-        #self.assertEqual((), torch.normal(1, zero_d).shape)
-        #self.assertEqual((), torch.normal(1, one_d).shape)
+        # self.assertEqual((), torch.normal(1, zero_d).shape)
+        # self.assertEqual((), torch.normal(1, one_d).shape)
         self.assertEqual((), torch.normal(zero_d, 1).shape)
         self.assertEqual((1,), torch.normal(one_d, 1).shape)
 
