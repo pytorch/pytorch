@@ -65,7 +65,7 @@ struct GraphExecutorImplBase {
   virtual ExecutionPlan getPlanFor(Stack& stack) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
-  virtual std::shared_ptr<Graph> _getProfiledGraph() {
+  virtual std::shared_ptr<Graph> _getProfiledGraph() const {
     return {nullptr};
   }
 

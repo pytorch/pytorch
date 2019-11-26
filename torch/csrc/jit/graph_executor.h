@@ -49,7 +49,7 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
 
-  std::shared_ptr<Graph> getProfiledGraph();
+  std::shared_ptr<Graph> getProfiledGraph() const;
 
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;

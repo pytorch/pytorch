@@ -644,7 +644,7 @@ GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
 }
 
-std::shared_ptr<Graph> GraphExecutor::getProfiledGraph() {
+std::shared_ptr<Graph> GraphExecutor::getProfiledGraph() const {
   return pImpl->_getProfiledGraph();
 }
 
