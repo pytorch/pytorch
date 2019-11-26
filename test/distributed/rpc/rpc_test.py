@@ -16,7 +16,7 @@ import dist_utils
 from dist_utils import dist_init
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
-from rpc_agent_test_fixture import RpcAgentTestFixture
+from distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 
 def requires_process_group_agent(message=""):

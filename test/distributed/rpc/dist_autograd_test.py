@@ -10,7 +10,7 @@ import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import dist_utils
 from dist_utils import dist_init
-from rpc_agent_test_fixture import RpcAgentTestFixture
+from distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 import threading
 
