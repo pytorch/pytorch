@@ -11,7 +11,7 @@
   return: argument 0
   options:
     - cname: set
-      scalar_check: source_->dim() == 0
+      scalar_check: false
       arguments:
         - THTensor* self
         - THTensor* source
