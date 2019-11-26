@@ -1,29 +1,21 @@
 .. _autograd-mechanics:
 
-Autograd mechanics
-==================
+Autograd
+========
 
-This note will present an overview of how autograd works. It's not strictly necessary
-to understand all this, but we recommend getting familiar with it, as it will help you
-write more efficient, cleaner programs, and can aid you in debugging.
+This note presents advanced informations about the autograd in pytorch.
+The reader is assumed to be familiar with the `autograd introduction <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_ already.
+This note contains three independent sections:
 
-TL-DR:
-
-- Mathematical formulation: we compute vector-Jacobian products using the chain rule. We support in-place operations using hidden versioning of the Tensors.
-- Non-gradients: we provide helper functions to be able to compute a result that is not the gradient of the user's whole program.
-- Will in-place operation work?: Because they modify the original value, if anything needs this value for the backward, the backward pass will fail.
-- Gradients of zero vs independent of the input: We don't see the difference.
-- Gradients of zero: They can be represented by a Tensor full of ``0`` s, ``None`` in python, undefined tensor in c++ or and error for ``autograd.grad(allow_unused=False)``.
-- Non-differentiable functions: We do not provide anyone guarantee, but we have fixed rules on what each elementary operation's backward pass should compute which should cover most cases reasonably.
-- Implementation details: Only if you want to understand the current implementation at a high level.
-
-
+.. contents::
+    :local:
+    :depth: 2
 
 Mathematical formulation
-^^^^^^^^^^^^^^^^^^^^^^^^
+------------------------
 
 What does the autograd package do
-"""""""""""""""""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The autograd package allows to use automatic differentiation techniques on top of tensors.
 Automatic differentiation computes the dot product between a given vector and the Jacobian of a user-defined function.
@@ -44,7 +36,7 @@ It is also regularly called the backpropagation algorithm in this case.
 
 
 How does it does that
-"""""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^^^
 
 One simple interpretation of what it is doing is splitting the user function :math:`f` into composition of smaller
 pre-defined operations.
@@ -55,7 +47,7 @@ For example, if we split :math:`f` into two elementary operations, namely :math:
 the automatic differentiation will compute :math:`v^T J_f = (v^T J_{op_2}) J_{op_1} =  v^T J_{op_2} J_{op_1}`.
 
 What is your code computing
-"""""""""""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The tensors for which the user want to compute the gradients can be marked using the :code:`.requires_grad_()` function.
 The user can then use any pytorch function on this tensor to compute the final value of its function.
@@ -94,7 +86,7 @@ Adding a new operation as follows:
 Will change the computation to: :math:`v^T J_f = v^T J_{op_3} J_{op_2} J_{op_1} = v^T \dfrac{\partial{z}}{\partial{y}} \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{z}}{\partial{w}}`.
 
 Handling in-place operations
-"""""""""""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The only special case that needs to be considered here are in-place operations.
 The main reason to use in-place operations is to preserve side effects and prevent additional memory requirements.
@@ -132,10 +124,11 @@ See the two functions below for examples where we use subscripts to specify each
 The corresponding autograd computations can simply be written using the implicit variables: :math:`v^T J_f = v^T J_{op_2\_} J_{op_1} = v^T \dfrac{\partial{z_1}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}} = v^T \dfrac{\partial{z_1}}{\partial{x}}`.
 And for g, it is harder to write as only part of :code:`op_2_()` is used when computing :code:`y`, but it can be written as :math:`v^T J_g = v^T \dfrac{\partial{y_1}}{\partial{y_0}} \dfrac{\partial{y_0}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}}`.
 
-Computing not gradients
-^^^^^^^^^^^^^^^^^^^^^^^
+Computing gradient of a subset of your whole program
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In some cases, the user might need to compute something that is not the "true gradient" of its function.
+We saw above how to start recording gradient only from a given Tensor using ``requires_grad`` but some cases require to disable them locally or stop tracking them.
 We identify few use cases here:
 
 - Ignore the gradients for some part of the computation as they could render the computed gradients unstable, e.g. gradients of square root near :math:`0`.
@@ -270,9 +263,11 @@ detach and no_grad can be implemented using the others as follows:
         # Some ops using x and y, producing z and w
         return z, w
 
+Autograd quirks
+---------------
 
-Will in-place ops work?
-^^^^^^^^^^^^^^^^^^^^^^
+Will in-place operations work?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 We repeat the example from above here for clarity:
 
@@ -289,7 +284,7 @@ The main limitation of our in-place operation strategy is that in this example, 
 Because we do not want to hide memory allocation from the user, the backward pass will raise an error.
 In such a case, to be able to perform this backward pass we need to either replace :code:`op_2_` with an equivalent out-of-place operation or make sure :code:`op_2_` modifies in-place a copy of :code:`z` by adding a :code:`.clone()` for example.
 
-Gradient of 0 vs independent of the input
+Gradient of zero vs independent of the input
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 As long as all gradients are finite values, these two can be seen as being the same.
@@ -298,10 +293,10 @@ The autograd engine does not make a difference between the two.
 
 Unfortunately as soon as :code:`inf` or :code:`nan` appear, the two become different.
 This is because a gradient of :math:`0` should propagate the non-finite values while an independent gradient should propagate an independent gradient (which is the same as :math:`0`).
-This is a problem when trying to hide pathological points with indexing as can be seen for example in [Issue #9688](https://github.com/pytorch/pytorch/issues/9688).
+This is a problem when trying to hide pathological points with indexing as can be seen for example in `Issue 9688 <https://github.com/pytorch/pytorch/issues/9688>`_.
 
-How do we express gradients of 0
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+How do we express gradients of zero
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A gradient of :math:`0` (or independent) can be expressed in any of the following ways:
 
@@ -337,7 +332,7 @@ To try and reduce the impact of this limitation, we define the gradients of the 
 
 
 Implementation details
-^^^^^^^^^^^^^^^^^^^^^^
+----------------------
 
 .. warn::
 
@@ -345,7 +340,7 @@ Implementation details
   You should not rely on them being fixed but they can be useful to debug code that uses the current version.
 
 Computational graph
-"""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^
 
 To know in which order the chain rule should be applied, we need to record the order the operations are applied to be able to replay it in the reverse order later.
 This is known as tape-based automatic differentiation.
@@ -355,7 +350,7 @@ The edges link a given :code:`Node` to all the :code:`Node` s that created the i
 
 You can access the :code:`Node` that created a given Tensor (if the Tensor requires gradients and is not a leaf Tensor) using the ``.grad_fn`` field.
 You can then access the edges that link the different :code:`Node` s by using the ``.next_functions`` field of a :code:`Node` .
-A handy package to explore this graph is [torchviz](https://github.com/szagoruyko/pytorchviz).
+A handy package to explore this graph is `torchviz <https://github.com/szagoruyko/pytorchviz>`_.
 
 We use ``autograd.Function`` as a nice interface to create this graph.
 Indeed, during the ``.apply``, the forward is invoked and all the inputs and outputs are connected properly to the exiting graph associated to the inputs.
@@ -364,7 +359,7 @@ graph examples in torchviz.
 
 
 Not Gradients
-"""""""""""""
+^^^^^^^^^^^^^
 
 The operations that do not compute gradients that are presented above are implemented as follows to obtain the behavior described above.
 
@@ -375,7 +370,7 @@ The Tensor is the same except that it does not require gradient and its grad_fn 
 
 
 In-place handling
-""""""""""""""""
+^^^^^^^^^^^^^^^^^
 
 To get the required behavior for in-place operations, two things are needed.
 First, to be able to ensure correctness, we need to track the versions of the different Tensors to make sure that a :code:`Node` has access to the version it needs, not a modified one.
