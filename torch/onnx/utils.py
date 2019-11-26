@@ -180,15 +180,15 @@ def warn_on_static_input_change(input_states):
                 warnings.warn(warning)
 
 
-def _resolve_args_by_export_type(arg_name, arg_bool_value, operator_export_type):
-    # This helper method disables the arguments not supported if export_type != operator_export_type.ONNX
+def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
+    # This helper method resolves the arguments that are ignored when export_type != operator_export_type.ONNX
     if operator_export_type is not operator_export_type.ONNX:
-        if arg_bool_value is True:
+        if arg_value is True:
             warnings.warn("`{}' can be set to True only when 'operator_export_type' is "
                           "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
                           "`{}` argument will be ignored.".format(arg_name, arg_name))
-        arg_bool_value = False
-    return arg_bool_value
+        arg_value = False
+    return arg_value
 
 
 def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type,
@@ -428,8 +428,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
             else:
                 operator_export_type = OperatorExportTypes.ONNX
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            do_constant_folding = False
 
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
