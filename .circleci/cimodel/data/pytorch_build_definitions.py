@@ -160,9 +160,13 @@ def gen_dependent_configs(xenial_parent_config):
 
         configs.append(c)
 
+    return configs
+
+
+def gen_docs_configs(xenial_parent_config):
+    configs = []
     for x in ["pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
         configs.append(HiddenConf(x, parent_build=xenial_parent_config))
-
     return configs
 
 
@@ -246,6 +250,9 @@ def instantiate_configs():
             is_important=is_important,
             parallel_backend=parallel_backend,
         )
+
+        if distro_name == 'xenial' and fc.find_prop("pyver") == '2.7.9' and cuda_version is None:
+            c.dependent_tests = gen_docs_configs(c)
 
         if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
