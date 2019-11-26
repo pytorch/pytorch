@@ -114,10 +114,10 @@ ${return_type} ${api_name}(${type_method_formals}) {
 
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 // not registering the following op because it's registered in VariableType.cpp
-// .op(torch::RegisterOperators::options()
-//   .schema("${schema_string}")
-//   .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>(TensorTypeId::VariableTensorId)
-//   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+/* .op(torch::RegisterOperators::options()
+     .schema("${schema_string}")
+     .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>(TensorTypeId::VariableTensorId)
+     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))*/
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
@@ -127,10 +127,10 @@ BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 // not registering the following op because it's registered in VariableType.cpp
-//.op(torch::RegisterOperators::options()
-//  .schema("${schema_string}")
-//  .kernel<${return_type} (${formals_types})>(TensorTypeId::VariableTensorId, &TypeDefault::${api_name})
-//  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+/* .op(torch::RegisterOperators::options()
+    .schema("${schema_string}")
+    .kernel<${return_type} (${formals_types})>(TensorTypeId::VariableTensorId, &TypeDefault::${api_name})
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))*/
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
