@@ -9626,7 +9626,7 @@ class TestNNDeviceType(NNTestCase):
             if new_offsets is True and mode == 'sum':
                 offsets = torch.cat((offsets, torch.tensor([input.size(0)], device=device, dtype=torch.long)), 0)
 
-            per_sample_weights = torch.randn_like(input, dtype=dtype) \
+            per_sample_weights = torch.randn_like(input, device=device, dtype=dtype) \
                                       .requires_grad_(trainable_scale)
             ref_per_sample_weights = \
                 per_sample_weights.detach().requires_grad_(trainable_scale)
