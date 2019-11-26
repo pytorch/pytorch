@@ -49,21 +49,21 @@ bool IsSameSource(const Node* n, const Node* m) {
       (source_n->starting_line_no() == source_m->starting_line_no()));
 }
 
+// Trace back all the slice & select nodes associated with the index_put node.
+// E.g. The IR for x[1:3, 0] = update
+//    ...
+//    %8 : Float(2, 4) = aten::slice(%0, %4, %5, %6, %7)
+//    ...
+//    %11 : Float(2) = aten::select(%8, %9, %10)
+//    ...
+//    %13 : Tensor?[] = prim::ListConstruct()
+//    ...
+//    %16 : Float(2) = aten::index_put(%11, %13, %14, %15)
+//
+// We collect %11 and %8, to construct the index tensors.
+// The vector slice_and_select_node contains all the associated slice and
+// select node, in the reversed order.
 std::vector<Node*> FetchSliceAndSelect(const Node* index_put_node) {
-  // Trace back all the slice & select nodes associated with the index_put node.
-  // E.g. The IR for x[1:3, 0] = update
-  //    ...
-  //    %8 : Float(2, 4) = aten::slice(%0, %4, %5, %6, %7)
-  //    ...
-  //    %11 : Float(2) = aten::select(%8, %9, %10)
-  //    ...
-  //    %13 : Tensor?[] = prim::ListConstruct()
-  //    ...
-  //    %16 : Float(2) = aten::index_put(%11, %13, %14, %15)
-  //
-  // We collect %11 and %8, to construct the index tensors.
-  // The vector slice_and_select_node contains all the associated slice and
-  // select node, in the reversed order.
   std::vector<Node*> slice_and_select_node;
   auto src_node = index_put_node->input(0)->node();
   while (src_node) {
@@ -228,6 +228,18 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   return indices;
 }
 
+// Trace back all the slice & select nodes associated with the index_put node,
+// and convert them to associated indices.
+// E.g. The IR for x[1:3, 0] = update
+//    ...
+//    %8 : Float(2, 4) = aten::slice(%0, %4, %5, %6, %7)
+//    ...
+//    %11 : Float(2) = aten::select(%8, %9, %10)
+//    ...
+//    %13 : Tensor?[] = prim::ListConstruct()
+//    ...
+//    %16 : Float(2) = aten::index_put(%11, %13, %14, %15)
+// The aten::index_put node alone does not contain any indices (%13 : Tensor?[] = prim::ListConstruct()).
 void SquashSliceAndSelect(Node* index_put_node) {
   auto graph = index_put_node->owningGraph();
 

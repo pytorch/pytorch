@@ -773,23 +773,18 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.ones(1)
         self.run_test(CopyModel(), (x, update))
 
-        class CopyModel2(torch.nn.Module):
-            def forward(self, x, update):
-                x[..., 1] = update
-                return x
-
         x = torch.randn(2, 3, 4, 5, 6)
         update = torch.ones(1)
-        self.run_test(CopyModel2(), (x, update))
+        self.run_test(CopyModel(), (x, update))
 
-        class CopyModel3(torch.nn.Module):
+        class CopyModel2(torch.nn.Module):
             def forward(self, x, update):
                 x[2, ..., 1:3] = update
                 return x
 
         x = torch.randn(3, 4, 5, 6)
         update = torch.ones(1)
-        self.run_test(CopyModel3(), (x, update))
+        self.run_test(CopyModel2(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_flip(self):
