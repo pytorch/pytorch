@@ -16,8 +16,8 @@ namespace caffe2 {
  *
  * Behavior is roughly equivalent to pseudocode:
  *
- * pos = 0
- * for (i = 0..output_size-2)
+ * pos = offsets[0]
+ * for (i = 0..output_size-1)
  *   for (k = 0..block_size-1)
  *     out[i*block_size + k] = 0
  *   start_offset = offsets[i]

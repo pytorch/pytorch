@@ -218,6 +218,7 @@ Args:
     pad: number of timesteps to pad. Default: 0
 """)
 
+
 # Pooling
 avg_pool1d = _add_docstr(torch.avg_pool1d, r"""
 avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor

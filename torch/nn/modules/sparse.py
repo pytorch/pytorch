@@ -298,7 +298,7 @@ class EmbeddingBag(Module):
     @classmethod
     def from_pretrained(cls, embeddings, freeze=True, max_norm=None,
                         norm_type=2., scale_grad_by_freq=False,
-                        mode='mean', sparse=False):
+                        mode='mean', sparse=False, new_offsets=False):
         r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -311,6 +311,7 @@ class EmbeddingBag(Module):
             scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
             mode (string, optional): See module initialization documentation. Default: ``"mean"``
             sparse (bool, optional): See module initialization documentation. Default: ``False``.
+            new_offsets (bool, optional): See module initialization documentation. Default: ``False``.
 
         Examples::
 
@@ -333,6 +334,7 @@ class EmbeddingBag(Module):
             norm_type=norm_type,
             scale_grad_by_freq=scale_grad_by_freq,
             mode=mode,
-            sparse=sparse)
+            sparse=sparse,
+            new_offsets=new_offsets)
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag

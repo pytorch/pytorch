@@ -121,6 +121,10 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
   /// Note: this option is not supported when ``mode="kMax"``.
   TORCH_ARG(bool, sparse) = false;
+  /// If ``True``, `offsets` has one additional element, where the last element
+  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
+  /// this option is currently only supported when ``mode="sum"``.
+  TORCH_ARG(bool, new_offsets) = false;
 };
 
 // ============================================================================
