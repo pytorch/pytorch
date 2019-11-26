@@ -30,7 +30,8 @@ TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type =
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool strip_doc_string = true,
-    bool keep_initializers_as_inputs = true);
+    bool keep_initializers_as_inputs = true,
+    bool add_node_names = true);
 
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(
@@ -41,7 +42,8 @@ TORCH_API std::string pretty_print_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type =
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool google_printer = false,
-    bool keep_initializers_as_inputs = true);
+    bool keep_initializers_as_inputs = true,
+    bool add_node_names = true);
 
 TORCH_API void ExportModule(
     const script::Module& module,
