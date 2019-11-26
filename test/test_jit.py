@@ -12425,6 +12425,15 @@ a")
         for a, b in zip(eager_out, script_out):
             check_equal_and_dtype(a, b)
 
+    def test_floordiv(self):
+        def fn(a, b):
+            return a // b, a.floor_divide(b)
+
+        tensors = [torch.tensor([5.5, 3.2]), torch.tensor([2, 2]), torch.tensor([3, 2])]
+        for i in range(len(tensors)):
+            for j in range(len(tensors)):
+                self.checkScript(fn, (tensors[i], tensors[j]))
+
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_traced_module(self):
         @_trace(torch.rand(3, 4))

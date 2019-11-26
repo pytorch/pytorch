@@ -1981,6 +1981,30 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args))
 
+add_docstr(torch.floor_divide,
+           r"""
+floor_divide(self, other) -> Tensor
+
+Each element of the tensor ``input`` is divided by each element of the tensor
+``other``. The resulting tensor then truncated if it is floating point. See
+`torch.div` for type promotion and broadcasting rules.
+
+.. math::
+    \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
+
+""" + r"""
+Args:
+    {self}
+    {other}
+
+Example::
+
+    >>> a = torch.tensor([4.0, 3.0])
+    >>> b = torch.tensor([2.0, 2.0])
+    >>> a.floor_divide(b)
+    tensor([2.0, 1.0])
+""".format(**common_args))
+
 add_docstr(torch.fmod,
            r"""
 fmod(input, other, out=None) -> Tensor

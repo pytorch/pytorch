@@ -1197,6 +1197,9 @@
     CPU: floor_out
     CUDA: floor_out
 
+- func: floor_divide(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+
 - func: frac(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True

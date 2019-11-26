@@ -37,6 +37,12 @@ def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
+auto floordiv =
+    R"SCRIPT(
+def floordiv(self : Tensor, other : Tensor) -> Tensor:
+  return self.floor_divide(other)
+)SCRIPT";
+
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(
       Symbol name) {
@@ -96,6 +102,7 @@ struct BuiltinFunctionRegistry {
         loadSource(_ntuple_ops.format(env));
       }
     }
+    loadSource(floordiv);
   }
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
