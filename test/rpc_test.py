@@ -395,6 +395,7 @@ class RpcTest(RpcAgentTestFixture):
             )
         rpc.shutdown()
 
+    @unittest.skip("test_invalid_names is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
