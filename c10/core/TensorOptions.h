@@ -547,6 +547,12 @@ inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
 }
 
+inline std::string toString(const TensorOptions options) {
+  std::ostringstream stream;
+  stream << options;
+  return stream.str();
+}
+
 // This is intended to be a centralized location by which we can determine
 // what an appropriate TensorTypeId for a tensor is.
 //

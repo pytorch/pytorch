@@ -76,8 +76,10 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   auto sizes = tensors[0].sizes();
   for (size_t i = 1; i < tensors.size(); i++) {
     if (!tensors[i].options().type_equal(options)) {
+      const auto expected = toString(options);
+      const auto actual = toString(tensors[i].options());
       throw std::invalid_argument(
-          "argument contains mixed types (" + options + " and " + tensors[i].options() +
+          "argument contains mixed types (" + expected + " and " + actual +
           ")");
     }
     if (!tensors[i].sizes().equals(sizes)) {
@@ -108,7 +110,7 @@ inline void assertTypeMatch(
     size_t index) {
   if (tensors[index].options().type_equal(options)) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
-       options + ", got " + tensors[index].options() + ")");
+       toString(options) + ", got " + toString(tensors[index].options()) + ")");
   }
 }
 
