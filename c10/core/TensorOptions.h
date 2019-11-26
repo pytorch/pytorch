@@ -292,6 +292,11 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
+  /// Returns if the layout is sparse
+  bool is_sparse() const {
+    return layout_ == c10::Layout::Sparse;
+  }
+
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
     return layout_ == other.layout() && dtype_ == other.dtype() && device_ == other.device();
