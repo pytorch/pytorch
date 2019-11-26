@@ -329,14 +329,21 @@ class MyPythonStore(c10d.Store):
         self.store = dict()
 
     def set(self, key, value):
+        if type(key) is not str:
+            raise AssertionError("Expected set to be called with string key")
+        if type(value) is not bytes:
+            raise AssertionError("Expected set to be called with bytes value")
         self.store[key] = value
 
     def get(self, key):
-        return self.store.get(key, "")
+        value = self.store.get(key, b"")
+        if type(value) is not bytes:
+            raise AssertionError("Expected get to return bytes value")
+        return value
 
     def add(self, key, value):
         new = int(self.store.get(key, 0)) + value
-        self.set(key, str(new))
+        self.set(key, bytes(str(new), "utf-8"))
         return new
 
 

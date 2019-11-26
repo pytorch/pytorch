@@ -62,22 +62,28 @@ class PythonStore : public ::c10d::Store {
   // function with a std::string instead of a std::vector<uint8_t>.
   void set(const std::string& key, const std::vector<uint8_t>& value) override {
     pybind11::gil_scoped_acquire gil;
-    pybind11::function overload =
+    pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "set");
-    TORCH_INTERNAL_ASSERT(overload);
-    overload(key, std::string(value.begin(), value.end()));
+    TORCH_INTERNAL_ASSERT(fn);
+    // Call function with a py::bytes object for the value.
+    fn(key,
+       py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
   }
 
   // Note: this function manually calls the Python-side overload
   // for this function instead of using the PYBIND11_OVERLOAD_XYZ
   // macros. This is done so that the Python-side function can
-  // return a std::string instead of a std::vector<uint8_t>.
+  // return a py::bytes instead of a std::vector<uint8_t>.
   std::vector<uint8_t> get(const std::string& key) override {
     pybind11::gil_scoped_acquire gil;
-    pybind11::function overload =
+    pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "get");
-    TORCH_INTERNAL_ASSERT(overload);
-    auto str = pybind11::detail::cast_safe<std::string>(overload(key));
+    TORCH_INTERNAL_ASSERT(fn);
+    // Cast return value from Python to py::bytes, then implicitly
+    // convert that to a std::string, so that we can construct a
+    // std::vector<uint8_t>. There is no API for directly accessing
+    // the contents of the py::bytes object.
+    std::string str = pybind11::cast<py::bytes>(fn(key));
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
