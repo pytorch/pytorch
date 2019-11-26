@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/instruction.h>
 
 namespace torch {
 namespace jit {
@@ -366,6 +367,37 @@ void Module::dump(
   std::cout << dump_to_str(
                    print_method_bodies, print_attr_values, print_param_values)
             << std::endl;
+}
+
+namespace {
+void export_opnames(const script::Module& m, std::unordered_set<std::string>& opnames) {
+  auto methods = m.get_methods();
+  for (const auto& method : methods) {
+    const auto& func = method.function();
+    torch::jit::Code code(func.graph());
+    for (size_t i = 0; i < code.instructions().size(); ++i) {
+      auto ins = code.instructions()[i];
+      auto node = code.instructions_source()[i];
+      if (ins.op == OpCode::OP) {
+        auto opname = node->schema().operator_name();
+        std::string namestr = opname.name;
+        if (!opname.overload_name.empty())
+          namestr += "." + opname.overload_name;
+        opnames.emplace(namestr);
+      }
+    }
+  }
+  for (const auto& sub_m : m.children()) {
+    export_opnames(sub_m, opnames);
+  }
+}
+} // namespace
+
+// Returns a list of names of all operators in the module and its submodules.
+std::vector<std::string> Module::opnames() const {
+  std::unordered_set<std::string> names;
+  export_opnames(*this, names);
+  return std::vector<std::string>(names.begin(), names.end());
 }
 
 } // namespace script

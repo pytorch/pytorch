@@ -26,16 +26,6 @@ void Module::_save_for_mobile(
   ExportModule(*this, filename, extra_files, true);
 }
 
-// Dump all operator names of the module and submodules in yaml format.
-void Module::dump_op_names(const std::string& filename) const {
-  std::unordered_set<std::string> opnames;
-  torch::jit::export_opnames(*this, opnames);
-  std::ofstream ofile(filename);
-  for (const auto& name : opnames) {
-    ofile << "- " << name << std::endl;
-  }
-  ofile.close();
-}
 } // namespace script
 } // namespace jit
 } // namespace torch

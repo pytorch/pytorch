@@ -457,7 +457,7 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-Node* insertQuantDeQuantCall(
+void insertQuantDeQuantCall(
     Value* v,
     const IValue& qparams,
     const IValue& scalar_type) {
@@ -487,14 +487,25 @@ Node* insertQuantDeQuantCall(
 
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
-
-  Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
-  dequant->output()->setDebugName(v->debugName() + ".dequant");
-
   g->insertNode(quant);
-  g->insertNode(dequant);
 
-  return dequant;
+  // two passes to insert the dequant for every usage
+  // in first pass, identify all the nodes using "v"
+  std::vector<Node*> use_nodes;
+  for (const auto& use : v->uses()) {
+    auto cur = use.user;
+    if(cur != quant) {
+      use_nodes.push_back(cur);
+    }
+  }
+
+  // in second pass, replace the input "v" with dequant output
+  for (size_t i = 0; i < use_nodes.size(); ++i) {
+    Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
+    dequant->output()->setDebugName(v->debugName() + ".dequant." + c10::guts::to_string(i));
+    use_nodes[i]->replaceInputWith(v, dequant->output());
+    g->insertNode(dequant);
+  }
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -532,7 +543,6 @@ class QuantizeHelper {
   std::vector<Value*> values_to_quantize_;
   std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
 };
-
 
 void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   auto observer_name = findObserverName(v);
@@ -582,29 +592,21 @@ void QuantizeHelper::quantizeTensors() {
     auto tp = values_to_qparams_[v];
     auto qparams = std::get<0>(tp);
     auto scalar_type = std::get<1>(tp);
-    // NB: v is updated here, since removeObserver replaces
-    // v with the input to the observer call
-    Node* dequant;
-    dequant = insertQuantDeQuantCall(v, qparams, scalar_type);
-    v->replaceAllUsesWith(dequant->output());
-    Node* q = dequant->input(0)->node();
-    // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the one
-    // used in quant node. Restore it here:
-    q->replaceInputWith(dequant->output(), v);
+    insertQuantDeQuantCall(v, qparams, scalar_type);
   }
   // no need to clear the vector or map
 }
 
-void checkCalculateQParamsResult(const IValue& qparams) {
+void checkGetQParamsResult(const IValue& qparams) {
   TORCH_CHECK(
       qparams.isTuple(),
-      "`calculate_qparams` function is expected to return a "
+      "`get_qparams` function is expected to return a "
       "Tuple, but got:",
       qparams.tagKind());
   auto tp = qparams.toTuple();
   TORCH_CHECK(
       tp->elements().size() == 2 || tp->elements().size() == 3,
-      "`calculate_qparams` function is expected to reutrn a "
+      "`get_qparams` function is expected to return a "
       "Tuple of size 2 or 3, got Tuple of size ",
       tp->elements().size());
   // Expect first two elements of the tuple to be Tensor
@@ -635,14 +637,13 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto om = module_.attr(observer_name.value()).toModule();
-  auto calculate_qparams = om.get_method("calculate_qparams");
-  IValue qparams = calculate_qparams(std::vector<IValue>());
-  checkCalculateQParamsResult(qparams);
-  auto scalar_type = om.attr("dtype");
-  TORCH_CHECK(
-      scalar_type.toScalarType() != at::ScalarType::Undefined,
-      "dtype of observer can't be undefined");
+  auto observer_module = module_.attr(observer_name.value()).toModule();
+  auto get_qparams = observer_module.get_method("get_qparams");
+  IValue qparams = get_qparams(std::vector<IValue>());
+  checkGetQParamsResult(qparams);
+  auto scalar_type = observer_module.attr("dtype");
+  TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
+              "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
 }
 

@@ -5,10 +5,12 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Shape_0"
     op_type: "Shape"
   }
   node {
     output: "2"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -23,6 +25,7 @@ graph {
     input: "1"
     input: "2"
     output: "3"
+    name: "Gather_2"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -33,10 +36,12 @@ graph {
   node {
     input: "0"
     output: "4"
+    name: "Shape_3"
     op_type: "Shape"
   }
   node {
     output: "5"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -51,6 +56,7 @@ graph {
     input: "4"
     input: "5"
     output: "6"
+    name: "Gather_5"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -60,6 +66,7 @@ graph {
   }
   node {
     output: "7"
+    name: "Constant_6"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -74,10 +81,12 @@ graph {
     input: "6"
     input: "7"
     output: "8"
+    name: "Sub_7"
     op_type: "Sub"
   }
   node {
     output: "9"
+    name: "Constant_8"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -90,6 +99,7 @@ graph {
   }
   node {
     output: "10"
+    name: "Constant_9"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -103,6 +113,7 @@ graph {
   node {
     input: "3"
     output: "11"
+    name: "Unsqueeze_10"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -113,6 +124,7 @@ graph {
   node {
     input: "10"
     output: "12"
+    name: "Unsqueeze_11"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -123,6 +135,7 @@ graph {
   node {
     input: "9"
     output: "13"
+    name: "Unsqueeze_12"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -132,6 +145,7 @@ graph {
   }
   node {
     output: "14"
+    name: "Constant_13"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -150,12 +164,14 @@ graph {
     input: "13"
     input: "14"
     output: "15"
+    name: "Slice_14"
     op_type: "Slice"
   }
   node {
     input: "15"
     input: "8"
     output: "16"
+    name: "Gather_15"
     op_type: "Gather"
     attribute {
       name: "axis"
