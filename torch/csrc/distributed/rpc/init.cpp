@@ -36,7 +36,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout);
+          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
+          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -171,8 +172,8 @@ Otherwise, throws an exception.
     agent->start();
   });
 
-  module.def("_destroy_rref_context", []() {
-    RRefContext::getInstance().destroyInstance();
+  module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
+    RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
   });
 
   module.def("_cleanup_python_rpc_handler", []() {
