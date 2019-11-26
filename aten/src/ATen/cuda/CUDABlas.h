@@ -7,7 +7,7 @@
 
     gemv<Dtype>(stream, transa, m, n, alpha, a, lda, x, incx, beta, y, incy)
 
-  where Dtype is double, float, or at::Half. The functions are
+  where Dtype is double, float, at::Half or at::BFloat16(ROCm). The functions are
   available in at::cuda::blas namespace.
  */
 
@@ -35,6 +35,10 @@ template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
+#ifdef __HIP_PLATFORM_HCC__
+template <>
+void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
+#endif
 
 /* LEVEL 2 BLAS FUNCTIONS */
 
@@ -54,6 +58,10 @@ template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float));
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
+#ifdef __HIP_PLATFORM_HCC__
+template <>
+void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
+#endif
 
 } // namespace blas
 } // namespace cuda
