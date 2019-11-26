@@ -1630,8 +1630,8 @@ Unsupported ``torch.nn`` Modules::
 
 Python Functions and Modules
 ----------------------------
-Many Pythons global functions and their associated magic methods are supported in
-TorchScript. The :any:`math` module is also supported, but no other Python modules
+Many Python's `built-in functions <https://docs.python.org/3/library/functions.html>`_ are supported in TorchScript.
+The :any:`math` module is also supported, but no other Python modules
 (built-in or third party) are supported.
 
 

@@ -1,5 +1,6 @@
 import torch.jit
 import inspect
+import textwrap
 # this file is for generating documentation using sphinx autodoc
 # > help(torch.jit.supported_ops) will also give a nice listed of the
 # supported ops programmatically
@@ -30,11 +31,14 @@ def _emit_rets(returns):
         return _emit_ret(returns[0])
     return "Tuple[{}]".format(", ".join(_emit_ret(r) for r in returns))
 
-def _emit_schema(mod, name, schema, arg_start=0):
-    qualified_name = "{}.{}".format(mod, name)
+def _emit_schema(mod, name, schema, arg_start=0, padding=4):
+    if mod is None:
+        qualified_name = name
+    else:
+        qualified_name = "{}.{}".format(mod, name)
     schema = "{}({}) -> {}".format(qualified_name,
-                                    _emit_args(len(qualified_name) + 1 + 4, schema.arguments[arg_start:]),
-                                    _emit_rets(schema.returns))
+                                   _emit_args(len(qualified_name) + 1 + padding, schema.arguments[arg_start:]),
+                                   _emit_rets(schema.returns))
     return schema
 
 def _get_tensor_ops():
@@ -151,6 +155,114 @@ def _get_math_builtins():
     return "``math`` Module", functions
 
 
+def _get_global_builtins():
+    # Taken from the 'globals' map in torch/csrc/jit/script/compiler.cpp
+    supported_builtins = [
+        'print',
+        'tuple',
+        'float',
+        'int',
+        'bool',
+        'str',
+        'getattr',
+        'hasattr',
+        'isinstance',
+        'len',
+        'hex',
+        'oct',
+        'round',
+        'hash',
+        'min',
+        'max',
+        'abs',
+        'all',
+        'divmod',
+        'list',
+        'ord',
+        'chr',
+        'bin',
+        'range',
+        'zip',
+        'enumerate',
+        'sorted',
+    ]
+
+    op_renames = {
+        'bool': 'aten::Bool',
+        'int': 'aten::Int',
+        'float': 'aten::Float'
+    }
+
+    schemaless_op_explanations = {
+        'print': 'Print any value',
+        'tuple': 'Lists cannot be converted to tuples with this method since their size is not statically known',
+        'getattr': 'Attribute name must be a literal string',
+        'hasattr': 'Attribute name must be a literal string',
+        'isinstance': 'Result is static',
+        'zip': 'Arguments must be lists',
+        'enumerate': 'Arguments must be lists',
+    }
+
+    magic_methods = [
+        ('float', '__float__'),
+        ('int', '__int__'),
+        ('bool', '__bool__'),
+        ('str', '__str__'),
+        ('len', '__len__'),
+        ('hex', '__hex__'),
+        ('oct', '__oct__'),
+    ]
+
+    magic_methods_rows = []
+    for fn, magic_method in magic_methods:
+        magic_methods_rows.append('":any:`{}`", "``{}``"'.format(fn, magic_method))
+
+    schematized_ops = []
+    schemaless_ops = []
+
+    for fn in supported_builtins:
+        op_name = 'aten::{}'.format(fn)
+        if fn in op_renames:
+            op_name = op_renames[fn]
+        schemas = torch._C._jit_get_schemas_for_operator(op_name)
+        for s in schemas:
+            schematized_ops.append(_emit_schema(None, fn, s, padding=0))
+        if len(schemas) > 0:
+            schematized_ops.append('')
+        else:
+            table_row = '":any:`{}`", "{}"'.format(fn, schemaless_op_explanations[fn])
+            schemaless_ops.append(table_row)
+
+    schematized_ops = '\n'.join(schematized_ops)
+    schemaless_ops = '\n'.join(schemaless_ops)
+    magic_methods_rows = '\n'.join(magic_methods_rows)
+    schematized_ops = textwrap.indent(schematized_ops, '\t')
+    schemaless_ops = textwrap.indent(schemaless_ops, '\t')
+    magic_methods_rows = textwrap.indent(magic_methods_rows, '\t')
+    section = """
+The functions in the following table are supported but do not have a static schema
+
+.. csv-table::
+    :header: "Function", "Note"
+
+{}
+
+The following functions will use the corresponding magic method on :any:`TorchScript classes`
+
+.. csv-table::
+    :header: "Function", "Magic Method"
+
+{}
+
+These built-in functions do have a schema
+::
+
+{}
+    """.format(schemaless_ops, magic_methods_rows, schematized_ops)
+
+    return "Python Built-in Functions", section
+
+
 def _list_supported_ops():
     def emit_block(decls):
         return '\n::\n\n{}\n'.format(''.join('    {}\n\n'.format(d) for d in decls))
@@ -160,11 +272,15 @@ def _list_supported_ops():
         _get_tensor_ops,
         _get_nn_functional_ops,
         _get_torchscript_builtins,
+        _get_global_builtins,
         _get_math_builtins,
     )
     for fn in op_gathering_fns:
         header, items = fn()
-        body += "{}\n{}\n{}".format(header, '~' * len(header), emit_block(items))
+        if isinstance(items, str):
+            body += "{}\n{}\n{}\n".format(header, '~' * len(header), items)
+        else:
+            body += "{}\n{}\n{}".format(header, '~' * len(header), emit_block(items))
 
     return body
 
