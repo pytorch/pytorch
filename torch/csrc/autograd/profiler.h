@@ -14,9 +14,6 @@
 #ifndef _WIN32
 #include <ctime>
 #endif
-#ifdef C10_IOS
-#include <sys/time.h>
-#endif
 #include <torch/csrc/autograd/record_function.h>
 
 typedef struct CUevent_st* CUDAEventStub;
@@ -67,10 +64,11 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-#if defined(__MACH__) && !defined(CLOCK_REALTIME)
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
 #include <sys/time.h>
 // clock_gettime is not implemented on older versions of OS X (< 10.12).
 // If implemented, CLOCK_REALTIME will have already been defined.
+// For iOS, clock_gettime is only available on iOS 10.0 or newer. 
 #endif
 
 inline int64_t getTime() {
