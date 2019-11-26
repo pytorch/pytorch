@@ -1,5 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
@@ -196,6 +198,43 @@ static PyObject* _ListNestedTensorVariable_device(
   END_HANDLE_TH_ERRORS
 }
 
+// TODO: This could be multithreaded by inlining invokeScriptFunctionFromPython
+// and accumulating all AutoNoGIL code.
+static _NestedNode apply_jit_function(
+    const _NestedNode nested_node,
+    Function& fn) {
+  if (nested_node._children.size() == 0) {
+    Variable child_variable = nested_node._variable_node._variable;
+    PyObject* child = THPVariable_Wrap(child_variable);
+    pybind11::object self =
+        pybind11::reinterpret_borrow<pybind11::object>(child);
+    py::object result = invokeScriptFunctionFromPython(
+        fn, torch::jit::tuple_slice(py::make_tuple(self)), py::dict());
+    return _NestedNode(result.cast<Variable>());
+
+  } else {
+    std::vector<_NestedNode> result;
+    for (size_t i = 0; i < nested_node._children.size(); i++) {
+      result.push_back(apply_jit_function(nested_node._children[i], fn));
+    }
+    return _NestedNode(result);
+  }
+}
+
+static PyObject* jit_apply_function(PyObject* module, PyObject* args) {
+  PyObject* nt_;
+  PyObject* fn;
+  if (!PyArg_ParseTuple(args, "OO", &nt_, &fn)) {
+    throw std::runtime_error("jit apply args parsing failed");
+  }
+  auto& nt = reinterpret_cast<_ListNestedTensorVariable*>(nt_)->cdata;
+  pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
+  auto sfn = torch::jit::script::as_function(ofn).value();
+  Function& callee = *sfn.function_;
+  return _ListNestedTensorVariable_Wrap(
+      _ListNestedTensor(apply_jit_function(nt.get_structure(), callee)));
+}
+
 static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
     {"dtype",
      (getter)_ListNestedTensorVariable_dtype,
@@ -219,6 +258,12 @@ static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
      nullptr,
      nullptr},
     {nullptr}};
+
+static PyMethodDef nested_tensor_functions[] = {{"jit_apply_function",
+                                                 jit_apply_function,
+                                                 METH_VARARGS,
+                                                 "jit_apply_function."},
+                                                {nullptr, nullptr, 0, nullptr}};
 
 static PyMethodDef _ListNestedTensorVariable_methods[] = {
     {"element_size",
@@ -355,6 +400,20 @@ void initialize_python_bindings() {
       0) {
     Py_DECREF(&_ListNestedTensorVariableType);
     Py_DECREF(m);
+    throw python_error();
+  }
+
+  static struct PyModuleDef def = {PyModuleDef_HEAD_INIT,
+                                   "torch.nested_tensor",
+                                   NULL,
+                                   -1,
+                                   nested_tensor_functions};
+  PyObject* nested_tensor = PyModule_Create(&def);
+  if (!nested_tensor) {
+    throw python_error();
+  }
+  // steals a reference to nested_tensor
+  if (PyModule_AddObject(m, "nested_tensor", nested_tensor) != 0) {
     throw python_error();
   }
 }
