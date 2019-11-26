@@ -243,7 +243,6 @@ namespace c10 {
   _(attr, scope)                     \
   _(attr, keepdims)                  \
   _(attr, new_axis)
->>>>>>> Export dynamic unbind/split and __getitem__
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

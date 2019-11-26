@@ -1819,7 +1819,7 @@ class TestONNXRuntime(unittest.TestCase):
                 res2 = torch.zeros(3, 4, dtype=torch.long)
                 for i in range(len(arr)):
                     res = res.append(arr[i].sum(0, False))
-                    res1 = res1.append(arr[-1-i].sum(0, False))
+                    res1 = res1.append(arr[-1 - i].sum(0, False))
                     res2 += 1
                 return torch.stack(res), torch.stack(res1), res2
 
