@@ -14,11 +14,13 @@ class TestQuantizedOps(unittest.TestCase):
         model.qconfig = torch.quantization.default_qconfig
         q_model = torch.quantization.prepare(model, inplace=False)
         q_model = torch.quantization.convert(q_model, inplace=False)
+
         pytorch_res = q_model(*pt_inputs)
         f = io.BytesIO()
         torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
         onnx_model = onnx.load(f)
+
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
         np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=3)
 
@@ -178,13 +180,27 @@ class TestQuantizedOps(unittest.TestCase):
         f = io.BytesIO()
         torch.onnx.export(module_quant, (X), f, verbose=False, example_outputs=output, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK, opset_version=9)
         f.seek(0)
-        onnx_model = onnx.load('quant.onnx')
+        onnx_model = onnx.load(f)
         sample_inputs = (
             x_numpy,
         )
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
         np.testing.assert_almost_equal(output.numpy(), caffe_res, decimal=3)
+
     '''
+    def test_upsample(self):
+        class QUpsampleModule(torch.nn.Module):
+            def __init__(self):
+                super(QUpsampleModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode='nearest')
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        self.generic_test(QUpsampleModule(), (x,), input_names=["x"])
 
 if __name__ == '__main__':
     unittest.main()

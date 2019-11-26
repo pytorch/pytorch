@@ -17,7 +17,7 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
       : Operator<CPUContext>(std::forward<Args>(args)...) {
     width_scale_ = this->template GetSingleArgument<float>("width_scale", 1);
     height_scale_ = this->template GetSingleArgument<float>("height_scale", 1);
-    output_dims = this->template GetRepeatedArgument<int>("output_size");
+    output_dims = this->template GetRepeatedArgument<int>("output_size", vector<int>{});
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
   }

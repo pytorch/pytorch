@@ -552,7 +552,7 @@ jobs:
   caffe2_macos_build:
     <<: *caffe2_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -758,7 +758,7 @@ jobs:
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       - attach_workspace:
           at: ~/workspace
@@ -786,7 +786,7 @@ jobs:
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -827,7 +827,7 @@ jobs:
   binary_mac_upload: &binary_mac_upload
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -851,7 +851,7 @@ jobs:
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "10.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -875,11 +875,11 @@ jobs:
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios
-  
-  binary_ios_upload: 
+
+  binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "10.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -1018,7 +1018,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -1058,7 +1058,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
@@ -1079,11 +1079,11 @@ jobs:
       - store_test_results:
           path: test/test-reports
 
-  pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+  pytorch_macos_10_13_cuda10_0_cudnn7_py3_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda10.0-cudnn7-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -1097,21 +1097,21 @@ jobs:
 
             export IN_CIRCLECI=1
 
-            # Install CUDA 9.2
-            sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
-            curl https://s3.amazonaws.com/ossci-macos/cuda_9.2.64_mac_installer.zip -o ~/cuda_9.2.64_mac_installer.zip
-            unzip ~/cuda_9.2.64_mac_installer.zip -d ~/
-            sudo ~/cuda_9.2.64_mac_installer.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
-            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-9.2/lib/libcuda.dylib
+            # Install CUDA 10.0
+            sudo rm -rf ~/CUDAMacOSXInstaller.app || true
+            curl https://s3.amazonaws.com/ossci-macos/cuda_10.0.130_mac_installer.zip -o ~/cuda_10.0.130_mac_installer.zip
+            unzip ~/cuda_10.0.130_mac_installer.zip -d ~/
+            sudo ~/CUDAMacOSXInstaller.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
+            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-10.0/lib/libcuda.dylib
             sudo rm -rf /usr/local/cuda || true
 
-            # Install cuDNN 7.1 for CUDA 9.2
-            curl https://s3.amazonaws.com/ossci-macos/cudnn-9.2-osx-x64-v7.1.tgz -o ~/cudnn-9.2-osx-x64-v7.1.tgz
-            rm -rf ~/cudnn-9.2-osx-x64-v7.1 && mkdir ~/cudnn-9.2-osx-x64-v7.1
-            tar -xzvf ~/cudnn-9.2-osx-x64-v7.1.tgz -C ~/cudnn-9.2-osx-x64-v7.1
-            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/include/
-            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-9.2/lib/
-            sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
+            # Install cuDNN 7.6.5 for CUDA 10.0
+            curl https://s3.amazonaws.com/ossci-macos/cudnn-10.0-osx-x64-v7.6.5.32.tgz -o ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz
+            rm -rf ~/cudnn-10.0-osx-x64-v7.6.5.32 && mkdir ~/cudnn-10.0-osx-x64-v7.6.5.32
+            tar -xzvf ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz -C ~/cudnn-10.0-osx-x64-v7.6.5.32
+            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/include/
+            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-10.0/lib/
+            sudo chmod a+r /Developer/NVIDIA/CUDA-10.0/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/lib/libcudnn*
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -1298,14 +1298,14 @@ jobs:
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "10.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
       - checkout
-      - run_brew_for_ios_build    
+      - run_brew_for_ios_build
       - run:
-          name: Run Fastlane
+          name: cert install
           no_output_timeout: "1h"
           command: |
             set -e
@@ -1335,6 +1335,7 @@ jobs:
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"
+
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
             chmod +x ~/Downloads/conda.sh
@@ -1358,7 +1359,7 @@ jobs:
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
-          name: Run Build Tests
+          name: Test
           no_output_timeout: "30m"
           command: |
             set -e
@@ -1375,28 +1376,7 @@ jobs:
               echo 'xcodebuild failed!'
               exit 1
             fi
-      - run:
-          name: Run Simulator Tests
-          no_output_timeout: "2h"
-          command: |
-            set -e
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
-              echo "not SIMULATOR build, skip it."
-              exit 0
-            fi
-            WORKSPACE=/Users/distiller/workspace
-            PROJ_ROOT=/Users/distiller/project
-            source ~/anaconda/bin/activate
-            #install the latest version of PyTorch and TorchVision
-            pip install torch torchvision
-            #run unit test
-            cd ${PROJ_ROOT}/ios/TestApp/benchmark
-            python trace_model.py
-            ruby setup.rb
-            cd ${PROJ_ROOT}/ios/TestApp
-            instruments -s -devices
-            fastlane scan
-            
+
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1913,7 +1893,7 @@ workflows:
           requires:
             - setup
             - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+      - pytorch_macos_10_13_cuda10_0_cudnn7_py3_build:
           requires:
             - setup
       - pytorch_android_gradle_build-x86_32:
@@ -1930,17 +1910,17 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
       - pytorch_ios_build:
-          name: pytorch_ios_11_2_1_x86_64_build
+          name: pytorch_ios_10_2_1_x86_64_build
           context: org-member
-          build_environment: "pytorch-ios-11.2.1-x86_64_build"
+          build_environment: "pytorch-ios-10.2.1-x86_64_build"
           ios_arch: "x86_64"
           ios_platform: "SIMULATOR"
           requires:
             - setup
       - pytorch_ios_build:
-          name: pytorch_ios_11_2_1_arm64_build
+          name: pytorch_ios_10_2_1_arm64_build
           context: org-member
-          build_environment: "pytorch-ios-11.2.1-arm64_build"
+          build_environment: "pytorch-ios-10.2.1-arm64_build"
           ios_arch: "arm64"
           ios_platform: "OS"
           requires:
@@ -3787,8 +3767,8 @@ workflows:
               only: nightly
       # Pytorch iOS binary builds
       - binary_ios_build:
-          name: pytorch_ios_11_2_1_nightly_x86_64_build
-          build_environment: "libtorch-ios-11.2.1-nightly-x86_64-build"
+          name: pytorch_ios_10_2_1_nightly_x86_64_build
+          build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
           context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
@@ -3798,8 +3778,8 @@ workflows:
             branches:
               only: nightly
       - binary_ios_build:
-          name: pytorch_ios_11_2_1_nightly_arm64_build
-          build_environment: "libtorch-ios-11.2.1-nightly-arm64-build"
+          name: pytorch_ios_10_2_1_nightly_arm64_build
+          build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
           context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
@@ -3809,12 +3789,12 @@ workflows:
             branches:
               only: nightly
       - binary_ios_upload:
-          build_environment: "libtorch-ios-11.2.1-nightly-binary-build-upload"
+          build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
           context: org-member
           requires:
             - setup
-            - pytorch_ios_11_2_1_nightly_x86_64_build
-            - pytorch_ios_11_2_1_nightly_arm64_build
+            - pytorch_ios_10_2_1_nightly_x86_64_build
+            - pytorch_ios_10_2_1_nightly_arm64_build
           filters:
             branches:
               only: nightly

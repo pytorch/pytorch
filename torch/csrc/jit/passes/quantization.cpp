@@ -222,13 +222,53 @@ bool isWeightOfConvOrLinear(Value* v) {
     if (u.user->kind() == Symbol::aten("conv2d") &&
         v == u.user->inputs().at(1)) {
       return true;
-    } else if (u.user->kind() == prim::CallFunction &&
-               getFuncName(u.user->inputs()[0]) == "linear" &&
-               v == u.user->inputs().at(2)) {
+    } else if (
+        u.user->kind() == prim::CallFunction &&
+        getFuncName(u.user->inputs()[0]) == "linear" &&
+        v == u.user->inputs().at(2)) {
       return true;
     }
   }
   return false;
+}
+
+void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
+  std::string convolution = R"(
+graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %r = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+        return (%r) )";
+
+  std::string conv2d = R"(
+graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
+        %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  // Filter the unsupported case
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto transposed_value =
+        getIValue("transposed", match_vmap, vmap).value().toBool();
+    auto benchmark_value =
+        getIValue("benchmark", match_vmap, vmap).value().toBool();
+    auto deterministic_value =
+        getIValue("deterministic", match_vmap, vmap).value().toBool();
+    auto cudnn_enabled_value =
+        getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
+    auto output_padding_value =
+        getIValue("output_padding", match_vmap, vmap).value().toIntList();
+
+    if (!transposed_value && !benchmark_value && !deterministic_value &&
+        cudnn_enabled_value && (output_padding_value[0] == 0) &&
+        (output_padding_value[1] == 0)) {
+      return true;
+    }
+    return false;
+  };
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(convolution, conv2d);
+  rewriter.runOnGraph(graph, filter);
 }
 
 // Clone observer module and add it to the original module,
@@ -245,7 +285,9 @@ Node* InsertObserversHelper::insertObserverFor(
 
   script::Module observer_module;
   if (isWeightOfConvOrLinear(v)) {
-    TORCH_CHECK(v->uses().size() == 1, "We only support weight being used by one node.");
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -323,6 +365,8 @@ void InsertObserversHelper::insertObservers(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
   ConstantPropagation(graph);
+  // must do constant propagation first before replacement
+  replaceConvolutionWithConv2d(graph);
   addIntermediateValuesToSkipObserver(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
@@ -413,7 +457,7 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-Node* insertQuantDeQuantCall(
+void insertQuantDeQuantCall(
     Value* v,
     const IValue& qparams,
     const IValue& scalar_type) {
@@ -443,14 +487,25 @@ Node* insertQuantDeQuantCall(
 
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
-
-  Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
-  dequant->output()->setDebugName(v->debugName() + ".dequant");
-
   g->insertNode(quant);
-  g->insertNode(dequant);
 
-  return dequant;
+  // two passes to insert the dequant for every usage
+  // in first pass, identify all the nodes using "v"
+  std::vector<Node*> use_nodes;
+  for (const auto& use : v->uses()) {
+    auto cur = use.user;
+    if(cur != quant) {
+      use_nodes.push_back(cur);
+    }
+  }
+
+  // in second pass, replace the input "v" with dequant output
+  for (size_t i = 0; i < use_nodes.size(); ++i) {
+    Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
+    dequant->output()->setDebugName(v->debugName() + ".dequant." + c10::guts::to_string(i));
+    use_nodes[i]->replaceInputWith(v, dequant->output());
+    g->insertNode(dequant);
+  }
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -477,39 +532,24 @@ class QuantizeHelper {
   std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       Value* child_instance);
-  void quantizeTensor(Value* v);
-  // Remove the observer for value `v`. This function returns
-  // the original value (i.e. before observation), and thus all
-  // uses of the passed-in `v` should be replaced by the caller with
-  // the return value
-  Value* removeObserver(Value* v, const std::string& observer_name);
-  void removeModulesAndNodes() {
-    // Remove observer modules from last one to first one in order to
-    // reduce the time complexity, assuming all the observer modules
-    // are added after the existing modules, we'll have complexity of
-    // O(N) where N is number of observer moduels with this optimization
-    for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
-      auto observer_name = observer_modules_to_remove_[i];
-      module_._ivalue()->unsafeRemoveAttr(observer_name);
-      module_.type()->unsafeRemoveAttribute(observer_name);
-    }
-    // Destroy observer forward calls
-    for (auto& n : nodes_to_destroy_) {
-      n->destroy();
-    }
-  }
+  void collectObserverNodesAndValueToQuantize(Value*);
+  void removeObservers();
+  void quantizeTensors();
 
  private:
   script::Module& module_;
   std::vector<std::string> observer_modules_to_remove_;
   std::vector<Node*> nodes_to_destroy_;
+  std::vector<Value*> values_to_quantize_;
+  std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
 };
 
-Value* QuantizeHelper::removeObserver(
-    Value* v,
-    const std::string& observer_name) {
-  // remove observer_module
-  observer_modules_to_remove_.push_back(observer_name);
+void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
+  auto observer_name = findObserverName(v);
+  if (!observer_name) {
+    return;
+  }
+  observer_modules_to_remove_.push_back(observer_name.value());
 
   Node* observer = v->node();
   TORCH_INTERNAL_ASSERT(
@@ -517,24 +557,56 @@ Value* QuantizeHelper::removeObserver(
       observer->s(attr::name) == "forward" &&
       observer->inputs()[0]->node()->kind() == prim::GetAttr &&
       observer->inputs()[0]->node()->s(attr::name) == observer_name);
+
   // Observer forward call node
   nodes_to_destroy_.push_back(observer);
   // GetAttr node for observer module
   nodes_to_destroy_.push_back(observer->inputs()[0]->node());
-  v->replaceAllUsesWith(observer->input(1));
-  return observer->input(1);
+  Value* new_value = observer->input(1);
+  v->replaceAllUsesWith(new_value);
+  values_to_quantize_.push_back(new_value);
+  values_to_qparams_.insert({new_value, getQParams(v)});
 }
 
-void checkCalculateQParamsResult(const IValue& qparams) {
+void QuantizeHelper::removeObservers() {
+  for (auto& n : nodes_to_destroy_) {
+    n->removeAllInputs();
+  }
+  for (auto& n : nodes_to_destroy_) {
+    n->destroy();
+  }
+  // Remove observer modules from last one to first one in order to
+  // reduce the time complexity, assuming all the observer modules
+  // are added after the existing modules, we'll have complexity of
+  // O(N) where N is number of observer moduels with this optimization
+  for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
+    auto observer_name = observer_modules_to_remove_[i];
+    module_._ivalue()->unsafeRemoveAttr(observer_name);
+    module_.type()->unsafeRemoveAttribute(observer_name);
+  }
+}
+
+void QuantizeHelper::quantizeTensors() {
+  for (auto& v : values_to_quantize_) {
+    TORCH_INTERNAL_ASSERT(values_to_qparams_.count(v));
+    auto tp = values_to_qparams_[v];
+    auto qparams = std::get<0>(tp);
+    auto scalar_type = std::get<1>(tp);
+    insertQuantDeQuantCall(v, qparams, scalar_type);
+  }
+  // no need to clear the vector or map
+}
+
+void checkGetQParamsResult(const IValue& qparams) {
   TORCH_CHECK(
       qparams.isTuple(),
-      "`calculate_qparams` function is expected to return a "
+      "`get_qparams` function is expected to return a "
       "Tuple, but got:",
       qparams.tagKind());
   auto tp = qparams.toTuple();
   TORCH_CHECK(
       tp->elements().size() == 2 || tp->elements().size() == 3,
-      "`calculate_qparams` function is expected to reutrn a "
+      "`get_qparams` function is expected to return a "
       "Tuple of size 2 or 3, got Tuple of size ",
       tp->elements().size());
   // Expect first two elements of the tuple to be Tensor
@@ -565,34 +637,14 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto om = module_.attr(observer_name.value()).toModule();
-  auto calculate_qparams = om.get_method("calculate_qparams");
-  IValue qparams = calculate_qparams(std::vector<IValue>());
-  checkCalculateQParamsResult(qparams);
-  auto scalar_type = om.attr("dtype");
+  auto observer_module = module_.attr(observer_name.value()).toModule();
+  auto get_qparams = observer_module.get_method("get_qparams");
+  IValue qparams = get_qparams(std::vector<IValue>());
+  checkGetQParamsResult(qparams);
+  auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
               "dtype of observer can't be undefined");
   return std::make_tuple(qparams, scalar_type);
-}
-
-void QuantizeHelper::quantizeTensor(Value* v) {
-  auto observer_name = findObserverName(v);
-  if (!observer_name) {
-    return;
-  }
-  auto tp = getQParams(v);
-  auto qparams = std::get<0>(tp);
-  auto scalar_type = std::get<1>(tp);
-  // NB: v is updated here, since removeObserver replaces
-  // v with the input to the observer call
-  v = removeObserver(v, observer_name.value());
-  Node* dequant;
-  dequant = insertQuantDeQuantCall(v, qparams, scalar_type);
-  v->replaceAllUsesWith(dequant->output());
-  Node* q = dequant->input(0)->node();
-  // replaceAllUsesWith rewrote all uses of V, but we want to keep one: the one
-  // used in quant node. Restore it here:
-  q->replaceInputWith(dequant->output(), v);
 }
 
 c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
@@ -650,7 +702,7 @@ void InsertQuantDeQuantImpl(
             InsertQuantDeQuantImpl(m.value(), module_method_name);
           }
         }
-        qh.quantizeTensor(v);
+        qh.collectObserverNodesAndValueToQuantize(v);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -660,10 +712,10 @@ void InsertQuantDeQuantImpl(
   }
 
   for (Value* v : input_values) {
-    qh.quantizeTensor(v);
+    qh.collectObserverNodesAndValueToQuantize(v);
   }
-
-  qh.removeModulesAndNodes();
+  qh.removeObservers();
+  qh.quantizeTensors();
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
@@ -694,8 +746,7 @@ graph(%linear, %a_dequant, %w_quant, %b):
   };
 
   SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant,
-                                  linear_with_quant_prepack);
+  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
   rewriter.runOnGraph(graph, filter);
 }
 
