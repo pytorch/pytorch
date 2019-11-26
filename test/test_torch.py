@@ -6212,6 +6212,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.randn((2, 3), device=device).take(zero_d_int).shape)
         self.assertEqual((1,), torch.randn((2, 3), device=device).take(one_d_int).shape)
 
+        # gather
+        self.assertEqual((), torch.gather(zero_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(zero_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((), torch.gather(one_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(one_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
