@@ -274,11 +274,11 @@ def _list_supported_ops():
 
     body = ''
     op_gathering_fns = (
-        # _get_tensor_ops,
-        # _get_nn_functional_ops,
-        # _get_torchscript_builtins,
+        _get_tensor_ops,
+        _get_nn_functional_ops,
+        _get_torchscript_builtins,
         _get_global_builtins,
-        # _get_math_builtins,
+        _get_math_builtins,
     )
     for fn in op_gathering_fns:
         header, items = fn()
