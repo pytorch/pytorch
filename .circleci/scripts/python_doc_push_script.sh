@@ -54,8 +54,8 @@ export PATH=/opt/conda/bin:$PATH
 
 rm -rf pytorch || true
 
-# Install TensorBoard in python 3 so torch.utils.tensorboard classes render
-pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
+# Install TensorBoard in python 2 so torch.utils.tensorboard classes render
+pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
 
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
