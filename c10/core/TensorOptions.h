@@ -299,7 +299,7 @@ struct C10_API TensorOptions {
 
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
-    return layout_ == other.layout() && dtype_ == other.dtype() && device_ == other.device();
+    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
   }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
