@@ -5,6 +5,9 @@ import torch
 import warnings
 
 
+#TODO: model device in example code?
+#TODO: Will we be able to update the blogpost?
+#TODO: Can we use diffent swa_lr, swa_freq, swa_start for different param groups?
 class SWA(Optimizer):
     def __init__(self, optimizer, swa_start=None, swa_freq=None, swa_lr=None):
         r"""Implements Stochastic Weight Averaging (SWA).
@@ -48,38 +51,42 @@ class SWA(Optimizer):
             >>> opt = torchcontrib.optim.SWA(
             >>>                 base_opt, swa_start=10, swa_freq=5, swa_lr=0.05)
             >>> for _ in range(100):
-            >>>     opt.zero_grad()
-            >>>     loss_fn(model(input), target).backward()
-            >>>     opt.step()
-            >>> opt.swap_swa_sgd()
+            >>>     for input, target in loader:
+            >>>         opt.zero_grad()
+            >>>         loss_fn(model(input), target).backward()
+            >>>         opt.step()
+            >>> opt.swap_swa_sgd_update_bn(loader, model)
             >>> # manual mode
             >>> opt = torchcontrib.optim.SWA(base_opt)
             >>> for i in range(100):
-            >>>     opt.zero_grad()
-            >>>     loss_fn(model(input), target).backward()
-            >>>     opt.step()
+            >>>     for input, target in loader:
+            >>>         opt.zero_grad()
+            >>>         loss_fn(model(input), target).backward()
+            >>>         opt.step()
             >>>     if i > 10 and i % 5 == 0:
             >>>         opt.update_swa()
-            >>> opt.swap_swa_sgd()
+            >>> opt.swap_swa_sgd_update_bn(loader, model)
 
         .. note::
-            SWA does not support parameter-specific values of :attr:`swa_start`,
-            :attr:`swa_freq` or :attr:`swa_lr`. In automatic mode SWA uses the
-            same :attr:`swa_start`, :attr:`swa_freq` and :attr:`swa_lr` for all
-            parameter groups. If needed, use manual mode with
-            :meth:`update_swa_group` to use different update schedules for
-            different parameter groups.
-
-        .. note::
-            Call :meth:`swap_swa_sgd` in the end of training to use the computed
-            running averages.
-
-        .. note::
-            If you are using SWA to optimize the parameters of a Neural Network
-            containing Batch Normalization layers, you need to update the
+            Call :meth:`swap_swa_sgd_update_bn` in the end of training to use 
+            the computed SWA running averages and update the
             :attr:`running_mean` and :attr:`running_var` statistics of the
-            Batch Normalization module. You can do so by using
-            `torchcontrib.optim.swa.bn_update` utility.
+            Batch Normalization module.
+
+        .. note::
+            If you don't want to update Batch Normalization statistics
+            for the SWA solution, you can call :meth:`opt.swap_swa_sgd()` 
+            instead of 
+            :meth:`opt.swap_swa_sgd_update_bn(loader, model)`.
+
+        .. note::
+            If you need to update the statistics of Batch Normalization
+            modules, you can do so by using
+            `torchcontrib.optim.SWA.bn_update` utility.
+
+        .. note::
+            Parameters :attr:`swa_start`, :attr:`swa_freq` represent the number 
+            of optimization steps, not epochs.
 
         .. note::
             See the blogpost
@@ -92,9 +99,11 @@ class SWA(Optimizer):
 
         .. _Averaging Weights Leads to Wider Optima and Better Generalization:
             https://arxiv.org/abs/1803.05407
-        .. _Improving Consistency-Based Semi-Supervised Learning with Weight
-            Averaging:
+        .. _There Are Many Consistent Explanations of Unlabeled Data: Why You 
+            Should Average:
             https://arxiv.org/abs/1806.05594
+        .. _SWALP: Stochastic Weight Averaging in Low-Precision Training:
+            https://arxiv.org/abs/1904.11943
         """
         self._auto_mode, (swa_start, swa_freq) = \
             self._check_params(self, swa_start, swa_freq)
@@ -326,12 +335,13 @@ class SWA(Optimizer):
     def swap_swa_sgd_update_bn(self, loader, model, device=None):
         r"""Swaps variables and swa buffers and updates BatchNorm buffers.
 
-        This method is equivalent to subsequently calling `opt.swap_swa_sgd()` \
-        and `opt.bn_update(loader, model, device)`. It's meant to be called in 
+        This method is equivalent to subsequently calling 
+        :meth:`opt.swap_swa_sgd()` and 
+        :meth:`opt.bn_update(loader, model, device)`. It's meant to be called in
         the end of training to use the collected swa running averages and update
-        the batchnorm buffers in the model. It can also be used to evaluate the 
-        running averages during training; to continue training `swap_swa_sgd`
-        should be called again.
+        the Batch Normalization running activation statistics in the model. It 
+        can also be used to evaluate the SWA running averages during training; 
+        to continue training `swap_swa_sgd` should be called again.
         """
         self.swap_swa_sgd()
         self.update_bn(loader, model, device)
