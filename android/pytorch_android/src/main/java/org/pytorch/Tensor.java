@@ -1,5 +1,6 @@
 package org.pytorch;
 
+import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.jni.HybridData;
 
 import java.nio.Buffer;
@@ -329,9 +330,9 @@ public abstract class Tensor {
     return new Tensor_float64(data, shape);
   }
 
-  protected HybridData mHybridData;
+  @DoNotStrip protected HybridData mHybridData;
 
-  private native HybridData initHybrid();
+  @DoNotStrip private native HybridData initHybrid();
 
   private Tensor(long[] shape) {
     checkShape(shape);
