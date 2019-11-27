@@ -32,6 +32,7 @@ def _set_rpc_done(rank_distance):
 
 def _check_rpc_done(rank_distance):
     while not rpc_done[rank_distance]:
+        # yield control to other threads
         time.sleep(0)
 
 def requires_process_group_agent(message=""):

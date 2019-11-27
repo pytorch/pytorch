@@ -163,6 +163,8 @@ class ProcessGroupAgent : public RpcAgent {
   // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
   // ProcessGroupAgent::join. It controls whether several background threads
   // should be running.
+  // We lock access to this in shutdown() and pollTimedOutRPCs() to prevent race
+  // conditions when notifying condition variables.
   std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
@@ -170,6 +172,8 @@ class ProcessGroupAgent : public RpcAgent {
   std::thread listenerThread_;
   // A thread to poll existing futures and check for timed out ones.
   std::thread futureTimeoutThread_;
+  // Lock and shared ptr to currently pending work, set in listenloop() and
+  // interruptible in shutdown().
   std::mutex recvWorkMutex_;
   std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
   // A threadPool that processing both SendWork and RecvWork. There are two
