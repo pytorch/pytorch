@@ -59,6 +59,28 @@ class Trace {
   static bool is_initialized_;
 };
 
+class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
+ public:
+  constexpr static const char* kJavaDescriptor = "Lorg/pytorch/Tensor;";
+
+  explicit TensorHybrid(at::Tensor tensor) : tensor_(tensor) {}
+
+  static facebook::jni::local_ref<TensorHybrid::jhybriddata> initHybrid(
+      facebook::jni::alias_ref<TensorHybrid::javaobject> jtensorThis);
+
+  static facebook::jni::local_ref<TensorHybrid::javaobject>
+  newJTensorFromAtTensor(const at::Tensor& tensor);
+
+  static at::Tensor newAtTensorFromJTensor(
+      facebook::jni::alias_ref<TensorHybrid::javaobject> jtensor);
+
+  static void registerNatives();
+
+ private:
+  friend HybridBase;
+  at::Tensor tensor_;
+};
+
 class JIValue : public facebook::jni::JavaClass<JIValue> {
  public:
   constexpr static const char* kJavaDescriptor = "Lorg/pytorch/IValue;";

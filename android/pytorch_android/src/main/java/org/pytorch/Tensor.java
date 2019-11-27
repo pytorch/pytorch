@@ -1,5 +1,7 @@
 package org.pytorch;
 
+import com.facebook.jni.HybridData;
+
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -327,6 +329,9 @@ public abstract class Tensor {
     return new Tensor_float64(data, shape);
   }
 
+  protected HybridData mHybridData;
+  private native HybridData initHybrid();
+
   private Tensor(long[] shape) {
     checkShape(shape);
     this.shape = Arrays.copyOf(shape, shape.length);
@@ -437,6 +442,7 @@ public abstract class Tensor {
     private Tensor_uint8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
     }
 
     @Override
@@ -469,6 +475,7 @@ public abstract class Tensor {
     private Tensor_int8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
     }
 
     @Override
@@ -501,6 +508,7 @@ public abstract class Tensor {
     private Tensor_int32(IntBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
     }
 
     @Override
@@ -533,6 +541,7 @@ public abstract class Tensor {
     Tensor_float32(FloatBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
     }
 
     @Override
@@ -565,6 +574,7 @@ public abstract class Tensor {
     private Tensor_int64(LongBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
     }
 
     @Override
@@ -597,6 +607,7 @@ public abstract class Tensor {
     private Tensor_float64(DoubleBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
     }
 
     @Override

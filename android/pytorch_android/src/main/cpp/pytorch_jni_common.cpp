@@ -121,87 +121,70 @@ static at::Tensor newAtTensor(
       at::TensorOptions(typeMeta));
 }
 
-class JTensor : public facebook::jni::JavaClass<JTensor> {
- public:
-  constexpr static const char* kJavaDescriptor = "Lorg/pytorch/Tensor;";
+facebook::jni::local_ref<TensorHybrid::jhybriddata> TensorHybrid::initHybrid(
+    facebook::jni::alias_ref<TensorHybrid::javaobject> jtensorThis) {
+  static auto cls = TensorHybrid::javaClassStatic();
+  static const auto dtypeMethod = cls->getMethod<jint()>("dtypeJniCode");
+  static const auto shapeField = cls->getField<jlongArray>("shape");
+  static auto getDataBufferMethod = cls->getMethod<
+      facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
+      "getRawDataBuffer");
 
-  static facebook::jni::local_ref<JTensor> newJTensor(
-      facebook::jni::alias_ref<facebook::jni::JByteBuffer> jBuffer,
-      facebook::jni::alias_ref<jlongArray> jShape,
-      jint jdtype) {
-    static auto jMethodNewTensor =
-        JTensor::javaClassStatic()
-            ->getStaticMethod<facebook::jni::local_ref<JTensor>(
-                facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
-                facebook::jni::alias_ref<jlongArray>,
-                jint)>("nativeNewTensor");
-    return jMethodNewTensor(
-        JTensor::javaClassStatic(), jBuffer, jShape, jdtype);
+  at::Tensor tensor = newAtTensor(
+      getDataBufferMethod(jtensorThis),
+      jtensorThis->getFieldValue(shapeField),
+      dtypeMethod(jtensorThis));
+  return makeCxxInstance(std::move(tensor));
+}
+
+facebook::jni::local_ref<TensorHybrid::javaobject> TensorHybrid::
+    newJTensorFromAtTensor(const at::Tensor& tensor) {
+  const auto scalarType = tensor.scalar_type();
+  int jdtype = 0;
+  if (at::kFloat == scalarType) {
+    jdtype = kTensorDTypeFloat32;
+  } else if (at::kInt == scalarType) {
+    jdtype = kTensorDTypeInt32;
+  } else if (at::kByte == scalarType) {
+    jdtype = kTensorDTypeUInt8;
+  } else if (at::kChar == scalarType) {
+    jdtype = kTensorDTypeInt8;
+  } else if (at::kLong == scalarType) {
+    jdtype = kTensorDTypeInt64;
+  } else if (at::kDouble == scalarType) {
+    jdtype = kTensorDTypeFloat64;
+  } else {
+    facebook::jni::throwNewJavaException(
+        facebook::jni::gJavaLangIllegalArgumentException,
+        "at::Tensor scalar type is not supported on java side");
   }
+  static auto cls = TensorHybrid::javaClassStatic();
+  auto sizes = tensor.sizes();
+  facebook::jni::local_ref<jlongArray> jTensorShape =
+      facebook::jni::make_long_array(sizes.size());
+  jTensorShape->setRegion(0, sizes.size(), sizes.data());
 
-  static facebook::jni::local_ref<JTensor> newJTensorFromAtTensor(
-      const at::Tensor& tensor) {
-    const auto scalarType = tensor.scalar_type();
-    int jdtype = 0;
-    if (at::kFloat == scalarType) {
-      jdtype = kTensorDTypeFloat32;
-    } else if (at::kInt == scalarType) {
-      jdtype = kTensorDTypeInt32;
-    } else if (at::kByte == scalarType) {
-      jdtype = kTensorDTypeUInt8;
-    } else if (at::kChar == scalarType) {
-      jdtype = kTensorDTypeInt8;
-    } else if (at::kLong == scalarType) {
-      jdtype = kTensorDTypeInt64;
-    } else if (at::kDouble == scalarType) {
-      jdtype = kTensorDTypeFloat64;
-    } else {
-      facebook::jni::throwNewJavaException(
-          facebook::jni::gJavaLangIllegalArgumentException,
-          "at::Tensor scalar type is not supported on java side");
-    }
+  facebook::jni::local_ref<facebook::jni::JByteBuffer> jTensorBuffer =
+      facebook::jni::JByteBuffer::wrapBytes(
+          (uint8_t*)tensor.storage().data(), tensor.nbytes());
+  jTensorBuffer->order(facebook::jni::JByteOrder::nativeOrder());
 
-    const auto& tensorShape = tensor.sizes();
-    std::vector<jlong> tensorShapeVec;
-    for (const auto& s : tensorShape) {
-      tensorShapeVec.push_back(s);
-    }
+  static auto jMethodNewTensor =
+      cls->getStaticMethod<facebook::jni::local_ref<TensorHybrid::javaobject>(
+          facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
+          facebook::jni::alias_ref<jlongArray>,
+          jint)>("nativeNewTensor");
+  return jMethodNewTensor(cls, jTensorBuffer, jTensorShape, jdtype);
+}
 
-    facebook::jni::local_ref<jlongArray> jTensorShape =
-        facebook::jni::make_long_array(tensorShapeVec.size());
+at::Tensor TensorHybrid::newAtTensorFromJTensor(
+    facebook::jni::alias_ref<TensorHybrid::javaobject> jtensor) {
+  return jtensor->cthis()->tensor_;
+}
 
-    jTensorShape->setRegion(0, tensorShapeVec.size(), tensorShapeVec.data());
-
-    facebook::jni::local_ref<facebook::jni::JByteBuffer> jTensorBuffer =
-        facebook::jni::JByteBuffer::allocateDirect(tensor.nbytes());
-    jTensorBuffer->order(facebook::jni::JByteOrder::nativeOrder());
-    std::memcpy(
-        jTensorBuffer->getDirectBytes(),
-        tensor.storage().data(),
-        tensor.nbytes());
-    return JTensor::newJTensor(jTensorBuffer, jTensorShape, jdtype);
-  }
-
-  static at::Tensor newAtTensorFromJTensor(
-      facebook::jni::alias_ref<JTensor> jtensor) {
-    static const auto dtypeMethod =
-        JTensor::javaClassStatic()->getMethod<jint()>("dtypeJniCode");
-    jint jdtype = dtypeMethod(jtensor);
-
-    static const auto shapeField =
-        JTensor::javaClassStatic()->getField<jlongArray>("shape");
-    auto jshape = jtensor->getFieldValue(shapeField);
-
-    static auto dataBufferMethod =
-        JTensor::javaClassStatic()
-            ->getMethod<
-                facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
-                "getRawDataBuffer");
-    facebook::jni::local_ref<facebook::jni::JBuffer> jbuffer =
-        dataBufferMethod(jtensor);
-    return newAtTensor(jbuffer, jshape, jdtype);
-  }
-};
+void TensorHybrid::registerNatives() {
+  registerHybrid({makeNativeMethod("initHybrid", TensorHybrid::initHybrid)});
+}
 
 facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
     const at::IValue& ivalue) {
@@ -216,10 +199,10 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
     static auto jMethodTensor =
         JIValue::javaClassStatic()
             ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                facebook::jni::local_ref<JTensor>)>("from");
+                facebook::jni::local_ref<TensorHybrid::javaobject>)>("from");
     return jMethodTensor(
         JIValue::javaClassStatic(),
-        JTensor::newJTensorFromAtTensor(ivalue.toTensor()));
+        TensorHybrid::newJTensorFromAtTensor(ivalue.toTensor()));
   } else if (ivalue.isBool()) {
     static auto jMethodBool =
         JIValue::javaClassStatic()
@@ -309,12 +292,13 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
         JIValue::javaClassStatic()
             ->getStaticMethod<facebook::jni::local_ref<JIValue>(
                 facebook::jni::alias_ref<facebook::jni::JArrayClass<
-                    JTensor::javaobject>::javaobject>)>("listFrom");
+                    TensorHybrid::javaobject>::javaobject>)>("listFrom");
     auto jArray =
-        facebook::jni::JArrayClass<JTensor::javaobject>::newArray(list.size());
+        facebook::jni::JArrayClass<TensorHybrid::javaobject>::newArray(
+            list.size());
     auto index = 0;
     for (const auto& e : list) {
-      (*jArray)[index++] = JTensor::newJTensorFromAtTensor(e);
+      (*jArray)[index++] = TensorHybrid::newJTensorFromAtTensor(e);
     }
     return jMethodTensorListArr(JIValue::javaClassStatic(), jArray);
   } else if (ivalue.isGenericList()) {
@@ -403,9 +387,9 @@ at::IValue JIValue::JIValueToAtIValue(
   } else if (JIValue::kTypeCodeTensor == typeCode) {
     static const auto jMethodGetTensor =
         JIValue::javaClassStatic()
-            ->getMethod<facebook::jni::alias_ref<JTensor::javaobject>()>(
+            ->getMethod<facebook::jni::alias_ref<TensorHybrid::javaobject>()>(
                 "toTensor");
-    return JTensor::newAtTensorFromJTensor(jMethodGetTensor(jivalue));
+    return TensorHybrid::newAtTensorFromJTensor(jMethodGetTensor(jivalue));
   } else if (JIValue::kTypeCodeBool == typeCode) {
     static const auto jMethodGetBool =
         JIValue::javaClassStatic()->getMethod<jboolean()>("toBool");
@@ -481,15 +465,15 @@ at::IValue JIValue::JIValueToAtIValue(
   } else if (JIValue::kTypeCodeTensorList == typeCode) {
     static const auto jMethodGetTensorList =
         JIValue::javaClassStatic()
-            ->getMethod<
-                facebook::jni::JArrayClass<JTensor::javaobject>::javaobject()>(
-                "toTensorList");
+            ->getMethod<facebook::jni::JArrayClass<
+                TensorHybrid::javaobject>::javaobject()>("toTensorList");
     auto jArray = jMethodGetTensorList(jivalue);
     size_t n = jArray->size();
     c10::List<at::Tensor> list{};
     list.reserve(n);
     for (size_t i = 0; i < n; ++i) {
-      list.push_back(JTensor::newAtTensorFromJTensor(jArray->getElement(i)));
+      list.push_back(
+          TensorHybrid::newAtTensorFromJTensor(jArray->getElement(i)));
     }
     return at::IValue{std::move(list)};
   } else if (JIValue::kTypeCodeList == typeCode) {
