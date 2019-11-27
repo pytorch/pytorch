@@ -8,6 +8,8 @@
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_types.h>
 
+#include <torch/csrc/Exceptions.h>
+
 PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name)
 {
   AT_ASSERT(name.length() < DTYPE_NAME_LEN);
@@ -31,6 +33,10 @@ PyObject *THPDtype_is_floating_point(THPDtype *self, PyObject *noargs)
 
 PyObject *THPDtype_is_signed(THPDtype *self, PyObject *noargs)
 {
+  if (at::isQIntType(self->scalar_type)) {
+    PyErr_SetString(PyExc_TypeError, "Quantized types don't support is_signed");
+    return nullptr;
+  }
   if (at::isSignedType(self->scalar_type)) {
     Py_RETURN_TRUE;
   } else {
