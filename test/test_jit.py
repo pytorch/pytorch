@@ -314,6 +314,10 @@ class Observer(torch.nn.Module):
     def calculate_qparams(self):
         return torch.tensor([2.0]), torch.tensor([3])
 
+    @torch.jit.export
+    def get_qparams(self):
+        return self.calculate_qparams()
+
 class WeightObserver(Observer):
     def __init__(self):
         super(WeightObserver, self).__init__(torch.qint8)
@@ -1011,7 +1015,7 @@ graph(%x : Tensor,
                    .check('Tensor = aten::conv2d') \
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                   .run(str(m._c.getattr("conv")._get_method('conv2d_forward').graph))
+                   .run(str(m._c.getattr("conv")._get_method('_conv_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_child_qconfig(self):
@@ -1064,8 +1068,8 @@ graph(%x : Tensor,
         check_not_observed(get_forward_graph(m._c))
         # check conv.forward is observed
         check_not_observed(get_forward_graph(m._c.getattr('conv')))
-        # check conv.conv2d_forward is observed
-        check_observed(get_module_method(m, 'conv', 'conv2d_forward').graph)
+        # check conv._conv_forward is observed
+        check_observed(get_module_method(m, 'conv', '_conv_forward').graph)
         # check sub is not observed
         check_not_observed(get_module_method(m, 'sub', 'forward'))
         # check forward of sub.linear is observed
@@ -1186,7 +1190,34 @@ graph(%x : Tensor,
                        .check(quant_func) \
                        .check_next("aten::dequantize") \
                        .check("return") \
-                       .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
+                       .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
+
+    def test_insert_quant_dequant_multi_uses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, w0, w1, w2):
+                a = F.conv2d(x, w0)
+                b = F.conv2d(a, w1)
+                c = F.conv2d(a, w2)
+                return b + c
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+        qconfig_dict = {
+            '':
+            QConfig(
+                activation=observer._c,
+                weight=observer._c)
+        }
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
+
+        # we just check we have one dequant on every op input, even input
+        # is sharded as multi uses
+        FileCheck().check_count("aten::dequantize", 8, exactly=True) \
+                   .run(str(get_forward_graph(m._c)))
 
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
