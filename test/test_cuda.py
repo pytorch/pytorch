@@ -2076,6 +2076,44 @@ t2.start()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_fp16(self):
+        # from autocast_lists import torch_fp16_ops# , nn_fp16_ops, tensor_fp16_ops 
+        dtype = torch.float32
+
+        conv_args = [(torch.empty((8, 8, *(8,)*dims), dtype=dtype, device="cuda"),
+                      torch.empty((8, *(8,)*(dims + 1)), dtype=dtype, device="cuda"))
+                      for dims in (1, 2, 3)]
+
+        bias = (torch.empty((8,), dtype=dtype, device="cuda"),)
+        
+        pointwise = (torch.empty(128, dtype=dtype, device="cuda"),)
+
+        # fp16-list functions whose Python-Aten interface appears in python_torch_functions_dispatch.h,
+        torch_fp16_ops = [
+          ("_convolution"        , conv_args[1] + bias + ((1,1), (0,0), (1,1), False, (0,0), 1, False, False, True)),
+          ("_convolution_nogroup", conv_args[1] + bias + ((1,1), (0,0), (1,1), False, (0,0))),
+          ("conv1d"              , conv_args[0]),
+          ("conv2d"              , conv_args[1]),
+          ("conv3d"              , conv_args[2]),
+          ("conv_tbc"            , conv_args[0] + bias),
+          ("conv_transpose1d"    , conv_args[0]),
+          ("conv_transpose2d"    , conv_args[1]),
+          ("conv_transpose3d"    , conv_args[2]),
+          ("convolution"         , conv_args[1] + bias + ((1,1), (0,0), (1,1), False, (0,0), 1)),
+          ("cudnn_convolution"   , conv_args[1] + bias + ((0,0), (1,1), (1,1), 1, False, False)),
+          ("cudnn_convolution_transpose", conv_args[1] + bias + ((0,0), (0,0), (1,1), (1,1), 1, False, False)),
+        ]
+
+        with torch.cuda.amp.autocast():
+            for op, special_args in torch_fp16_ops:
+                output = getattr(torch, op)(*special_args)
+                self.assertTrue(output.dtype == torch.float16,
+                                "autocast for torch.{} produced {} output, should produce torch.float16".format(
+                                op, output.dtype))
+
+
 
 if __name__ == '__main__':
     run_tests()
