@@ -139,6 +139,10 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Install Cuda
+          command: |
+            choco install -y cuda
+      - run:
           name: Install Cudnn
           command : |
             cd c:/
