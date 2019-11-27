@@ -311,6 +311,7 @@ import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit
+import torch.serialization
 import torch.hub
 import torch.random
 import torch.distributions
