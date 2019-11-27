@@ -1201,6 +1201,12 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
 
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
     def test_randn(self):
         x = torch.randn(1, 2, 3, 4)
 
