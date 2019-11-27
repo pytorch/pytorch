@@ -125,6 +125,14 @@ class SpawnContext(ProcessContext):
     pass
 
 
+# Note: [start_processes]
+# mp.start_processes handles both start_method='spawn' and 'fork'. It's supposed to be a
+# more generalized API than mp.spawn. Currently we only document mp.spawn as it's the
+# CUDA compatible start_method. However, in environments like Ipython notebooks, 'fork'
+# works better than 'spawn'. Every helper function we created for mp.spawn is indeed
+# general enough, and backends like XLA can reuse them in Colab notebooks as well.
+# Currently we only add this API first, we can consider adding it to documentation as
+# needed in the future.
 def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     _python_version_check()
     mp = multiprocessing.get_context(start_method)
