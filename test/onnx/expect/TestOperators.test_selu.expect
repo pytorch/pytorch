@@ -5,6 +5,7 @@ graph {
   node {
     input: "input"
     output: "1"
+    name: "Selu_0"
     op_type: "Selu"
   }
   name: "torch-jit-export"
