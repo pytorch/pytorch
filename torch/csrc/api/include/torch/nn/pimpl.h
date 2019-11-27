@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/any.h>
 #include <torch/arg.h>
 #include <torch/detail/static.h>
 #include <torch/serialize/archive.h>
@@ -18,6 +19,8 @@ namespace detail {
 } // namespace detail
 
 namespace nn {
+
+class AnyModule;
 
 /// A `ModuleHolder` is essentially a wrapper around `std::shared_ptr<M>` where
 /// `M` is an `nn::Module` subclass, with convenient constructors defined for
@@ -118,6 +121,18 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   template <typename... Args>
   auto operator()(Args&&... args)
       -> torch::detail::return_type_of_forward_t<Contained, Args...> {
+    // yf225 TODO: Invariants:
+    // 1. the hook should take the module itself and the original Args as input, and return void
+    for (const auto& any_hook : impl_->forward_pre_hooks().values()) {
+      try {
+        // yf225 TODO improve comment: The hook must take `AnyModule` as one of its inputs, because some hooks need to be able to take any type of modules
+        auto hook = c10::any_cast<std::function<void(torch::nn::AnyModule, Args...)>>(any_hook);
+        hook(torch::nn::AnyModule(impl_), std::forward<Args>(args)...);
+      } catch (const c10::bad_any_cast& e) {
+        TORCH_CHECK(false, "yf225 TODO: some useful err msg about hook function input / output type being wrong");
+      }
+    }
+
     // This will not compile if the module does not have a `forward()` method
     // (as expected).
     // NOTE: `std::forward` is qualified to prevent VS2017 emitting

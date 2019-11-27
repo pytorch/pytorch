@@ -230,6 +230,10 @@ OrderedDict<std::string, std::shared_ptr<Module>> Module::named_children()
   return children_;
 }
 
+torch::autograd::hooks_dict Module::forward_pre_hooks() const {
+  return forward_pre_hooks_;
+}
+
 void Module::train(bool on) {
   for (auto& child : children_) {
     child.value()->train(on);

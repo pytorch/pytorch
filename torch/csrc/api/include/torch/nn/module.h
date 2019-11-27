@@ -254,6 +254,9 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// their keys.
   OrderedDict<std::string, std::shared_ptr<Module>> named_children() const;
 
+  /// Returns the forward pre-hooks of this `Module`.
+  torch::autograd::hooks_dict forward_pre_hooks() const;
+
   /// Enables "training" mode.
   virtual void train(bool on = true);
 
@@ -511,6 +514,26 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// with `name` an exception is thrown.
   void unregister_module(const std::string& name);
 
+  /// Registers a forward pre-hook on the module.
+  ///
+  /// The hook will be called every time before `forward` is invoked.
+  /// It should have the following signature:
+  ///
+  ///     hook(module, input) -> void
+  ///
+  /// The hook can modify the input.
+  ///
+  /// Returns:
+  ///     `torch::utils::hooks::RemovableHandle`:
+  ///         a handle that can be used to remove the added hook by calling
+  ///         `handle.remove()`
+  template <typename... Args>
+  torch::utils::hooks::RemovableHandle register_forward_pre_hook(
+      std::function<void(torch::nn::AnyModule, Args...)> hook) {
+    auto handle = torch::utils::hooks::RemovableHandle(forward_pre_hooks_);
+    forward_pre_hooks_.insert(handle.id(), hook);
+    return handle;
+  }
  private:
   // Friend classes.
 
@@ -561,6 +584,9 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   /// The registered (direct) submodules of this `Module`.
   OrderedDict<std::string, std::shared_ptr<Module>> children_;
+
+  /// The forward pre-hooks of this `Module`.
+  torch::autograd::hooks_dict forward_pre_hooks_;
 
   /// The module's name (e.g. "LSTM").
   mutable optional<std::string> name_;
