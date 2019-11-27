@@ -35,6 +35,18 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
+        if (HasArgument("dim")) {
+          auto dim = this->template GetSingleArgument<int>("dim", 0);
+          auto start = this->template GetSingleArgument<int64_t>("start_idx", 0);
+          auto end = this->template GetSingleArgument<int64_t>("end_idx", 0);
+          auto& input_tensor = Inputs()[0]->Get<Int8TensorCPU>();
+          auto rank = input_tensor.t.sizes().size();
+          starts_.resize(rank, 0);
+          ends_.resize(rank, -1);
+          starts_[dim] = start;
+          ends_[dim] = end;
+        }
+
         ReinitializeTensor(
             &starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
         ReinitializeTensor(

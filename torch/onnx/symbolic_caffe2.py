@@ -13,7 +13,7 @@ def register_quantized_ops(domain, version):
     quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
-            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'reshape']
+            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'reshape', 'slice']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -190,5 +190,32 @@ def reshape(g, input, shape):
     }
     print("shape is ", shape)
     output = g.op("_caffe2::Int8Reshape", input, shape, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v', 'v', 'v', 'v', 'i')
+def slice(g, input, dim, start, end, step):
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import slice
+        return slice(g, input, dim, start, end, step)
+
+    start = sym_help._parse_arg(start, 'i')
+    end = sym_help._parse_arg(end, 'i')
+    dim = sym_help._parse_arg(dim, 'i')
+
+    # Dummy values as C2 op expects them to be passed.
+    start_list = [0]
+    end_list = [-1]
+
+    kwargs = {
+        "starts_i": start_list,
+        "ends_i": end_list,
+        "start_idx_i": start,
+        "end_idx_i": end,
+        "dim_i": dim,
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+    output = g.op("_caffe2::Int8Slice", input, **kwargs)
     sym_help._quantized_ops.add(output)
     return output
