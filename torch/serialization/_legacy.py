@@ -9,7 +9,7 @@ import warnings
 from contextlib import closing
 from torch._utils_internal import get_source_lines_and_file
 import torch.serialization._file_utils as _file_utils
-from torch.serialization._tensor_utils import location_tag, default_restore_location, \
+from torch.serialization._tensor_utils import location_tag, \
     normalize_storage_type, storage_to_tensor_type, get_restore_location
 
 

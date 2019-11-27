@@ -5,7 +5,7 @@ import tempfile
 import torch
 
 from contextlib import contextmanager
-from torch._six import string_classes as _string_classes, PY2
+from torch._six import PY2
 
 if not PY2:
     import pathlib
