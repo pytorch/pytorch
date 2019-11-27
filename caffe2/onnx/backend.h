@@ -215,6 +215,8 @@ class CAFFE2_API Caffe2Backend {
 
   Caffe2Ops CreateConcat(OnnxNode* onnx_node, const ConversionContext& ctx);
 
+  Caffe2Ops CreateInt8Concat(OnnxNode* onnx_node, const ConversionContext& ctx);
+
   Caffe2Ops CreateLogSoftmax(OnnxNode* onnx_node, const ConversionContext& ctx);
 
   Caffe2Ops CreateSlice(OnnxNode* onnx_node, const ConversionContext& ctx);

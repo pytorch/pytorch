@@ -354,6 +354,7 @@ Caffe2Backend::get_special_operators() const {
               {"Gemm", &Caffe2Backend::CreateGemm},
               {"Pad", &Caffe2Backend::CreatePad},
               {"Concat", &Caffe2Backend::CreateConcat},
+              {"Int8Concat", &Caffe2Backend::CreateInt8Concat},
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
               {"Split", &Caffe2Backend::CreateSplit},
@@ -889,6 +890,17 @@ Caffe2Ops Caffe2Backend::CreatePad(
 // used when doing training, so we should change Caffe2 to allow
 // 1 output.
 Caffe2Ops Caffe2Backend::CreateConcat(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
+  CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
+  auto* op = c2_op.ops.Mutable(0);
+  op->add_output(dummy_->NewDummyName());
+
+  return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateInt8Concat(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
