@@ -230,7 +230,7 @@ def masked_scatter(g, self, mask, source):
     return g.op('ScatterND', self, index, source)
 
 
-def len(g, self):
+def _len(g, self):
     return g.op("SequenceLength", self)
 
 
