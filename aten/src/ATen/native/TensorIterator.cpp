@@ -230,15 +230,18 @@ void TensorIterator::compute_types() {
   }
 
   for (auto &op : operands_) {
+    bool skip_output = compute_common_dtype_only_for_inputs && op.is_output;
+    bool is_different = op.tensor.defined() && op.current_dtype != common_dtype_;
+
     if (may_have_differing_types) {
       validate_dtype(op, common_dtype_, common_dtype_strategy_);
-      bool cast_by_copy = compute_common_dtype && !common_device_is_cuda && (!compute_common_dtype_only_for_inputs || !op.is_output);
+      bool cast_by_copy = compute_common_dtype && !common_device_is_cuda && !skip_output;
       if (cast_by_copy) {
         maybe_copy_casting_to_common_dtype(op, common_dtype_);
       }
     }
 
-    if (op.tensor.defined() && op.current_dtype != common_dtype_) {
+    if (is_different && !skip_output) {
       have_differing_types_ = true;
     }
 
@@ -686,6 +689,7 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.allow_cpu_scalars_ = true;
   iter.compute_common_dtype_only_for_inputs();
   iter.build();
+  iter.dynamic_cast_if(iter.dtype() != kBool);
   return iter;
 }
 
