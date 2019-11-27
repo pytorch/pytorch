@@ -126,7 +126,7 @@ facebook::jni::local_ref<TensorHybrid::jhybriddata> TensorHybrid::initHybrid(
   static auto cls = TensorHybrid::javaClassStatic();
   static const auto dtypeMethod = cls->getMethod<jint()>("dtypeJniCode");
   static const auto shapeField = cls->getField<jlongArray>("shape");
-  static auto getDataBufferMethod = cls->getMethod<
+  static const auto getDataBufferMethod = cls->getMethod<
       facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
       "getRawDataBuffer");
 
@@ -173,13 +173,14 @@ facebook::jni::local_ref<TensorHybrid::javaobject> TensorHybrid::
       cls->getStaticMethod<facebook::jni::local_ref<TensorHybrid::javaobject>(
           facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
           facebook::jni::alias_ref<jlongArray>,
-          jint)>("nativeNewTensor");
-  return jMethodNewTensor(cls, jTensorBuffer, jTensorShape, jdtype);
+          jint,
+          facebook::jni::alias_ref<jhybriddata>)>("nativeNewTensor");
+  return jMethodNewTensor(
+      cls, jTensorBuffer, jTensorShape, jdtype, makeCxxInstance(tensor));
 }
 
-at::Tensor TensorHybrid::newAtTensorFromJTensor(
-    facebook::jni::alias_ref<TensorHybrid::javaobject> jtensor) {
-  return jtensor->cthis()->tensor_;
+at::Tensor TensorHybrid::tensor() const {
+  return tensor_;
 }
 
 void TensorHybrid::registerNatives() {
@@ -389,7 +390,7 @@ at::IValue JIValue::JIValueToAtIValue(
         JIValue::javaClassStatic()
             ->getMethod<facebook::jni::alias_ref<TensorHybrid::javaobject>()>(
                 "toTensor");
-    return TensorHybrid::newAtTensorFromJTensor(jMethodGetTensor(jivalue));
+    return jMethodGetTensor(jivalue)->cthis()->tensor();
   } else if (JIValue::kTypeCodeBool == typeCode) {
     static const auto jMethodGetBool =
         JIValue::javaClassStatic()->getMethod<jboolean()>("toBool");
@@ -472,8 +473,7 @@ at::IValue JIValue::JIValueToAtIValue(
     c10::List<at::Tensor> list{};
     list.reserve(n);
     for (size_t i = 0; i < n; ++i) {
-      list.push_back(
-          TensorHybrid::newAtTensorFromJTensor(jArray->getElement(i)));
+      list.push_back(jArray->getElement(i)->cthis()->tensor());
     }
     return at::IValue{std::move(list)};
   } else if (JIValue::kTypeCodeList == typeCode) {

@@ -71,8 +71,7 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
   static facebook::jni::local_ref<TensorHybrid::javaobject>
   newJTensorFromAtTensor(const at::Tensor& tensor);
 
-  static at::Tensor newAtTensorFromJTensor(
-      facebook::jni::alias_ref<TensorHybrid::javaobject> jtensor);
+  at::Tensor tensor() const;
 
   static void registerNatives();
 
