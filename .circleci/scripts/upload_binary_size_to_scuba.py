@@ -45,7 +45,7 @@ def build_message(size):
 
 
 def send_message(message):
-    access_token = os.environ.get("access_token")
+    access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
     if not access_token:
         raise ValueError("Can't find access token from environment")
     url = "https://graph.facebook.com/scribe_logs"
