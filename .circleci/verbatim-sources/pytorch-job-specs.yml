@@ -138,19 +138,19 @@ jobs:
       TORCH_CUDA_ARCH_LIST: "7.5"
     steps:
       - checkout
-      - run:
-          name: Install Cuda
-          command: |
-            choco install -y cuda --ignore-checksums
-      - run:
-          name: Install Cudnn
-          command : |
-            cd c:/
-            choco install -y 7zip curl
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
-            curl -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-            7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-            cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+      # - run:
+      #     name: Install Cuda
+      #     command: |
+      #       choco install -y cuda --ignore-checksums
+      # - run:
+      #     name: Install Cudnn
+      #     command : |
+      #       cd c:/
+      #       choco install -y 7zip curl
+      #       choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
+      #       curl -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
+      #       7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
+      #       cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
       - run:
           name: Build
           no_output_timeout: "90m"
