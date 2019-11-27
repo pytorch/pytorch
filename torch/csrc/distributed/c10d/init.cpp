@@ -17,6 +17,7 @@
 #endif
 
 #include <c10d/PrefixStore.hpp>
+#include <c10d/ProcessGroupRoundRobin.hpp>
 #include <c10d/TCPStore.hpp>
 #include <pybind11/chrono.h>
 
@@ -482,6 +483,20 @@ They are used in specifying strategies for reduction collectives, e.g.,
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_round_robin_process_groups",
+      [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
+          -> std::shared_ptr<::c10d::ProcessGroup> {
+        if (processGroups.size() == 0) {
+          throw std::invalid_argument("Specify at least 1 process group");
+        }
+        const auto& first = processGroups.front();
+        return std::make_shared<::c10d::ProcessGroupRoundRobin>(
+            first->getRank(), first->getSize(), std::move(processGroups));
+      },
+      py::arg("process_groups"),
+      py::call_guard<py::gil_scoped_release>());
 
 #ifdef USE_C10D_GLOO
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
