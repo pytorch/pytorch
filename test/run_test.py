@@ -157,7 +157,7 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     # Add 'test_directory' to PYTHONPATH so that imports work.
     env = os.environ.copy()
     if 'PYTHONPATH' in env:
-        env['PYTHONPATH'] += ':{}'.format(test_directory)
+        env['PYTHONPATH'] = os.pathsep.join([env['PYTHONPATH'], test_directory])
     else:
         env['PYTHONPATH'] = test_directory
 
