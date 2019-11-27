@@ -291,10 +291,10 @@ class Tensor(torch._C._TensorBase):
 
     def retain_grad(self):
         r"""Enables .grad attribute for non-leaf Tensors."""
-        if self.grad_fn is None:  # no-op for leaves
-            return
         if not self.requires_grad:
             raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
+        if self.is_leaf:  # no-op for leaves
+            return
         if hasattr(self, 'retains_grad'):
             return
         weak_self = weakref.ref(self)
@@ -727,5 +727,14 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).rename_(names)
         else:
             return super(Tensor, self).rename(names)
+
+    @property
+    def grad(self):
+        if not self.requires_grad:
+            warnings.warn("Accessing .grad on a Tensor that does not require gradients always returns None.")
+        if not hasattr(self, "retains_grad") and not self.is_leaf:
+            warnings.warn("Accessing .grad on a Tensor that is not a leaf Tensor: its .grad attribute won't "
+                          "be populated. See .retain_grad() if you want the gradient to be saved.")
+        return super(Tensor, self).grad
 
     __module__ = 'torch'
