@@ -241,7 +241,7 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   }
   {
     // Case 2: Undefined tensors as buffers
-    BatchNorm module(BatchNormOptions(5).track_running_stats(false).affine(true));
+    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(true));
     ASSERT_TRUE(module->weight.defined());
     ASSERT_FALSE(module->running_mean.defined());
 
