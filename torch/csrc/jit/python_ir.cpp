@@ -234,7 +234,8 @@ void initPythonIRBindings(PyObject* module_) {
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string,
-             bool keep_initializers_as_inputs) {
+             bool keep_initializers_as_inputs,
+             bool add_node_names) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
@@ -245,7 +246,8 @@ void initPythonIRBindings(PyObject* module_) {
                 defer_weight_export,
                 operator_export_type,
                 strip_doc_string,
-                keep_initializers_as_inputs);
+                keep_initializers_as_inputs,
+                add_node_names);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -267,7 +269,8 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("strip_doc_string") = true,
-          py::arg("keep_initializers_as_inputs") = true)
+          py::arg("keep_initializers_as_inputs") = true,
+          py::arg("add_node_names") = true)
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
@@ -276,7 +279,8 @@ void initPythonIRBindings(PyObject* module_) {
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool google_printer,
-             bool keep_initializers_as_inputs) {
+             bool keep_initializers_as_inputs,
+             bool add_node_names) {
             return pretty_print_onnx(
                 g,
                 initializers,
@@ -284,7 +288,8 @@ void initPythonIRBindings(PyObject* module_) {
                 defer_weight_export,
                 operator_export_type,
                 google_printer,
-                keep_initializers_as_inputs);
+                keep_initializers_as_inputs,
+                add_node_names);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
@@ -292,7 +297,8 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("google_printer") = false,
-          py::arg("keep_initializers_as_inputs") = true)
+          py::arg("keep_initializers_as_inputs") = true,
+          py::arg("add_node_names") = true)
       .def(
           "inputs",
           [](Graph& g) {
@@ -692,6 +698,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
+  py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
+      .def_static("get", &NoneType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
@@ -723,13 +731,21 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
-      }));
+      }))
+      .def("name", [](ClassType& self) { return self.name()->name(); });
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_interface(
             c10::QualifiedName(qualified_name));
-      }));
+      }))
+      .def("getMethodNames", [](InterfaceType& self) {
+        std::vector<std::string> names;
+        for (const FunctionSchema& fn : self.methods()) {
+          names.emplace_back(fn.name());
+        }
+        return names;
+      });
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)

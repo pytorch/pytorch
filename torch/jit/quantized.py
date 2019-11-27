@@ -18,15 +18,15 @@ class QuantizedLinear(torch.jit.ScriptModule):
         self.out_features = other.out_features
         # Quantize weight and discard the original
         self.weight, self.col_offsets, self.scale, self.zero_point = torch.fbgemm_linear_quantize_weight(
-            other.weight.clone().float())
+            other.weight.clone(memory_format=torch.contiguous_format).float())
         self.weight = torch.nn.Parameter(self.weight, requires_grad=False)
         self.col_offsets = torch.nn.Parameter(self.col_offsets, requires_grad=False)
         assert other.bias is not None, 'QuantizedLinear requires a bias'
-        self.bias = torch.nn.Parameter(other.bias.clone().float(), requires_grad=False)
+        self.bias = torch.nn.Parameter(other.bias.clone(memory_format=torch.contiguous_format).float(), requires_grad=False)
 
         self.register_buffer(
             'packed_tensor_ptr',
-            torch.fbgemm_pack_quantized_matrix(self.weight.clone()))
+            torch.fbgemm_pack_quantized_matrix(self.weight.clone(memory_format=torch.contiguous_format)))
 
     @torch.jit.script_method
     def _unpack(self):
@@ -59,9 +59,9 @@ class QuantizedLinearFP16(torch.jit.ScriptModule):
         self.out_features = other.out_features
         self.original_weight = other.weight
         self.weight = torch.fbgemm_pack_gemm_matrix_fp16(
-            other.weight.clone().float())
+            other.weight.clone(memory_format=torch.contiguous_format).float())
         assert other.bias is not None, 'QuantizedLinearFP16 requires a bias'
-        self.bias = torch.nn.Parameter(other.bias.clone().float(), requires_grad=False)
+        self.bias = torch.nn.Parameter(other.bias.clone(memory_format=torch.contiguous_format).float(), requires_grad=False)
         self.register_buffer('packed_weight', self.weight)
 
     @torch.jit.script_method
@@ -99,11 +99,11 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
             raise ValueError("Quantized RNN cells require bias terms")
 
         weight_ih, col_offsets_ih, self.scale_ih, self.zero_point_ih = \
-            torch.fbgemm_linear_quantize_weight(other.weight_ih.clone().float())
+            torch.fbgemm_linear_quantize_weight(other.weight_ih.clone(memory_format=torch.contiguous_format).float())
         self.register_buffer('weight_ih', weight_ih)
         self.register_buffer('col_offsets_ih', col_offsets_ih)
         weight_hh, col_offsets_hh, self.scale_hh, self.zero_point_hh = \
-            torch.fbgemm_linear_quantize_weight(other.weight_hh.clone().float())
+            torch.fbgemm_linear_quantize_weight(other.weight_hh.clone(memory_format=torch.contiguous_format).float())
         self.register_buffer('weight_hh', weight_hh)
         self.register_buffer('col_offsets_hh', col_offsets_hh)
 
@@ -112,8 +112,8 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
         packed_hh = torch.fbgemm_pack_quantized_matrix(self.weight_hh)
         self.register_buffer('packed_hh', packed_hh)
 
-        self.bias_ih = torch.nn.Parameter(other.bias_ih.clone().float(), requires_grad=False)
-        self.bias_hh = torch.nn.Parameter(other.bias_hh.clone().float(), requires_grad=False)
+        self.bias_ih = torch.nn.Parameter(other.bias_ih.clone(memory_format=torch.contiguous_format).float(), requires_grad=False)
+        self.bias_hh = torch.nn.Parameter(other.bias_hh.clone(memory_format=torch.contiguous_format).float(), requires_grad=False)
 
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
@@ -292,7 +292,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                         #   w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                         #   col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh
                         qweight, col_offsets, scale, zero_point = \
-                            torch.fbgemm_linear_quantize_weight(weight.clone().float())
+                            torch.fbgemm_linear_quantize_weight(weight.clone(memory_format=torch.contiguous_format).float())
                         packed_weight = torch.fbgemm_pack_quantized_matrix(qweight)
 
                         params = [qweight, bias, packed_weight, col_offsets, scale, zero_point]
@@ -307,7 +307,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                         #
                         #   packed_ih, packed_hh, b_ih, b_hh
                         packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
-                            weight.clone().float())
+                            weight.clone(memory_format=torch.contiguous_format).float())
 
                         self._orig_weights_names.append(weight_name)
                         self.register_buffer(weight_name, weight)

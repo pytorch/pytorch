@@ -4,7 +4,7 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 from torch.utils.cpp_extension import CUDA_HOME
 
-CXX_FLAGS = [] if sys.platform == 'win32' else ['-g', '-Werror']
+CXX_FLAGS = ['/sdl', '/permissive-'] if sys.platform == 'win32' else ['-g', '-Werror']
 
 ext_modules = [
     CppExtension(

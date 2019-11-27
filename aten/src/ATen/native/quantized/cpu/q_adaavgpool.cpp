@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>

@@ -239,13 +239,10 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // root_key
   pushString(c10::to_string(tensor_data_.size()));
   // location
-  std::ostringstream ss;
-  ss << tensor.device();
-  pushString(ss.str());
+  pushString(tensor.device().str());
   // size
   pushInt(tensor.storage().size());
-  // view_metadata
-  push<PickleOpCode>(PickleOpCode::NONE);
+
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 

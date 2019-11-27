@@ -63,7 +63,7 @@ struct TORCH_API TracingState
   void setValue(const IValue& v, Value* value);
   void delValue(const IValue& var);
   Value* getValue(const IValue& var);
-  Value* getOutput(const IValue& var);
+  Value* getOutput(const IValue& var, size_t i);
   bool hasValue(const IValue& var) const;
 
 private:

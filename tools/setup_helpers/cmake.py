@@ -13,7 +13,6 @@ from distutils.version import LooseVersion
 
 from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
-from .cuda import USE_CUDA
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 
@@ -231,9 +230,12 @@ class CMake:
              'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
+             'JAVA_HOME',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',
+             'Numa_INCLUDE_DIR',
+             'Numa_LIBRARIES',
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
@@ -265,7 +267,6 @@ class CMake:
             # are automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
-            'USE_CUDA': USE_CUDA,
             'USE_NUMPY': USE_NUMPY,
         })
 

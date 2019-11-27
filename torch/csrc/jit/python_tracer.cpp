@@ -104,8 +104,7 @@ Node* preRecordPythonTrace(
     n->addInput(getValueTrace(input));
   }
 
-  // NB: Order matters. This must append after inputs but before outputs.
-  graph->appendNode(n);
+  graph->insertNode(n);
 
   return n;
 }
@@ -147,6 +146,11 @@ void initPythonTracerBindings(PyObject* module) {
             s.graph->push_scope(scope_name);
           })
       .def("pop_scope", [](TracingState& s) { s.graph->pop_scope(); })
+      .def(
+          "current_scope",
+          [](TracingState& s) {
+            return s.graph->current_scope()->name().toUnqualString();
+          })
       .def(
           "set_graph",
           [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })

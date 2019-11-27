@@ -33,6 +33,16 @@ namespace torch {
 /// We are going to fix this discrepancy by making `torch::tensor` give
 /// a float tensor by default.
 /// Tracking issue: https://github.com/pytorch/pytorch/issues/28902
+///
+/// NOTE: C++ `torch::tensor` with an integer literal or a braced-init-list of
+/// integer literals always produces a tensor of dtype `at::kLong` (aka. int64_t),
+/// matching Python `torch.tensor` behavior.
+///
+/// NOTE: The following dtypes are not supported by `torch::tensor` currently:
+/// - `unsigned int`
+/// - `unsigned long int`
+/// - `unsigned long long int`
+/// - `long long int`
 inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
   return autograd::make_variable(
     tensor_data_container.convert_to_tensor(options),
@@ -58,7 +68,7 @@ inline at::Tensor from_blob(
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+    return at::from_blob(data, sizes, strides, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -94,7 +104,7 @@ inline at::Tensor from_blob(
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::from_blob(data, sizes, deleter, options.is_variable(false));
+    return at::from_blob(data, sizes, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
