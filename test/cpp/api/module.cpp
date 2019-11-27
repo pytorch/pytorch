@@ -221,6 +221,50 @@ TEST_F(ModuleTest, AsCastsModulesCorrectly) {
   ASSERT_EQ(unit.as<AGIUnit>(), &unit);
 }
 
+void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
+  torch::Device to_device, torch::Dtype to_dtype) {
+  {
+    // Case 1: Undefined tensors as parameters
+    torch::nn::Linear module(torch::nn::LinearOptions(10, 20).bias(false));
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_FALSE(module->bias.defined());
+
+    module->to(to_device);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.device(), to_device);
+    ASSERT_FALSE(module->bias.defined());
+
+    module->to(to_dtype);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.dtype(), to_dtype);
+    ASSERT_FALSE(module->bias.defined());
+  }
+  {
+    // Case 2: Undefined tensors as buffers
+    BatchNorm module(BatchNormOptions(5).track_running_stats(false).affine(true));
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_FALSE(module->running_mean.defined());
+
+    module->to(to_device);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.device(), to_device);
+    ASSERT_FALSE(module->running_mean.defined());
+
+    module->to(to_dtype);
+    ASSERT_TRUE(module->weight.defined());
+    ASSERT_EQ(module->weight.dtype(), to_dtype);
+    ASSERT_FALSE(module->running_mean.defined());
+  }
+}
+
+TEST_F(ModuleTest, DeviceConversionSkipsUndefinedTensor) {
+  test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCPU, torch::kDouble);
+}
+
+TEST_F(ModuleTest, DeviceConversionSkipsUndefinedTensor_CUDA) {
+  test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCUDA, torch::kDouble);
+}
+
 TEST_F(ModuleTest, Conversion_MultiCUDA) {
   Linear module(128, 64);
   for (auto& parameter : module->parameters()) {
