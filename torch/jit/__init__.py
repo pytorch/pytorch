@@ -1617,12 +1617,6 @@ if _enabled:
             """
             return self.forward.code
 
-        def opnames(self, *args, **kwargs):
-            r"""
-            Returns a list of operator names in this module and its sub modules.
-            """
-            return self._c.opnames()
-
         def save(self, *args, **kwargs):
             r"""
             save(f, _extra_files=ExtraFilesMap{})
