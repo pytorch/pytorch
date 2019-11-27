@@ -257,11 +257,11 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   }
 }
 
-TEST_F(ModuleTest, DeviceConversionSkipsUndefinedTensor) {
+TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor) {
   test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCPU, torch::kDouble);
 }
 
-TEST_F(ModuleTest, DeviceConversionSkipsUndefinedTensor_CUDA) {
+TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor_CUDA) {
   test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCUDA, torch::kDouble);
 }
 
