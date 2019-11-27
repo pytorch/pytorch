@@ -1973,28 +1973,24 @@ _builtin_ops = [
 
 
 # Caching: we currently cache compilation of free functions.
+# To cache free functions we hold a weak ref to the function object and
+# map to the compiled fn's qualified name.
 # In the future we could consider caching more types of objects so that
 # aliasing is preserved across separate compilations of the same object.
-# There is no weakref WeakKeyValueDictioanry, so we use a WeakKeyDictionary
-# and create a weakref to the value
 
 _jit_caching_layer = weakref.WeakKeyDictionary()
 
 def _try_get_jit_cached_key(key):
-    if key in _jit_caching_layer:
-        weakref = _jit_caching_layer[key]
-
-        # get reference from weak reference by calling it
-        ref = weakref()
-
-        # if the value ref got GC'd it will be none; remove key from cache
-        if ref is None:
-            _jit_caching_layer.pop(key)
-        return ref
-    return None
+    qual_name = _jit_caching_layer.get(key, None)
+    if qual_name:
+        return torch._try_get_compiled_func(qual_name)
+    else:
+        return None
 
 def _set_jit_cache(key, value):
-    _jit_caching_layer[key] = weakref.ref(value)
+    # only free functions currently supported
+    assert isinstance(value, torch.jit.ScriptFunction)
+    _jit_caching_layer[key] = value.qualified_name
 
 
 # lazily built to ensure the correct initialization order

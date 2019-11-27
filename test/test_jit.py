@@ -4889,20 +4889,6 @@ a")
 
         self.assertEqual(num_cached_elements - 1, len(torch.jit._jit_caching_layer))
 
-        # testing weak value ref in caching layer
-        def foo():
-            return 1
-
-        script_foo = torch.jit.script(foo)
-        num_cached_elements = len(torch.jit._jit_caching_layer)
-        del script_foo
-        # make sure gc is run so that test works deterministically
-        gc.collect()
-        out = torch.jit._try_get_jit_cached_key(foo)
-        self.assertEqual(num_cached_elements - 1, len(torch.jit._jit_caching_layer))
-        self.assertIsNone(out)
-        self.assertEqual(torch.jit.script(foo)(), 1)
-
     def test_string_ops(self):
         def foo():
             a = "a" + "b"
