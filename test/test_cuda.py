@@ -2079,16 +2079,16 @@ t2.start()
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_amp_fp16(self):
-        # from autocast_lists import torch_fp16_ops# , nn_fp16_ops, tensor_fp16_ops 
+        # from autocast_lists import torch_fp16_ops# , nn_fp16_ops, tensor_fp16_ops
         dtype = torch.float32
 
+        # Some general-purpose arguments to serve the functions below.
         conv_args = [(torch.empty((8, 8, *(8,)*dims), dtype=dtype, device="cuda"),
                       torch.empty((8, *(8,)*(dims + 1)), dtype=dtype, device="cuda"))
                       for dims in (1, 2, 3)]
-
         bias = (torch.empty((8,), dtype=dtype, device="cuda"),)
-        
         pointwise = (torch.empty(128, dtype=dtype, device="cuda"),)
+        element = (torch.empty(1, dtype=dtype, device="cuda"),)
 
         # fp16-list functions whose Python-Aten interface appears in python_torch_functions_dispatch.h,
         torch_fp16_ops = [
@@ -2104,6 +2104,10 @@ t2.start()
           ("convolution"         , conv_args[1] + bias + ((1,1), (0,0), (1,1), False, (0,0), 1)),
           ("cudnn_convolution"   , conv_args[1] + bias + ((0,0), (1,1), (1,1), 1, False, False)),
           ("cudnn_convolution_transpose", conv_args[1] + bias + ((0,0), (0,0), (1,1), (1,1), 1, False, False)),
+          ("prelu"               , pointwise + element)
+        ]
+
+        nn_fp16_methods = [
         ]
 
         with torch.cuda.amp.autocast():
@@ -2113,7 +2117,80 @@ t2.start()
                                 "autocast for torch.{} produced {} output, should produce torch.float16".format(
                                 op, output.dtype))
 
+        tensor_specific_fp16_methods = [
+          "__matmul__" ,
+        ]
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_fp32(self):
+        dtype = torch.float16
+
+        torch_fp32_methods = [
+        ]
+
+        nn_fp32_methods = [
+        ]
+
+        tensor_specific_fp32_methods = [
+          "__ipow__",
+          "__pow__" ,
+          "__rpow__",
+        ]
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_promotion(self):
+        # These ops take multiple arguments but don't route through TensorIterator's type
+        # promotion.  Autocast handles promotion for these explicitly, and we should make
+        # sure it does the right thing.
+        # TODO:  If any ops below are modified to perform built-in type promotion,
+        # yell at mcarilli to move them to the expect_builtin_promotion list, and remove
+        # their registration as promote ops in ATen/core/autocast/register_autocast_ops.cpp.
+        torch_need_autocast_promotion_ops = [
+        ]
+
+        # Amp expects these ops to have built-in type promotion (eg through TensorIterator),
+        # so they shouldn't need special treatment from autocasting.
+        # However, it's important to confirm they're promoting the way Amp expects.
+        # TODO:  If any ops below are modified so they no longer promote the way Amp expects,
+        # yell at mcarilli to move them to the need_autocast_promotion list, and add them
+        # as promote ops in ATen/core/autocast/register_autocast_ops.cpp.
+        torch_expect_builtin_promotion_ops = [
+        ]
+
+        nn_need_autocast_promotion_ops = [
+        ]
+
+        nn_expect_builtin_promotion_ops = [
+        ]
+
+        tensor_specific_need_autocast_promotion_methods = [
+        ]
+
+        tensor_specific_expect_builtin_promotion_methods = [
+          "__add__"     ,
+          "__div__"     ,
+          "__eq__"      ,
+          "__ge__"      ,
+          "__gt__"      ,
+          "__iadd__"    ,
+          "__idiv__"    ,
+          "__imul__"    ,
+          "__isub__"    ,
+          "__itruediv__",
+          "__le__"      ,
+          "__lt__"      ,
+          "__mul__"     ,
+          "__ne__"      ,
+          "__radd__"    ,
+          "__rdiv__"    ,
+          "__rmul__"    ,
+          "__rsub__"    ,
+          "__rtruediv__",
+          "__sub__"     ,
+          "__truediv__" ,
+        ]
 
 if __name__ == '__main__':
     run_tests()

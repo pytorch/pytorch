@@ -281,6 +281,10 @@ auto register_explicit = torch::RegisterOperators()
     .schema("aten::cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
     .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), PATCH(cudnn_convolution_transpose, fp16)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::prelu(Tensor self, Tensor weight) -> Tensor")
+    .kernel<Tensor (const Tensor &, const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::prelu, fp16))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 
   /* FP32 OPS */
   /* PROMOTE OPS */
