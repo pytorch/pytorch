@@ -5,11 +5,13 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "NonZero_0"
     op_type: "NonZero"
   }
   node {
     input: "1"
     output: "2"
+    name: "Transpose_1"
     op_type: "Transpose"
     attribute {
       name: "perm"
