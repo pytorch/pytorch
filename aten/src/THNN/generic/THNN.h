@@ -48,19 +48,5 @@ TH_API void THNN_(LogSigmoid_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           THTensor *buffer);           // [BUFFER]
 
-TH_API void THNN_(SoftPlus_updateOutput)(
-          THNNState *state,
-          THTensor *input, THTensor *output,
-          accreal beta,
-          accreal threshold);
-TH_API void THNN_(SoftPlus_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *output,
-          accreal beta,
-          accreal threshold);
-
 #endif
 #endif
