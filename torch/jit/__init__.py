@@ -28,6 +28,7 @@ import re
 import sys
 import textwrap
 import warnings
+import weakref
 
 from collections import OrderedDict
 
@@ -1270,7 +1271,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
     else:
         _check_directly_compile_overloaded(obj)
-        maybe_already_compiled_fn = torch.try_get_compiled_func(qualified_name)
+        maybe_already_compiled_fn = _try_get_jit_cached_key(obj)
         if maybe_already_compiled_fn:
             return maybe_already_compiled_fn
         ast = get_jit_def(obj)
@@ -1279,6 +1280,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        _set_jit_cache(obj, fn)
         return fn
 
 def interface(obj):
@@ -1967,6 +1969,32 @@ _builtin_ops = [
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
 ]
+
+
+
+# Caching: we currently cache compilation of free functions.
+# In the future we could consider caching more types of objects so that
+# aliasing is preserved across separate compilations of the same object.
+# There is no weakref WeakKeyValueDictioanry, so we use a WeakKeyDictionary
+# and create a weakref to the value
+
+_jit_caching_layer = weakref.WeakKeyDictionary()
+
+def _try_get_jit_cached_key(key):
+    if key in _jit_caching_layer:
+        weakref = _jit_caching_layer[key]
+
+        # get reference from weak reference by calling it
+        ref = weakref()
+
+        # if the value ref got GC'd it will be none; remove key from cache
+        if ref is None:
+            _jit_caching_layer.pop(key)
+        return ref
+    return None
+
+def _set_jit_cache(key, value):
+    _jit_caching_layer[key] = weakref.ref(value)
 
 
 # lazily built to ensure the correct initialization order

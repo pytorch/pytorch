@@ -86,6 +86,7 @@ import math
 import numpy as np
 import io
 import os
+import gc
 import pickle
 import pickletools
 import random
@@ -4869,7 +4870,38 @@ a")
         def fun():
             return 1 + 2
 
-        self.assertIs(torch.jit.script(fun), torch.jit.script(fun))
+        fun_compiled = torch.jit.script(fun)
+        self.assertIs(fun_compiled, torch.jit.script(fun))
+
+        def fun():
+            return 3 + 4
+
+        # caching doesn't get tripped up by same qualname
+        fun_compiled_2 = torch.jit.script(fun)
+        self.assertIsNot(fun_compiled, fun_compiled_2)
+        self.assertEqual(fun_compiled_2(), 7)
+
+        # testing weak key ref in caching layer
+        num_cached_elements = len(torch.jit._jit_caching_layer)
+        del fun
+        # make sure gc is run so that test works deterministically
+        gc.collect()
+
+        self.assertEqual(num_cached_elements - 1, len(torch.jit._jit_caching_layer))
+
+        # testing weak value ref in caching layer
+        def foo():
+            return 1
+
+        script_foo = torch.jit.script(foo)
+        num_cached_elements = len(torch.jit._jit_caching_layer)
+        del script_foo
+        # make sure gc is run so that test works deterministically
+        gc.collect()
+        out = torch.jit._try_get_jit_cached_key(foo)
+        self.assertEqual(num_cached_elements - 1, len(torch.jit._jit_caching_layer))
+        self.assertIsNone(out)
+        self.assertEqual(torch.jit.script(foo)(), 1)
 
     def test_string_ops(self):
         def foo():
