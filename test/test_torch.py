@@ -5284,12 +5284,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
     def test_comparison_ops_must_take_bool_output(self):
-        for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne, torch.logical_xor]:
+        for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne,
+                   torch.logical_and, torch.logical_or, torch.logical_xor]:
             self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
 
     def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
         with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
-            for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_']:
+            for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
                 x = torch.tensor([1], dtype=torch.int)
                 y = torch.tensor([2], dtype=torch.long)
                 in_place_method = getattr(x, op)
@@ -6203,6 +6204,21 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), one_d_clone.set_(one_d.storage(), 0, (), ()).shape)
         self.assertEqual((1,), one_d_clone.set_(one_d.storage(), 0, (1,), (1,)).shape)
 
+        self.assertEqual((), zero_d.clone().set_(zero_d).shape)
+        self.assertEqual((), one_d.clone().set_(zero_d).shape)
+        self.assertEqual((1,), zero_d.clone().set_(one_d).shape)
+        self.assertEqual((1,), one_d.clone().set_(one_d).shape)
+
+        # take
+        self.assertEqual((), torch.randn((2, 3), device=device).take(zero_d_int).shape)
+        self.assertEqual((1,), torch.randn((2, 3), device=device).take(one_d_int).shape)
+
+        # gather
+        self.assertEqual((), torch.gather(zero_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(zero_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((), torch.gather(one_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(one_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
@@ -6506,40 +6522,60 @@ class TestTorchDeviceType(TestCase):
             a.logical_not_()
             self.assertEqual(expected_res, a)
 
-    def test_logical_xor(self, device):
+    def _test_logical(self, device, op, a_, b_, expected_res_):
         for dtype in torch.testing.get_all_dtypes():
-            expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
-            a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
+            if device.startswith('xla') and dtype == torch.half:  # Skip Half on xla.
+                with self.assertRaises(RuntimeError):
+                    expected_res = torch.tensor(expected_res_, dtype=dtype, device=device)
+                with self.assertRaises(RuntimeError):
+                    a = torch.tensor(a_, dtype=dtype, device=device)
+                continue
+            expected_res = torch.tensor(expected_res_, dtype=dtype, device=device)
+            a = torch.tensor(a_, dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
-                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+                if device.startswith('xla') and other_dtype == torch.half:  # Skip Half on xla.
+                    with self.assertRaises(RuntimeError):
+                        b = torch.tensor(b_, dtype=other_dtype, device=device)
+                    continue
+                b = torch.tensor(b_, dtype=other_dtype, device=device)
 
                 # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-                if device != 'cpu' and torch.bfloat16 in (dtype, other_dtype):
+                if device.startswith('cuda') and torch.bfloat16 in (dtype, other_dtype):
                     with self.assertRaises(RuntimeError):
-                        a.logical_xor(b)
+                        getattr(a, op)(b)
                     continue
                 # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
                 # Skip only if either dtype or other_dtype is bfloat16.
                 if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
                     with self.assertRaises(RuntimeError):
-                        a.logical_xor(b)
+                        getattr(a, op)(b)
                     continue
+
                 # new tensor
-                self.assertEqual(expected_res.bool(), a.logical_xor(b))
+                self.assertEqual(expected_res.bool(), getattr(a, op)(b))
                 # out
                 c = torch.empty(0, dtype=torch.bool, device=device)
-                torch.logical_xor(a, b, out=c)
+                getattr(torch, op)(a, b, out=c)
                 self.assertEqual(expected_res.bool(), c.bool())
 
             # in-place
-            b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
+            b = torch.tensor(b_, dtype=dtype, device=device)
             # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
-            if device != 'cpu' and dtype == torch.bfloat16:
+            if device.startswith('cuda') and dtype == torch.bfloat16:
                 with self.assertRaises(RuntimeError):
-                    a.logical_xor_(b)
+                    getattr(a, op + '_')(b)
                 continue
-            a.logical_xor_(b)
+            getattr(a, op + '_')(b)
             self.assertEqual(expected_res, a)
+
+    def test_logical_xor(self, device):
+        self._test_logical(device, 'logical_xor', [10, 0, 1, 0], [1, 0, 0, 10], [0, 0, 1, 1])
+
+    def test_logical_and(self, device):
+        self._test_logical(device, 'logical_and', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 0, 0])
+
+    def test_logical_or(self, device):
+        self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
     def test_isinf(self, device):
         t1 = torch.Tensor([1, inf, 2, -inf, nan]).to(device)

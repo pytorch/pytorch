@@ -2705,6 +2705,34 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.logical_and,
+           r"""
+logical_and(input, other, out=None) -> Tensor
+
+Computes the element-wise logical AND of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
+
+Args:
+    {input}
+    other (Tensor): the tensor to compute AND with
+    {out}
+
+Example::
+
+    >>> torch.logical_and(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([ True, False, False])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_and(a, b)
+    tensor([False, False,  True, False])
+    >>> torch.logical_and(a.double(), b.double())
+    tensor([False, False,  True, False])
+    >>> torch.logical_and(a.double(), b)
+    tensor([False, False,  True, False])
+    >>> torch.logical_and(a, b, out=torch.empty(4, dtype=torch.bool))
+    tensor([False, False,  True, False])
+""".format(**common_args))
+
 add_docstr(torch.logical_not,
            r"""
 logical_not(input, out=None) -> Tensor
@@ -2719,13 +2747,41 @@ Args:
 Example::
 
     >>> torch.logical_not(torch.tensor([True, False]))
-    tensor([ False,  True])
+    tensor([False,  True])
     >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.int8))
     tensor([ True, False, False])
     >>> torch.logical_not(torch.tensor([0., 1.5, -10.], dtype=torch.double))
     tensor([ True, False, False])
     >>> torch.logical_not(torch.tensor([0., 1., -10.], dtype=torch.double), out=torch.empty(3, dtype=torch.int16))
     tensor([1, 0, 0], dtype=torch.int16)
+""".format(**common_args))
+
+add_docstr(torch.logical_or,
+           r"""
+logical_or(input, other, out=None) -> Tensor
+
+Computes the element-wise logical OR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
+
+Args:
+    {input}
+    other (Tensor): the tensor to compute OR with
+    {out}
+
+Example::
+
+    >>> torch.logical_or(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([ True, False,  True])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_or(a, b)
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a.double(), b.double())
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a.double(), b)
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a, b, out=torch.empty(4, dtype=torch.bool))
+    tensor([ True,  True,  True, False])
 """.format(**common_args))
 
 add_docstr(torch.logical_xor,
@@ -2743,7 +2799,7 @@ Args:
 Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
-    tensor([ False, False,  True])
+    tensor([False, False,  True])
     >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
     >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
     >>> torch.logical_xor(a, b)
@@ -4867,7 +4923,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+argsort(input, dim=-1, descending=False) -> LongTensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -5199,6 +5255,9 @@ i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
 
+.. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
+          then the singular values of each matrix in the batch is returned in descending order.
+
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
           `gesdd` as well.
@@ -5278,6 +5337,9 @@ Since the input matrix :attr:`input` is supposed to be symmetric,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
+
+.. note:: The eigenvalues are returned in ascending order. If :attr:`input` is a batch of matrices,
+          then the eigenvalues of each matrix in the batch is returned in ascending order.
 
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
