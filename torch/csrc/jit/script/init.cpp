@@ -843,6 +843,16 @@ void initJitScriptBindings(PyObject* module) {
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         return script_compile_function(name, def, defaults, std::move(rcb));
       });
+  m.def("try_get_compiled_func", [](const std::string& qualname) {
+    auto cu = get_python_cu();
+    const auto name = c10::QualifiedName(qualname);
+    auto out = cu->find_function(name);
+    c10::optional<StrongFunctionPtr> ret = c10::nullopt;
+    if (out) {
+      ret = StrongFunctionPtr(std::move(cu), out);
+    }
+    return ret;
+  });
   m.def(
       "_jit_script_compile_overload",
       [](const std::string& qualname,

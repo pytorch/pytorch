@@ -4865,6 +4865,12 @@ a")
         ''')
         FileCheck().check("aa").check("a\\n\\tb\\n").run(str(cu.foo.graph))
 
+    def test_function_compilation_caching(self):
+        def fun():
+            return 1 + 2
+
+        self.assertIs(torch.jit.script(fun), torch.jit.script(fun))
+
     def test_string_ops(self):
         def foo():
             a = "a" + "b"
