@@ -5,11 +5,13 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Shape_0"
     op_type: "Shape"
   }
   node {
     input: "1"
     output: "2"
+    name: "ConstantFill_1"
     op_type: "ConstantFill"
     attribute {
       name: "dtype"

@@ -280,6 +280,9 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
+# Disable some autograd test when testing with multithreaded autograd
+TEST_WITH_MULTITHREAD_AUTOGRAD = os.getenv('AUTOGRAD_NUM_THREADS_PER_DEVICE', '1') > '1'
+
 if TEST_NUMPY:
     import numpy
 

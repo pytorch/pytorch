@@ -165,7 +165,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, nondet_rtol=0.0):
                         jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
-        if not torch.allclose(jacobian_x, jacobian_reentrant_x, nondet_rtol, nondet_tol):
+        if jacobian_x.numel() != 0 and not torch.allclose(jacobian_x, jacobian_reentrant_x, nondet_rtol, nondet_tol):
             reentrant = False
 
     return jacobian, reentrant, correct_grad_sizes
@@ -272,11 +272,6 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                 if len(torch.nonzero(n)) > 0:
                     return fail_test('Numerical gradient for function expected to be zero')
         return True
-
-    # multithreaded autograd allow nondeterminism, apply tolerance of 1e-13 rather than 0.0
-    if torch.autograd.get_num_threads_per_device() > 1:
-        nondet_tol = 1e-13
-        nondet_rtol = 1e-13
 
     for i, o in enumerate(output):
         if not o.requires_grad:

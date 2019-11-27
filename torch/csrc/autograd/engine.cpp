@@ -52,8 +52,8 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
 
-// The timeout that a ReadyQueue pop operation should wait for
-static const int queue_pop_timeout = 10;
+// The timeout (us) that a ReadyQueue pop operation should wait for
+static constexpr int queue_pop_timeout = 10;
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 // Shutdown tasks are first and then empty NodeTask are next.
@@ -86,7 +86,11 @@ struct ReadyQueue {
   // might set this to false.
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
+
+  // Pop a NodeTask from the ReadyQueue, block thread if queue is empty
   std::unique_ptr<NodeTask> pop();
+  // Pop a NodeTask from the ReadyQueue within a timeout period, if timeout
+  // then it will return a nullptr instead.
   std::unique_ptr<NodeTask> pop(const std::chrono::microseconds &timeout);
 };
 
@@ -303,6 +307,7 @@ auto Engine::thread_main(
   // Note [Reentrant backwards]
   while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
     std::unique_ptr<NodeTask> task{nullptr};
+    // If graph_task is not empty, the current thread is reentrant thread
     if (graph_task) {
       // For the case where there're more re-entrant threads than outstanding
       // tasks, then some thread that couldn't grab the task will hang on

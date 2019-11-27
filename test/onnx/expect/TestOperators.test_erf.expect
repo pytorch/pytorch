@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Erf_0"
     op_type: "Erf"
   }
   name: "torch-jit-export"

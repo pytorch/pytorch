@@ -11,7 +11,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from functools import reduce
+from functools import reduce, partial
 import torch
 
 # TODO: remove this global setting
@@ -27,7 +27,8 @@ from torch.autograd.profiler import (profile, format_time, EventList,
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
+                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                          IS_WINDOWS, IS_MACOS, TEST_WITH_MULTITHREAD_AUTOGRAD)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -3073,10 +3074,8 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
             torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
 
+    @unittest.skipIf(TEST_WITH_MULTITHREAD_AUTOGRAD, "Not guaranteed in multithreaded environment")
     def test_no_grad_copy(self):
-        if torch.autograd.get_num_threads_per_device() > 1:
-            raise unittest.SkipTest("Not guaranteed in multithreaded environment")
-
         # create autograd function that saves grad pointer as class static
         class MyFunc(Function):
             static_grad_ptr = None
@@ -3240,10 +3239,8 @@ for shape in [(1,), ()]:
         # in the same thread recursively
         DeepReentrant.apply(v).sum().backward()
 
+    @unittest.skipIf(TEST_WITH_MULTITHREAD_AUTOGRAD, "Not guaranteed in multithreaded environment")
     def test_reentrant_priority(self):
-        if torch.autograd.get_num_threads_per_device() > 1:
-            raise unittest.SkipTest("Not guaranteed in multithreaded environment")
-
         order = []
 
         class MyFunction(Function):
@@ -3880,8 +3877,8 @@ class TestAutogradDeviceType(TestCase):
             return tuple([t if isinstance(t, torch.Tensor) else tt for t in out for tt in t])
         gradcheckfunc = partial(flatten_out, mod)
         with torch.backends.cudnn.flags(enabled=False):
-            torch.autograd.gradcheck(gradcheckfunc, inp)
-            torch.autograd.gradgradcheck(gradcheckfunc, inp)
+            gradcheck(gradcheckfunc, inp)
+            gradgradcheck(gradcheckfunc, inp)
 
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
@@ -4028,4 +4025,8 @@ if __name__ == '__main__':
     if nthreads != torch.autograd.get_num_threads_per_device():
         torch.autograd.set_num_threads_per_device(nthreads)
         print('Using {} threads per device to run autograd'.format(nthreads))
+        # multithreaded autograd is non-deterministic, so for autograd tests we
+        # patch default tolerance of gradcheck and gradgradcheck from 0.0 to 1e-13
+        gradcheck = partial(gradcheck, nondet_tol=1e-13, nondet_rtol=1e-13)
+        gradgradcheck = partial(gradgradcheck, nondet_tol=1e-13, nondet_rtol=1e-13)
     run_tests()

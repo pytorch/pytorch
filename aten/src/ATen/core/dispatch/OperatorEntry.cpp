@@ -39,7 +39,7 @@ RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
   auto& k = kernels_[dispatch_key];
-  k.push_front(kernel);
+  k.push_front(std::move(kernel));
   std::list<KernelFunction>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
@@ -57,7 +57,7 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(KernelFunction kern
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  catchAllKernels_.push_front(kernel);
+  catchAllKernels_.push_front(std::move(kernel));
   std::list<KernelFunction>::iterator inserted = catchAllKernels_.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel

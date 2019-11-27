@@ -98,6 +98,23 @@ Numerical gradient checking
 
 .. autofunction:: gradgradcheck
 
+Multithreaded Autograd
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Supporting multithreaded autograd engine by setting the number of threads
+per device. This is a global setting to set up all devices with specific
+number of CPU threads. i.e. you could set this for both GPU and CPU
+but the performance characteristics for GPU might be different from CPU.
+
+.. warning::
+    This API is experimental and subject to change. Some limitations might
+    apply when using it: 1. Setting this to a value > 1 will make the backward
+    pass non-deterministic. 2. If you use this together with C++ Autograd hooks,
+    the hooks need to be thread safe.
+
+.. autofunction:: set_num_threads_per_device
+
+.. autofunction:: get_num_threads_per_device
+
 Profiler
 ^^^^^^^^
 
