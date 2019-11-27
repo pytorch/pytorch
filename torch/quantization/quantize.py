@@ -107,7 +107,7 @@ def add_quant_dequant(module):
 
     Args:
         module: input module with qconfig attributes for all the leaf modules
-                that we want to quantize
+        that we want to quantize
 
     Return:
         Either the inplace modified module with submodules wrapped in

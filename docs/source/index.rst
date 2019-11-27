@@ -29,7 +29,6 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    :maxdepth: 1
    :caption: Python API
 
-
    torch
    nn
    nn.functional
