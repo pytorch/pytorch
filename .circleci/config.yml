@@ -444,7 +444,7 @@ jobs:
       - run:
           name: Install Cuda
           command: |
-            choco install -y cuda
+            choco install -y cuda --ignore-checksums
       - run:
           name: Install Cudnn
           command : |
