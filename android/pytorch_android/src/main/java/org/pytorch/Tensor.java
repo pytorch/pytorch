@@ -329,7 +329,7 @@ public abstract class Tensor {
     return new Tensor_float64(data, shape);
   }
 
-  protected HybridData hybridData;
+  protected HybridData mHybridData;
 
   private native HybridData initHybrid();
 
@@ -443,13 +443,13 @@ public abstract class Tensor {
     private Tensor_uint8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.hybridData = super.initHybrid();
+      this.mHybridData = super.initHybrid();
     }
 
     private Tensor_uint8(ByteBuffer data, long[] shape, HybridData hybridData) {
       super(shape);
       this.data = data;
-      this.hybridData = hybridData;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -482,13 +482,13 @@ public abstract class Tensor {
     private Tensor_int8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.hybridData = super.initHybrid();
+      this.mHybridData = super.initHybrid();
     }
 
     private Tensor_int8(ByteBuffer data, long[] shape, HybridData hybridData) {
       super(shape);
       this.data = data;
-      this.hybridData = hybridData;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -521,13 +521,13 @@ public abstract class Tensor {
     private Tensor_int32(IntBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.hybridData = super.initHybrid();
+      this.mHybridData = super.initHybrid();
     }
 
     private Tensor_int32(IntBuffer data, long[] shape, HybridData hybridData) {
       super(shape);
       this.data = data;
-      this.hybridData = hybridData;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -560,13 +560,13 @@ public abstract class Tensor {
     Tensor_float32(FloatBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.hybridData = super.initHybrid();
+      this.mHybridData = super.initHybrid();
     }
 
     Tensor_float32(FloatBuffer data, long[] shape, HybridData hybridData) {
       super(shape);
       this.data = data;
-      this.hybridData = hybridData;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -599,13 +599,13 @@ public abstract class Tensor {
     private Tensor_int64(LongBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.hybridData = super.initHybrid();
+      this.mHybridData = super.initHybrid();
     }
 
     private Tensor_int64(LongBuffer data, long[] shape, HybridData hybridData) {
       super(shape);
       this.data = data;
-      this.hybridData = hybridData;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -638,13 +638,13 @@ public abstract class Tensor {
     private Tensor_float64(DoubleBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.hybridData = super.initHybrid();
+      this.mHybridData = super.initHybrid();
     }
 
     private Tensor_float64(DoubleBuffer data, long[] shape, HybridData hybridData) {
       super(shape);
       this.data = data;
-      this.hybridData = hybridData;
+      this.mHybridData = hybridData;
     }
 
     @Override

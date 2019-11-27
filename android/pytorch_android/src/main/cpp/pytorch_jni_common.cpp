@@ -122,18 +122,18 @@ static at::Tensor newAtTensor(
 }
 
 facebook::jni::local_ref<TensorHybrid::jhybriddata> TensorHybrid::initHybrid(
-    facebook::jni::alias_ref<TensorHybrid::javaobject> jtensorThis) {
+    facebook::jni::alias_ref<TensorHybrid::javaobject> jTensorThis) {
   static auto cls = TensorHybrid::javaClassStatic();
-  static const auto dtypeMethod = cls->getMethod<jint()>("dtypeJniCode");
-  static const auto shapeField = cls->getField<jlongArray>("shape");
-  static const auto getDataBufferMethod = cls->getMethod<
+  static const auto jMethodDTypeCode = cls->getMethod<jint()>("dtypeJniCode");
+  static const auto jFieldShape = cls->getField<jlongArray>("shape");
+  static const auto jMethodGetDataBuffer = cls->getMethod<
       facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
       "getRawDataBuffer");
 
   at::Tensor tensor = newAtTensor(
-      getDataBufferMethod(jtensorThis),
-      jtensorThis->getFieldValue(shapeField),
-      dtypeMethod(jtensorThis));
+      jMethodGetDataBuffer(jTensorThis),
+      jTensorThis->getFieldValue(jFieldShape),
+      jMethodDTypeCode(jTensorThis));
   return makeCxxInstance(std::move(tensor));
 }
 
@@ -169,7 +169,7 @@ facebook::jni::local_ref<TensorHybrid::javaobject> TensorHybrid::
           (uint8_t*)tensor.storage().data(), tensor.nbytes());
   jTensorBuffer->order(facebook::jni::JByteOrder::nativeOrder());
 
-  static auto jMethodNewTensor =
+  static const auto jMethodNewTensor =
       cls->getStaticMethod<facebook::jni::local_ref<TensorHybrid::javaobject>(
           facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
           facebook::jni::alias_ref<jlongArray>,
