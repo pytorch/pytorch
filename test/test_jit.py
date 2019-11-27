@@ -4871,7 +4871,9 @@ a")
             return 1 + 2
 
         fun_compiled = torch.jit.script(fun)
-        self.assertIs(fun_compiled, torch.jit.script(fun))
+        # python wrapper around the script function is a different pointer,
+        # but the underlying script function graph is the same
+        self.assertIs(fun_compiled.graph, torch.jit.script(fun).graph)
 
         def fun():
             return 3 + 4

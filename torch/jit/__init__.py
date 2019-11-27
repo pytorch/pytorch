@@ -1983,7 +1983,7 @@ _jit_caching_layer = weakref.WeakKeyDictionary()
 def _try_get_jit_cached_key(key):
     qual_name = _jit_caching_layer.get(key, None)
     if qual_name:
-        return torch._try_get_compiled_func(qual_name)
+        return torch._C._try_get_compiled_func(qual_name)
     else:
         return None
 
