@@ -18,6 +18,7 @@ from functools import partial, reduce
 import operator
 
 import torch
+from torch._six import string_classes
 import common_utils as common
 from torch import nn
 import torch.nn.functional as F
@@ -329,7 +330,7 @@ class MyPythonStore(c10d.Store):
         self.store = dict()
 
     def set(self, key, value):
-        if type(key) is not str:
+        if not isinstance(key, string_classes):
             raise AssertionError("Expected set to be called with string key")
         if type(value) is not bytes:
             raise AssertionError("Expected set to be called with bytes value")
