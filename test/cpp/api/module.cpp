@@ -225,7 +225,7 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   torch::Device to_device, torch::Dtype to_dtype) {
   {
     // Case 1: Undefined tensors as parameters
-    torch::nn::Linear module(torch::nn::LinearOptions(10, 20).bias(false));
+    Linear module(LinearOptions(10, 20).bias(false));
     ASSERT_TRUE(module->weight.defined());
     ASSERT_FALSE(module->bias.defined());
 
