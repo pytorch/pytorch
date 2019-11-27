@@ -66,7 +66,7 @@ puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
 targets.each do |target|
     target.frameworks_build_phases.clear
-    for lib in libs do 
+    for lib in libs do
         path = "#{install_path}/lib/#{lib}"
         if File.exist?(path)
             libref = project.frameworks_group.new_file(path)
