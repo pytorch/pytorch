@@ -1983,7 +1983,7 @@ Example::
 
 add_docstr(torch.floor_divide,
            r"""
-floor_divide(self, other) -> Tensor
+floor_divide(input, other) -> Tensor
 
 Each element of the tensor ``input`` is divided by each element of the tensor
 ``other``. The resulting tensor then truncated if it is floating point. See
@@ -1994,8 +1994,8 @@ Each element of the tensor ``input`` is divided by each element of the tensor
 
 """ + r"""
 Args:
-    {self}
-    {other}
+    input (Tensor): the numerator tensor
+    other (Tensor): the denominator tensor
 
 Example::
 
