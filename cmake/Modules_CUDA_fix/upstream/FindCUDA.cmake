@@ -1472,7 +1472,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     string(APPEND _cuda_nvcc_flags_config "\nset(CUDA_NVCC_FLAGS_${config_upper} ${CUDA_NVCC_FLAGS_${config_upper}} ;; ${CUDA_WRAP_OPTION_NVCC_FLAGS_${config_upper}})")
   endforeach()
 
-  # Process the C++11 flag.  If the host sets the flag, we need to add it to nvcc and
+  # Process the C++14 flag.  If the host sets the flag, we need to add it to nvcc and
   # remove it from the host. This is because -Xcompile -std=c++ will choke nvcc (it uses
   # the C preprocessor).  In order to get this to work correctly, we need to use nvcc's
   # specific c++14 flag.
