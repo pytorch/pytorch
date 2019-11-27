@@ -231,7 +231,7 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
 
     module->to(to_device);
     ASSERT_TRUE(module->weight.defined());
-    ASSERT_EQ(module->weight.device(), to_device);
+    ASSERT_EQ(module->weight.device().type(), to_device.type());
     ASSERT_FALSE(module->bias.defined());
 
     module->to(to_dtype);
@@ -247,7 +247,7 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
 
     module->to(to_device);
     ASSERT_TRUE(module->weight.defined());
-    ASSERT_EQ(module->weight.device(), to_device);
+    ASSERT_EQ(module->weight.device().type(), to_device.type());
     ASSERT_FALSE(module->running_mean.defined());
 
     module->to(to_dtype);
