@@ -57,7 +57,7 @@ bool cudnn_is_acceptable(const Tensor& self) {
 Tensor detach(const Tensor& self) {
 #ifndef USE_STATIC_DISPATCH
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  AT_ERROR("detach is not implemented for Tensor");
+  //AT_ERROR("detach is not implemented for Tensor");
 #endif
   // this is no-op for USE_STATIC_DISPATCH mode
   return self;
@@ -66,7 +66,7 @@ Tensor detach(const Tensor& self) {
 Tensor & detach_(Tensor & self) {
 #ifndef USE_STATIC_DISPATCH
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  AT_ERROR("detach_ is not implemented for Tensor");
+  //AT_ERROR("detach_ is not implemented for Tensor");
 #endif
   // this is no-op for USE_STATIC_DISPATCH mode
   return self;
