@@ -3956,14 +3956,14 @@ class _TestTorchMixin(object):
         }
 
         def test(name_or_buffer):
-            with torch.serialization._open_zipfile_writer(name_or_buffer) as zip_file:
+            with torch.serialization._file_utils.open_zipfile_writer(name_or_buffer) as zip_file:
                 for key in data:
                     zip_file.write_record(key, data[key], len(data[key]))
 
             if hasattr(name_or_buffer, 'seek'):
                 name_or_buffer.seek(0)
 
-            with torch.serialization._open_zipfile_reader(name_or_buffer) as zip_file:
+            with torch.serialization._file_utils.open_zipfile_reader(name_or_buffer) as zip_file:
                 for key in data:
                     actual = zip_file.get_record(key)
                     expected = data[key]
@@ -4068,7 +4068,7 @@ class _TestTorchMixin(object):
             # has been backported), this test and torch.serialization._is_zipfile
             # can be deleted
             self.assertTrue(zipfile.is_zipfile(f))
-            self.assertFalse(torch.serialization._is_zipfile(f))
+            self.assertFalse(torch.serialization._file_utils.is_zipfile(f))
             self.assertEqual(torch.load(f.name), t)
 
     def test_serialization_gzip(self):
