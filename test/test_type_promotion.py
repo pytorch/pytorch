@@ -433,6 +433,10 @@ class TestTypePromotion(TestCase):
 
     def _test_sparse_op_input_tensors(self, device, dtype, coalesced, zeros=True):
         t = self._get_test_tensor(device, dtype, not zeros)
+        if zeros and dtype != torch.bool:
+            # ensure sparsity. Bool should already have sufficient sparsity.
+            mask = self._get_test_tensor(device, torch.bool)
+            t = t * mask
         if coalesced:
             s = t.to_sparse()
         else:
@@ -442,6 +446,8 @@ class TestTypePromotion(TestCase):
             s = torch.sparse_coo_tensor(indices=indices, values=values, size=s.size(), dtype=dtype, device=device)
             t = s.to_dense()
         self.assertEqual(s.is_coalesced(), coalesced)
+        self.assertEqual(s.dtype, dtype)
+        self.assertEqual(t.dtype, s.dtype)
         return (t, s)
 
     def _get_precision(self, dtype, coalesced):
@@ -521,14 +527,27 @@ class TestTypePromotion(TestCase):
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
             self.assertRaises(RuntimeError, lambda: op(s1, d2.view(d2.numel())[0].item()))
 
-    @onlyOnCPUAndCUDA
-    def test_sparse_ops(self, device):
+    def _run_all_tests_for_sparse_op(self, op_name, device):
         dtypes = torch.testing.get_all_math_dtypes(device)
-        ops = ['add', 'sub', 'mul', 'div']
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
-            for op_name in ops:
-                for inplace, coalesced in itertools.product([True, False], [True, False]):
-                    self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
+            for inplace, coalesced in itertools.product([True, False], [True, False]):
+                self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
+
+    @onlyOnCPUAndCUDA
+    def test_sparse_add(self, device):
+        self._run_all_tests_for_sparse_op('add', device)
+
+    @onlyOnCPUAndCUDA
+    def test_sparse_mul(self, device):
+        self._run_all_tests_for_sparse_op('mul', device)
+
+    @onlyOnCPUAndCUDA
+    def test_sparse_div(self, device):
+        self._run_all_tests_for_sparse_op('div', device)
+
+    @onlyOnCPUAndCUDA
+    def test_sparse_sub(self, device):
+        self._run_all_tests_for_sparse_op('sub', device)
 
 instantiate_device_type_tests(TestTypePromotion, globals())
 
