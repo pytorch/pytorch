@@ -445,7 +445,7 @@ jobs:
           name: Install Cuda
           command: |
             curl -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-            cuda_10.1.243_426.00_win10.exe -s
+            ./cuda_10.1.243_426.00_win10.exe -s
       - run:
           name: Install Cudnn
           command : |
