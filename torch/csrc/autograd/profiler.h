@@ -69,7 +69,9 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
 #include <sys/time.h>
 // clock_gettime is not implemented on older versions of OS X (< 10.12).
 // If implemented, CLOCK_REALTIME will have already been defined.
-// clock_gettime is only available on iOS 10.0 or newer. 
+
+// clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
+// CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
 #endif
 
 inline int64_t getTime() {
