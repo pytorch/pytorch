@@ -5,6 +5,7 @@ graph {
   node {
     input: "weight"
     output: "2"
+    name: "Unsqueeze_0"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -17,6 +18,7 @@ graph {
     input: "input"
     input: "2"
     output: "3"
+    name: "PRelu_1"
     op_type: "PRelu"
   }
   name: "torch-jit-export"

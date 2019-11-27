@@ -172,8 +172,8 @@ Otherwise, throws an exception.
     agent->start();
   });
 
-  module.def("_destroy_rref_context", []() {
-    RRefContext::getInstance().destroyInstance();
+  module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
+    RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
   });
 
   module.def("_cleanup_python_rpc_handler", []() {

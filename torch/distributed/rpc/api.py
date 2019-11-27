@@ -21,7 +21,16 @@ import torch.distributed as dist
 
 
 _agent = None
-
+# NB: Ignoring RRef leaks during shutdown. Without this, applications have to
+# make sure there is no references to any RRef in the application code and
+# Python GC has done its job to delete those RRefs. This is could result in bad
+# debugging experiences especially when for large applications. Therefore, by
+# default, we are going to ignore RRef leaks during shutdown. This is usually
+# fine as shutdown means applications have done training and no longer care
+# about states.
+#
+# To enable RRef leak checking, set this _ignore_rref_leak to False
+_ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
 
 @contextlib.contextmanager
@@ -35,6 +44,7 @@ def _use_rpc_pickler(rpc_pickler):
         yield
     finally:
         _default_pickler = _internal_rpc_pickler
+
 
 def _require_initialized(func):
     @functools.wraps(func)
@@ -76,7 +86,7 @@ def wait_all_workers():
     if _agent:
         _agent.join()
         _agent = None
-        _destroy_rref_context()
+        _destroy_rref_context(_ignore_rref_leak)
         # clean up python rpc handler in wait_all_workers(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
