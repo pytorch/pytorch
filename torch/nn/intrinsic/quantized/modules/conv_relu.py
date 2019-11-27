@@ -83,8 +83,5 @@ class ConvReLU3d(nnq.Conv3d):
 
     @classmethod
     def from_float(cls, mod):
-        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU3d:
-            mod.weight, mod.bias = fuse_conv_bn_weights(
-                mod.weight, mod.bias, mod.running_mean, mod.running_var,
-                mod.eps, mod.gamma, mod.beta)
+        # TODO: Add qat support for ConvReLU3d and ConvBnReLU3d
         return super(ConvReLU3d, cls).from_float(mod)
