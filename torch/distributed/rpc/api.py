@@ -82,9 +82,10 @@ def shutdown(graceful=True):
     other RPC processes to reach this method.
 
     Arguments:
-        graceful (bool): Whether to do a graceful shutdown or not. If
-        graceful=True, this will block until all local and remote RPC processes
-        have reached this method and wait for all outstanding work to complete.
+        graceful (bool): Whether to do a graceful shutdown or not. If True,
+                         this will block until all local and remote RPC
+                         processes have reached this method and wait for all
+                         outstanding work to complete.
 
     Example::
 
