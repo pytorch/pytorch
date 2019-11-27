@@ -86,13 +86,14 @@ for communication.
 The following APIs provide primitives allowing users to remotely execute
 functions as well as create (RRefs) to remote data objects.
 
-.. automodule:: torch.distributed.rpc
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
 .. autofunction:: remote
 .. autofunction:: get_worker_info
 .. autofunction:: wait_all_workers
 
+
+.. _rref:
 
 RRef
 ----
