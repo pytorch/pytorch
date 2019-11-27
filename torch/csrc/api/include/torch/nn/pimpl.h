@@ -129,6 +129,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
         auto hook = c10::any_cast<std::function<void(torch::nn::AnyModule, Args...)>>(any_hook);
         hook(torch::nn::AnyModule(impl_), std::forward<Args>(args)...);
       } catch (const c10::bad_any_cast& e) {
+        // yf225 TODO: add test for this err msg as well
         TORCH_CHECK(false, "yf225 TODO: some useful err msg about hook function input / output type being wrong");
       }
     }
