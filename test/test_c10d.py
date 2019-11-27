@@ -18,6 +18,7 @@ from functools import partial, reduce
 import operator
 
 import torch
+from torch._six import string_classes
 import common_utils as common
 from torch import nn
 import torch.nn.functional as F
@@ -321,6 +322,45 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.tcpstore)
+
+
+class MyPythonStore(c10d.Store):
+    def __init__(self):
+        super(MyPythonStore, self).__init__()
+        self.store = dict()
+
+    def set(self, key, value):
+        if not isinstance(key, string_classes):
+            raise AssertionError("Expected set to be called with string key")
+        if type(value) is not bytes:
+            raise AssertionError("Expected set to be called with bytes value")
+        self.store[key] = value
+
+    def get(self, key):
+        value = self.store.get(key, b"")
+        if type(value) is not bytes:
+            raise AssertionError("Expected get to return bytes value")
+        return value
+
+    def add(self, key, value):
+        new = int(self.store.get(key, 0)) + value
+        self.set(key, bytes(str(new).encode("utf-8")))
+        return new
+
+
+class PythonStoreTest(TestCase):
+    def setUp(self):
+        super(PythonStoreTest, self).setUp()
+
+    def test_set_get(self):
+        # If we were to inherit from StoreTestBase and try to use
+        # its test_set_get function, we would exercise the Python
+        # API directly, instead of going through the C++ trampoline.
+        # We care about testing the C++ trampoline, so run the
+        # equivalent of StoreTestBase.test_set_get from C++.
+        # See `torch/csrc/distributed/c10d/init.cpp` for the definition
+        # of this test function.
+        c10d._test_python_store(MyPythonStore())
 
 
 class RendezvousTest(TestCase):
