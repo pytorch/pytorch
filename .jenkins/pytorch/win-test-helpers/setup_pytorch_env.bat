@@ -37,8 +37,8 @@ call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary
 @echo on
 popd
 
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
-set CUDA_PATH_V9_0=%CUDA_PATH%
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.2
+set CUDA_PATH_V9_2=%CUDA_PATH%
 
 goto cuda_build_common
 
