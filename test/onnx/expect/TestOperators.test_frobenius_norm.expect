@@ -6,11 +6,13 @@ graph {
     input: "x"
     input: "x"
     output: "1"
+    name: "Mul_0"
     op_type: "Mul"
   }
   node {
     input: "1"
     output: "2"
+    name: "ReduceSum_1"
     op_type: "ReduceSum"
     attribute {
       name: "axes"
@@ -27,6 +29,7 @@ graph {
   node {
     input: "2"
     output: "3"
+    name: "Sqrt_2"
     op_type: "Sqrt"
   }
   name: "torch-jit-export"
