@@ -378,8 +378,16 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def split(g, self, split_size, dim):
+def split(g, self, split_size_or_sizes, dim):
+    if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
+                           .format('split_size_or_sizes', split_size_or_sizes))
+    split_val = split_size_or_sizes.node()['value']
+    if split_val.dim() > 0:
+        return split_with_sizes(g, self, split_size_or_sizes, dim)
+    split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
+    dim = sym_help._get_const(dim, 'i', 'dim')
+
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
@@ -1234,7 +1242,7 @@ def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None)
 
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
-def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def empty_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
@@ -1256,7 +1264,7 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1273,7 +1281,7 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def ones_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1295,7 +1303,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
+def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float

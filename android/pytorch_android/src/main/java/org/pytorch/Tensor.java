@@ -640,6 +640,7 @@ public abstract class Tensor {
   // endregion checks
 
   // Called from native
+  @DoNotStrip
   private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype) {
     if (DType.FLOAT32.jniCode == dtype) {
       return new Tensor_float32(data.asFloatBuffer(), shape);

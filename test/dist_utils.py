@@ -72,6 +72,11 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
 
     @wraps(old_test_method)
     def new_test_method(self, *arg, **kwargs):
+        # Setting _ignore_rref_leak to make sure OwnerRRefs are properly deleted
+        # in tests.
+        import torch.distributed.rpc.api as api
+        api._ignore_rref_leak = False
+
         self.worker_id = self.rank
 
         if setup_rpc:
