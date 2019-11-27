@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/export.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -633,9 +634,6 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
-          "opnames",
-          [](Module& m) {return debugMakeList(m.opnames());})
-      .def(
           "dump",
           &Module::dump,
           py::arg("code") = true,
@@ -1055,6 +1053,9 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
     return Module(get_python_cu(), type);
   });
+
+  m.def("opnames",
+          [](script::Module& sm) {return debugMakeList(torch::jit::opnames(sm));});
 
   py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")

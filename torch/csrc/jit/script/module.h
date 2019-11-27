@@ -222,8 +222,6 @@ struct TORCH_API Module : public Object {
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
-  std::vector<std::string> opnames() const;
-
   // Clones both the underlying `ClassType` and the module instance(data), this function
   // creates a new `ClassType` and returns a new instance that has the same data
   // as the current instance but with the new type

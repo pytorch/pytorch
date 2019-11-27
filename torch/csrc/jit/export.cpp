@@ -785,5 +785,34 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       graph_encoder.get_raw_data_export_map());
 }
 
+namespace {
+void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
+  for (const auto& method : m.get_methods()) {
+    const auto& func = method.function();
+    torch::jit::Code code(func.graph());
+    for (size_t i = 0; i < code.instructions().size(); ++i) {
+      auto ins = code.instructions()[i];
+      auto node = code.instructions_source()[i];
+      if (ins.op == OpCode::OP) {
+        auto opname = node->schema().operator_name();
+        std::string namestr = opname.name;
+        if (!opname.overload_name.empty())
+          namestr += "." + opname.overload_name;
+        opnames.emplace(namestr);
+      }
+    }
+  }
+  for (const auto& sub_m : m.children()) {
+    export_opnames(sub_m, opnames);
+  }
+}
+} // namespace
+
+std::vector<std::string> opnames(const script::Module& m) {
+  std::set<std::string> names;
+  export_opnames(m, names);
+  return std::vector<std::string>(names.begin(), names.end());
+}
+
 } // namespace jit
 } // namespace torch
