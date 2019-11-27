@@ -13,7 +13,7 @@ def register_quantized_ops(domain, version):
     quant_version_ops = getmembers(sym_registry._symbolic_versions['caffe2'])
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
-            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'slice', 'reshape', 'cat']
+            aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize', 'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'slice', 'reshape', 'cat', 'permute']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -219,7 +219,7 @@ def reshape(g, input, shape):
     sym_help._quantized_ops.add(output)
     return output
 
-def cat(g, tensor_list, dim, scale, zero_point):
+def cat(g, tensor_list, dim, scale=None, zero_point=None):
     tensors = sym_help._unpack_list(tensor_list)
     input = tensors[0]
     if input not in sym_help._quantized_ops:
@@ -232,5 +232,22 @@ def cat(g, tensor_list, dim, scale, zero_point):
         "Y_zero_point_i": tensors[0].node()["Y_zero_point"],
     }
     output = g.op("_caffe2::Int8Concat", *tensors, axis_i=dim, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
+
+@parse_args('v', 'is')
+def permute(g, input, dims):
+    if dims == list(range(0, len(dims))):
+        return input
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import permute
+        return permute(g, input, dims)
+
+    quant_args = {
+        "axes_i": dims,
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+    output = g.op("_caffe2::Int8Transpose", input, **quant_args)
     sym_help._quantized_ops.add(output)
     return output

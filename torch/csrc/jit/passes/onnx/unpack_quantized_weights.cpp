@@ -89,7 +89,11 @@ std::pair<double, int> getScaleFromInput(Node* input_node) {
     return getScaleFromInput(input_node->inputs()[0]->node());
   } else if (
       input_name == "quantized::nchw2nhwc" ||
-      input_name == "quantized::nhwc2nchw") {
+      input_name == "quantized::nhwc2nchw" ||
+      input_name == "aten::slice" ||
+      input_name == "aten::avg_pool2d" ||
+      input_name == "quantized::cat" ||
+      input_name == "prim::ListConstruct") {
     return getScaleFromInput(input_node->inputs()[0]->node());
   }
   TORCH_INTERNAL_ASSERT(
