@@ -1,9 +1,10 @@
 #include <c10d/test/StoreTestCommon.hpp>
 
-#include <gtest/gtest.h>
 #include <cstdlib>
 #include <iostream>
 #include <thread>
+
+#include <gtest/gtest.h>
 
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
@@ -18,10 +19,10 @@ void testHelper(int port, const std::string& prefix = "") {
   // server store
   auto serverThread =
       std::thread([&serverTCPStore, &serverStore, &prefix, &numWorkers, &port] {
-        serverTCPStore = std::make_unique<c10d::TCPStore>(
+        serverTCPStore = c10::guts::make_unique<c10d::TCPStore>(
             "127.0.0.1", port, numWorkers, true, std::chrono::seconds(30));
         serverStore =
-            std::make_unique<c10d::PrefixStore>(prefix, *serverTCPStore);
+            c10::guts::make_unique<c10d::PrefixStore>(prefix, *serverTCPStore);
 
         // Basic set/get on the server store
         c10d::test::set(*serverStore, "key0", "value0");

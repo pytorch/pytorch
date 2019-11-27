@@ -131,14 +131,13 @@ std::pair<int, PortType> listen(PortType port) {
   return {socket, getSocketPort(socket)};
 }
 
-template <typename T>
 void handleConnectException(
     struct ::addrinfo** nextAddr,
     int error_code,
     bool* anyRefused,
     bool* anyReset,
     bool wait,
-    T start,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
     std::shared_ptr<struct ::addrinfo> addresses,
     std::chrono::milliseconds timeout) {
   // ECONNREFUSED happens if the server is not yet listening.
@@ -175,14 +174,13 @@ void handleConnectException(
   }
 }
 
-template <typename T>
 void handleConnectSystemError(
     struct ::addrinfo** nextAddr,
     std::system_error& e,
     bool* anyRefused,
     bool* anyReset,
     bool wait,
-    T start,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
     std::shared_ptr<struct ::addrinfo> addresses,
     std::chrono::milliseconds timeout) {
   handleConnectException(
