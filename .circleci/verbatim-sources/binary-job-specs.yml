@@ -45,8 +45,8 @@
         name: Upload binary size
         no_output_timeout: "5m"
         command: |
-            conda install -y requests
-            python /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+            pip3 install requests
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
     - persist_to_workspace:
         root: /
         paths: final_pkgs
