@@ -1,24 +1,26 @@
 import json
 import os
+import os.path
 import requests
 import re
 import time
 import glob
 import sys
+import logging
 
 
 def get_size(file_dir="/home/circleci/project/final_pkgs"):
     try:
         # we should only expect one file, if no, something is wrong
-        file_name = glob.glob(file_dir)[0]
+        file_name = glob.glob(os.path.join(file_dir, "*"))[0]
         return os.stat(file_name).st_size
-    except Exception as e:
-        print(e)
+    except:
+        logging.exception("error getting file from " + file_dir)
         return 0
 
 
 def build_message(size):
-    pkg_type, py_ver, cu_ver = os.env.get("BUILD_ENVIRONMENT", "N/A N/A N/A").split()
+    pkg_type, py_ver, cu_ver = os.env.get("BUILD_ENVIRONMENT", "n/a n/a n/a").split()
     os_name = os.uname()[0].lower()
     pr = os.env.get("CIRCLE_PR_NUMBER", "n/a")
     build_num = os.env.get("CIRCLE_BUILD_NUM", "n/a")
@@ -76,5 +78,5 @@ if __name__ == "__main__":
     if size != 0:
         try:
             send_message(build_message(size))
-        except Exception as e:
-            print(e)
+        except:
+            logging.exception("can't send message")
