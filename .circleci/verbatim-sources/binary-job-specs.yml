@@ -19,8 +19,8 @@
             elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
               retry apt-get update
               retry apt-get -y install expect moreutils
-              conda install -y -c eumetsat expect
-              conda install -y cmake
+              retry conda install -y -c eumetsat expect
+              retry conda install -y cmake
             fi
     - run:
         name: Update compiler to devtoolset7
