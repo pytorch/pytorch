@@ -1238,6 +1238,48 @@ graph(%x : Tensor,
         FileCheck().check_count("aten::dequantize", 8, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
 
+    def test_insert_quant_dequant_shared_class_type(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv2(self.conv1(x))
+
+        for is_per_channel in [True, False]:
+            m = torch.jit.script(M())
+            observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
+                if is_per_channel else default_observer
+            qconfig = QConfig(activation=observer, weight=observer)
+            qconfig_dict = {
+                '': script_qconfig(qconfig)
+            }
+            m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
+            data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+
+            get_forward(m._c)(data)
+            m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False)
+            # assert len(m._modules._c.items()) == 1, \
+            #    'Expected to have single submodule of conv'
+
+            get_forward(m._c)(data)
+            quant_func = "aten::quantize_per_channel" if is_per_channel \
+                else "aten::quantize_per_tensor"
+            FileCheck().check_not(quant_func) \
+                       .check("prim::CallMethod[name=\"forward\"]") \
+                       .check_not(quant_func) \
+                       .check("return") \
+                       .run(str(get_forward_graph(m._c)))
+            FileCheck().check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("aten::conv2d") \
+                       .check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("return") \
+                       .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
+
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
         class L(torch.nn.Module):
