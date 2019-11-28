@@ -116,9 +116,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
                 return PyRRef::unpickle(t);
               }));
 
-  // future.wait() should not be called after wait_all_workers(), e.g.,
-  // pythonRpcHandler is cleaned up in wait_all_workers(), after
-  // wait_all_workers(), python objects returned from rpc python call can not be
+  // future.wait() should not be called after shutdown(), e.g.,
+  // pythonRpcHandler is cleaned up in shutdown(), after
+  // shutdown(), python objects returned from rpc python call can not be
   // resolved.
   auto futureMessage =
       shared_ptr_class_<FutureMessage>(module, "FutureMessage")
@@ -163,6 +163,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "join",
           &ProcessGroupAgent::join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "shutdown",
+          &ProcessGroupAgent::shutdown,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "sync",
