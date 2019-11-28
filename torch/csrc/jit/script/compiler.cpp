@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
+#include "torch/csrc/jit/passes/constant_propagation.h"
 
 #include <torch/csrc/jit/constants.h>
 
@@ -3402,6 +3403,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
   ConstantPooling(to_clean);
+  ConstantPropagationNonAliasingTypes(to_clean);
   // For jitter
   CanonicalizeOutputs(to_clean);
 }
