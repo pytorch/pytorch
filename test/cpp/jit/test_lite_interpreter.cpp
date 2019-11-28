@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/script.h>
 
 // Tests go in torch::jit
 namespace torch {
@@ -126,6 +127,114 @@ void testLiteInterpreterPrimOverload() {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.run_method("forward", inputs);
   AT_ASSERT(output.toIntList()[2] == 3);
+}
+
+void testLiteInterpreterPytext() {
+  std::vector<torch::jit::IValue> inputs;
+
+//  auto L = c10::List<int64_t>({1, 1, 1});
+//  auto length = L.size();
+//  auto LL = c10::List<c10::List<int64_t>>({L});
+//  inputs.emplace_back(torch::jit::IValue(LL));
+//  auto bite_lens = c10::List<int64_t>({3});
+//  inputs.emplace_back(torch::jit::IValue(bite_lens));
+
+  auto options = torch::TensorOptions().dtype(torch::kI64);
+  int length = 3;
+  inputs.push_back(torch::ones({1, length}, options));
+  auto stensor = length * torch::ones({1}, options);
+  inputs.push_back(stensor);
+
+  auto m = load("/Users/myuan/data/pytext/BI/model_1115.pt1");
+  auto ref = m.forward(inputs);
+  std::cout << ref << std::endl;
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+//  m._save_for_mobile("/Users/myuan/data/pytext/BI/model_1115.bc");
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  auto bcinputs = inputs;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.run_method("forward", bcinputs);
+  }
+  std::cout << res << std::endl;
+}
+
+void testLiteInterpreterFbnet() {
+  std::vector<torch::jit::IValue> inputs;
+  inputs.push_back(torch::ones({1, 3, 224, 224})); //{1, 1, 28, 28} for lenet
+  auto m = load("/Users/myuan/data/fbnet/fbnet.pt1");
+//  m.save("/Users/myuan/data/fbnet/fbnet.pt1i");
+  auto ref = m.forward(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+//  m._save_for_mobile("/Users/myuan/data/fbnet/fbnet.bc");
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+
+  auto reft = ref.toTensor();
+  auto rest = res.toTensor();
+  std::cout << "Reference results from JIT script:" << std::endl;
+  std::cout << reft.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+  std::cout << "Lite interpreter results:" << std::endl;
+  std::cout << rest.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+  AT_ASSERT(reft.equal(rest));
+}
+
+void testLiteInterpreterResnet() {
+  std::vector<torch::jit::IValue> inputs;
+  inputs.push_back(torch::ones({1, 3, 224, 224})); //{1, 1, 28, 28} for lenet
+  auto m = load("/Users/myuan/data/resnet18/resnet18_eval.pt");
+//  m.save("/Users/myuan/data/fbnet/fbnet.pt1i");
+  auto ref = m.forward(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  auto mname = bc.name();
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+
+  auto reft = ref.toTensor();
+  auto rest = res.toTensor();
+  std::cout << "Reference results from JIT script:" << std::endl;
+  std::cout << reft.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+  std::cout << "Lite interpreter results:" << std::endl;
+  std::cout << rest.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+  AT_ASSERT(reft.equal(rest));
+}
+
+void testLiteInterpreterLenet() {
+  std::vector<torch::jit::IValue> inputs;
+  inputs.push_back(torch::ones({1, 1, 28, 28})); //{1, 1, 28, 28} for lenet
+  auto m = load("/Users/myuan/data/lenet/Lenet_pickle.pt");
+  auto ref = m.forward(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+
+  auto reft = ref.toTensor();
+  auto rest = res.toTensor();
+  std::cout << "Reference results from JIT script:" << std::endl;
+  std::cout << reft.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+  std::cout << "Lite interpreter results:" << std::endl;
+  std::cout << rest.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+  AT_ASSERT(reft.equal(rest));
 }
 } // namespace torch
 } // namespace jit

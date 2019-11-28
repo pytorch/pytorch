@@ -74,6 +74,10 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
+  _(LiteInterpreterPytext)       \
+  _(LiteInterpreterFbnet)       \
+  _(LiteInterpreterResnet)       \
+  _(LiteInterpreterLenet)       \
   _(CommonAncestor)
 
 #define TH_FORALL_TESTS_CUDA(_) \
