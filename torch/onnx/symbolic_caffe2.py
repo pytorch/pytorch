@@ -32,11 +32,9 @@ def nchw2nhwc(g, input):
     axes = [0, 2, 3, 1]
     return _permute_helper(g, input, axes)
 
-
 def nhwc2nchw(g, input):
     axes = [0, 3, 1, 2]
     return _permute_helper(g, input, axes)
-
 
 def linear_prepack(g, weight, bias):
     # Mapping to a dummy caffe2 prepack node.
