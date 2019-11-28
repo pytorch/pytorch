@@ -415,8 +415,8 @@ Examples::
 
     # Batch matrix multiply of matrices Tensor['C', 'D'] and Tensor['E', 'F'].
     # 'A', 'B' are batch dimensions.
-    >>> x = torch.randn(3, 3, 3, 3, names=('A', 'B', 'C', 'D))
-    >>> y = torch.randn(3, 3, 3, names=('B', 'E', 'F))
+    >>> x = torch.randn(3, 3, 3, 3, names=('A', 'B', 'C', 'D'))
+    >>> y = torch.randn(3, 3, 3, names=('B', 'E', 'F'))
     >>> torch.matmul(x, y).names
     ('A', 'B', 'C', 'F')
 

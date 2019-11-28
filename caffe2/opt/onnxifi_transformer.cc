@@ -458,7 +458,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
           std::piecewise_construct,
           std::forward_as_tuple(ret.first->first),
           std::forward_as_tuple(
-              std::vector(shape.dims_size(), TensorBoundShape_DimType_CONSTANT),
+              std::vector<TensorBoundShape::DimType>(
+                  shape.dims_size(), TensorBoundShape_DimType_CONSTANT),
               ret.first->second));
 
       // Feed into workspace as CPU Tensors
