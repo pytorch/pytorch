@@ -107,7 +107,7 @@ class TestONNXRuntime(unittest.TestCase):
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=False,
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
         return run_model_test(self, model, batch_size=batch_size,
@@ -1065,6 +1065,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
 
+    def test_logsoftmax(self):
+        for i in range(7)[2:]:
+            model = torch.nn.LogSoftmax(dim=i - 1)
+            dims = [2] * (i - 2) + [3, 4]
+            input = torch.ones(*dims, requires_grad=True)
+            self.run_test(model, input)
+
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = torch.nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_test(model, input)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm(self):
         model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
@@ -1398,6 +1411,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_getitem(self):
+        class GetItemModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z, ind):
+                # this will create prim::ListConstruct(x, y, z) + aten::__getitem__
+                arr = [x, y, z]
+                return arr[ind]
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(1, 4, 5)
+        z = torch.randn(2, 4, 5)
+        ind = torch.tensor(1, dtype=torch.long)
+        self.run_test(GetItemModel(), (x, y, z, ind))
+
+        ind = torch.tensor(-2, dtype=torch.long)
+        self.run_test(GetItemModel(), (x, y, z, ind))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
@@ -1413,6 +1444,65 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5)
         self.run_test(UnbindModel2(), x)
+
+        class UnbindModel3(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(-2)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel3(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unbind_dynamic(self):
+        class UnbindModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.unbind()[1]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel(), x)
+
+        class UnbindModel2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.unbind(-1)[1]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel2(), x)
+
+    def test_split(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 2])
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+        class SplitModel2(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 1], -2)
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_dynamic(self):
+        class SplitModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.split(2)[1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+        class SplitModel2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.split(2, -3)[1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel2(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
@@ -1444,6 +1534,36 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_zero(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.zero_(), x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Zero_(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_fill(self):
+        class Fill_(torch.nn.Module):
+            def forward(self, x):
+                return x.fill_(3), x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Fill_(), x)
+
+    def test_inplace_arithmetic(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                x.add_(3)
+                y.mul_(x)
+                return x, y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(Arithmetic(), (x, y))
 
     def test_sort(self):
         class SortModel(torch.nn.Module):

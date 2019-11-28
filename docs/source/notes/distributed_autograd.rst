@@ -330,7 +330,7 @@ autograd and distributed optimizer is as follows:
   def random_tensor():
       return torch.rand((3, 3), requires_grad=True)
 
-  def _run_process(self_rank, dst_rank, file_name):
+  def _run_process(self_rank, dst_rank):
       self_name = "worker{}".format(self_rank)
       dst_name = "worker{}".format(dst_rank)
 
@@ -339,7 +339,6 @@ autograd and distributed optimizer is as follows:
           self_name=self_name,
           self_rank=self_rank,
           worker_name_to_id={"worker0": 0, "worker1": 1},
-          init_method="file://{}".format(file_name),
       )
 
       # Use a distributed autograd context.
@@ -362,16 +361,15 @@ autograd and distributed optimizer is as follows:
          # Run the distributed optimizer step.
          dist_optim.step()
 
-  def run_process(self_rank, dst_rank, file_name):
-      _run_process(self_rank, dst_rank, file_name)
+  def run_process(self_rank, dst_rank):
+      _run_process(self_rank, dst_rank)
       rpc.wait_all_workers()
 
-  file_name = NamedTemporaryFile().name
   processes = []
 
   # Run two workers.
   for i in range(2):
-      p = mp.Process(target=run_process, args=(i, (i + 1) % 2, file_name))
+      p = mp.Process(target=run_process, args=(i, (i + 1) % 2))
       p.start()
       processes.append(p)
 

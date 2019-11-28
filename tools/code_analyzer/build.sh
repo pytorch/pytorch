@@ -7,21 +7,19 @@
 #
 # 1. Analyze torch and generate yaml file of op dependency transitive closure:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TORCH=1 scripts/build_code_analyzer.sh
+# ANALYZE_TORCH=1 tools/code_analyzer/build.sh
 #
-# 2. Analyze test project and generate dot file with specific debug filters:
+# 2. Analyze test project and compare with expected result:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# FORMAT=dot \
-# ANALYZE_TEST=1 scripts/build_code_analyzer.sh \
-# -debug_filter="CPUType|TypeDefault|^at::"
+# ANALYZE_TEST=1 CHECK_RESULT=1 tools/code_analyzer/build.sh
 #
-# 3. Analyze test project and compare with expected result:
+# 3. Analyze torch and generate yaml file of op dependency with debug path:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TEST=1 CHECK_RESULT=1 scripts/build_code_analyzer.sh
+# ANALYZE_TORCH=1 tools/code_analyzer/build.sh -closure=false -debug_path=true
 
 set -ex
 
-SRC_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
+SRC_ROOT="$( cd "$(dirname "$0")"/../.. ; pwd -P)"
 ANALYZER_SRC_HOME="${SRC_ROOT}/tools/code_analyzer"
 
 # Clang/LLVM path
@@ -120,7 +118,7 @@ analyze_test_project() {
   OBJECT_DIR="${WORK_DIR}/test_objs"
   rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
   ar x "${TEST_INSTALL_PREFIX}/lib/libc10.a"
-  ar x "${TEST_INSTALL_PREFIX}/lib/libSimpleOps.a"
+  ar x "${TEST_INSTALL_PREFIX}/lib/libOpLib.a"
   popd
 
   # Link into a single module
