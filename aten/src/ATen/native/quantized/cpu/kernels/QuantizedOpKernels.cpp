@@ -6,7 +6,6 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/SortingUtils.h>
-#include <iostream>
 
 
 namespace at {
