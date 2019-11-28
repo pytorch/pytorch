@@ -99,7 +99,7 @@ class TestOptim(TestCase):
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
     def _test_basic_cases_template(self, weight, bias, input, constructor, 
-            scheduler_constructors, swa=False):
+                                   scheduler_constructors, swa=False):
         weight = Variable(weight, requires_grad=True)
         bias = Variable(bias, requires_grad=True)
         input = Variable(input)
@@ -570,16 +570,16 @@ class TestOptim(TestCase):
                 sparse_adam, swa_start=10, swa_freq=1, swa_lr=1e-2)
 
         auto_constructor_list = [sgd_constructor, sgd_momentum_constructor,
-                                 adam_constructor, adadelta_constructor,
-                                 adagrad_constructor, adamax_constructor,
-                                 rmsprop_constructor, rprop_constructor,
-                                 asgd_constructor, adamw_constructor,
-                                 lbfgs_constructor]
+            adam_constructor, adadelta_constructor,
+            adagrad_constructor, adamax_constructor,
+            rmsprop_constructor, rprop_constructor,
+            asgd_constructor, adamw_constructor,
+            lbfgs_constructor]
 
         sparse_auto_constructor_list = [
-                                 sgd_constructor,
-                                 sparse_adam_constructor,
-                                 adagrad_constructor]
+            sgd_constructor,
+            sparse_adam_constructor,
+            adagrad_constructor]
 
         for i, constructor in enumerate(auto_constructor_list):
             if constructor in sparse_auto_constructor_list:
@@ -588,20 +588,20 @@ class TestOptim(TestCase):
                     constructor, 
                     [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
                     swa=True)
+            ignore_multidevice = (constructor == lbfgs_constructor)
             self._test_basic_cases(
                 lambda weight, bias: constructor([weight, bias]),
-                    ignore_multidevice=(constructor == lbfgs_constructor),
-                    swa=True
-            )
+                                     ignore_multidevice=ignore_multidevice,
+                                     swa=True)
             if i < len(auto_constructor_list) - 1:
                 self._test_basic_cases(
                     lambda weight, bias: constructor(
-                       self._build_params_dict(weight, bias, lr=1e-2)),
-                       swa=True)
+                        self._build_params_dict(weight, bias, lr=1e-2)),
+                        swa=True)
                 self._test_basic_cases(
                     lambda weight, bias: constructor(
-                       self._build_params_dict_single(weight, bias, lr=1e-2)),
-                       swa=True)
+                        self._build_params_dict_single(weight, bias, lr=1e-2)),
+                        swa=True)
 
         self._test_rosenbrock_sparse(sgd_manual_constructor, swa=True)
 
@@ -850,8 +850,8 @@ class TestOptim(TestCase):
         self.assertEqual(opt._auto_mode, False)
 
         self.assertWarnsRegex(
-           lambda : optim.SWA(base_opt, swa_lr=swa_lr),
-           "Some of swa_start, swa_freq is None")
+            lambda : optim.SWA(base_opt, swa_lr=swa_lr),
+            "Some of swa_start, swa_freq is None")
         opt = optim.SWA(base_opt, swa_lr=swa_lr)
         self.assertEqual(opt._auto_mode, False)
 
@@ -889,7 +889,7 @@ class TestOptim(TestCase):
                 else:
                     y = self.y[index]
                     return x, y
-        
+
             def __len__(self):
                 return self.N 
 
@@ -990,7 +990,7 @@ class TestOptim(TestCase):
 
             def compute_preactivation(self, x):
                 return self.conv1(x)
-                
+
             def forward(self, x):
                 x = self.conv1(x)
                 x = self.bn(x) 
