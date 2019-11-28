@@ -9,18 +9,27 @@ import onnx
 import caffe2.python.onnx.backend as c2
 
 class TestQuantizedOps(unittest.TestCase):
-    def generic_test(self, model, sample_inputs, input_names=None):
+    def generic_test(self, model, sample_inputs, input_names=None, permute=False):
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
         model.qconfig = torch.quantization.default_qconfig
         q_model = torch.quantization.prepare(model, inplace=False)
         q_model = torch.quantization.convert(q_model, inplace=False)
+
+        if permute:
+            # Permute input to caffe2 to be NHWC layout
+            X_nhwc = np.ascontiguousarray(sample_inputs[0].transpose([0, 2, 3, 1]))
+
         pytorch_res = q_model(*pt_inputs)
         f = io.BytesIO()
         torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
         onnx_model = onnx.load(f)
-        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
-        np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=3)
+        if permute:
+            caffe_res = c2.run_model(onnx_model, dict(zip(input_names, (X_nhwc,))))[0]
+            np.testing.assert_almost_equal(pytorch_res.permute(0, 2, 3, 1).numpy(), caffe_res, decimal=3)
+        else:
+            caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
+            np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=3)
 
     def generic_unary_test(self, op):
         class QModule(torch.nn.Module):
@@ -129,6 +138,20 @@ class TestQuantizedOps(unittest.TestCase):
 
         # Permute pytorch output to NHWC
         np.testing.assert_almost_equal(outputs.permute(0, 2, 3, 1).numpy(), caffe_res, decimal=3)
+
+    def test_upsample(self):
+        class QUpsampleModule(torch.nn.Module):
+            def __init__(self):
+                super(QUpsampleModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = torch.nn.quantized.functional.interpolate(self.quant1(x), size=[6, 8], mode='nearest')
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        self.generic_test(QUpsampleModule(), (x,), input_names=["x"], permute=True)
 
 if __name__ == '__main__':
     unittest.main()

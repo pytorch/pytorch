@@ -8,7 +8,7 @@ sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
-curl https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
+curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
