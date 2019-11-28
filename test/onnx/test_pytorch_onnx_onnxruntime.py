@@ -107,7 +107,7 @@ class TestONNXRuntime(unittest.TestCase):
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=False,
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
         return run_model_test(self, model, batch_size=batch_size,
@@ -1064,6 +1064,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
+
+    def test_logsoftmax(self):
+        for i in range(7)[2:]:
+            model = torch.nn.LogSoftmax(dim=i - 1)
+            dims = [2] * (i - 2) + [3, 4]
+            input = torch.ones(*dims, requires_grad=True)
+            self.run_test(model, input)
+
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = torch.nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm(self):
