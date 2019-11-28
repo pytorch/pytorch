@@ -69,40 +69,42 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
-          A class encapsulating a reference to a value of some type on a remote worker.
-          This handle will keep the referenced remote value alive on the worker.
-      )")
+          A class encapsulating a reference to a value of some type on a remote
+          worker. This handle will keep the referenced remote value alive on the
+          worker.
+          )")
           .def(py::init<const py::object&>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
               &PyRRef::isOwner,
               R"(
-Returns whether or not the current node is the owner of this ``RRef``.
+                  Returns whether or not the current node is the owner of this
+                  ``RRef``.
               )")
           .def(
               // not releasing GIL here to avoid context switch on getters
               "owner",
               &PyRRef::owner,
               R"(
-Returns worker information of the node that owns this ``RRef``.
+                  Returns worker information of the node that owns this ``RRef``.
               )")
           .def(
               "to_here",
               &PyRRef::toHere,
               py::call_guard<py::gil_scoped_release>(),
               R"(
-Blocking call that copies the value of the RRef from the owner to the local node
-and returns it. If the current node is the owner, returns a reference to the
-local value.
+                  Blocking call that copies the value of the RRef from the owner
+                  to the local node and returns it. If the current node is the
+                  owner, returns a reference to the local value.
               )")
           .def(
               "local_value",
               &PyRRef::localValue,
               py::call_guard<py::gil_scoped_release>(),
               R"(
-If the current node is the owner, returns a reference to the local value.
-Otherwise, throws an exception.
+                  If the current node is the owner, returns a reference to the
+                  local value. Otherwise, throws an exception.
               )")
           .def(py::pickle(
               [](const PyRRef& self) {
