@@ -147,6 +147,9 @@ class InsertObserversHelper {
   void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
+  void insertObserversForInvokedMethods(
+      script::Module& module, const std::string& method_name);
+
   Node* insertObserverFor(
       Value* v,
       Graph* g,
@@ -271,6 +274,50 @@ graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %g
   rewriter.runOnGraph(graph, filter);
 }
 
+void InsertObserversHelper::insertObserversForInvokedMethods(
+    script::Module& module, const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (n->kind() == prim::CallMethod) {
+        // If we find a call to a method of a child module,
+        // we'll recursively insert observers for the forward function to
+        // the child module.
+        auto module_instance = n->inputs()[0];
+        auto module_method_name = n->s(attr::name);
+        script::Module callee_module;
+        if (module_instance->node()->kind() == prim::GetAttr) {
+          auto child_module_name = module_instance->node()->s(attr::name);
+          callee_module = module.attr(child_module_name).toModule();
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              module_instance == graph->inputs()[0],
+              "We only support call method either on %self"
+              "or child instance in insert_observers_pass right now");
+          callee_module = module;
+        }
+        auto method_graph =
+            callee_module.get_method(module_method_name).graph();
+        // Recursively insert observer for the forward function of child
+        // module
+        insertObservers(callee_module, module_method_name);
+      }
+
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+
+}
+
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
 Node* InsertObserversHelper::insertObserverFor(
@@ -368,6 +415,7 @@ void InsertObserversHelper::insertObservers(
   // must do constant propagation first before replacement
   replaceConvolutionWithConv2d(graph);
   addIntermediateValuesToSkipObserver(module, method_name);
+  insertObserversForInvokedMethods(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -415,30 +463,6 @@ void InsertObserversHelper::insertObservers(
         if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
-      }
-
-      if (n->kind() == prim::CallMethod) {
-        // If we find a call to a method of a child module,
-        // we'll recursively insert observers for the forward function to
-        // the child module.
-        auto module_instance = n->inputs()[0];
-        auto module_method_name = n->s(attr::name);
-        script::Module callee_module;
-        if (module_instance->node()->kind() == prim::GetAttr) {
-          auto child_module_name = module_instance->node()->s(attr::name);
-          callee_module = module.attr(child_module_name).toModule();
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              module_instance == graph->inputs()[0],
-              "We only support call method either on %self"
-              "or child instance in insert_observers_pass right now");
-          callee_module = module;
-        }
-        auto method_graph =
-            callee_module.get_method(module_method_name).graph();
-        // Recursively insert observer for the forward function of child
-        // module
-        insertObservers(callee_module, module_method_name);
       }
 
       for (Block* subblock : n->blocks()) {
