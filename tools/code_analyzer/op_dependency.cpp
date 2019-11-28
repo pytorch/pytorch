@@ -143,6 +143,7 @@
 #include <unordered_set>
 
 #include "llvm/Demangle/Demangle.h"
+#include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -219,15 +220,6 @@ static cl::opt<int> Verbose(
     cl::Hidden,
     cl::init(0));
 
-static RegexOpt DebugFilterLoc;
-static cl::opt<RegexOpt, true, cl::parser<std::string>> DebugFilter(
-    "debug_filter",
-    cl::desc("Debug filter regex pattern. "
-             "Example: -debug_filter 'CPUType|TypeDefault|^at::native'"),
-    cl::location(DebugFilterLoc),
-    cl::ZeroOrMore,
-    cl::ValueRequired);
-
 static cl::opt<bool> DebugPath(
     "debug_path",
     cl::desc("Output path between two nodes."),
@@ -287,9 +279,7 @@ public:
     // "Key nodes" are the nodes we keep in the result graph. Ultimately we only
     // care about #1 as that's what we use to prune registered ops via codegen,
     // (then #2 will be stripped by linker automatically), so #1 is counted as
-    // key nodes by default. #2 can also be kept in the result graph via
-    // "DebugFilter" flag, i.e. function symbols that match DebugFilter are
-    // also counted as key nodes.
+    // key nodes.
     SET keyNodes;
 
     // Find global strings matching function schema pattern. Then use fuzz
@@ -297,11 +287,6 @@ public:
     GRAPH schemaStrToFunctions, functionsToSchemaStrs;
     scanGlobalsForFunctionSchema(
         M, &keyNodes, &schemaStrToFunctions, &functionsToSchemaStrs);
-
-    // Find all function names that match DebugFilter.
-    if (DebugFilterLoc.pattern) {
-      scanFunctionsForDebugFilter(M, &keyNodes);
-    }
 
     // Extended llvm::CallGraph analysis - all references are counted.
     GRAPH functionToFunctions;
@@ -428,18 +413,44 @@ private:
                       << demangle(func->getName()) << std::endl;
           }
         };
-        scanReferredFunctionsFromOperands(*cur, cb);
+        scanReferredFunctions(*cur, cb);
       }
     }
   }
 
-  // llvm::CallGraph only checks CallSites. This method also checks constant
-  // function pointer references for better recall - the function might not
-  // actually be called.
+  static bool isFunctionSchemaString(const std::string& str) {
+    return FunctionSchemaPatternLoc.pattern->match(str);
+  }
+
+  static std::string truncateFunctionSchemaString(
+      const std::string& schemaStr) {
+    auto pos = schemaStr.find_first_of(".(");
+    return pos == std::string::npos ? schemaStr : schemaStr.substr(0, pos);
+  }
+
+  static Instruction* getNextInstruction(Instruction& I) {
+    Instruction* next = I.getNextNonDebugInstruction();
+    if (next) return next;
+    auto parentBlock = I.getParent();
+    if (!parentBlock) return nullptr;
+    auto nextBlock = parentBlock->getNextNode();
+    return nextBlock ? &nextBlock->front() : nullptr;
+  }
+
+  static bool checkInstructionCalledFunction(Instruction& I, Regex& pattern) {
+    bool called = false;
+    scanReferredFunctions(I, [&](Function* func) -> void {
+      called |= pattern.match(demangle(func->getName()));
+    });
+    return called;
+  }
+
+  // This method constructs function -> function reference graph. It inserts an
+  // edge from function A to function B if A *might* call B.
   static void scanReferenceGraph(Module& M, GRAPH* functionToFunctions) {
     for (Function& F : M) {
       std::string name = F.getName();
-      scanReferredFunctionsFromOperandsInFunction(F,
+      scanReferredFunctionsInFunction(F,
           [&](Function* func) -> void {
             (*functionToFunctions)[name].insert(func->getName());
           if (Verbose > 1) {
@@ -450,11 +461,69 @@ private:
     }
   }
 
-  static void scanFunctionsForDebugFilter(Module& M, SET* keyNodes) {
-    for (Function& F : M) {
-      std::string name = F.getName();
-      if (matchDebugFilter(name)) {
-        keyNodes->insert(name);
+  static void scanReferredFunctionsInFunction(
+      Function& F, const std::function<void(Function*)>& CB) {
+    for (BasicBlock& BB : F) {
+      for (Instruction& I : BB) {
+        scanReferredFunctions(I, CB);
+      }
+    }
+  }
+
+  // llvm::CallGraph only searches for functions referenced by "CallSites" (i.e.
+  // by call/invoke instructions). However functions can be referenced by
+  // non-call/invoke instructions as well (being passed as function pointer),
+  // e.g.:
+  // ```
+  // store i64 ptrtoint (void (%"class.at::Tensor"*, %"class.at::Tensor"*)*
+  //                     @at::foo_op(at::Tensor const&) to i64), i64* %14, ...
+  // ```
+  // "@at::foo_op" is a operand of "ptrtoint", which in turn is a constant
+  // operand of "store" instruction. The stored function pointer can be called
+  // indirectly later on.
+  //
+  // Sometimes directly called functions can be in ConstExpr as well, e.g.:
+  // ```
+  // invoke void bitcast (
+  //    void (ty1*, ...)* @c10::Dispatcher::findSchema(...) to
+  //    void (ty2*, ...)*)(...)
+  // ```
+  // In above case, "CallSite(I).getCalledFunction()" won't return "findSchema"
+  // as it's nested in "bitcast" instruction.
+  //
+  // To cover these cases this method recursively traverses all operands of the
+  // input instruction "I" to search for directly/indirectly referenced function
+  // pointers by the instruction. The referenced functions might NOT actually be
+  // called (which is fine for our use case). llvm::LazyCallGraph has similar
+  // logic.
+  static void scanReferredFunctions(
+      Instruction& I, const std::function<void(Function*)>& CB) {
+    SmallVector<Constant*, 16> worklist;
+    SmallPtrSet<Constant*, 16> visited;
+
+    if (auto CS = CallSite(&I)) {
+      Function* callee = CS.getCalledFunction();
+      if (callee && !callee->isIntrinsic() && visited.insert(callee).second) {
+        CB(callee);
+      }
+    }
+
+    for (Value* op : I.operand_values()) {
+      Constant* C = dyn_cast<Constant>(op);
+      if (C && visited.insert(C).second) {
+        worklist.push_back(C);
+      }
+    }
+
+    LazyCallGraph::visitReferences(worklist, visited, [&](Function &F) {
+      CB(&F);
+    });
+  }
+
+  static void mergeGraph(GRAPH& src, GRAPH* dest) {
+    for (auto& S : src) {
+      for (auto& E : S.second) {
+        (*dest)[S.first].insert(E);
       }
     }
   }
@@ -487,89 +556,6 @@ private:
         }
         // Expand node.
         expand(curNode);
-      }
-    }
-  }
-
-  static bool isFunctionSchemaString(const std::string& str) {
-    return FunctionSchemaPatternLoc.pattern->match(str);
-  }
-
-  static std::string truncateFunctionSchemaString(
-      const std::string& schemaStr) {
-    auto pos = schemaStr.find_first_of(".(");
-    return pos == std::string::npos ? schemaStr : schemaStr.substr(0, pos);
-  }
-
-  static bool matchDebugFilter(const std::string& node) {
-    return DebugFilterLoc.pattern
-        && DebugFilterLoc.pattern->match(demangle(node));
-  }
-
-  static Instruction* getNextInstruction(Instruction& I) {
-    Instruction* next = I.getNextNonDebugInstruction();
-    if (next) return next;
-    auto parentBlock = I.getParent();
-    if (!parentBlock) return nullptr;
-    auto nextBlock = parentBlock->getNextNode();
-    return nextBlock ? &nextBlock->front() : nullptr;
-  }
-
-  // CallGraph only searches for CallSites (call/invoke instructions). However
-  // functions can be referenced in other instructions as well (being passed
-  // as function pointer).
-  // This method recursively traverses all operands to search for function
-  // pointers, e.g.:
-  // ```
-  // store i64 ptrtoint (void (%"class.at::Tensor"*, %"class.at::Tensor"*)*
-  //                     @at::foo_op(at::Tensor const&) to i64), i64* %14, ...
-  // ```
-  // "@at::foo_op" is a operand of "ptrtoint", which in turn is a constant
-  // operand of "store" instruction.
-  static void scanReferredFunctionsFromOperands(
-      User& U, const std::function<void(Function*)>& CB) {
-    for (auto& O : U.operands()) {
-      Function* func = dyn_cast<Function>(O);
-      if (func && !func->isIntrinsic()) {
-        CB(func);
-      }
-      // Recursively scans constant operand. Operands that are instructions
-      // should already be scanned when it scans the entire function.
-      Constant* C = dyn_cast<Constant>(O);
-      if (C) {
-        scanReferredFunctionsFromOperands(*C, CB);
-      }
-    }
-  }
-
-  static void scanReferredFunctionsFromOperandsInFunction(
-      Function& F, const std::function<void(Function*)>& CB) {
-    for (BasicBlock& BB : F) {
-      for (Instruction& I : BB) {
-        scanReferredFunctionsFromOperands(I, CB);
-      }
-    }
-  }
-
-  // Directly called function might be in ConstExpr as well, e.g.:
-  // invoke void bitcast (
-  //    void (ty1*, ...)* @c10::Dispatcher::findSchema(...) to
-  //    void (ty2*, ...)*)(...)
-  //
-  // In above case, "CallSite(I).getCalledFunction()" won't return "findSchema"
-  // as it's nested in "bitcast" instruction.
-  static bool checkInstructionCalledFunction(Instruction& I, Regex& pattern) {
-    bool called = false;
-    scanReferredFunctionsFromOperands(I, [&](Function* func) -> void {
-      called |= pattern.match(demangle(func->getName()));
-    });
-    return called;
-  }
-
-  static void mergeGraph(GRAPH& src, GRAPH* dest) {
-    for (auto& S : src) {
-      for (auto& E : S.second) {
-        (*dest)[S.first].insert(E);
       }
     }
   }
