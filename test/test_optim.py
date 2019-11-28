@@ -508,7 +508,7 @@ class TestOptim(TestCase):
         def sgd_constructor(params):
             sgd = optim.SGD(params, lr=1e-3)
             return optim.SWA(
-                sgd, swa_start=10, swa_freq=1, swa_lr=1e-3)
+                sgd, swa_start=10, swa_freq=1, swa_lr=1e-4)
 
         def sgd_manual_constructor(params):
             sgd = optim.SGD(params, lr=1e-3)
@@ -517,32 +517,32 @@ class TestOptim(TestCase):
         def sgd_momentum_constructor(params):
             sgd = optim.SGD(params, lr=1e-3, momentum=0.9, weight_decay=1e-4)
             return optim.SWA(
-                sgd, swa_start=10, swa_freq=1, swa_lr=1e-3)
+                sgd, swa_start=10, swa_freq=1, swa_lr=1e-4)
 
         def adam_constructor(params):
             adam = optim.Adam(params, lr=1e-2)
             return optim.SWA(
-                adam, swa_start=10, swa_freq=1, swa_lr=1e-2)
+                adam, swa_start=10, swa_freq=1, swa_lr=1e-4)
 
         def adamw_constructor(params):
             adam = optim.AdamW(params, lr=1e-3)
             return optim.SWA(
-                adam, swa_start=10, swa_freq=1, swa_lr=1e-2)
+                adam, swa_start=10, swa_freq=1, swa_lr=5e-4)
 
         def adadelta_constructor(params):
             adadelta = optim.Adadelta(params)
             return optim.SWA(
-                adadelta, swa_start=10, swa_freq=1)
+                adadelta, swa_start=10, swa_freq=1, swa_lr=1e-1)
 
         def adagrad_constructor(params):
-            adagrad = optim.Adagrad(params, lr=5e-1)
+            adagrad = optim.Adagrad(params, lr=3e-1)
             return optim.SWA(
                 adagrad, swa_start=10, swa_freq=1, swa_lr=1e-1)
 
         def adamax_constructor(params):
             adamax = optim.Adamax(params, lr=1e-1)
             return optim.SWA(
-                adamax, swa_start=10, swa_freq=1, swa_lr=1e-2)
+                adamax, swa_start=10, swa_freq=1, swa_lr=5e-3)
 
         def rmsprop_constructor(params):
             rmsprop = optim.RMSprop(params, lr=1e-2)
@@ -560,14 +560,14 @@ class TestOptim(TestCase):
                 asgd, swa_start=10, swa_freq=1, swa_lr=1e-3)
 
         def lbfgs_constructor(params):
-            lbfgs = optim.LBFGS(params, lr=5e-2, max_iter=5)
+            lbfgs = optim.LBFGS(params)
             return optim.SWA(
-                lbfgs, swa_start=10, swa_freq=1, swa_lr=1e-3)
+                lbfgs, swa_start=10, swa_freq=1, swa_lr=1e-4)
 
         def sparse_adam_constructor(params):
             sparse_adam = optim.SparseAdam(params, lr=4e-2)
             return optim.SWA(
-                sparse_adam, swa_start=10, swa_freq=1, swa_lr=1e-2)
+                sparse_adam, swa_start=10, swa_freq=1, swa_lr=4e-2)
 
         auto_constructor_list = [sgd_constructor, sgd_momentum_constructor,
                                  adam_constructor, adadelta_constructor,
@@ -578,7 +578,6 @@ class TestOptim(TestCase):
 
         sparse_auto_constructor_list = [
             sgd_constructor,
-            sparse_adam_constructor,
             adagrad_constructor]
 
         for i, constructor in enumerate(auto_constructor_list):
@@ -603,6 +602,7 @@ class TestOptim(TestCase):
                     swa=True)
 
         self._test_rosenbrock_sparse(sgd_manual_constructor, swa=True)
+        self._test_rosenbrock_sparse(sparse_adam_constructor, sparse_only=True, swa=True)
 
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
