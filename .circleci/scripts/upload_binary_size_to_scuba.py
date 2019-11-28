@@ -9,7 +9,7 @@ import sys
 import logging
 
 
-def get_size(file_dir="/home/circleci/project/final_pkgs"):
+def get_size(file_dir):
     try:
         # we should only expect one file, if no, something is wrong
         file_name = glob.glob(os.path.join(file_dir, "*"))[0]
@@ -71,7 +71,7 @@ def send_message(message):
 
 
 if __name__ == "__main__":
-    file_dir = "/home/circleci/project/final_pkgs"
+    file_dir = os.env.get("PYTORCH_FINAL_PACKAGE_DIR", "/home/circleci/project/final_pkgs")
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
     size = get_size(file_dir)

@@ -1546,24 +1546,24 @@ workflows:
           requires:
             - setup
           docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_manywheel_2_7mu_cu101_devtoolset7_nightly_build
-          build_environment: "manywheel 2.7mu cu101 devtoolset7"
-          requires:
-            - setup
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_5m_cu101_devtoolset7_nightly_build
-          build_environment: "manywheel 3.5m cu101 devtoolset7"
-          requires:
-            - setup
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
-          build_environment: "manywheel 3.6m cu101 devtoolset7"
-          requires:
-            - setup
-          docker_image: "pytorch/manylinux-cuda101"
+      # - binary_linux_build:
+      #     name: binary_linux_manywheel_2_7mu_cu101_devtoolset7_nightly_build
+      #     build_environment: "manywheel 2.7mu cu101 devtoolset7"
+      #     requires:
+      #       - setup
+      #     docker_image: "pytorch/manylinux-cuda101"
+      # - binary_linux_build:
+      #     name: binary_linux_manywheel_3_5m_cu101_devtoolset7_nightly_build
+      #     build_environment: "manywheel 3.5m cu101 devtoolset7"
+      #     requires:
+      #       - setup
+      #     docker_image: "pytorch/manylinux-cuda101"
+      # - binary_linux_build:
+      #     name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
+      #     build_environment: "manywheel 3.6m cu101 devtoolset7"
+      #     requires:
+      #       - setup
+      #     docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_build
           build_environment: "manywheel 3.7m cu101 devtoolset7"
