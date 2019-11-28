@@ -74,6 +74,7 @@ if __name__ == "__main__":
     file_dir = os.env.get("PYTORCH_FINAL_PACKAGE_DIR", "/home/circleci/project/final_pkgs")
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
+    print("checking dir: " + file_dir)
     size = get_size(file_dir)
     if size != 0:
         try:
