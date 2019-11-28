@@ -48,6 +48,7 @@ set(C10D_SRCS
   FileStore.cpp
   HashStore.cpp
   ProcessGroup.cpp
+  ProcessGroupRoundRobin.cpp
   Store.cpp
   PrefixStore.cpp
   TCPStore.cpp
