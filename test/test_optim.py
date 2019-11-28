@@ -721,8 +721,8 @@ class TestOptim(TestCase):
 
         x, y, loss_fun, _ = self._define_vars_loss_opt()
         opt = optim.SGD([x], lr=1e-3, momentum=0.9)
-        swa_start = 5
-        swa_freq = 2
+        swa_start, y_swa_start = 5, 3
+        swa_freq, y_swa_freq = 2, 3
         opt = optim.SWA(opt, swa_start=swa_start, swa_freq=swa_freq, swa_lr=0.001)
 
         x_sum = torch.zeros_like(x)
@@ -742,7 +742,8 @@ class TestOptim(TestCase):
 
         x_avg = x_sum / x_n_avg
 
-        opt.add_param_group({'params': y, 'lr': 1e-4})
+        opt.add_param_group({'params': y, 'lr': 1e-4, 'swa_start': y_swa_start,
+                            'swa_freq': y_swa_freq})
 
         for y_step in range(1, 11):
             opt.zero_grad()
@@ -750,7 +751,7 @@ class TestOptim(TestCase):
             loss.backward()
             opt.step()
             x_step += 1
-            if y_step % swa_freq == 0 and y_step > swa_start:
+            if y_step % y_swa_freq == 0 and y_step > y_swa_start:
                 y_n_avg += 1
                 y_sum += y.data
             if x_step % swa_freq == 0 and x_step > swa_start:
@@ -940,7 +941,6 @@ class TestOptim(TestCase):
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
         self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
 
-    #TODO: check
     def test_bn_update(self):
         # Test bn_update for fully-connected and convolutional networks with
         # BatchNorm1d and BatchNorm2d respectively

@@ -5,9 +5,6 @@ import torch
 import warnings
 
 
-#TODO: model device in example code?
-#TODO: Will we be able to update the blogpost?
-#TODO: Can we use diffent swa_lr, swa_freq, swa_start for different param groups?
 class SWA(Optimizer):
     def __init__(self, optimizer, swa_start=None, swa_freq=None, swa_lr=None):
         r"""Implements Stochastic Weight Averaging (SWA).
