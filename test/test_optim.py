@@ -570,11 +570,11 @@ class TestOptim(TestCase):
                 sparse_adam, swa_start=10, swa_freq=1, swa_lr=1e-2)
 
         auto_constructor_list = [sgd_constructor, sgd_momentum_constructor,
-            adam_constructor, adadelta_constructor,
-            adagrad_constructor, adamax_constructor,
-            rmsprop_constructor, rprop_constructor,
-            asgd_constructor, adamw_constructor,
-            lbfgs_constructor]
+                                 adam_constructor, adadelta_constructor,
+                                 adagrad_constructor, adamax_constructor,
+                                 rmsprop_constructor, rprop_constructor,
+                                 asgd_constructor, adamw_constructor,
+                                 lbfgs_constructor]
 
         sparse_auto_constructor_list = [
             sgd_constructor,
@@ -591,17 +591,16 @@ class TestOptim(TestCase):
             ignore_multidevice = (constructor == lbfgs_constructor)
             self._test_basic_cases(
                 lambda weight, bias: constructor([weight, bias]),
-                                     ignore_multidevice=ignore_multidevice,
-                                     swa=True)
+                ignore_multidevice=ignore_multidevice, swa=True)
             if i < len(auto_constructor_list) - 1:
                 self._test_basic_cases(
-                    lambda weight, bias: constructor(
-                        self._build_params_dict(weight, bias, lr=1e-2)),
-                        swa=True)
+                    lambda weight, bias: 
+                        constructor(self._build_params_dict(weight, bias, lr=1e-2)),
+                    swa=True)
                 self._test_basic_cases(
-                    lambda weight, bias: constructor(
-                        self._build_params_dict_single(weight, bias, lr=1e-2)),
-                        swa=True)
+                    lambda weight, bias: 
+                        constructor(self._build_params_dict_single(weight, bias, lr=1e-2)),
+                    swa=True)
 
         self._test_rosenbrock_sparse(sgd_manual_constructor, swa=True)
 
