@@ -7,10 +7,10 @@ import io
 
 import onnx
 import caffe2.python.onnx.backend as c2
-torch.backends.quantized.engine = "qnnpack"
 
 class TestQuantizedOps(unittest.TestCase):
     def generic_test(self, model, sample_inputs, input_names=None, permute=False):
+        torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
         model.qconfig = torch.quantization.default_qconfig
         q_model = torch.quantization.prepare(model, inplace=False)
