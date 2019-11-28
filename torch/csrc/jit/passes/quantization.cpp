@@ -560,29 +560,33 @@ c10::optional<std::string> findObserverName(Value* v) {
 
 class InsertQuantDeQuantHelper {
  public:
-  InsertQuantDeQuantHelper(script::Module& m) : module_(m) {}
+  InsertQuantDeQuantHelper() {}
+  void run(
+    script::Module& module,
+    const std::string& method_name);
   // quantization parameters and scalar type
-  std::tuple<IValue, IValue> getQParams(Value* v);
+  std::tuple<IValue, IValue> getQParams(script::Module& module, Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
+      script::Module& module,
       Value* child_instance);
-  void collectObserverNodesAndValueToQuantize(Value*);
-  void removeObservers();
-  void quantizeTensors();
+  void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
+  void removeObservers(script::Module& module);
+  void quantizeTensors(script::Module& module);
 
  private:
-  script::Module& module_;
-  std::vector<std::string> observer_modules_to_remove_;
-  std::vector<Node*> nodes_to_destroy_;
-  std::vector<Value*> values_to_quantize_;
-  std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
+  std::unordered_map<script::ModulePtr, std::vector<std::string>> observer_modules_to_remove_;
+  std::unordered_map<script::ModulePtr, std::vector<Node*>> nodes_to_destroy_;
+  std::unordered_map<script::ModulePtr, std::vector<Value*>> values_to_quantize_;
+  std::unordered_map<script::ModulePtr, std::unordered_map<Value*, std::tuple<IValue, IValue>>> values_to_qparams_;
 };
 
-void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(Value* v) {
+void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
+    script::Module& module, Value* v) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
   }
-  observer_modules_to_remove_.push_back(observer_name.value());
+  observer_modules_to_remove_[module._ivalue()].push_back(observer_name.value());
 
   Node* observer = v->node();
   TORCH_INTERNAL_ASSERT(
@@ -592,37 +596,45 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(Value* v) 
       observer->inputs()[0]->node()->s(attr::name) == observer_name);
 
   // Observer forward call node
-  nodes_to_destroy_.push_back(observer);
+  nodes_to_destroy_[module._ivalue()].push_back(observer);
   // GetAttr node for observer module
-  nodes_to_destroy_.push_back(observer->inputs()[0]->node());
+  nodes_to_destroy_[module._ivalue()].push_back(observer->inputs()[0]->node());
   Value* new_value = observer->input(1);
   v->replaceAllUsesWith(new_value);
-  values_to_quantize_.push_back(new_value);
-  values_to_qparams_.insert({new_value, getQParams(v)});
+  values_to_quantize_[module._ivalue()].push_back(new_value);
+  values_to_qparams_[module._ivalue()].insert({new_value, getQParams(module, v)});
 }
 
-void InsertQuantDeQuantHelper::removeObservers() {
-  for (auto& n : nodes_to_destroy_) {
-    n->removeAllInputs();
-  }
-  for (auto& n : nodes_to_destroy_) {
-    n->destroy();
+void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
+  if (nodes_to_destroy_.count(module._ivalue())) {
+    for (auto& n : nodes_to_destroy_.at(module._ivalue())) {
+      n->removeAllInputs();
+    }
+    for (auto& n : nodes_to_destroy_.at(module._ivalue())) {
+      n->destroy();
+    }
   }
   // Remove observer modules from last one to first one in order to
   // reduce the time complexity, assuming all the observer modules
   // are added after the existing modules, we'll have complexity of
   // O(N) where N is number of observer moduels with this optimization
-  for (int64_t i = observer_modules_to_remove_.size() - 1; i >= 0; --i) {
-    auto observer_name = observer_modules_to_remove_[i];
-    module_._ivalue()->unsafeRemoveAttr(observer_name);
-    module_.type()->unsafeRemoveAttribute(observer_name);
+  if (observer_modules_to_remove_.count(module._ivalue())) {
+    auto observers = observer_modules_to_remove_.at(module._ivalue());
+    for (int64_t i = observers.size() - 1; i >= 0; --i) {
+      auto observer_name = observers[i];
+      module._ivalue()->unsafeRemoveAttr(observer_name);
+      module.type()->unsafeRemoveAttribute(observer_name);
+    }
   }
 }
 
-void InsertQuantDeQuantHelper::quantizeTensors() {
-  for (auto& v : values_to_quantize_) {
-    TORCH_INTERNAL_ASSERT(values_to_qparams_.count(v));
-    auto tp = values_to_qparams_[v];
+void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module) {
+  if (!values_to_quantize_.count(module._ivalue())) {
+    return;
+  }
+  for (auto& v : values_to_quantize_.at(module._ivalue())) {
+    TORCH_INTERNAL_ASSERT(values_to_qparams_.at(module._ivalue()).count(v));
+    auto tp = values_to_qparams_.at(module._ivalue()).at(v);
     auto qparams = std::get<0>(tp);
     auto scalar_type = std::get<1>(tp);
     insertQuantDeQuantCall(v, qparams, scalar_type);
@@ -662,7 +674,8 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(Value* v) {
+std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(
+    script::Module& module, Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -670,7 +683,7 @@ std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(Value* v) {
       "getQParams expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  auto observer_module = module_.attr(observer_name.value()).toModule();
+  auto observer_module = module.attr(observer_name.value()).toModule();
   auto get_qparams = observer_module.get_method("get_qparams");
   IValue qparams = get_qparams(std::vector<IValue>());
   checkGetQParamsResult(qparams);
@@ -681,18 +694,19 @@ std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(Value* v) {
 }
 
 c10::optional<script::Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
+    script::Module& module,
     Value* child_instance) {
   TORCH_INTERNAL_ASSERT(
       child_instance->node()->kind() == prim::GetAttr,
       "Child instance should come from GetAttr.");
   auto child_module_name = child_instance->node()->s(attr::name);
   if (child_module_name.find("_observer_") == std::string::npos) {
-    return module_.attr(child_module_name).toModule();
+    return module.attr(child_module_name).toModule();
   }
   return c10::nullopt;
 }
 
-void InsertQuantDeQuantImpl(
+void InsertQuantDeQuantHelper::run(
     script::Module& module,
     const std::string& method_name) {
   script::Method method = module.get_method(method_name);
@@ -709,7 +723,6 @@ void InsertQuantDeQuantImpl(
     }
   }
 
-  InsertQuantDeQuantHelper qh(module);
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
@@ -729,13 +742,13 @@ void InsertQuantDeQuantImpl(
           if (module_instance == graph->inputs()[0]) {
             m = module;
           } else {
-            m = qh.findChildModuleToQuantize(module_instance);
+            m = findChildModuleToQuantize(module, module_instance);
           }
           if (m) {
-            InsertQuantDeQuantImpl(m.value(), module_method_name);
+            run(m.value(), module_method_name);
           }
         }
-        qh.collectObserverNodesAndValueToQuantize(v);
+        collectObserverNodesAndValueToQuantize(module, v);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -745,10 +758,10 @@ void InsertQuantDeQuantImpl(
   }
 
   for (Value* v : input_values) {
-    qh.collectObserverNodesAndValueToQuantize(v);
+    collectObserverNodesAndValueToQuantize(module, v);
   }
-  qh.removeObservers();
-  qh.quantizeTensors();
+  removeObservers(module);
+  quantizeTensors(module);
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
@@ -842,7 +855,8 @@ script::Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace) {
   script::Module module = inplace ? input_module : input_module.clone();
-  InsertQuantDeQuantImpl(module, method_name);
+  InsertQuantDeQuantHelper h;
+  h.run(module, method_name);
 
   // NOTE: Remove observer module does not work right now, we'll return
   // the module with observer modules as a temporary workaround
