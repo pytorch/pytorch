@@ -568,6 +568,7 @@ class InsertQuantDeQuantHelper {
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
   void removeObservers(script::Module& module);
+  bool registerQParams(script::Module& module, Value* v);
   void quantizeTensors(script::Module& module, Value* self);
 
  private:
@@ -625,12 +626,7 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
   }
 }
 
-void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Value* self) {
-  if (!values_to_quantize_.count(module._ivalue())) {
-    return;
-  }
-  for (auto& v : values_to_quantize_.at(module._ivalue())) {
-    TORCH_INTERNAL_ASSERT(values_to_qparams_.at(module._ivalue()).count(v));
+bool InsertQuantDeQuantHelper::registerQParams(script::Module& module, Value* v) {
     auto qparams_and_scalar_type = values_to_qparams_.at(module._ivalue()).at(v);
     auto qparams = std::get<0>(qparams_and_scalar_type);
     auto scalar_type = std::get<1>(qparams_and_scalar_type);
@@ -650,6 +646,15 @@ void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Value* se
       module.register_attribute(prefix + "_zero_point", IntType::get(), zero_point.item<int64_t>());
     }
     module.register_attribute(prefix + "_scalar_type", IntType::get(), scalar_type);
+    return is_per_channel;
+}
+
+void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Value* self) {
+  if (!values_to_quantize_.count(module._ivalue())) {
+    return;
+  }
+  for (auto& v : values_to_quantize_.at(module._ivalue())) {
+    auto is_per_channel = registerQParams(module, v);
     insertQuantDeQuantCall(self, v, is_per_channel);
   }
   // no need to clear the vector or map
