@@ -48,7 +48,7 @@ def set_training(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True,
+           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None):
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -179,6 +179,18 @@ def warn_on_static_input_change(input_states):
                           "Note that strings will not appear as inputs/outputs of the ONNX graph. "
                 warnings.warn(warning)
 
+
+def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
+    # This helper method resolves the arguments that are ignored when export_type != operator_export_type.ONNX
+    if operator_export_type is not operator_export_type.ONNX:
+        if arg_value is True:
+            warnings.warn("`{}' can be set to True only when 'operator_export_type' is "
+                          "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
+                          "`{}` argument will be ignored.".format(arg_name, arg_name))
+        arg_value = False
+    return arg_value
+
+
 def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type,
                                opset_version):
     # This method encapsulates the logic to decide whether the initializers in the graph
@@ -207,15 +219,13 @@ def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type
         val_keep_init_as_ip = False
     return val_keep_init_as_ip
 
+
 def _decide_add_node_names(add_node_names, operator_export_type):
-    if operator_export_type is not operator_export_type.ONNX:
-        if add_node_names is True:
-            warnings.warn("`add_node_names` can be set to True only when 'operator_export_type' is "
-                          "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
-                          "`add_node_names` argument will be ignored and node anme will"
-                          " not be added.")
-        return False  # Node name will not be added.
-    return add_node_names
+    return _resolve_args_by_export_type("add_node_names", add_node_names, operator_export_type)
+
+
+def _decide_constant_folding(do_constant_folding, operator_export_type):
+    return _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
 
 
 def _trace(func, args, operator_export_type, return_outs=False):
@@ -258,7 +268,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
-                    _retain_param_name=False, do_constant_folding=False,
+                    _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
@@ -366,7 +376,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
-                             do_constant_folding=False, keep_initializers_as_inputs=None,
+                             do_constant_folding=True, keep_initializers_as_inputs=None,
                              fixed_batch_size=False, add_node_names=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
@@ -378,11 +388,12 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                      operator_export_type,
                                                      opset_version)
     val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
+    val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
                                                     example_outputs, propagate, _retain_param_name,
-                                                    do_constant_folding, fixed_batch_size=fixed_batch_size)
+                                                    val_do_constant_folding, fixed_batch_size=fixed_batch_size)
 
     return graph._pretty_print_onnx(params_dict, opset_version, False,
                                     operator_export_type, google_printer,
@@ -396,7 +407,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-            opset_version=None, _retain_param_name=False, do_constant_folding=False,
+            opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, add_node_names=True):
     if isinstance(model, torch.nn.DataParallel):
@@ -417,17 +428,19 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
             else:
                 operator_export_type = OperatorExportTypes.ONNX
+
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
+        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, propagate,
-                                                        _retain_param_name, do_constant_folding,
+                                                        _retain_param_name, val_do_constant_folding,
                                                         fixed_batch_size=fixed_batch_size)
 
         # TODO: Don't allocate a in-memory string for the protobuf
