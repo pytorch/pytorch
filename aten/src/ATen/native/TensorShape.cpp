@@ -1202,8 +1202,8 @@ Tensor view(const Tensor& self, IntArrayRef size) {
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
   auto self_ = self.alias();
-  self_.set_(
-    self.storage(), self.storage_offset(), inferred_size, stride_value);
+  auto impl_ = self_.unsafeGetTensorImpl();
+  impl_->set_sizes_and_strides(inferred_size, stride_value);
   return self_;
 }
 
