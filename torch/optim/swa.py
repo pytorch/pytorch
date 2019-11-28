@@ -1,5 +1,4 @@
 from collections import defaultdict
-from itertools import chain
 from torch.optim import Optimizer
 import torch
 import warnings

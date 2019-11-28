@@ -98,7 +98,8 @@ class TestOptim(TestCase):
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
-    def _test_basic_cases_template(self, weight, bias, input, constructor, scheduler_constructors, swa=False):
+    def _test_basic_cases_template(self, weight, bias, input, constructor, 
+            scheduler_constructors, swa=False):
         weight = Variable(weight, requires_grad=True)
         bias = Variable(bias, requires_grad=True)
         input = Variable(input)
@@ -576,7 +577,7 @@ class TestOptim(TestCase):
                                  lbfgs_constructor]
 
         sparse_auto_constructor_list = [
-                                 sgd_constructor, 
+                                 sgd_constructor,
                                  sparse_adam_constructor,
                                  adagrad_constructor]
 
@@ -589,18 +590,18 @@ class TestOptim(TestCase):
                     swa=True)
             self._test_basic_cases(
                 lambda weight, bias: constructor([weight, bias]),
-                ignore_multidevice=(constructor == lbfgs_constructor),
-                swa=True
+                    ignore_multidevice=(constructor == lbfgs_constructor),
+                    swa=True
             )
             if i < len(auto_constructor_list) - 1:
                 self._test_basic_cases(
                     lambda weight, bias: constructor(
-                        self._build_params_dict(weight, bias, lr=1e-2)),
-                        swa=True)
+                       self._build_params_dict(weight, bias, lr=1e-2)),
+                       swa=True)
                 self._test_basic_cases(
                     lambda weight, bias: constructor(
-                        self._build_params_dict_single(weight, bias, lr=1e-2)),
-                        swa=True)
+                       self._build_params_dict_single(weight, bias, lr=1e-2)),
+                       swa=True)
 
         self._test_rosenbrock_sparse(sgd_manual_constructor, swa=True)
 
@@ -706,7 +707,7 @@ class TestOptim(TestCase):
 
         warning = r"SWA wasn't applied"
         self.assertWarnsRegex(opt.swap_swa_sgd, warning)
-            
+
 
         y_avg = y_sum / n_avg
         self.assertEqual(y_avg, y)
@@ -825,32 +826,32 @@ class TestOptim(TestCase):
         self.assertEqual(opt._auto_mode, True)
 
         self.assertWarnsRegex(
-                lambda : optim.SWA(base_opt, swa_start=swa_start, swa_lr=swa_lr),
-                "Some of swa_start, swa_freq is None")
+            lambda : optim.SWA(base_opt, swa_start=swa_start, swa_lr=swa_lr),
+            "Some of swa_start, swa_freq is None")
         opt = optim.SWA(base_opt, swa_start=swa_start, swa_lr=swa_lr)
         self.assertEqual(opt._auto_mode, False)
 
         self.assertWarnsRegex(
-                lambda : optim.SWA(base_opt, swa_freq=swa_freq, swa_lr=swa_lr),
-                "Some of swa_start, swa_freq is None")
+            lambda : optim.SWA(base_opt, swa_freq=swa_freq, swa_lr=swa_lr),
+            "Some of swa_start, swa_freq is None")
         opt = optim.SWA(base_opt, swa_freq=swa_freq, swa_lr=swa_lr)
         self.assertEqual(opt._auto_mode, False)
 
         self.assertWarnsRegex(
-                lambda : optim.SWA(base_opt, swa_start=swa_start),
-                "Some of swa_start, swa_freq is None")
+            lambda : optim.SWA(base_opt, swa_start=swa_start),
+            "Some of swa_start, swa_freq is None")
         opt = optim.SWA(base_opt, swa_start=swa_start)
         self.assertEqual(opt._auto_mode, False)
 
         self.assertWarnsRegex(
-                lambda : optim.SWA(base_opt, swa_freq=swa_freq),
-                "Some of swa_start, swa_freq is None")
+            lambda : optim.SWA(base_opt, swa_freq=swa_freq),
+            "Some of swa_start, swa_freq is None")
         opt = optim.SWA(base_opt, swa_freq=swa_freq)
         self.assertEqual(opt._auto_mode, False)
 
         self.assertWarnsRegex(
-                lambda : optim.SWA(base_opt, swa_lr=swa_lr),
-                "Some of swa_start, swa_freq is None")
+           lambda : optim.SWA(base_opt, swa_lr=swa_lr),
+           "Some of swa_start, swa_freq is None")
         opt = optim.SWA(base_opt, swa_lr=swa_lr)
         self.assertEqual(opt._auto_mode, False)
 
@@ -880,7 +881,7 @@ class TestOptim(TestCase):
                 self.X = X
                 self.y = y
                 self.N = self.X.shape[0]
-        
+
             def __getitem__(self, index):
                 x = self.X[index]
                 if self.y is None:
@@ -891,7 +892,7 @@ class TestOptim(TestCase):
         
             def __len__(self):
                 return self.N 
-        
+
         with_y = label_tensor is not None
         ds = DatasetFromTensors(data_tensor, y=label_tensor)
         dl = data.DataLoader(ds, batch_size=5, shuffle=True)
@@ -914,10 +915,10 @@ class TestOptim(TestCase):
                 preactivations = preactivations.transpose(1, 3)
             preactivations = preactivations.contiguous().view(-1, dnn.n_features)
             total_num += preactivations.shape[0]
-        
+
             preactivation_sum += torch.sum(preactivations, dim=0)
             preactivation_squared_sum += torch.sum(preactivations**2, dim=0)  
-            
+
         preactivation_mean = preactivation_sum / total_num
         preactivation_var = preactivation_squared_sum / total_num 
         preactivation_var = preactivation_var - preactivation_mean**2
@@ -945,25 +946,25 @@ class TestOptim(TestCase):
         # Test bn_update for fully-connected and convolutional networks with
         # BatchNorm1d and BatchNorm2d respectively
         objects = 100
-        input_features=5
+        input_features = 5
         x = torch.rand(objects, input_features)
         y = torch.rand(objects)
-        
+
         class DNN(nn.Module):
             def __init__(self):
                 super(DNN, self).__init__()
                 self.n_features = 100
                 self.fc1 = nn.Linear(input_features, self.n_features)
                 self.bn = nn.BatchNorm1d(self.n_features)
-                
+
             def compute_preactivation(self, x):
                 return self.fc1(x)
-                
+
             def forward(self, x):
                 x = self.fc1(x)
                 x = self.bn(x)
                 return x 
-        
+
         dnn = DNN()
         dnn.train()
         self._test_bn_update(x, dnn, False)
@@ -979,14 +980,14 @@ class TestOptim(TestCase):
         height, width = 5, 5
         x = torch.rand(objects, channels, height, width)
         y = torch.rand(objects)
-            
+
         class CNN(nn.Module):
             def __init__(self):
                 super(CNN, self).__init__()
                 self.n_features = 10
                 self.conv1 = nn.Conv2d(channels, self.n_features, kernel_size=3, padding=1)
                 self.bn = nn.BatchNorm2d(self.n_features, momentum=0.3)
-                
+
             def compute_preactivation(self, x):
                 return self.conv1(x)
                 
