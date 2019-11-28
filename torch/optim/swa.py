@@ -344,7 +344,7 @@ class SWA(Optimizer):
         to continue training `swap_swa_sgd` should be called again.
         """
         self.swap_swa_sgd()
-        self.update_bn(loader, model, device)
+        self.bn_update(loader, model, device)
 
 
 # BatchNorm utils

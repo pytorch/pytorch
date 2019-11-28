@@ -6,6 +6,8 @@ from copy import deepcopy
 import torch
 from torch._six import inf
 import torch.optim as optim
+import torch.nn as nn
+import torch.utils.data as data
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
@@ -921,14 +923,20 @@ class TestOptim(TestCase):
 
         swa = optim.SWA(optim.SGD(dnn.parameters(), lr=1e-3))
 
-        swa.bn_update(dl, dnn, device=dnn.device())
+        swa.bn_update(dl, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
         self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
 
         # test the swap_swa_sgd_update_bn method
-        dnn.apply(optim.swa._reset_bn)
+        def _reset_bn(module):
+            if issubclass(module.__class__, 
+                          torch.nn.modules.batchnorm._BatchNorm):
+                module.running_mean = torch.zeros_like(module.running_mean)
+                module.running_var = torch.ones_like(module.running_var)
+        dnn.apply(_reset_bn)
+
         swa.update_swa()
-        swa.swap_swa_sgd_update_bn(dl, dnn, cuda=dnn.device())
+        swa.swap_swa_sgd_update_bn(dl, dnn, device=x.device)
         self.assertEqual(preactivation_mean, dnn.bn.running_mean)
         self.assertEqual(preactivation_var, dnn.bn.running_var, prec=1e-1)
 
