@@ -127,7 +127,6 @@ ProcessGroupAgent::ProcessGroupAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
           c10::guts::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
-      shutdown_{false},
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
@@ -184,30 +183,12 @@ std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
 }
 
 void ProcessGroupAgent::join() {
-  // Every process i sends a SHUTDOWN message to process i + 1. This is
-  // necessary for now because:
-  // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
-  //    feed it a message or kill the thread.
-  // 2. A GLOO process cannot send message to itself. (there is an ongoing
-  //    effort to fix this problem).
-  shutdown_.store(true);
   sync();
-  // This is needed in case no futures were created, otherwise the future
-  // timeout watchdog would sleep forever.
-
-  futureTimeoutCV_.notify_one();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
-  int dst = (pg_->getRank() + 1) % pg_->getSize();
-  enqueueSend(
-      SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
-  threadPool_.waitWorkComplete();
-  listenerThread_.join();
-  futureTimeoutThread_.join();
-  PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
@@ -273,14 +254,38 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
+  {
+    std::lock_guard<std::mutex> futureLock{futureMutex_};
+    rpcRunning_.store(true);
+  }
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
   futureTimeoutThread_ =
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
 }
 
+void ProcessGroupAgent::shutdown() {
+  LOG(INFO) << "Shutting down ProcessGroupAgent.";
+  std::unique_lock<std::mutex> lock{futureMutex_};
+  if (!rpcRunning_.exchange(false)) {
+    return;
+  }
+  lock.unlock();
+  futureTimeoutCV_.notify_one();
+  futureTimeoutThread_.join();
+  {
+    std::unique_lock<std::mutex> lock(recvWorkMutex_);
+    if (recvWork_) {
+      recvWork_->abort();
+    }
+  }
+  threadPool_.waitWorkComplete();
+  listenerThread_.join();
+}
+
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
       "Destination rank is out of bound, got ",
@@ -460,10 +465,19 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  while (true) {
+  while (rpcRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
-    pg_->recvAnysource(preamble, pg_->getRank())->wait();
+    auto work = pg_->recvAnysource(preamble, pg_->getRank());
+    {
+      std::lock_guard<std::mutex> guard(recvWorkMutex_);
+      recvWork_ = work;
+    }
+
+    if (!rpcRunning_.load() || !work->wait() /* aborted */) {
+      return;
+    }
+
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];
@@ -487,9 +501,12 @@ void ProcessGroupAgent::listenLoop() {
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (!shutdown_.load()) {
-    std::chrono::milliseconds sleepTime;
+  while (true) {
     std::unique_lock<std::mutex> lock{futureMutex_};
+    if (!rpcRunning_.load()) {
+      return;
+    }
+    std::chrono::milliseconds sleepTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
     // if there are no futures or the first future's RPC timeout is set to 0
@@ -509,7 +526,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       futureTimeoutCV_.wait_for(lock, sleepTime);
     }
 
-    if (shutdown_.load()) {
+    if (!rpcRunning_.load()) {
       return;
     }
 

@@ -58,8 +58,11 @@ across RPC boundaries. These features can be categorized into four sets of APIs.
    across RPC boundaries and in which order should the local autograd engines
    be launched, which can become quite complicated where there are nested and
    inter-dependent RPC calls in the forward pass.
-4) **Distributed Optimizer** takes a list of parameter RRefs in the constructor
-   and updates them all accordingly when running `step()`. When you have a
+4) **Distributed Optimizer**'s constructor takes a
+   :meth:`~torch.optim.Optimizer` (e.g., :meth:`~torch.optim.SGD`,
+   :meth:`~torch.optim.Adagrad`, etc.) and a list of parameter RRefs, creates an
+   :meth:`~torch.optim.Optimizer` instance on each distinct RRef owner, and
+   updates parameters accordingly when running `step()`. When you have
    distributed forward and backward passes, parameters and gradients will be
    scattered across multiple workers, and hence it requires an optimizer on each
    of the involved workers. Distributed Optimizer wraps all those local
@@ -90,7 +93,7 @@ functions as well as create (RRefs) to remote data objects.
 .. autofunction:: rpc_async
 .. autofunction:: remote
 .. autofunction:: get_worker_info
-.. autofunction:: wait_all_workers
+.. autofunction:: shutdown
 
 
 .. _rref:
