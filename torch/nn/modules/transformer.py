@@ -273,7 +273,7 @@ class TransformerEncoderLayer(Module):
 
     def __setstate__(self, state):
         if 'activation' not in state:
-            state['activation'] = _identity
+            state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
 
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
@@ -340,7 +340,7 @@ class TransformerDecoderLayer(Module):
 
     def __setstate__(self, state):
         if 'activation' not in state:
-            state['activation'] = _identity
+            state['activation'] = F.relu
         super(TransformerDecoderLayer, self).__setstate__(state)
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
@@ -376,9 +376,6 @@ class TransformerDecoderLayer(Module):
 def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
-
-def _identity(x):
-    return x
 
 def _get_activation_fn(activation):
     if activation == "relu":
