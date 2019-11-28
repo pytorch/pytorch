@@ -506,8 +506,7 @@ at::IValue JIValue::JIValueToAtIValue(
 
     auto jivalue_first_element = jarray->getElement(0);
     auto first_element = JIValue::JIValueToAtIValue(jivalue_first_element);
-    c10::TypePtr typePtr = first_element.type();
-    c10::impl::GenericList list{typePtr};
+    c10::impl::GenericList list{c10::unshapedType(first_element.type())};
     list.reserve(n);
     list.push_back(first_element);
     for (auto i = 1; i < n; ++i) {
@@ -529,8 +528,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::TypePtr typePtr = firstEntryValue.type();
-    c10::impl::GenericDict dict{c10::StringType::get(), typePtr};
+    c10::impl::GenericDict dict{c10::StringType::get(),
+                                c10::unshapedType(firstEntryValue.type())};
     dict.insert(it->first->toStdString(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {
@@ -552,8 +551,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::TypePtr typePtr = firstEntryValue.type();
-    c10::impl::GenericDict dict{c10::IntType::get(), typePtr};
+    c10::impl::GenericDict dict{c10::IntType::get(),
+                                c10::unshapedType(firstEntryValue.type())};
     dict.insert((int64_t)it->first->longValue(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/TensorTypeSet.h>
+#include <c10/util/Flags.h>
 
 // TLS management for TensorTypeSet (the "local" TensorTypeSet(s))
 //
@@ -21,6 +22,8 @@
 
 namespace c10 {
 namespace impl {
+
+C10_DECLARE_bool(disable_variable_dispatch);
 
 // POD version of LocalTensorTypeSet.  Declared here just so that
 // we can put it in the guards.
