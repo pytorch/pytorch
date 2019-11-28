@@ -38,7 +38,7 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
         if (HasArgument("dim")) {
           auto dim = this->template GetSingleArgument<int>("dim", 0);
           auto start = this->template GetSingleArgument<int64_t>("start_idx", 0);
-          auto end = this->template GetSingleArgument<int64_t>("end_idx", 0);
+          auto end = this->template GetSingleArgument<int64_t>("end_idx", -1);
           auto& input_tensor = Inputs()[0]->Get<Int8TensorCPU>();
           auto rank = input_tensor.t.sizes().size();
           starts_.resize(rank, 0);

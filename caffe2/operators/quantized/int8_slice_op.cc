@@ -41,8 +41,8 @@ Example:
     .Arg(
         "dim",
         "(Optional) The dimension to slice over. If specified start_idx and end_idx should also be given and it takes precedence over starts and ends")
-    .Arg("start_idx", "(Optional) The dimension to start slice from")
-    .Arg("end_idx", "(Optional) The dimension to end the slice")
+    .Arg("start_idx", "(Optional) The dimension to start slice from. Default is 0")
+    .Arg("end_idx", "(Optional) The dimension to end the slice. Default is -1")
     .Output(0, "output", "Sliced Int8 data tensor.")
     .InheritOnnxSchema("Slice");
 
