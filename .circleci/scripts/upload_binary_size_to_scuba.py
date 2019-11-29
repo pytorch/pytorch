@@ -34,7 +34,7 @@ def build_message(size):
         "normal": {
             "build_info": json.dumps(
                 {
-                    "os": os,
+                    "os": os_name,
                     "pkg_type": pkg_type,
                     "py_ver": py_ver,
                     "cu_ver": cu_ver,
