@@ -32,18 +32,14 @@ def build_message(size):
         os_name = "macos"
     return {
         "normal": {
-            "build_info": json.dumps(
-                {
-                    "os": os_name,
-                    "pkg_type": pkg_type,
-                    "py_ver": py_ver,
-                    "cu_ver": cu_ver,
-                    "pr": pr,
-                    "build": build_num,
-                    "sha1": sha1,
-                    "size": size,
-                }
-            )
+            "os": os_name,
+            "pkg_type": pkg_type,
+            "py_ver": py_ver,
+            "cu_ver": cu_ver,
+            "pr": pr,
+            "build": build_num,
+            "sha1": sha1,
+            "size": size,
         },
         "int": {"time": int(time.time())},
     }
