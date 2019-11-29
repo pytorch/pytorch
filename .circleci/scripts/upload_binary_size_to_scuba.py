@@ -1,12 +1,13 @@
+import glob
 import json
+import logging
 import os
 import os.path
-import requests
 import re
-import time
-import glob
 import sys
-import logging
+import time
+
+import requests
 
 
 def get_size(file_dir):
@@ -20,11 +21,13 @@ def get_size(file_dir):
 
 
 def build_message(size):
-    pkg_type, py_ver, cu_ver = os.env.get("BUILD_ENVIRONMENT", "n/a n/a n/a").split()
+    pkg_type, py_ver, cu_ver = os.environ.get(
+        "BUILD_ENVIRONMENT", "n/a n/a n/a"
+    ).split()
     os_name = os.uname()[0].lower()
-    pr = os.env.get("CIRCLE_PR_NUMBER", "n/a")
-    build_num = os.env.get("CIRCLE_BUILD_NUM", "n/a")
-    sha1 = os.env.get("CIRCLE_SHA1", "n/a")
+    pr = os.environ.get("CIRCLE_PR_NUMBER", "n/a")
+    build_num = os.environ.get("CIRCLE_BUILD_NUM", "n/a")
+    sha1 = os.environ.get("CIRCLE_SHA1", "n/a")
     if os_name == "darwin":
         os_name = "macos"
     return {
@@ -71,7 +74,9 @@ def send_message(message):
 
 
 if __name__ == "__main__":
-    file_dir = os.env.get("PYTORCH_FINAL_PACKAGE_DIR", "/home/circleci/project/final_pkgs")
+    file_dir = os.environ.get(
+        "PYTORCH_FINAL_PACKAGE_DIR", "/home/circleci/project/final_pkgs"
+    )
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
     print("checking dir: " + file_dir)
