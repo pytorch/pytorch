@@ -230,9 +230,12 @@ class CMake:
              'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
+             'JAVA_HOME',
              'MKL_THREADING',
              'MKLDNN_THREADING',
              'MSVC_Z7_OVERRIDE',
+             'Numa_INCLUDE_DIR',
+             'Numa_LIBRARIES',
              'ONNX_ML',
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
@@ -264,6 +267,8 @@ class CMake:
             # are automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
+            # Most library detection should go to CMake script, except this one, which Python can do a much better job
+            # due to NumPy's inherent Pythonic nature.
             'USE_NUMPY': USE_NUMPY,
         })
 

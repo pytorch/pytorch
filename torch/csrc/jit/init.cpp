@@ -33,6 +33,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -267,7 +268,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_lower_graph",
           [](std::shared_ptr<Graph>& graph, const script::Module& self) {
-            return LowerGraph(*graph, self.module_object());
+            return LowerGraph(*graph, self._ivalue());
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -356,7 +357,14 @@ void initJITBindings(PyObject* module) {
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
-          });
+          })
+      .def("_jit_pass_onnx_unpack_quantized_weights",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                UnpackQuantizedWeights(graph, paramsDict);
+                return paramsDict;
+             },
+             pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -406,21 +414,75 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def(
-          "write_record",
-          [](PyTorchStreamWriter& self,
-             const std::string& name,
-             const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile);
+      .def(py::init([](const py::object &buffer) {
+        auto writer_func = [=](const void *data, size_t size) {
+          auto bytes = py::bytes(reinterpret_cast<const char *>(data), size);
+          buffer.attr("write")(std::move(bytes));
+          return size;
+        };
+        return caffe2::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+      }))
+      .def(py::init<const std::function<size_t(const void *, size_t)> &>())
+      .def("write_record",
+           [](PyTorchStreamWriter &self, const std::string &name,
+              const char *data,
+              size_t size) { return self.writeRecord(name, data, size); })
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("write_record",
+           [](PyTorchStreamWriter &self, const std::string &name,
+              uintptr_t data, size_t size) {
+             return self.writeRecord(name, reinterpret_cast<const char *>(data),
+                                     size);
+           });
+
+  // This allows PyTorchStreamReader to read from a Python buffer. It requires
+  // that the buffer implement `seek()`, `tell()`, and `read()`.
+  class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
+   public:
+    BufferAdapter(const py::object& buffer) : buffer_(buffer) {
+      // Jump to the end of the buffer to get its size
+      auto current = buffer.attr("tell")();
+      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+      size_ = py::cast<size_t>(buffer.attr("tell")());
+      buffer.attr("seek")(current);
+    }
+
+    size_t size() const override {
+      return size_;
+    }
+
+    size_t read(uint64_t pos, void* buf, size_t n, const char* what)
+        const override {
+      // Seek to desired position
+      buffer_.attr("seek")(pos);
+
+      // Read bytes into `buf` from the buffer
+      std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
+      std::copy(
+          bytes.data(),
+          bytes.data() + bytes.size(),
+          reinterpret_cast<char*>(buf));
+      return bytes.size();
+    }
+
+    py::object buffer_;
+    size_t size_;
+  };
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
+      .def(py::init([](const py::object& buffer) {
+        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
+        return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
+      }))
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecord(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_all_records", [](PyTorchStreamReader& self) {
+        return self.getAllRecords();
       });
 
   m.def(

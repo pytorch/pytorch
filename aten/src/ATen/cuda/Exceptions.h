@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cublas_v2.h>
+#include <cusparse.h>
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
@@ -31,6 +32,17 @@ const char* _cublasGetErrorEnum(cublasStatus_t error);
     TORCH_CHECK(__err == CUBLAS_STATUS_SUCCESS,                 \
                 "CUDA error: ",                                 \
                 at::cuda::blas::_cublasGetErrorEnum(__err),     \
+                " when calling `" #EXPR "`");                   \
+  } while (0)
+
+const char *cusparseGetErrorString(cusparseStatus_t status);
+
+#define TORCH_CUDASPARSE_CHECK(EXPR)                            \
+  do {                                                          \
+    cusparseStatus_t __err = EXPR;                              \
+    TORCH_CHECK(__err == CUSPARSE_STATUS_SUCCESS,               \
+                "CUDA error: ",                                 \
+                cusparseGetErrorString(__err),                  \
                 " when calling `" #EXPR "`");                   \
   } while (0)
 

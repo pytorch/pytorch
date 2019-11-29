@@ -255,7 +255,7 @@ Tensor internal_new_from_data(
 #ifdef USE_NUMPY
   if (PyObject_HasAttrString(data, "__cuda_array_interface__")) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
-    auto tensor = autograd::make_variable(tensor_from_cuda_array_interface(data), /*requires_grad=*/false);
+    auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
@@ -265,7 +265,7 @@ Tensor internal_new_from_data(
 
   if (PyArray_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
-    auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
+    auto tensor = tensor_from_numpy(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
     AutoNoGIL no_gil;
@@ -345,7 +345,7 @@ Tensor legacy_sparse_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scala
     return at::empty({0}, options(type_id, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
+    return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type_id, deviceOptional);
@@ -387,7 +387,7 @@ Tensor legacy_sparse_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar
     return at::empty({0}, options(type_id, scalar_type));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
+    return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
@@ -454,7 +454,7 @@ Tensor legacy_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type,
     return new_with_storage(type_id, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
+    return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
     return new_with_tensor(type_id, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {
@@ -500,7 +500,7 @@ Tensor legacy_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar_type, 
     return new_with_storage(type_id, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
+    return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
     return new_with_tensor(type_id, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {

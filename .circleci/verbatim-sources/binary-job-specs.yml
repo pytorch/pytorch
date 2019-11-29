@@ -19,8 +19,8 @@
             elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
               retry apt-get update
               retry apt-get -y install expect moreutils
-              conda install -y -c eumetsat expect
-              conda install -y cmake
+              retry conda install -y -c eumetsat expect
+              retry conda install -y cmake
             fi
     - run:
         name: Update compiler to devtoolset7
@@ -130,7 +130,7 @@
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       - attach_workspace:
           at: ~/workspace
@@ -158,7 +158,7 @@
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -199,7 +199,7 @@
   binary_mac_upload: &binary_mac_upload
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -247,8 +247,8 @@
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios
-  
-  binary_ios_upload: 
+
+  binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
       xcode: "10.2.1"

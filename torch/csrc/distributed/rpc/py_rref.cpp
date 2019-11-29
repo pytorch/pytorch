@@ -29,6 +29,14 @@ PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
+PyRRef::PyRRef(const py::object& value)
+    : PyRRef([&value]() {
+        auto rref = RRefContext::getInstance().createOwnerRRef<py::object>();
+        py::object copy(value); // increases refcount
+        rref->setValue(std::move(copy));
+        return rref;
+      }()) {}
+
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
@@ -69,6 +77,7 @@ py::object PyRRef::localValue() {
     const py::object& value =
         std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
 
+    PythonRpcHandler::getInstance().handleException(value);
     {
       // acquiring GIL as the return statement construct a new py::object from
       // a const reference.

@@ -32,6 +32,12 @@ class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 
+namespace torch { namespace autograd {
+
+struct Node;
+
+}} // namespace torch::autograd
+
 namespace at {
 
 class Tensor;
@@ -43,6 +49,12 @@ struct Quantizer;
 // to frontend
 using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
+
+namespace impl {
+inline bool variable_excluded_from_dispatch() {
+  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+}
+}
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
@@ -249,10 +261,9 @@ class CAFFE2_API Tensor {
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
-  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
-  /// Defined in Type.h because of include order issues.
+  C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
-    return impl_->is_variable();
+    return !at::impl::variable_excluded_from_dispatch();
   }
 
   /// Returns a `Tensor`'s layout. Defined in Type.h
@@ -423,6 +434,80 @@ class CAFFE2_API Tensor {
   auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
     return func(*this, std::forward<Args>(params)...);
   }
+
+  /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended
+  /// to be used from functions that need to access the `Variable`'s equivalent `Tensor`
+  /// (i.e. `Tensor` that shares the same storage and tensor metadata with the `Variable`).
+  ///
+  /// One notable difference with the legacy `.data()` function is that changes to the
+  /// returned `Tensor`'s tensor metadata (e.g. sizes / strides / storage / storage_offset)
+  /// will not update the original `Variable`, due to the fact that this function
+  /// shallow-copies the `Variable`'s underlying TensorImpl.
+  at::Tensor tensor_data() const;
+
+  /// NOTE: `var.variable_data()` in C++ has the same semantics as `tensor.data`
+  /// in Python, which create a new `Variable` that shares the same storage and
+  /// tensor metadata with the original `Variable`, but with a completely new
+  /// autograd history.
+  ///
+  /// NOTE: If we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a variable created from `var.variable_data()`, those
+  /// changes will not update the original variable `var`. In `.variable_data()`, we set
+  /// `allow_tensor_metadata_change_` to false to make such changes explicitly illegal,
+  /// in order to prevent users from changing metadata of `var.variable_data()`
+  /// and expecting the original variable `var` to also be updated.
+  at::Tensor variable_data() const;
+
+  // Gradient Node and Edges
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  /// Gets the gradient function of the `Variable`. If this is a leaf variable,
+  /// the pointer returned will be null.
+  ///
+  /// For View Variables:
+  /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
+  /// re-create the grad_fn to express the up-to-date view relationship between
+  /// this and the base Variable.
+  const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
+
+  // Hooks
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  template <typename T>
+  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  template <typename T>
+  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+
+  // Returns the index of the hook in the list which can be used to remove hook
+  // Register a hook with no return value
+  template <typename T>
+  hook_return_void_t<T> register_hook(T&& hook) const;
+  // Register a hook with variable return value
+  template <typename T>
+  hook_return_var_t<T> register_hook(T&& hook) const;
+
+private:
+  unsigned _register_hook(std::function<Tensor(const Tensor&)> hook) const;
+
+public:
+
+  // Remove hook at given position
+  void remove_hook(unsigned pos) const;
+
+  // View Variables
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  /// Returns true if this `Variable` is a view of another `Variable`.
+  bool is_view() const;
+
+  /// Returns the `Variable` that this `Variable` is a view of. If this
+  /// `Variable` is not a view, throw a `std::runtime_error`.
+  const Tensor& base() const;
+
+  // Miscellaneous
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  const std::string& name() const;
 
 protected:
   friend class ::caffe2::Tensor;
