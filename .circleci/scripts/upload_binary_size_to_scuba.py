@@ -21,7 +21,7 @@ def get_size(file_dir):
 
 
 def build_message(size):
-    pkg_type, py_ver, cu_ver = os.environ.get(
+    pkg_type, py_ver, cu_ver, *_ = os.environ.get(
         "BUILD_ENVIRONMENT", "n/a n/a n/a"
     ).split()
     os_name = os.uname()[0].lower()
