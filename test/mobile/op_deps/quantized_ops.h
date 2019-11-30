@@ -2,8 +2,6 @@
 
 #include <ATen/Tensor.h>
 
-namespace at {
-
 // special op invocation pattern from: ATen/native/c10_utils.h
 template <class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
@@ -29,5 +27,3 @@ inline std::vector<c10::IValue> callOp(
   assert(op_handle.has_value());
   return callOp(op_handle.value(), args...);
 }
-
-} // namespace at
