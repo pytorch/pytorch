@@ -318,9 +318,22 @@ private:
   }
 
   static std::string extractStringValue(Value* V) {
-    auto array = dyn_cast<ConstantDataArray>(V);
-    if (!array || !array->isCString()) return {};
-    return array->getAsCString().str();
+    if (auto array = dyn_cast<ConstantDataArray>(V)) {
+      if (array->isCString()) {
+        return array->getAsCString().str();
+      } else if (array->isString()) {
+        std::cerr << "[WARNING] ignore non-C string: "
+                  << array->getAsString().str() << std::endl;
+      }
+    } else if (ConstantInt* CI = dyn_cast<ConstantInt>(V)) {
+      // Short string literal might be encoded into constant integer, e.g.:
+      // "aten::AA" => 4702103508586165345 (0x41413A3A6E657461)
+      // This can be tricky as it depends on consistent endianness/size.
+      int64_t intValue = CI->getZExtValue();
+      auto data = reinterpret_cast<const char*>(&intValue);
+      return {data, data + sizeof(int64_t)/sizeof(char)};
+    }
+    return {};
   }
 
   static std::shared_ptr<std::string> extractOpSchema(Value* V) {
