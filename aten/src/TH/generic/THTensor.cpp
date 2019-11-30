@@ -623,6 +623,13 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   bool allSkipped= true;
   int64_t nDims = 0;
   THTensor *notSkippedTensor;  // non-owning reference
+
+  // Inputs cannot alias the output tensor
+  for (int i = 0; i < numInputs; i++) {
+    THArgCheck(result != inputs[i], 0,
+        "Cannot output result into input tensor %d", i);
+  }
+
   auto should_skip = [](THTensor *t) { return t->is_empty() && t->dim() == 1; };
   for (int i = 0; i < numInputs; i++) {
     if (should_skip(inputs[i])) {

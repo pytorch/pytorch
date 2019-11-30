@@ -87,6 +87,12 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   auto should_skip = [](THCTensor *t) { return t->is_empty() && t->dim() == 1; };
   int nDims = 0;
 
+  // Inputs cannot alias the output tensor
+  for (int i = 0; i < numInputs; i++) {
+    THArgCheck(result != inputs[i], 0,
+        "Cannot output result into input tensor %d", i);
+  }
+
   for (i = 0; i < numInputs; i++)
   {
     if (should_skip(inputs[i])) {
