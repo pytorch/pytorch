@@ -511,7 +511,7 @@ def gen_pyi(declarations_path, out):
         'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: _bool=False) -> Tensor: ...'],
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
-        'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
+        'map_': ['def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: _bool=False)'
                  ' -> Union[str, Tensor]: ...'],
