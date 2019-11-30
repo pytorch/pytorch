@@ -175,7 +175,7 @@ def arg_to_type_hint(arg):
 
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
               'matmul', 'floordiv',
-              'radd', 'rmul', 'rfloordiv',          # reverse arithmetic
+              'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
               'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
