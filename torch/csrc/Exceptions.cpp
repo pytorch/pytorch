@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 #include <cstdarg>
+#include <exception>
 
 #include <torch/csrc/THP.h>
 
@@ -148,6 +149,16 @@ PyWarningHandler::PyWarningHandler() noexcept(true):
   c10::Warning::set_warning_handler(this);
 }
 
+static bool _in_uncaught_exception() {
+  // std::uncaught_exception was deprecated in C++17 and replaced with
+  // std::uncaught_exceptions
+#if __cplusplus >= 201703L
+  return std::uncaught_exceptions() > 0;
+#else
+  return std::uncaught_exception();
+#endif
+}
+
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
 /// NOLINTNEXTLINE(bugprone-exception-escape)
 PyWarningHandler::~PyWarningHandler() noexcept(false) {
@@ -159,8 +170,8 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
     PyObject *ptype, *pvalue, *ptraceback;
     PyErr_Fetch(&ptype, &pvalue, &ptraceback);
 
-    if(ptype) {
-      // A python error happened after the warning
+    if(ptype || _in_uncaught_exception()) {
+      // An error happened after the warning
       // Simply handle with the previous handler
       for(const auto& warning: warning_buffer_) {
         auto source_location = warning.first;

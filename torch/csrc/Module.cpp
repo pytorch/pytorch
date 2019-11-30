@@ -742,6 +742,15 @@ PyObject* initModule() {
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
+  // Automatically translate errors thrown from pybind11 functions
+  py::register_exception_translator([](std::exception_ptr e) {
+    HANDLE_TH_ERRORS
+    if (e) {
+      std::rethrow_exception(e);
+    }
+    END_HANDLE_TH_ERRORS_RET()
+  });
+
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);

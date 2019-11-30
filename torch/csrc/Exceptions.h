@@ -40,8 +40,7 @@
 /// cpp warnings.
 #define HANDLE_TH_ERRORS                                             \
   try {                                                              \
-    torch::PyWarningHandler __enforce_warning_buffer;                \
-    try{
+    torch::PyWarningHandler __enforce_warning_buffer;
 
 #define CATCH_TH_ERRORS(retstmnt)                                    \
     catch (python_error & e) {                                       \
@@ -69,45 +68,10 @@
     }
 
 #define END_HANDLE_TH_ERRORS_PYBIND                                      \
-    }                                                                    \
-    catch (py::error_already_set & e) {                                  \
-      /* Unpack already stored error to be detectable by warning code */ \
-      e.restore();                                                       \
-      throw;                                                             \
-    }                                                                    \
-    catch (py::builtin_exception & e) {                                  \
-      /* Unpack already stored error to be detectable by warning code */ \
-      e.set_error();                                                     \
-      throw;                                                             \
-    }                                                                    \
-    catch (torch::jit::JITException & e) {                               \
-      /* Special case for JITException that are explicitly unpacked by */\
-      /* pybind. Set a temporary python error to be detectable by */     \
-      /* warning code */                                                 \
-      PyErr_SetString(PyExc_RuntimeError, "JITException");               \
-      throw;                                                             \
-    }                                                                    \
-    CATCH_TH_ERRORS(throw)                                               \
-  }                                                                      \
-  catch (py::error_already_set & e) {                                    \
-    /* Repack already stored error */                                    \
-    throw py::error_already_set();                                       \
-  }                                                                      \
-  catch (py::builtin_exception & e) {                                    \
-    /* Repack already stored error */                                    \
-    throw py::error_already_set();                                       \
-  }                                                                      \
-  catch (torch::jit::JITException & e) {                                 \
-    /* Special case for JITException that are explicitly unpacked by */  \
-    /* pybind. Clear the temporary error message we used */              \
-    PyErr_Clear();                                                       \
-    throw;                                                               \
   }                                                                      \
   CATCH_TH_ERRORS(throw py::error_already_set())
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
-    }                                                                \
-    CATCH_TH_ERRORS(return retval)                                   \
   }                                                                  \
   CATCH_TH_ERRORS(return retval)
 
