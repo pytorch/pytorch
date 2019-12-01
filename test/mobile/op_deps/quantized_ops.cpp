@@ -38,17 +38,20 @@ class QAdd final : public c10::OperatorKernel {
   }
 };
 
-template <const char* str>
-class QHelper final : public c10::OperatorKernel {
- public:
-  Tensor operator()(Tensor qa) {
-    std::cout << str << std::endl;
-    return qa;
+template <const char* opName, const char* callOpName>
+Tensor QHelper(Tensor qa) {
+  std::cout << "Op: " << opName << std::endl;
+  if (callOpName != nullptr) {
+    std::cout << "Call op: " << callOpName << std::endl;
+    callOp(callOpName, "", qa);
   }
-};
+  return qa;
+}
 
-static char helper1[] = "quantized helper1";
-static char helper2[] = "quantized helper2";
+static char helper1[] = "quantized::t_helper1";
+static char helper2[] = "quantized::t_helper2";
+static char helper3[] = "quantized::t_helper3";
+static char helper4[] = "quantized::t_helper4";
 
 static auto registry = c10::RegisterOperators()
 .op("quantized::t_add(Tensor qa, Tensor qb, float scale, int zero_point)"
@@ -59,12 +62,10 @@ static auto registry = c10::RegisterOperators()
      "-> Tensor qc",
     c10::RegisterOperators::options()
       .catchAllKernel<QAdd</*ReLUFused=*/true>>())
-.op("quantized::t_helper1(Tensor qa) -> Tensor",
-    c10::RegisterOperators::options()
-      .catchAllKernel<QHelper<helper1>>())
-.op("quantized::t_helper2(Tensor qa) -> Tensor",
-    c10::RegisterOperators::options()
-      .catchAllKernel<QHelper<helper2>>());
+.op("quantized::t_helper1(Tensor qa) -> Tensor", &QHelper<helper1, helper3>)
+.op("quantized::t_helper2(Tensor qa) -> Tensor", &QHelper<helper2, helper4>)
+.op("quantized::t_helper3(Tensor qa) -> Tensor", &QHelper<helper3, nullptr>)
+.op("quantized::t_helper4(Tensor qa) -> Tensor", &QHelper<helper4, nullptr>);
 
 } // namespace
 
