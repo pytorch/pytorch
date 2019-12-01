@@ -8,6 +8,7 @@ future.
 from .adadelta import Adadelta
 from .adagrad import Adagrad
 from .adam import Adam
+from .lazy_adam import LazyAdam
 from .optimizerw import AdamW
 from .adamax import Adamax
 from .asgd import ASGD
@@ -19,7 +20,7 @@ from .lbfgs import LBFGS
 from . import lr_scheduler
 
 # backward compatibility
-SparseAdam = Adam
+SparseAdam = LazyAdam
 
 del adadelta
 del adagrad
