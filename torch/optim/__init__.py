@@ -7,10 +7,9 @@ future.
 
 from .adadelta import Adadelta
 from .adagrad import Adagrad
-from .adam import Adam
+from .adam import Adam, Adamax
 from .lazy_adam import LazyAdam
 from .optimizerw import AdamW
-from .adamax import Adamax
 from .asgd import ASGD
 from .sgd import SGD
 from .rprop import Rprop
@@ -26,7 +25,6 @@ del adadelta
 del adagrad
 del adam
 del optimizerw
-del adamax
 del asgd
 del sgd
 del rprop
