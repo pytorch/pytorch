@@ -392,12 +392,13 @@ void FunctionParameter::set_default_str(const std::string& str) {
   }
 }
 
-FunctionSignature::FunctionSignature(const std::string& fmt)
+FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   : min_args(0)
   , max_args(0)
   , max_pos_args(0)
   , hidden(false)
   , deprecated(false)
+  , index(index)
 {
   auto open_paren = fmt.find('(');
   if (open_paren == std::string::npos) {
@@ -659,8 +660,10 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  : max_args(0)
  , traceable(traceable)
 {
+  int index = 0;
   for (auto& fmt : fmts) {
-    signatures_.emplace_back(fmt);
+    signatures_.emplace_back(fmt, index);
+    ++index;
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {
@@ -670,21 +673,25 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
   if (signatures_.size() > 0) {
     function_name = signatures_[0].name;
   }
+
+  // Check deprecated signatures last
+  std::stable_partition(signatures_.begin(), signatures_.end(),
+    [](const FunctionSignature & sig) {
+      return !sig.deprecated;
+    });
 }
 
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(args, kwargs, parsed_args, true);
-    return PythonArgs(0, traceable, signature, parsed_args);
+    return PythonArgs(traceable, signature, parsed_args);
   }
 
-  int i = 0;
   for (auto& signature : signatures_) {
     if (signature.parse(args, kwargs, parsed_args, false)) {
-      return PythonArgs(i, traceable, signature, parsed_args);
+      return PythonArgs(traceable, signature, parsed_args);
     }
-    i++;
   }
 
   print_error(args, kwargs, parsed_args);
