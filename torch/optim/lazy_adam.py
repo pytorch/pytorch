@@ -1,4 +1,3 @@
-from .optimizer import Optimizer
 from .adam import Adam
 
 
@@ -22,7 +21,7 @@ class LazyAdam(Adam):
     """
 
     def get_update(self, p, **kwargs):
-        return Optimizer.get_update(self, p, **kwargs)
+        raise ValueError("LazyAdam algorithm only applicable to sparse gradients")
 
     def get_sparse_update(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
         if amsgrad:
