@@ -427,28 +427,48 @@ private:
     }
   }
 
-  static std::string extractStringValue(Value* V) {
+  static void extractStringValue(
+      Value* V, const std::function<void(const std::string&)>& CB) {
     if (auto array = dyn_cast<ConstantDataArray>(V)) {
+      // Normal case for c-style string literal and "std::basic_string".
       if (array->isCString()) {
-        return array->getAsCString().str();
+        CB(array->getAsCString().str());
       } else if (array->isString()) {
         std::cerr << "[WARNING] ignore non-C string: "
                   << array->getAsString().str() << std::endl;
       }
-    } else if (ConstantInt* CI = dyn_cast<ConstantInt>(V)) {
+    } else if (auto CI = dyn_cast<ConstantInt>(V)) {
       // Short string literal might be encoded into constant integer, e.g.:
       // "aten::AA" => 4702103508586165345 (0x41413A3A6E657461)
       // This can be tricky as it depends on consistent endianness/size.
+      // Seen this case for "std::__1::basic_string" ABI.
       int64_t intValue = CI->getZExtValue();
       auto data = reinterpret_cast<const char*>(&intValue);
-      return {data, data + sizeof(int64_t)/sizeof(char)};
+      CB({data, data + sizeof(int64_t)/sizeof(char)});
+    } else if (auto C = dyn_cast<Constant>(V)) {
+      // Short string literal might be in a constant vector, e.g.:
+      // store <2 x i64> <i64 8, i64 4702103508586165345>, <2 x i64>* %25
+      // Recursively extract each element to cover this case.
+      // Seen this case for "std::__cxx11::basic_string" ABI.
+      for (unsigned i = 0; auto elem = C->getAggregateElement(i); ++i) {
+        extractStringValue(elem, CB);
+      }
     }
-    return {};
   }
 
   static std::shared_ptr<std::string> extractOpSchema(Value* V) {
-    const std::string& schemaStr = extractStringValue(V);
-    if (!FunctionSchemaPatternLoc.pattern->match(schemaStr)) return {};
+    std::vector<std::string> schemaStrs;
+    extractStringValue(V, [&](const std::string& str) {
+      if (FunctionSchemaPatternLoc.pattern->match(str)) {
+        schemaStrs.push_back(str);
+      }
+    });
+    if (schemaStrs.empty()) return {};
+    if (schemaStrs.size() > 1) {
+      std::cerr << "[WARNING] found " << schemaStrs.size()
+                << " op schema strings in one value!" << std::endl;
+    }
+    const std::string schemaStr = schemaStrs[0];
     auto pos = schemaStr.find_first_of(".(");
     return std::make_shared<std::string>(
         pos == std::string::npos ? schemaStr : schemaStr.substr(0, pos));
@@ -460,19 +480,22 @@ private:
     for (auto N = dest; ; N = (*debugLink)[N]) {
       std::cerr << "[DEBUG][PATH][" << ++depth << "]";
       printDebugValue(N);
+      std::cerr << std::endl;
       if (N == src) break;
     }
   }
 
   static void printDebugValue(Value* V) {
     if (auto F = dyn_cast<Function>(V)) {
-      std::cerr << "[FUNC] " << demangle(F->getName()) << std::endl;
+      std::cerr << "[FUNC] " << demangle(F->getName());
     } else if (isa<Constant>(V)) {
-      std::cerr << "[CONST] " << *V << std::endl;
+      std::cerr << "[CONST] " << *V;
     } else if (isa<Instruction>(V)) {
-      std::cerr << "[INST] " << *V << std::endl;
+      std::cerr << "[INST] " << *V;
+    } else if (V) {
+      std::cerr << "[VALUE] " << *V;
     } else {
-      std::cerr << "[VALUE] " << *V << std::endl;
+      std::cerr << "NULL";
     }
   }
 
