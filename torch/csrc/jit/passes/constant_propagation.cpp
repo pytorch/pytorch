@@ -401,7 +401,7 @@ void ConstantPropagation(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After ConstantPropagation: ", graph);
 }
 
-void ConstantPropagationNonMutableTypes(std::shared_ptr<Graph>& graph) {
+void ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
   cp.run();
   EliminateDeadCode(graph);
