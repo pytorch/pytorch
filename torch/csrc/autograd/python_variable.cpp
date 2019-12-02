@@ -17,7 +17,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/utils/auto_gil.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -497,6 +497,8 @@ static PyObject * THPVariable_device(THPVariable* self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
+// properties are registered here because we are currently only able to bind them
+// manually. TODO: make declarable in native_functions
 static struct PyGetSetDef THPVariable_properties[] = {
   {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
