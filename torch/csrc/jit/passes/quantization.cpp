@@ -144,7 +144,7 @@ class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
       : module_qconfig_map_(map) {}
-  void insertObservers(script::Module& module, const std::string& method_name);
+  void insertObserversForMethodAndInvokedMethods(script::Module& module, const std::string& method_name);
 
  private:
   void insertObserversForInvokedMethods(
@@ -310,7 +310,7 @@ void InsertObserversHelper::insertObserversForInvokedMethods(
             callee_module.get_method(module_method_name).graph();
         // Recursively insert observer for the forward function of child
         // module
-        insertObservers(callee_module, module_method_name);
+        insertObserversForMethodAndInvokedMethods(callee_module, module_method_name);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -411,7 +411,7 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   }
 }
 
-void InsertObserversHelper::insertObservers(
+void InsertObserversHelper::insertObserversForMethodAndInvokedMethods(
     script::Module& module,
     const std::string& method_name) {
   if (!module_qconfig_map_.count(module._ivalue())) {
@@ -846,7 +846,7 @@ TORCH_API script::Module InsertObservers(
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
-  helper.insertObservers(module, method_name);
+  helper.insertObserversForMethodAndInvokedMethods(module, method_name);
   return module;
 }
 
