@@ -1,3 +1,5 @@
+.. _remote-reference-protocol:
+
 Remote Reference Protocol
 =========================
 
@@ -180,6 +182,7 @@ User Share RRef with Owner as Return Value
 
 
 .. code::
+
   import torch
   import torch.distributed.rpc as rpc
 
