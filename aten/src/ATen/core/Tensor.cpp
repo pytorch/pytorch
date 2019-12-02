@@ -1,5 +1,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 #include <iostream>
 
@@ -15,13 +16,13 @@ void Tensor::enforce_invariants() {
   if (defined()) {
     TORCH_INTERNAL_ASSERT(
         impl_->dtype_initialized(),
-        "Partially-initialized tensor not supported by at::Tensor");
+        "Partially-initialized tensor not supported by Tensor");
     TORCH_INTERNAL_ASSERT(
         !impl_->is_sparse(),
-        "Sparse Tensors are supported by at::Tensor, but invariant checking isn't implemented.  Please file a bug.");
+        "Sparse Tensors are supported by Tensor, but invariant checking isn't implemented.  Please file a bug.");
     TORCH_INTERNAL_ASSERT(
         impl_->storage_initialized(),
-        "Partially-initialized tensor not supported by at::Tensor");
+        "Partially-initialized tensor not supported by Tensor");
   }
 }
 
@@ -35,6 +36,41 @@ void Tensor::print() const {
 
 std::string Tensor::toString() const {
   return type().toString();
+}
+
+Tensor Tensor::variable_data() const {
+  return impl::GetVariableHooks()->variable_data(*this);
+}
+
+Tensor Tensor::tensor_data() const {
+  return impl::GetVariableHooks()->tensor_data(*this);
+}
+
+// View Variables
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+bool Tensor::is_view() const {
+  return impl::GetVariableHooks()->is_view(*this);
+}
+
+const Tensor& Tensor::base() const {
+  return impl::GetVariableHooks()->base(*this);
+}
+
+const std::string& Tensor::name() const {
+  return impl::GetVariableHooks()->name(*this);
+}
+
+const std::shared_ptr<torch::autograd::Node>& Tensor::grad_fn() const {
+  return impl::GetVariableHooks()->grad_fn(*this);
+}
+
+void Tensor::remove_hook(unsigned pos) const {
+  impl::GetVariableHooks()->remove_hook(*this, pos);
+}
+
+unsigned Tensor::_register_hook(std::function<Tensor(const Tensor&)> hook) const {
+  return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
 }
 
 } // namespace at

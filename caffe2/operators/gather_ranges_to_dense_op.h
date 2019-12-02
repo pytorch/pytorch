@@ -9,6 +9,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/proto_utils.h"
 
 #include <cstring>
 #include <map>
@@ -44,13 +45,21 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
   ~GatherRangesToDenseOp() noexcept override {
     if (totalRanges_ > minObservation_) {
+      string debugString;
+      if (this->has_debug_def()) {
+        debugString =
+            "Info from operator: " + ProtoDebugString(this->debug_def());
+      } else {
+        debugString = "Info from operator: no op def";
+      }
+
       LOG(INFO) << "In GatherRangesToDenseOp:\n"
                 << "  Lifetime empty ranges for each feature is "
                 << emptyRanges_ << ".\n"
                 << "  Lifetime mismatched ranges for each feature is "
                 << mismatchedRanges_ << ".\n"
                 << "  With a total of " << totalRanges_ << " examples.\n"
-                << this->getErrorMsg();
+                << debugString;
     }
   }
 
