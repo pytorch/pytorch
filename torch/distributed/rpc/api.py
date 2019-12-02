@@ -3,6 +3,7 @@ from . import (
     WorkerInfo,
     _cleanup_python_rpc_handler,
     _destroy_rref_context,
+    _log_owner_rrefs,
     _invoke_remote_builtin,
     _invoke_remote_python_udf,
     _invoke_rpc_builtin,

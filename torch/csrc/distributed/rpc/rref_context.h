@@ -116,6 +116,8 @@ class RRefContext {
       const RRefId& rrefId,
       const ForkId& forkId);
 
+  void logOwnerRRefs(bool verbose = false);
+
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 

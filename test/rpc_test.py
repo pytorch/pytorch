@@ -14,7 +14,7 @@ from torch.distributed.rpc import RRef
 from common_utils import load_tests
 import dist_utils
 from dist_utils import dist_init
-from torch.distributed.rpc.api import _use_rpc_pickler
+from torch.distributed.rpc.api import _use_rpc_pickler, _log_owner_rrefs
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from rpc_agent_test_fixture import RpcAgentTestFixture
 
@@ -1164,6 +1164,28 @@ class RpcTest(RpcAgentTestFixture):
             "UserRRef(RRefId = {0}({1}, 2), ForkId = {0}({1}, 1))".format(id_class, self.rank),
             rref2.__str__()
         )
+
+    @dist_init
+    def test_log_owner_rrefs(self):
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
+        rref1 = RRef(self.rank)
+        _log_owner_rrefs(True)
+
+        dst_rank = (self.rank + 1) % self.world_size
+        rref2 = rpc.remote("worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1))
+        rref3 = rpc.remote("worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1))
+        rref2.to_here()
+        rref3.to_here()
+
+        dist.barrier()
+        _log_owner_rrefs(True)
 
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):

@@ -41,6 +41,26 @@ RRefContext::~RRefContext() {
   }
 }
 
+void RRefContext::logOwnerRRefs(bool verbose) {
+  std::stringstream ss;
+
+  ss << "RRefContext[" << getWorkerName() << "] owns " << owners_.size()
+     << " RRefs." << std::endl;
+
+  if (verbose) {
+    std::lock_guard<std::mutex> lock(destroyedMutex_);
+    for (const auto& entry : owners_) {
+      ss << entry.first << " is used by: ";
+      for (const auto& forkId: forks_[entry.first]) {
+        ss << forkId << ", ";
+      }
+      ss << std::endl;
+    }
+  }
+
+  LOG(INFO) << ss.str();
+}
+
 void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
   if (!forks_.empty()) {
     std::stringstream ss;
