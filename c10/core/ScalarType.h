@@ -312,9 +312,7 @@ static inline ScalarType toUnderlying(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
-  if (isQIntType(t)) {
-    TORCH_CHECK(false, "isSignedType not supported for quantized types");
-  }
+  TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
   #define CASE_SIGNED(ctype, name) \
     case ScalarType::name:                       \
       return std::numeric_limits<ctype>::is_signed;
