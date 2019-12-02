@@ -33,15 +33,13 @@ PyObject *THPDtype_is_floating_point(THPDtype *self, PyObject *noargs)
 
 PyObject *THPDtype_is_signed(THPDtype *self, PyObject *noargs)
 {
-  if (at::isQIntType(self->scalar_type)) {
-    PyErr_SetString(PyExc_TypeError, "Quantized types don't support is_signed");
-    return nullptr;
-  }
+  HANDLE_TH_ERRORS
   if (at::isSignedType(self->scalar_type)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPDtype_reduce(THPDtype *self, PyObject *noargs)
