@@ -92,16 +92,16 @@ void check_exact_values(
   assign_parameter(
       parameters,
       "0.weight",
-      torch::tensor({-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}));
+      torch::tensor({-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}, torch::kFloat64));
   assign_parameter(
-      parameters, "0.bias", torch::tensor({-0.1085, -0.2979, 0.6892}));
+      parameters, "0.bias", torch::tensor({-0.1085, -0.2979, 0.6892}, torch::kFloat64));
   assign_parameter(
-      parameters, "2.weight", torch::tensor({-0.0508, -0.3941, -0.2843}));
-  assign_parameter(parameters, "2.bias", torch::tensor({-0.0711}));
+      parameters, "2.weight", torch::tensor({-0.0508, -0.3941, -0.2843}, torch::kFloat64));
+  assign_parameter(parameters, "2.bias", torch::tensor({-0.0711}, torch::kFloat64));
 
   auto optimizer = OptimizerClass(parameters.values(), options);
   torch::Tensor input =
-      torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}).reshape({3, 2});
+      torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64).reshape({3, 2});
 
   for (size_t i = 0; i < kIterations; ++i) {
     optimizer.zero_grad();
@@ -116,8 +116,9 @@ void check_exact_values(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
       for (size_t p = 0; p < parameters.size(); ++p) {
         ASSERT_TRUE(parameters[p]->defined());
-        auto computed = parameters[p]->flatten();
-        auto expected = expected_parameters.at(i / kSampleEvery).at(p);
+        // Always compare using double dtype, regardless of the original dtype of the tensors
+        auto computed = parameters[p]->flatten().to(torch::kFloat64);
+        auto expected = expected_parameters.at(i / kSampleEvery).at(p).to(torch::kFloat64);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
                     << " != " << expected << " (parameter " << p << ")"

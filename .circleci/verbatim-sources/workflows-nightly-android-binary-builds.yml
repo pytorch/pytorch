@@ -3,7 +3,7 @@
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:389"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:405"
           filters:
             branches:
               only: nightly
@@ -12,7 +12,7 @@
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:389"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:405"
           filters:
             branches:
               only: nightly
@@ -21,7 +21,7 @@
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:389"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:405"
           filters:
             branches:
               only: nightly
@@ -30,28 +30,27 @@
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a"
           requires:
             - setup
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:389"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:405"
           filters:
             branches:
               only: nightly
 
-# disabled until fixing https://github.com/pytorch/pytorch/issues/29159
-#      - pytorch_android_gradle_build:
-#          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
-#          requires:
-#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
-#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
-#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
-#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
-#          filters:
-#            branches:
-#              only: nightly
-#
-#      - pytorch_android_publish_snapshot:
-#          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_publish_snapshot
-#          requires:
-#            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
-#          context: org-member
-#          filters:
-#            branches:
-#              only: nightly
+      - pytorch_android_gradle_build:
+          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
+          requires:
+            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
+            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
+            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
+            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+          filters:
+            branches:
+              only: nightly
+
+      - pytorch_android_publish_snapshot:
+          name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_android_publish_snapshot
+          requires:
+            - nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_android_gradle_build
+          context: org-member
+          filters:
+            branches:
+              only: nightly

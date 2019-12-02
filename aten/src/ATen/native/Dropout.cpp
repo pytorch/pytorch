@@ -51,7 +51,7 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 
   at::Tensor b; // used for alpha_dropout only
-  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input, at::MemoryFormat::Contiguous);
+  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   noise.bernoulli_(1 - p);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;

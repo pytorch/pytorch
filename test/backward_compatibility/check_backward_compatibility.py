@@ -23,8 +23,13 @@ white_list = [
     ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
     ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
     ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
+    ('_aten', datetime.date(2019, 12, 22)),
+    ('_prim::ListConstruct', datetime.date(2019, 11, 22)),
     ('thnn_conv3d', datetime.date(9999, 1, 1)),
     ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
+    ('grad', datetime.date(2020, 1, 1)),
+    ('logical_and', datetime.date(2019, 12, 12)),
+    ('logical_or', datetime.date(2019, 12, 12)),
 ]
 
 

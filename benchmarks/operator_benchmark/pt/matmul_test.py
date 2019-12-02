@@ -12,6 +12,7 @@ import torch
 mm_short_configs = op_bench.config_list(
     attr_names=["M", "N", "K", "trans_a", "trans_b"],
     attrs=[
+        [1, 1, 1, True, False],
         [128, 128, 128, True, False],
         [256, 256, 256, False, True],
     ],
@@ -23,10 +24,10 @@ mm_short_configs = op_bench.config_list(
 
 
 mm_long_configs = op_bench.cross_product_configs(
-    M=[64, 128],
-    N=[64, 128],
-    K=[512],
-    trans_a=[True, False],
+    M=[32],
+    N=[512, 128],
+    K=[64],
+    trans_a=[False, True],
     trans_b=[True, False],
     device=['cpu', 'cuda'],
     tags=["long"]

@@ -58,8 +58,8 @@ class Adadelta(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p.data)
-                    state['acc_delta'] = torch.zeros_like(p.data)
+                    state['square_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
+                    state['acc_delta'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
 
                 square_avg, acc_delta = state['square_avg'], state['acc_delta']
                 rho, eps = group['rho'], group['eps']
