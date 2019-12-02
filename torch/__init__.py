@@ -176,11 +176,6 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-# If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from .serialization import save, load
-from ._tensor_str import set_printoptions
-
 ################################################################################
 # Define Storage and Tensor classes
 ################################################################################
@@ -348,3 +343,8 @@ import torch.quasirandom
 # the memory format could be preserved, and it was switched to old default
 # behaviour of contiguous
 legacy_contiguous_format = contiguous_format
+
+# If you edit these imports, please update torch/__init__.py.in as well
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
+from ._tensor_str import set_printoptions
+from torch.serialization import save, load
