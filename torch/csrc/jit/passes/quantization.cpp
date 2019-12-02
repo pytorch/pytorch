@@ -19,6 +19,7 @@ namespace torch {
 namespace jit {
 namespace {
 
+using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
 // This struct contains a compiled IR pattens slated for use in the
 // findPatternMatches function. The struct encapsulates the common
 // information from parseIR that is used in conjunction with the
@@ -147,6 +148,10 @@ class InsertObserversHelper {
   void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
+  ModuleMethodVector getInvokedMethods(
+    script::Module& module,
+    const std::string& method_name);
+
   Node* insertObserverFor(
       Value* v,
       Graph* g,
@@ -271,10 +276,10 @@ graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %g
   rewriter.runOnGraph(graph, filter);
 }
 
-std::vector<std::pair<script::Module, std::string>> getInvokedMethods(
+ModuleMethodVector InsertObserversHelper::getInvokedMethods(
     script::Module& module,
     const std::string& method_name) {
-  std::vector<std::pair<script::Module, std::string>> invoked_methods;
+  ModuleMethodVector invoked_methods;
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
