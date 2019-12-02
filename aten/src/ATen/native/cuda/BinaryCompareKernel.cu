@@ -11,7 +11,7 @@ namespace at { namespace native {
 
 void lt_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "lt_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a < b;
     });
   });
@@ -19,7 +19,7 @@ void lt_kernel_cuda(TensorIterator& iter) {
 
 void le_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "le_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a <= b;
     });
   });
@@ -27,7 +27,7 @@ void le_kernel_cuda(TensorIterator& iter) {
 
 void gt_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "gt_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a > b;
     });
   });
@@ -35,7 +35,7 @@ void gt_kernel_cuda(TensorIterator& iter) {
 
 void ge_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "ge_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a >= b;
     });
   });
@@ -43,7 +43,7 @@ void ge_kernel_cuda(TensorIterator& iter) {
 
 void eq_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "eq_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a == b;
     });
   });
@@ -51,25 +51,25 @@ void eq_kernel_cuda(TensorIterator& iter) {
 
 void ne_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "ne_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
       return a != b;
     });
   });
 }
 
-void max2_kernel_cuda(TensorIterator& iter) {
+void max_elementwise_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a || b;
     });
-  } else if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max2_cuda", [&]() {
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_elementwise_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::max(a, b);
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "max2_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "max_elementwise_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         // We avoid using nan or nanf because we want to return the same type as scalar_t.
         if (::isnan(a)) {
@@ -84,19 +84,19 @@ void max2_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void min2_kernel_cuda(TensorIterator& iter) {
+void min_elementwise_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a && b;
     });
-  } else if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min2_cuda", [&]() {
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min_elementwise_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::min(a, b);
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "min2_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "min_elementwise_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         // We avoid using nan or nanf because we want to return the same type as scalar_t.
         if (::isnan(a)) {
@@ -118,7 +118,7 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
 REGISTER_DISPATCH(ge_stub, &ge_kernel_cuda);
 REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
 REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda);
-REGISTER_DISPATCH(max2_stub, &max2_kernel_cuda);
-REGISTER_DISPATCH(min2_stub, &min2_kernel_cuda);
+REGISTER_DISPATCH(max_elementwise_stub, &max_elementwise_kernel_cuda);
+REGISTER_DISPATCH(min_elementwise_stub, &min_elementwise_kernel_cuda);
 
 }} // namespace at::native

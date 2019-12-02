@@ -24,8 +24,8 @@ DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
-DEFINE_DISPATCH(max2_stub);
-DEFINE_DISPATCH(min2_stub);
+DEFINE_DISPATCH(max_elementwise_stub);
+DEFINE_DISPATCH(min_elementwise_stub);
 
 static inline void alpha_check(const TensorIterator& iter, Scalar alpha) {
   TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool,
@@ -374,7 +374,7 @@ Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(),
               "Expected object of scalar type ", self.dtype(), " but got scalar type ",
               other.dtype(), " for argument 'other'");
-  max2_stub(iter.device_type(), iter);
+  max_elementwise_stub(iter.device_type(), iter);
   return result;
 }
 
@@ -391,7 +391,7 @@ Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(),
               "Expected object of scalar type ", self.dtype(), " but got scalar type ",
               other.dtype(), " for argument 'other'");
-  min2_stub(iter.device_type(), iter);
+  min_elementwise_stub(iter.device_type(), iter);
   return result;
 }
 
