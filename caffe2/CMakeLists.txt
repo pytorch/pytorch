@@ -851,6 +851,16 @@ if(USE_ROCM)
     USE_ROCM
     __HIP_PLATFORM_HCC__
     )
+  # NB: Massive hack.  torch/csrc/jit/fuser/codegen.cpp includes
+  # torch/csrc/jit/fuser/cuda/resource_strings.h which changes the
+  # strings depending on if you're __HIP_PLATFORM_HCC__ or not.
+  # But that file is in torch_cpu!  So, against all odds, this macro
+  # has to be set on torch_cpu too.  I also added it to torch for
+  # better luck
+  target_compile_definitions(torch_cpu PRIVATE
+    USE_ROCM
+    __HIP_PLATFORM_HCC__
+    )
   target_compile_definitions(torch PRIVATE
     USE_ROCM
     __HIP_PLATFORM_HCC__
