@@ -58,7 +58,7 @@ public:
 
     // internal-only for registering stack based catch-all kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
-    Options&& catchAllKernel() && {
+    Options&& compoundKernel() && {
       return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
     }
 
@@ -169,7 +169,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .catchAllKernel<my_kernel_cpu>());
+     * >         .compoundKernel<my_kernel_cpu>());
      *
      * The functor constructor can take arguments to configure the kernel.
      * The arguments are defined in the kernel registration.
@@ -188,11 +188,11 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .catchAllKernel<my_kernel_cpu>("some_configuration", 3, true));
+     * >         .compoundKernel<my_kernel_cpu>("some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
     // enable_if: only enable it if KernelFunctor is actually a functor
-    guts::enable_if_t<guts::is_functor<KernelFunctor>::value, Options&&> catchAllKernel(ConstructorParameters&&... constructorParameters) && {
+    guts::enable_if_t<guts::is_functor<KernelFunctor>::value, Options&&> compoundKernel(ConstructorParameters&&... constructorParameters) && {
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
@@ -243,11 +243,11 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .catchAllKernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
+     * >         .compoundKernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
      */
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel() && {
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> compoundKernel() && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
@@ -275,7 +275,7 @@ public:
 
     template<class FuncType>
     // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel(FuncType* kernel_func) && {
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> compoundKernel(FuncType* kernel_func) && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
@@ -369,14 +369,14 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .catchAllKernel([] (Tensor a) -> Tensor {...}));
+     * >         .compoundKernel([] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     guts::enable_if_t<
         guts::is_functor<guts::decay_t<Lambda>>::value
         && !std::is_same<typename guts::infer_function_traits_t<guts::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
-        Options&&> catchAllKernel(Lambda&& lambda) && {
+        Options&&> compoundKernel(Lambda&& lambda) && {
       static_assert(!std::is_base_of<OperatorKernel, guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
@@ -534,7 +534,7 @@ public:
     *
     * > static auto registry = c10::RegisterOperators()
     * >     .op("my_op", c10::RegisterOperators::options()
-    * >         .catchAllKernel([] (Tensor a, Tensor b) {...}));
+    * >         .compoundKernel([] (Tensor a, Tensor b) {...}));
     *
     */
     template<class Lambda>

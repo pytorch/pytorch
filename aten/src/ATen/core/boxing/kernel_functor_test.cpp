@@ -476,7 +476,7 @@ struct KernelWithDictInputWithoutOutput final : OperatorKernel {
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().catchAllKernel<KernelWithDictInputWithoutOutput>());
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().compoundKernel<KernelWithDictInputWithoutOutput>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -498,7 +498,7 @@ struct KernelWithDictInputWithOutput final : OperatorKernel {
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().catchAllKernel<KernelWithDictInputWithOutput>());
+      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().compoundKernel<KernelWithDictInputWithOutput>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -519,7 +519,7 @@ struct KernelWithDictOutput final : OperatorKernel {
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().catchAllKernel<KernelWithDictOutput>());
+      .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().compoundKernel<KernelWithDictOutput>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
@@ -646,7 +646,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutAnyA
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel<KernelWithoutInputs>());
+      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().compoundKernel<KernelWithoutInputs>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -667,7 +667,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutTens
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel<KernelWithoutTensorInputs>());
+      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().compoundKernel<KernelWithoutTensorInputs>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -825,7 +825,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegisteredWith
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegisteredCatchAllWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
-      .op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel<KernelForSchemaInference>());
+      .op("_test::no_schema_specified", RegisterOperators::options().compoundKernel<KernelForSchemaInference>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());

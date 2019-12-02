@@ -69,7 +69,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::BB(Tensor self) -> Tensor")
-    .catchAllKernel<decltype(BB_op), &BB_op>()
+    .compoundKernel<decltype(BB_op), &BB_op>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::CC(Tensor self) -> Tensor")
@@ -77,7 +77,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::DD(Tensor self) -> Tensor")
-    .catchAllKernel(&DD_op)
+    .compoundKernel(&DD_op)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::EE(Tensor self) -> Tensor")
@@ -94,7 +94,7 @@ auto registerer = torch::RegisterOperators()
     }))
   .op(torch::RegisterOperators::options()
     .schema("aten::HH(Tensor self) -> Tensor")
-    .catchAllKernel([] (Tensor a) -> Tensor {
+    .compoundKernel([] (Tensor a) -> Tensor {
       return a;
     }));
 

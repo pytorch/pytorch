@@ -21,7 +21,7 @@ OperatorEntry::OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options)
 : schema_(std::move(schema))
 , dispatchTable_(schema_)
 , kernels_()
-, catchAllKernels_()
+, compoundKernels_()
 , options_(std::move(options)) {
 }
 
@@ -30,7 +30,7 @@ void OperatorEntry::prepareForDeregistration() {
      TORCH_INTERNAL_ASSERT(false, "Tried to deregister op schema for an operator that still has kernels registered. The operator schema is ", toString(schema_), ". Registered kernels for dispatch keys: ", dispatchTable_.listAllDispatchKeys());
   }
   TORCH_INTERNAL_ASSERT(kernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_), ". The operator schema is ", toString(schema_));
-  TORCH_INTERNAL_ASSERT(catchAllKernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have catch-all kernel. The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(compoundKernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have catch-all kernel. The operator schema is ", toString(schema_));
 }
 
 RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, KernelFunction kernel) {
@@ -57,8 +57,8 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(KernelFunction kern
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  catchAllKernels_.push_front(std::move(kernel));
-  std::list<KernelFunction>::iterator inserted = catchAllKernels_.begin();
+  compoundKernels_.push_front(std::move(kernel));
+  std::list<KernelFunction>::iterator inserted = compoundKernels_.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateCatchallDispatchTable_();
@@ -88,7 +88,7 @@ void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<Kerne
 void OperatorEntry::deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  catchAllKernels_.erase(kernel);
+  compoundKernels_.erase(kernel);
 
   updateCatchallDispatchTable_();
 }
@@ -108,10 +108,10 @@ void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
 void OperatorEntry::updateCatchallDispatchTable_() {
   // precondition: kernelsMutex_ is locked
 
-  if (catchAllKernels_.size() == 0) {
+  if (compoundKernels_.size() == 0) {
     dispatchTable_.removeCatchallKernel();
   } else {
-    dispatchTable_.setCatchallKernel(catchAllKernels_.front());
+    dispatchTable_.setCatchallKernel(compoundKernels_.front());
   }
 }
 

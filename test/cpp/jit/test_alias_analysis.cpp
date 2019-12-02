@@ -739,7 +739,7 @@ graph():
     auto ops = torch::RegisterOperators().op(
         "uses::list",
         torch::RegisterOperators::options()
-            .catchAllKernel([](torch::List<at::Tensor> in) {
+            .compoundKernel([](torch::List<at::Tensor> in) {
               return torch::rand({2, 3});
             })
             .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
@@ -781,7 +781,7 @@ graph():
     auto ops = torch::RegisterOperators().op(
         "uses::list",
         torch::RegisterOperators::options()
-            .catchAllKernel([](torch::List<at::Tensor> in) {
+            .compoundKernel([](torch::List<at::Tensor> in) {
               return torch::rand({2, 3});
             })
             .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
@@ -992,7 +992,7 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand1",
         torch::RegisterOperators::options()
-            .catchAllKernel([](at::Tensor) -> at::Tensor {
+            .compoundKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
             .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
@@ -1008,7 +1008,7 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand2(Tensor arg1) -> Tensor",
         torch::RegisterOperators::options()
-            .catchAllKernel([](at::Tensor) -> at::Tensor {
+            .compoundKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
             .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
@@ -1026,7 +1026,7 @@ void testAliasRegistration() {
           torch::RegisterOperators().op(
               "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
               torch::RegisterOperators::options()
-                  .catchAllKernel([](at::Tensor) -> at::Tensor {
+                  .compoundKernel([](at::Tensor) -> at::Tensor {
                     return at::rand({2, 2});
                   })
                   .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
@@ -1039,7 +1039,7 @@ void testAliasRegistration() {
           torch::RegisterOperators().op(
               "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
               torch::RegisterOperators::options()
-                  .catchAllKernel([](at::Tensor) -> at::Tensor {
+                  .compoundKernel([](at::Tensor) -> at::Tensor {
                     return at::rand({2, 2});
                   })
                   .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
@@ -1052,7 +1052,7 @@ void testAliasRegistration() {
           torch::RegisterOperators().op(
               "foo::rand5",
               torch::RegisterOperators::options()
-                  .catchAllKernel([](at::Tensor) -> at::Tensor {
+                  .compoundKernel([](at::Tensor) -> at::Tensor {
                     return at::rand({2, 2});
                   })
                   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
@@ -1063,7 +1063,7 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand6(Tensor arg1) -> Tensor",
         torch::RegisterOperators::options()
-            .catchAllKernel([](at::Tensor) -> at::Tensor {
+            .compoundKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
@@ -1080,7 +1080,7 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand7(Tensor(a) arg1) -> Tensor(a)",
         torch::RegisterOperators::options()
-            .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
+            .compoundKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
     const auto rand_op = Symbol::fromQualString("foo::rand7");
 
@@ -1095,7 +1095,7 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand8(Tensor(a) arg1) -> Tensor(b)",
         torch::RegisterOperators::options()
-            .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
+            .compoundKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
             .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
     const auto rand_op = Symbol::fromQualString("foo::rand8");
     auto graph = std::make_shared<Graph>();
@@ -1109,7 +1109,7 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand9",
         torch::RegisterOperators::options()
-            .catchAllKernel([](at::Tensor) -> at::Tensor {
+            .compoundKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
             .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
@@ -1125,7 +1125,7 @@ void testAliasRegistration() {
     auto registry = torch::RegisterOperators().op(
         "foo::rand10(Tensor arg1) -> Tensor",
         torch::RegisterOperators::options()
-            .catchAllKernel([](at::Tensor) -> at::Tensor {
+            .compoundKernel([](at::Tensor) -> at::Tensor {
               return at::rand({2, 2});
             })
             .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
@@ -1143,7 +1143,7 @@ void testAliasRegistration() {
           torch::RegisterOperators().op(
               "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
               torch::RegisterOperators::options()
-                  .catchAllKernel(
+                  .compoundKernel(
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
                   .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },
@@ -1155,7 +1155,7 @@ void testAliasRegistration() {
           torch::RegisterOperators().op(
               "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
               torch::RegisterOperators::options()
-                  .catchAllKernel(
+                  .compoundKernel(
                       [](at::Tensor t) -> at::Tensor { return t * 2; })
                   .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
         },

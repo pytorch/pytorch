@@ -433,7 +433,7 @@ void kernelWithDictInputWithoutOutput(Dict<string, Tensor> input1) {
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().catchAllKernel<decltype(kernelWithDictInputWithoutOutput), &kernelWithDictInputWithoutOutput>());
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().compoundKernel<decltype(kernelWithDictInputWithoutOutput), &kernelWithDictInputWithoutOutput>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -453,7 +453,7 @@ string kernelWithDictInputWithOutput(Dict<string, string> input1) {
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().catchAllKernel<decltype(kernelWithDictInputWithOutput), &kernelWithDictInputWithOutput>());
+      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().compoundKernel<decltype(kernelWithDictInputWithOutput), &kernelWithDictInputWithOutput>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -472,7 +472,7 @@ Dict<string, string> kernelWithDictOutput(Dict<string, string> input) {
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().catchAllKernel<decltype(kernelWithDictOutput), &kernelWithDictOutput>());
+      .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().compoundKernel<decltype(kernelWithDictOutput), &kernelWithDictOutput>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
@@ -500,7 +500,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenFallbackKernelWithoutAny
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel<decltype(kernelWithoutInputs), &kernelWithoutInputs>());
+      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().compoundKernel<decltype(kernelWithoutInputs), &kernelWithoutInputs>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -519,7 +519,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenFallbackKernelWithoutTen
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel<decltype(kernelWithoutTensorInputs), &kernelWithoutTensorInputs>());
+      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().compoundKernel<decltype(kernelWithoutTensorInputs), &kernelWithoutTensorInputs>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -674,7 +674,7 @@ std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, 
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
-      .op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel<decltype(kernelForSchemaInference), &kernelForSchemaInference>());
+      .op("_test::no_schema_specified", RegisterOperators::options().compoundKernel<decltype(kernelForSchemaInference), &kernelForSchemaInference>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());

@@ -54,7 +54,7 @@ private:
   DispatchTable dispatchTable_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
-  // and catchAllKernels_ stores the catch-all kernels.
+  // and compoundKernels_ stores the catch-all kernels.
   // If an operator library gets loaded that overwrites an already existing kernel,
   // both kernels will be in that list but only the newer one will be in
   // dispatchTable. If any of the kernels go away (say the library gets
@@ -72,7 +72,7 @@ private:
   //    kernels_[dispatch_key] does not exist
   //  - If kernels_[dispatch_key] exists, then it has elements.
   //    It is never an empty list.
-  // Analogous invariants for catchAllKernels_.
+  // Analogous invariants for compoundKernels_.
   //
   // Why do we do that?
   // -----
@@ -86,7 +86,7 @@ private:
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
   ska::flat_hash_map<TensorTypeId, std::list<KernelFunction>> kernels_;
-  std::list<KernelFunction> catchAllKernels_;
+  std::list<KernelFunction> compoundKernels_;
 
   // Some metadata about the operator
   OperatorOptions options_;

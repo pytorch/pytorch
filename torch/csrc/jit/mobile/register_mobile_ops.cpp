@@ -261,7 +261,7 @@ static auto registry = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::eq",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
     [](int64_t a, int64_t b) -> bool {
       return a == b;
     })
@@ -292,34 +292,34 @@ static auto registry = torch::RegisterOperators().op(
   })
 ).op(
   "_prim::NumToTensor",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   [](at::Scalar s) -> at::Tensor {
       return at::scalar_to_tensor(s);
   })
 ).op(
   // Dummy operator that does nothing. Used to reserve a location of an operator table.
   "_prim::ListConstruct.int",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
   "_prim::ListConstruct.float",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
   "_prim::ListConstruct.bool",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
   "_prim::ListConstruct.Tensor",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
   "_prim::ListConstruct.generic",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 
@@ -370,7 +370,7 @@ static auto registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options().kernel<&cat_kernel>(c10::TensorTypeId::CPUTensorId)
 ).op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
-  torch::RegisterOperators::options().catchAllKernel<&__is__kernel>()
+  torch::RegisterOperators::options().compoundKernel<&__is__kernel>()
 ).op(
   "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&log_softmax_kernel>(c10::TensorTypeId::CPUTensorId)
@@ -379,25 +379,25 @@ static auto registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options().kernel<&softmax_kernel>(c10::TensorTypeId::CPUTensorId)
 ).op(
   "_aten::warn() -> void",
-  torch::RegisterOperators::options().catchAllKernel<&warn_kernel>()
+  torch::RegisterOperators::options().compoundKernel<&warn_kernel>()
 ).op(
   "_prim::unchecked_cast",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
   "_prim::TupleConstruct",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
   "_prim::TupleUnpack",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
   "_aten::format",
-  torch::RegisterOperators::options().catchAllKernel(
+  torch::RegisterOperators::options().compoundKernel(
   []() {
   })
 ).op(
@@ -405,7 +405,7 @@ static auto registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options().kernel<&listAppend<at::Tensor>>(c10::TensorTypeId::CPUTensorId)
 ).op(
   "_aten::append.int(int self) -> void",
-  torch::RegisterOperators::options().catchAllKernel<&listAppend<int64_t>>()
+  torch::RegisterOperators::options().compoundKernel<&listAppend<int64_t>>()
 );
 
 }

@@ -131,7 +131,7 @@ auto reg_str_ops_2 =
         .op("aten::splitlines(str self, bool keepends=False) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, bool keepends) {
+                .compoundKernel([](std::string string, bool keepends) {
                   std::string delimiters =
                       "\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
                   c10::List<std::string> splits;
@@ -158,14 +158,14 @@ auto reg_str_ops_2 =
         .op("aten::slice.str(str string, int start, int end=9223372036854775807, int step=1) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel<decltype(stringSlice), &stringSlice>())
+                .compoundKernel<decltype(stringSlice), &stringSlice>())
 
         // upper and lower require there to be at least one alpha character,
         // and ignore all other characters
         .op("aten::isupper(str self) -> bool",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
+                .compoundKernel([](std::string string) {
                   bool found_alpha = false;
                   bool is_upper = true;
                   for (size_t i = 0; i < string.size() && is_upper; ++i) {
@@ -178,7 +178,7 @@ auto reg_str_ops_2 =
         .op("aten::islower(str self) -> bool",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
+                .compoundKernel([](std::string string) {
                   bool found_alpha = false;
                   bool is_lower = true;
                   for (size_t i = 0; i < string.size() && is_lower; ++i) {
@@ -192,7 +192,7 @@ auto reg_str_ops_2 =
         .op("aten::capitalize(str self) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
+                .compoundKernel([](std::string string) {
                   std::stringstream ss;
                   auto first_char = true;
                   for (char c : string) {
@@ -209,7 +209,7 @@ auto reg_str_ops_2 =
         .op("aten::title(str self) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
+                .compoundKernel([](std::string string) {
                   std::stringstream ss;
                   bool prev_is_nonalpha = true;
                   for (char c : string) {
@@ -230,7 +230,7 @@ auto reg_str_ops_2 =
         .op("aten::center(str self, int width, str fillchar=' ') -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    int64_t width,
                                    std::string fillchar) {
                   if (fillchar.size() != 1) {
@@ -266,7 +266,7 @@ auto reg_str_ops_2 =
         .op("aten::count(str self, str substr, int start=0, int end=-1) -> int",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
@@ -298,7 +298,7 @@ auto reg_str_ops_2 =
         .op("aten::endswith(str self, str substr, int start=0, int end=-1) -> bool",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
@@ -325,7 +325,7 @@ auto reg_str_ops_2 =
         .op("aten::startswith(str self, str substr, int start=0, int end=-1) -> bool",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
@@ -349,7 +349,7 @@ auto reg_str_ops_2 =
         .op("aten::expandtabs(str self, int tabsize=8) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, int64_t tabsize) {
+                .compoundKernel([](std::string string, int64_t tabsize) {
                   std::stringstream ss;
                   size_t index = 0;
                   for (const auto& c : string) {
@@ -372,7 +372,7 @@ auto reg_str_ops_2 =
         .op("aten::find(str self, str substr, int start=0, int end=-1) -> int",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
@@ -382,7 +382,7 @@ auto reg_str_ops_2 =
         .op("aten::rfind(str self, str substr, int start=0, int end=-1) -> int",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
@@ -392,7 +392,7 @@ auto reg_str_ops_2 =
         .op("aten::index.str(str self, str substr, int start=0, int end=-1) -> int",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
@@ -406,7 +406,7 @@ auto reg_str_ops_2 =
         .op("aten::rindex(str self, str substr, int start=0, int end=-1) -> int",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string substr,
                                    int64_t start,
                                    int64_t end) {
@@ -421,7 +421,7 @@ auto reg_str_ops_2 =
         .op("aten::isidentifier(str self) -> bool",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
+                .compoundKernel([](std::string string) {
                   LOG(WARNING)
                       << "The isidentifier() implementation being used is from Python 2\n";
                   if (string.size() < 1) {
@@ -440,7 +440,7 @@ auto reg_str_ops_2 =
         .op("aten::istitle(str self) -> bool",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
+                .compoundKernel([](std::string string) {
                   auto result = false;
 
                   bool prev_is_alpha = false;
@@ -473,7 +473,7 @@ auto reg_str_ops_2 =
         .op("aten::isprintable(str self) -> bool",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string) {
+                .compoundKernel([](std::string string) {
                   auto result =
                       std::all_of(string.begin(), string.end(), [](char c) {
                         return ::isalnum(c) || ::ispunct(c) || c == ' ';
@@ -484,7 +484,7 @@ auto reg_str_ops_2 =
         .op("aten::ljust(str self, int width, str fillchar=' ') -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    int64_t width,
                                    std::string fillchar) {
                   if (fillchar.size() != 1) {
@@ -507,7 +507,7 @@ auto reg_str_ops_2 =
         .op("aten::rjust(str self, int width, str fillchar=' ') -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    int64_t width,
                                    std::string fillchar) {
                   if (fillchar.size() != 1) {
@@ -529,7 +529,7 @@ auto reg_str_ops_2 =
         .op("aten::zfill(str self, int width) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, int64_t width) {
+                .compoundKernel([](std::string string, int64_t width) {
                   auto to_append = std::max(
                       int64_t(0), width - static_cast<int64_t>(string.size()));
 
@@ -545,7 +545,7 @@ auto reg_str_ops_2 =
         .op("aten::lstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string chars) {
+                .compoundKernel([](std::string string, std::string chars) {
                   auto index = string.find_first_not_of(chars);
                   if (index != std::string::npos) {
                     string = string.substr(index, string.size());
@@ -558,7 +558,7 @@ auto reg_str_ops_2 =
         .op("aten::rstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string chars) {
+                .compoundKernel([](std::string string, std::string chars) {
                   auto index = string.find_last_not_of(chars);
                   if (index != std::string::npos) {
                     string = string.substr(0, index + 1);
@@ -571,7 +571,7 @@ auto reg_str_ops_2 =
         .op("aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string chars) {
+                .compoundKernel([](std::string string, std::string chars) {
                   auto rindex = string.find_last_not_of(chars);
                   if (rindex != std::string::npos) {
                     string = string.substr(0, rindex + 1);
@@ -590,7 +590,7 @@ auto reg_str_ops_2 =
         .op("aten::replace(str self, str old, str new, int max=-1) -> str",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string,
+                .compoundKernel([](std::string string,
                                    std::string old_str,
                                    std::string new_str,
                                    int64_t max) {
@@ -611,7 +611,7 @@ auto reg_str_ops_2 =
         .op("aten::partition(str self, str separator) -> (str, str, str)",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string separator) {
+                .compoundKernel([](std::string string, std::string separator) {
                   auto pos = string.find(separator, 0);
                   if (pos == std::string::npos) {
                     pos = string.size();
@@ -628,7 +628,7 @@ auto reg_str_ops_2 =
         .op("aten::rpartition(str self, str separator) -> (str, str, str)",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel([](std::string string, std::string separator) {
+                .compoundKernel([](std::string string, std::string separator) {
                   auto pos = string.find(separator, 0);
                   auto rpos = pos;
                   do {
@@ -652,7 +652,7 @@ auto reg_str_ops_2 =
         .op("aten::split.str(str self, str separator=' ', int max=-1) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel(
+                .compoundKernel(
                     [](std::string string, std::string separator, int64_t max) {
                       std::string::size_type prev_pos = 0;
                       std::string::size_type pos = 0;
@@ -678,7 +678,7 @@ auto reg_str_ops_2 =
         .op("aten::rsplit(str self, str separator=' ', int max=-1) -> str[]",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-                .catchAllKernel(
+                .compoundKernel(
                     [](std::string string, std::string separator, int64_t max) {
                       std::reverse(separator.begin(), separator.end());
                       std::reverse(string.begin(), string.end());

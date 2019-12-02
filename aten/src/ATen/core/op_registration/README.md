@@ -67,10 +67,10 @@ namespace { Tensor my_kernel_fallback(Tensor a, Tensor b) {...} }
 
 static auto registry = torch::RegisterOperators()
    .op("my_namespace::my_op", torch::RegisterOperators::options()
-       .catchAllKernel<decltype(my_kernel_fallback), &my_kernel_fallback>());
+       .compoundKernel<decltype(my_kernel_fallback), &my_kernel_fallback>());
 ```
 
-The other ways of specifying kernels mentioned above (as functions, functors or lambdas) also work with `catchAllKernel()`.
+The other ways of specifying kernels mentioned above (as functions, functors or lambdas) also work with `compoundKernel()`.
 
 ### Syntactic Sugar
 
