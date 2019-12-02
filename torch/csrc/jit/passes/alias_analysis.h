@@ -93,8 +93,8 @@ class AliasDb {
   TORCH_API void dump() const;
   TORCH_API std::string toString() const;
 
-  static bool aliasingType(const Value* v);
-  static bool aliasingType(const TypePtr& type);
+  static bool mutableType(const Value* v);
+  static bool mutableType(const TypePtr& type);
 
  private:
   // Helper for topologically-safe node moves.

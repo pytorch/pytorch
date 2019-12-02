@@ -29,14 +29,14 @@ c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
   }
 }
 
-bool AliasDb::aliasingType(const TypePtr& type) {
+bool AliasDb::mutableType(const TypePtr& type) {
   return getMutableTypeKind(type) != c10::nullopt;
 }
 
 // We only need to annotate values that either are mutable or could contain
 // mutable types.
-bool AliasDb::aliasingType(const Value* v) {
-  return aliasingType(v->type());
+bool AliasDb::mutableType(const Value* v) {
+  return mutableType(v->type());
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) {
@@ -431,7 +431,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!aliasingType(actualValue)) {
+    if (!mutableType(actualValue)) {
       continue;
     }
 
@@ -483,7 +483,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!aliasingType(actual)) {
+    if (!mutableType(actual)) {
       continue;
     }
 
@@ -531,7 +531,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
 // Register the fact that `n` writes to `v`.
 void AliasDb::registerWrite(const Value* v, Node* n) {
-  if (!aliasingType(v)) {
+  if (!mutableType(v)) {
     // don't need to register a write if the value isn't mutable
     return;
   }
@@ -664,7 +664,7 @@ void AliasDb::analyzeTupleConstruct(Node* node) {
   // only if it contains elements which need annotation
   getOrCreateElement(node->output());
   for (const auto& input : node->inputs()) {
-    if (aliasingType(input)) {
+    if (mutableType(input)) {
       addToContainedElements(input, node->output());
     }
   }
@@ -687,7 +687,7 @@ void AliasDb::analyzeConservative(Node* node) {
     registerWrite(input, node);
     // We may also write to any contained types
     for (const auto& type : input->type()->containedTypes()) {
-      if (aliasingType(type)) {
+      if (mutableType(type)) {
         auto el = getOrCreateWildcard(type);
         registerWrite(el, node);
       }
@@ -753,8 +753,8 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  if (!aliasingType(from)) {
-    TORCH_INTERNAL_ASSERT(!aliasingType(to));
+  if (!mutableType(from)) {
+    TORCH_INTERNAL_ASSERT(!mutableType(to));
     return;
   }
 
@@ -770,7 +770,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   }
 
   // At this point, we should be dealing with two mutable types.
-  TORCH_INTERNAL_ASSERT(aliasingType(from) && aliasingType(to));
+  TORCH_INTERNAL_ASSERT(mutableType(from) && mutableType(to));
 
   auto fromEl = getOrCreateElement(from);
   auto toEl = getOrCreateElement(to);
@@ -781,7 +781,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 void AliasDb::addToContainedElements(
     const Value* elem,
     const Value* container) {
-  if (!aliasingType(elem)) {
+  if (!mutableType(elem)) {
     return;
   }
 
@@ -794,7 +794,7 @@ void AliasDb::addToContainedElements(
 }
 
 bool AliasDb::mayAlias(const Value* a, const Value* b) const {
-  if (!aliasingType(a) || !aliasingType(b)) {
+  if (!mutableType(a) || !mutableType(b)) {
     return false;
   }
 
@@ -857,7 +857,7 @@ bool AliasDb::mayContainAlias(
     if (cannotCheckAliasContainment(val)) {
       return true;
     }
-    if (aliasingType(val)) {
+    if (mutableType(val)) {
       a_elements.push_back(elementMap_.at(val));
     }
   }
@@ -871,7 +871,7 @@ bool AliasDb::mayContainAlias(
     if (cannotCheckAliasContainment(val)) {
       return true;
     }
-    if (aliasingType(val)) {
+    if (mutableType(val)) {
       b_elements.push_back(elementMap_.at(val));
     }
   }
@@ -887,7 +887,7 @@ void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
 }
 
 void AliasDb::giveFreshAlias(const Value* value) {
-  if (!aliasingType(value)) {
+  if (!mutableType(value)) {
     return;
   }
 
@@ -1272,7 +1272,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
 }
 
 bool AliasDb::mayAliasWildcard(const Value* v) const {
-  if (!aliasingType(v)) {
+  if (!mutableType(v)) {
     return false;
   }
 
@@ -1285,7 +1285,7 @@ bool AliasDb::mayAliasWildcard(const Value* v) const {
 
 // Search the wildcard index for an element that corresponds to the given type.
 Element* AliasDb::getOrCreateWildcard(const TypePtr& type) {
-  TORCH_INTERNAL_ASSERT(aliasingType(type));
+  TORCH_INTERNAL_ASSERT(mutableType(type));
   const auto kind = getMutableTypeKind(type);
   TORCH_INTERNAL_ASSERT(kind);
 
@@ -1308,7 +1308,7 @@ Element* AliasDb::getWildcard(const TypePtr& type) const {
 
 // Register `v` as a wildcard value.
 void AliasDb::setWildcard(const Value* v) {
-  if (!aliasingType(v)) {
+  if (!mutableType(v)) {
     return;
   }
   auto wildcardElement = getOrCreateWildcard(v->type());

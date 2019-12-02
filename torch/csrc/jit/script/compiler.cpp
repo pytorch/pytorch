@@ -3403,7 +3403,8 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
   ConstantPooling(to_clean);
-  ConstantPropagationNonAliasingTypes(to_clean);
+  // run constant propagation only on non-mutable types so we do not jitter
+  ConstantPropagationNonMutableTypes(to_clean);
   // For jitter
   CanonicalizeOutputs(to_clean);
 }

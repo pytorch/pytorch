@@ -8,7 +8,7 @@ namespace jit {
 TORCH_API void ConstantPropagation(std::shared_ptr<Graph>& graph);
 
 // runs constant propagation only on ops that have non-aliasing inputs & outputs
-TORCH_API void ConstantPropagationNonAliasingTypes(
+TORCH_API void ConstantPropagationNonMutableTypes(
     std::shared_ptr<Graph>& graph);
 
 // Runs the node if its inputs are constants. Callers of this function must

@@ -58,12 +58,12 @@ std::unordered_set<Symbol> tuple_ops = {
 struct ConstantPropagator {
   // Runs constant propagation with an aliasing db and checks if inputs
   // might be mutated in the graph
-  static ConstantPropagator WithAliasing(std::shared_ptr<Graph> graph) {
+  static ConstantPropagator WithAliasDb(std::shared_ptr<Graph> graph) {
     return ConstantPropagator(graph, true);
   }
 
   // Runs constant propagation only on ops with non-aliasing inputs
-  static ConstantPropagator NoAliasing(std::shared_ptr<Graph> graph) {
+  static ConstantPropagator NoAliasDb(std::shared_ptr<Graph> graph) {
     return ConstantPropagator(graph, false);
   }
 
@@ -330,23 +330,23 @@ struct ConstantPropagator {
     return false;
   };
 
-  bool noAliasingValues(at::ArrayRef<Value*> values) {
+  bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
-      return AliasDb::aliasingType(v);
+      return AliasDb::mutableType(v);
     });
   }
 
   bool supportedNode(Node* n) {
-    bool handled_aliasing;
+    bool handled_mutation;
     if (aliasDb_) {
-      handled_aliasing = !aliasDb_->hasWriters(n);
+      handled_mutation = !aliasDb_->hasWriters(n);
     } else {
-      handled_aliasing =
-          noAliasingValues(n->inputs()) && noAliasingValues(n->outputs());
+      handled_mutation =
+          noMutableValues(n->inputs()) && noMutableValues(n->outputs());
     }
-    return handled_aliasing && skip_list.count(n->kind()) == 0 &&
-        !n->isNondeterministic() && !n->hasSideEffects() &&
-        n->blocks().size() == 0;
+    return handled_mutation && !n->kind().is_onnx() &&
+        skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+        !n->hasSideEffects() && n->blocks().size() == 0;
   }
 
   void ConstantPropagation(at::ArrayRef<Block*> blocks) {
@@ -395,14 +395,14 @@ struct ConstantPropagator {
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  ConstantPropagator cp = ConstantPropagator::WithAliasing(graph);
+  ConstantPropagator cp = ConstantPropagator::WithAliasDb(graph);
   cp.run();
   EliminateDeadCode(graph);
   GRAPH_DUMP("After ConstantPropagation: ", graph);
 }
 
-void ConstantPropagationNonAliasingTypes(std::shared_ptr<Graph>& graph) {
-  ConstantPropagator cp = ConstantPropagator::NoAliasing(graph);
+void ConstantPropagationNonMutableTypes(std::shared_ptr<Graph>& graph) {
+  ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
   cp.run();
   EliminateDeadCode(graph);
   GRAPH_DUMP("After ConstantPropagation: ", graph);

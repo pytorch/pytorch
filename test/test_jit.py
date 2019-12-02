@@ -6574,9 +6574,6 @@ a")
         int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
 
         def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None, args_type=None):
-            if func_name != "isinf":
-                return
-
             funcs_template = dedent('''
             def func(a, b):
                 # type: {args_type} -> {ret_type}
