@@ -11,8 +11,68 @@ machines.
 .. warning::
   The RPC API is experimental and subject to change.
 
-RPC and RRef Framework
-----------------------
+
+
+Basics
+------
+
+The distributed RPC framework makes it easy to run functions remotely, supports
+referencing remote objects without copying the real data around, and provides
+autograd and optimizer APIs to transparently run backward and update parameters
+across RPC boundaries. These features can be categorized into four sets of APIs.
+
+1) **Remote Procedure Call (RPC)** supports running a function on the specified
+   destination worker with the given arguments and getting the return value back
+   or creating a reference to the return value. There are three main RPC APIs:
+   :meth:`~torch.distributed.rpc.rpc_sync` (synchronous),
+   :meth:`~torch.distributed.rpc.rpc_async` (asynchronous), and
+   :meth:`~torch.distributed.rpc.remote` (asynchronous and returns a reference
+   to the remote return value). Use the synchronous API if the user code cannot
+   proceed without the return value. Otherwise, use the asynchronous API to get
+   a future, and wait on the future when the return value is needed on the
+   caller. The :meth:`~torch.distributed.rpc.remote` API is useful when the
+   requirement is to create something remotely but never need to fetch it to
+   the caller. Imagine the case that a driver process is setting up a parameter
+   server and a trainer. The driver can create an embedding table on the
+   parameter server and then share the reference to the embedding table with the
+   trainer, but itself will never use the embedding table locally. In this case,
+   :meth:`~torch.distributed.rpc.rpc_sync` and
+   :meth:`~torch.distributed.rpc.rpc_async` are no longer appropriate, as they
+   always imply that the return value will be returned to the caller
+   immediately or in the future.
+2) **Remote Reference (RRef)** serves as a distributed shared pointer to a local
+   or remote object. It can be shared with other workers and reference counting
+   will be handled transparently. Each RRef only has one owner and the object
+   only lives on that owner. Non-owner workers holding RRefs can get copies of
+   the object from the owner by explicitly requesting it. This is useful when
+   a worker needs to access some data object, but itself is neither the creator
+   (the caller of :meth:`~torch.distributed.rpc.remote`) or the owner of the
+   object. The distributed optimizer, as we will discuss below, is one example
+   of such use cases.
+3) **Distributed Autograd** stitches together local autograd engines on all the
+   workers involved in the forward pass, and automatically reach out to them
+   during the backward pass to compute gradients. This is especially helpful if
+   the forward pass needs to span multiple machines when conducting, e.g.,
+   distributed model parallel training, parameter-server training, etc. With
+   this feature, user code no longer needs to worry about how to send gradients
+   across RPC boundaries and in which order should the local autograd engines
+   be launched, which can become quite complicated where there are nested and
+   inter-dependent RPC calls in the forward pass.
+4) **Distributed Optimizer**'s constructor takes a
+   :meth:`~torch.optim.Optimizer` (e.g., :meth:`~torch.optim.SGD`,
+   :meth:`~torch.optim.Adagrad`, etc.) and a list of parameter RRefs, creates an
+   :meth:`~torch.optim.Optimizer` instance on each distinct RRef owner, and
+   updates parameters accordingly when running `step()`. When you have
+   distributed forward and backward passes, parameters and gradients will be
+   scattered across multiple workers, and hence it requires an optimizer on each
+   of the involved workers. Distributed Optimizer wraps all those local
+   optimizers into one, and provides a concise constructor and `step()` API.
+
+
+.. _rpc:
+
+RPC
+---
 
 Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
@@ -25,6 +85,16 @@ for communication.
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
+
+The following APIs provide primitives allowing users to remotely execute
+functions as well as create (RRefs) to remote data objects.
+
+.. autofunction:: rpc_sync
+.. autofunction:: rpc_async
+.. autofunction:: remote
+.. autofunction:: get_worker_info
+.. autofunction:: shutdown
+
 
 .. _rref:
 
@@ -44,18 +114,6 @@ details.
 .. autoclass:: RRef
     :members:
 
-RPC and RRef primitives
------------------------
-
-This library provides primitives allowing users to create and modify references
-(RRefs) to remote data as well as remotely execute functions.
-
-.. automodule:: torch.distributed.rpc
-.. autofunction:: rpc_sync
-.. autofunction:: rpc_async
-.. autofunction:: remote
-.. autofunction:: get_worker_info
-.. autofunction:: wait_all_workers
 
 Distributed Autograd Framework
 ------------------------------

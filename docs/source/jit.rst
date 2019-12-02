@@ -431,7 +431,6 @@ net models. In particular, TorchScript supports:
    "``T``", "A `TorchScript Class`_"
    "``NamedTuple[T0, T1, ...]``", "A :func:`collections.namedtuple <collections.namedtuple>` tuple type"
 
-
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
 
@@ -470,6 +469,33 @@ Example (a type mismatch)
                 ~ <--- HERE
      ...
 
+
+Unsupported Typing Constructs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TorchScript does not support all features and types of the :mod:`typing` module. Some of these
+are more fundamental things that are unlikely to be added in the future while others
+may be added if there is enough user demand to make it a priority.
+
+These types and features from the :mod:`typing` module are unavailble in TorchScript.
+
+.. csv-table::
+   :header: "Item", "Description"
+
+   ":any:`typing.Any`", ":any:`typing.Any` is currently in development but not yet released"
+   ":any:`typing.NoReturn`", "Not implemented"
+   ":any:`typing.Union`", "Unlikely to be implemented (however :any:`typing.Optional` is supported)"
+   ":any:`typing.Callable`", "Not implemented"
+   ":any:`typing.Literal`", "Not implemented"
+   ":any:`typing.ClassVar`", "Not implemented"
+   ":any:`typing.Final`", "This is supported for :any:`module attributes <Module Attributes>` class attribute annotations but not for functions"
+   ":any:`typing.AnyStr`", "TorchScript does not support :any:`bytes` so this type is not used"
+   ":any:`typing.overload`", ":any:`typing.overload` is currently in development but not yet released"
+   "Type aliases", "Not implemented"
+   "Nominal vs structural subtyping", "Nominal typing is in development, but structural typing is not"
+   "NewType", "Unlikely to be implemented"
+   "Generics", "Unlikely to be implemented"
+
+Any other functionality from the :any:`typing` module not explitily listed in this documentation is unsupported.
 
 Default Types
 ^^^^^^^^^^^^^
