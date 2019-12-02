@@ -122,6 +122,11 @@ CAFFE2_API std::vector<Dimname> compute_bmm_outnames(
 
 CAFFE2_API std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor);
 
+std::vector<Dimname> compute_diagonal_outnames(
+    const Tensor& tensor,
+    int64_t dim1,
+    int64_t dim2);
+
 // TensorImpl* overloads for Legacy TH/THC code. Use these sparingly.
 
 CAFFE2_API TensorImpl* propagate_names_if_nonempty(
