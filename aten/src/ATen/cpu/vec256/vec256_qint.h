@@ -776,6 +776,14 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
+  Vec256<c10::qint8> minimum(Vec256<c10::qint8> b) const {
+    Vec256<c10::qint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
   Vec256<c10::qint8> relu(Vec256<c10::qint8> zero_point) const {
     return maximum(zero_point);
   }
@@ -842,6 +850,14 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     Vec256<c10::quint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vec256<c10::quint8> minimum(Vec256<c10::quint8> b) const {
+    Vec256<c10::quint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
   }
@@ -913,6 +929,14 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     Vec256<c10::qint32> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vec256<c10::qint32> minimum(Vec256<c10::qint32> b) const {
+    Vec256<c10::qint32> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
   }
