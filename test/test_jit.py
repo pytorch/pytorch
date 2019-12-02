@@ -314,6 +314,10 @@ class Observer(torch.nn.Module):
     def calculate_qparams(self):
         return torch.tensor([2.0]), torch.tensor([3])
 
+    @torch.jit.export
+    def get_qparams(self):
+        return self.calculate_qparams()
+
 class WeightObserver(Observer):
     def __init__(self):
         super(WeightObserver, self).__init__(torch.qint8)

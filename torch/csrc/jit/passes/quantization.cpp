@@ -393,9 +393,9 @@ void InsertObserversHelper::insertObservers(
 
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
-  ConstantPropagation(graph);
   // To cleanup traced graph
   ConstantPooling(graph);
+  ConstantPropagation(graph);
   // must do constant propagation first before replacement
   replaceConvolutionWithConv2d(graph);
   // fuse exploded linear into aten::linear
