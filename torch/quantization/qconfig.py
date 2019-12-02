@@ -18,8 +18,8 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
     method (that behaves like functools.partial):
 
-      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8),
-                           weight=default_observer.with_args(dtype=torch.qint8))
+      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8), 
+      weight=default_observer.with_args(dtype=torch.qint8))
     """
     def __new__(cls, activation, weight):
         # catch common mistakes
