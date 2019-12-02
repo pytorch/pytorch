@@ -1,0 +1,18 @@
+      # Warning: indentation here matters!
+
+      # Pytorch MacOS builds
+      - pytorch_windows_build:
+          requires:
+            - setup
+      - pytorch_windows_test:
+          name: pytorch_windows_test1
+          test_name: pytorch_windows_test1
+          requires:
+            - setup
+            - pytorch_windows_build
+      - pytorch_windows_test:
+          name: pytorch_windows_test2
+          test_name: pytorch_windows_test2
+          requires:
+            - setup
+            - pytorch_windows_build

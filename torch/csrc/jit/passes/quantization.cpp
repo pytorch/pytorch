@@ -1235,13 +1235,13 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype):
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        return (%packed_params))");
+        return (%packed_params) )");
 
   const PatternInfo conv2d_prepack_per_channel = PatternInfo::parse_from_str(R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_axis, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_channel(%w, %w_scale, %w_zero_point, %w_axis, %w_dtype)
         %packed_params = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        return (%packed_params))");
+        return (%packed_params) )");
 };
 
 void FoldPrepackedWeightIntoModule(
