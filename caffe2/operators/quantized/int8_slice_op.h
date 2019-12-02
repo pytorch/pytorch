@@ -31,9 +31,6 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
       ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
-        CAFFE_ENFORCE(HasArgument("starts"));
-        CAFFE_ENFORCE(HasArgument("ends"));
-        CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
         if (HasArgument("dim")) {
           auto dim = this->template GetSingleArgument<int>("dim", 0);
@@ -45,7 +42,11 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
           ends_.resize(rank, -1);
           starts_[dim] = start;
           ends_[dim] = end;
+        } else {
+          CAFFE_ENFORCE(HasArgument("starts"));
+          CAFFE_ENFORCE(HasArgument("ends"));
         }
+        CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
         ReinitializeTensor(
             &starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));

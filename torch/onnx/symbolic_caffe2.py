@@ -198,13 +198,7 @@ def slice(g, input, dim, start, end, step):
     end = sym_help._parse_arg(end, 'i')
     dim = sym_help._parse_arg(dim, 'i')
 
-    # Dummy values as C2 op expects them to be passed.
-    start_list = [0]
-    end_list = [-1]
-
     kwargs = {
-        "starts_i": start_list,
-        "ends_i": end_list,
         "start_idx_i": start,
         "end_idx_i": end,
         "dim_i": dim,
