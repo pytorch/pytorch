@@ -16,6 +16,7 @@
   if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
     at::globalContext().setQEngine(at::QEngine::QNNPACK);
   }
+  torch::autograd::AutoGradMode guard(false);
 }
 
 - (void)setUp {
@@ -31,7 +32,6 @@
   _module.eval();
   std::vector<c10::IValue> inputs;
   inputs.push_back(torch::ones({1, 3, 224, 224}, at::ScalarType::Float));
-  torch::autograd::AutoGradMode guard(false);
   auto outputTensor = _module.forward(inputs).toTensor();
   float* outputBuffer = outputTensor.data_ptr<float>();
   XCTAssertTrue(outputBuffer != nullptr, @"");

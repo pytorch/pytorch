@@ -11,11 +11,12 @@
   return: argument 0
   options:
     - cname: set
-      scalar_check: source_->dim() == 0
+      scalar_check: false
       arguments:
         - THTensor* self
         - THTensor* source
     - cname: setStorage
+      scalar_check: false
       arguments:
         - THTensor* self
         - THStorage* source
@@ -95,6 +96,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -112,6 +114,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -140,6 +143,7 @@
   name: _th_clone
   cname: newClone
   return: THTensor*
+  scalar_check: false
   variants:
     - function
   cpu_half: True
@@ -188,7 +192,7 @@
   variants:
     - function
   return: argument 0
-  scalar_check: index_->dim() == 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -284,6 +288,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -313,6 +318,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: bitand
       arguments:
@@ -357,6 +363,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: bitor
       arguments:
@@ -399,6 +406,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: lshift
       arguments:
@@ -439,6 +447,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: rshift
       arguments:
@@ -502,7 +511,7 @@
   options:
     - cname: min
       return: argument 0,1
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
+      scalar_check: false
       arguments:
         - arg: THTensor* min
           output: True
@@ -542,7 +551,7 @@
   options:
     - cname: max
       return: argument 0,1
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
+      scalar_check: false
       arguments:
         - arg: THTensor* max
           output: True
@@ -558,7 +567,7 @@
   variants: function
   cname: mode
   return: argument 0,1
-  scalar_check: self_->dim() == 0|| (keepdim == false && self_->dim() == 1)
+  scalar_check: false
   arguments:
     - arg: THTensor* values
       output: True
@@ -732,17 +741,6 @@
       arguments:
         - THTensor* self
         - bool unbiased
-    - cname: var_single
-      return: argument 0
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - bool unbiased
-        - bool keepdim
 ]]
 [[
   name: _th_std
@@ -758,17 +756,6 @@
       arguments:
         - THTensor* self
         - bool unbiased
-    - cname: std_single
-      return: argument 0
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - bool unbiased
-        - bool keepdim
 ]]
 [[
   name: _th_renorm
@@ -1104,6 +1091,7 @@
   cuda_bfloat16: True
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1326,6 +1314,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* res1
       output: True
@@ -1401,6 +1390,7 @@
     - CPU
   variants:
     - function
+  scalar_check: false
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1465,6 +1455,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THIndexTensor* result
       output: True
@@ -1496,6 +1487,7 @@
   backends:
     - CPU
   return: argument 0
+  scalar_check: false
   variants:
     - function
   options:

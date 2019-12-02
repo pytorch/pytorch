@@ -28,7 +28,7 @@ class TORCH_API ScriptTypeParser {
 
   FunctionSchema parseSchemaFromDef(const Def& def, bool skip_self);
 
-  c10::IValue parseConstant(const Expr& type, const Expr& expr);
+  c10::IValue parseConstant(const Assign& assign);
 
  private:
   c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;
