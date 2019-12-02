@@ -586,7 +586,7 @@ def configure_extension_build():
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++14',
+            '-std=c++11',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
