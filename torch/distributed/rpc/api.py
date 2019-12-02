@@ -21,7 +21,16 @@ import torch.distributed as dist
 
 
 _agent = None
-
+# NB: Ignoring RRef leaks during shutdown. Without this, applications have to
+# make sure there is no references to any RRef in the application code and
+# Python GC has done its job to delete those RRefs. This is could result in bad
+# debugging experiences especially when for large applications. Therefore, by
+# default, we are going to ignore RRef leaks during shutdown. This is usually
+# fine as shutdown means applications have done training and no longer care
+# about states.
+#
+# To enable RRef leak checking, set this _ignore_rref_leak to False
+_ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
 
 @contextlib.contextmanager
@@ -36,6 +45,7 @@ def _use_rpc_pickler(rpc_pickler):
     finally:
         _default_pickler = _internal_rpc_pickler
 
+
 def _require_initialized(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -48,12 +58,34 @@ def _require_initialized(func):
     return wrapper
 
 
-def wait_all_workers():
+def _wait_all_workers():
     r"""
-    Block until all local and remote RPC processes reach this method, and then
-    destroy local the RPC agent. Every RPC process must call this method before
-    exit. This should be used to terminate the RPC framework, and there is no
-    guarantee that the RPC framework will work after this method returns.
+    Block until all local and remote RPC processes reach this method and wait
+    for all outstanding work to complete. Every RPC process must call this
+    method before exit to perform a graceful shutdown. This should be used to
+    terminate the RPC framework, and there is no guarantee that the RPC
+    framework will work after this method returns.
+    """
+    global _agent
+
+    if _agent:
+        _agent.join()
+
+def shutdown(graceful=True):
+    r"""
+    Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
+    stops the local agent from  accepting outstanding requests, and shuts
+    down the RPC framework by terminating all RPC threads. If graceful=True,
+    then this will block until all local and remote RPC processes reach this
+    method and wait for all outstanding work to complete. Otherwise, if
+    graceful=False, then this is a local shutdown, and it does not wait for
+    other RPC processes to reach this method.
+
+    Arguments:
+        graceful (bool): Whether to do a graceful shutdown or not. If True,
+                         this will block until all local and remote RPC
+                         processes have reached this method and wait for all
+                         outstanding work to complete.
 
     Example::
 
@@ -63,27 +95,28 @@ def wait_all_workers():
         >>> # do some work
         >>> result = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(1), 1))
         >>> # ready to shutdown
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> # wait for worker 0 to finish work, and then shutdown.
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
     """
     global _agent
-
     if _agent:
-        _agent.join()
-        _agent = None
-        _destroy_rref_context()
-        # clean up python rpc handler in wait_all_workers(), see comments in
+        if graceful:
+            _wait_all_workers()
+        _destroy_rref_context(_ignore_rref_leak)
+        _agent.shutdown()
+        # clean up python rpc handler in shutdown(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
         # interpreter exists
         _cleanup_python_rpc_handler()
+        _agent = None
 
-# TODO: add a context manager to wrap _init_rpc_backend and wait_all_workers
+# TODO: add a context manager to wrap _init_rpc_backend and shutdown
 def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,
     store=None,
@@ -95,12 +128,6 @@ def _init_rpc_backend(
 
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
-
-    if not rpc_backend_options:
-        # default construct a set of RPC agent options.
-        rpc_backend_options = rpc.backend_registry.construct_rpc_backend_options(
-            backend
-        )
 
     _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
@@ -201,12 +228,12 @@ def remote(to, func, args=None, kwargs=None):
         >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
 
@@ -270,12 +297,12 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut.wait()
@@ -310,12 +337,12 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
         >>> fut2 = rpc.rpc_async("worker1", min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
 
         On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut
