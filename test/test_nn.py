@@ -1937,7 +1937,7 @@ class TestNN(NNTestCase):
         amount requested by the user the moment the pruning method
         is initialized. This test checks that the expected errors are
         raised whenever the amount is invalid.
-        The orginal function runs basic type checking + value range checks.
+        The original function runs basic type checking + value range checks.
         It doesn't check the validity of the pruning amount with
         respect to the size of the tensor to prune. That's left to
         `_validate_pruning_amount`, tested below.
