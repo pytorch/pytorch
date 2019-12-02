@@ -16,7 +16,7 @@ namespace rpc {
 class RRefContext {
  public:
   static RRefContext& getInstance();
-  static void destroyInstance();
+  static void destroyInstance(bool ignoreRRefLeak = true);
 
   static void handleException(const Message& message);
 
@@ -47,23 +47,18 @@ class RRefContext {
   }
 
   // create a ``UserRRef`` owned by the worker ``ownerId``
-  template <typename T>
-  std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);
+  std::shared_ptr<UserRRef> createUserRRef(worker_id_t ownerId, const TypePtr& type);
 
   // Convert an RRefForkData into an RRef. This RRef could be user or owner.
   // This RRef could have already existed before, or could be created in this
   // method.
-  template <typename T>
-  std::shared_ptr<RRefBase> getOrCreateRRef(const RRefForkData& rfd);
-
+  std::shared_ptr<RRefBase> getOrCreateRRef(const RRefForkData& rfd, c10::optional<TypePtr> type={});
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
   // one.
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
+  std::shared_ptr<OwnerRRef> getOrCreateOwnerRRef(const RRefId& rrefId, c10::optional<TypePtr> opt_type={});
 
-  // Create an empty owner rref of type T.
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
+  // Create an empty owner rref of type.
+  std::shared_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -75,8 +70,7 @@ class RRefContext {
   // and this could happen before the self remote call finishes. To prevent
   // that, this API adds the RRefId as a ForkId, which will then delete the
   // ForkId when the self remote is done.
-  template <typename T>
-  void addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref);
+  void addSelfAsFork(std::shared_ptr<OwnerRRef>& rref);
 
   // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
@@ -111,19 +105,24 @@ class RRefContext {
   void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRefBase>& rref);
   void delPendingUser(const ForkId& forkId);
 
+  void delUser(
+      const worker_id_t owner,
+      const RRefId& rrefId,
+      const ForkId& forkId);
+
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
-  template <typename T>
-  std::shared_ptr<UserRRef<T>> createUserRRef(
+  std::shared_ptr<UserRRef> createUserRRef(
       worker_id_t ownerId,
       const RRefId& rrefId,
-      const ForkId& forkId);
+      const ForkId& forkId,
+      const TypePtr& type);
 
   void finishForkRequest(const ForkId& forkId, worker_id_t parent);
 
   // If there is any leak on any RRef, this method will throw an error.
-  void checkRRefLeaks();
+  void checkRRefLeaks(bool ignoreRRefLeak);
 
   static std::atomic<local_id_t> nextLocalId_;
 
@@ -157,6 +156,9 @@ class RRefContext {
   //     owner learns about the forked child.
   std::unordered_map<ForkId, std::shared_ptr<RRefBase>, ForkId::Hash>
       pendingChildren_;
+
+  std::mutex destroyedMutex_;
+  bool destroyed_;
 };
 
 } // namespace rpc

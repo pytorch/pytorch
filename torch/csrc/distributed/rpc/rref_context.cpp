@@ -13,8 +13,13 @@ RRefContext& RRefContext::getInstance() {
   return *context;
 }
 
-void RRefContext::destroyInstance() {
-  RRefContext::getInstance().checkRRefLeaks();
+void RRefContext::destroyInstance(bool ignoreRRefLeak) {
+  auto& ctx = RRefContext::getInstance();
+  {
+    std::lock_guard<std::mutex> lock(ctx.destroyedMutex_);
+    ctx.destroyed_ = true;
+  }
+  ctx.checkRRefLeaks(ignoreRRefLeak);
 }
 
 void RRefContext::handleException(const Message& message) {
@@ -27,16 +32,16 @@ void RRefContext::handleException(const Message& message) {
 }
 
 RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
-    : agent_(std::move(agent)) {}
+    : agent_(std::move(agent)), destroyed_(false) {}
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     owners_.clear();
   }
 }
 
-void RRefContext::checkRRefLeaks() {
+void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
   if (!forks_.empty()) {
     std::stringstream ss;
     for (auto& entry : forks_) {
@@ -46,28 +51,35 @@ void RRefContext::checkRRefLeaks() {
            << std::endl;
       }
     }
-    AT_ERROR(ss.str());
+
+    if (ignoreRRefLeak) {
+      LOG(WARNING)
+          << "Detected RRef Leaks during shutdown. This usually "
+          << "occurs when the application code still holds references to RRef "
+          << "instances when calling shutdown(). If the program has "
+          << "completed correctly and the process is exiting, it is OK to "
+          << "ignore these leaks. However, if you program will keep running "
+          << "after this, these leaks could result in memory leaks on RRef "
+          << "owners. Please make sure all RRefs are out of scope and Python "
+          << "GC has deleted them before calling shutdown(): \n"
+          << ss.str();
+    } else {
+      AT_ERROR(ss.str());
+    }
   }
 }
 
-template <typename T>
-std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
+std::shared_ptr<UserRRef> RRefContext::createUserRRef(worker_id_t ownerId, const TypePtr& type) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-  return createUserRRef<T>(
-      ownerId, genGloballyUniqueId(), genGloballyUniqueId());
+  return createUserRRef(
+      ownerId, genGloballyUniqueId(), genGloballyUniqueId(), type);
 }
 
-template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
-    worker_id_t ownerId);
-
-template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
-    py::object>(worker_id_t ownerId);
-
-template <typename T>
-std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
+std::shared_ptr<UserRRef> RRefContext::createUserRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
-    const ForkId& forkId) {
+    const ForkId& forkId,
+    const TypePtr& type) {
   TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
   // RRefContext does not track user RRefs, it will be destructed when there
   // is no shared_ptrs pointing to it.
@@ -82,81 +94,66 @@ std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(
   // The reason for not adding the pending user here is to put addPendingUser()
   // close to where the RPC occurs, and it is more clear to pair it with
   // deletePendingUser() in the response callback at the call site.
-  return std::shared_ptr<UserRRef<T>>(new UserRRef<T>(ownerId, rrefId, forkId));
+  return std::shared_ptr<UserRRef>(new UserRRef(ownerId, rrefId, forkId, type));
 }
 
-template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
-    worker_id_t ownerId,
+void RRefContext::delUser(
+    const worker_id_t owner,
     const RRefId& rrefId,
-    const ForkId& forkId);
+    const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(destroyedMutex_);
+  if (!destroyed_) {
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(owner),
+        RRefUserDelete(rrefId, forkId).toMessage());
 
-template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
-    py::object>(
-    worker_id_t ownerId,
-    const RRefId& rrefId,
-    const ForkId& forkId);
-
-template <typename T>
-std::shared_ptr<RRefBase> RRefContext::getOrCreateRRef(
-    const RRefForkData& rfd) {
-  auto& ownerId = rfd.ownerId_;
-  auto& rrefId = rfd.rrefId_;
-  auto& forkId = rfd.forkId_;
-  if (ownerId == getWorkerId()) {
-    return getOrCreateOwnerRRef<T>(rrefId);
-  } else {
-    return createUserRRef<T>(ownerId, rrefId, forkId);
+    fm->addCallback(
+        [](const Message& message) { RRefContext::handleException(message); });
   }
 }
 
-template std::shared_ptr<RRefBase> RRefContext::getOrCreateRRef<IValue>(
-    const RRefForkData& rfd);
+std::shared_ptr<RRefBase> RRefContext::getOrCreateRRef(
+    const RRefForkData& rfd,
+    c10::optional<TypePtr> type) {
+  auto& ownerId = rfd.ownerId_;
+  auto& rrefId = rfd.rrefId_;
+  auto& forkId = rfd.forkId_;
+  if (ownerId == getWorkerId() && type.has_value()) {
+    return getOrCreateOwnerRRef(rrefId, type);
+  } else {
+    return createUserRRef(ownerId, rrefId, forkId, type.value());
+  }
+}
 
-template std::shared_ptr<RRefBase> RRefContext::getOrCreateRRef<py::object>(
-    const RRefForkData& rfd);
-
-template <typename T>
-std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
-    const RRefId& rrefId) {
+std::shared_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
+    const RRefId& rrefId,
+    c10::optional<TypePtr> type) {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
-  if (iter == owners_.end()) {
+  if (iter == owners_.end() && type.has_value()) {
     // Scenario (1) the first time this owner knows about this RRef
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
     auto rref =
-        std::shared_ptr<OwnerRRef<T>>(new OwnerRRef<T>(getWorkerId(), rrefId));
+        std::shared_ptr<OwnerRRef>(new OwnerRRef(getWorkerId(), rrefId, type.value()));
     owners_[rref->rrefId()] = rref;
     return rref;
 
   } else {
     // Scenario (2) retrieving an existing RRef
-    return std::static_pointer_cast<OwnerRRef<T>>(iter->second);
+    return std::static_pointer_cast<OwnerRRef>(iter->second);
   }
 }
 
-template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
-    IValue>(const RRefId& rrefId);
-
-template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
-    getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
-
-template <typename T>
-std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
+std::shared_ptr<OwnerRRef> RRefContext::createOwnerRRef(const TypePtr& type) {
   // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
   // to another worker.
-  return std::shared_ptr<OwnerRRef<T>>(
-      new OwnerRRef<T>(getWorkerId(), genGloballyUniqueId()));
+  return std::shared_ptr<OwnerRRef>(
+      new OwnerRRef(getWorkerId(), genGloballyUniqueId(), type));
 }
-
-template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
-    IValue>();
-
-template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
-    py::object>();
 
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRefBase>& rref) {
   auto rfd = rref->fork();
@@ -288,8 +285,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   fm->addCallback([](const Message& message) { handleException(message); });
 }
 
-template <typename T>
-void RRefContext::addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref) {
+void RRefContext::addSelfAsFork(std::shared_ptr<OwnerRRef>& rref) {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto& rrefId = rref->rrefId();
   owners_[rrefId] = rref;
@@ -300,12 +296,6 @@ void RRefContext::addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref) {
       rrefId);
   rrefForks.insert(rrefId);
 }
-
-template void RRefContext::addSelfAsFork<IValue>(
-    std::shared_ptr<OwnerRRef<IValue>>& rref);
-
-template void RRefContext::addSelfAsFork<py::object>(
-    std::shared_ptr<OwnerRRef<py::object>>& rref);
 
 void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -344,7 +334,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     }
   }
   if (deletedRRef && deletedRRef->isPyObj()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     deletedRRef.reset();
   }
 }

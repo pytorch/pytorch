@@ -1,10 +1,11 @@
 #pragma once
 
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/jit_type.h>
 
 namespace c10 {
 
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 using worker_id_t = int16_t;
 
 // This abstract class contains only user-facing APIs, and will be shared
@@ -35,7 +36,7 @@ class C10_EXPORT RRef : public c10::intrusive_ptr_target {
   // Returns true if this is the ``OwnerRRef``
   virtual bool isOwner() const = 0;
 
-  // virtual TypePtr type() const = 0;
+  virtual TypePtr type() const = 0;
 };
 
 }

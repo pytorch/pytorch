@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -110,8 +111,8 @@ RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
 
 //////////////////////////////  RRefBase  /////////////////////////////////////
 
-RRefBase::RRefBase(worker_id_t ownerId, const RRefId& rrefId)
-    : RRef(), ownerId_(ownerId), rrefId_(rrefId) {}
+RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type)
+    : ownerId_(ownerId), rrefId_(rrefId), type_(type) {}
 
 RRefForkData RRefBase::fork() const {
   auto& ctx = RRefContext::getInstance();
@@ -121,12 +122,12 @@ RRefForkData RRefBase::fork() const {
 
 //////////////////////////  UserRRef  /////////////////////////////////////
 
-template <typename T>
-UserRRef<T>::UserRRef(
+UserRRef::UserRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
-    const ForkId& forkId)
-    : RRefBase(ownerId, rrefId), forkId_(forkId) {
+    const ForkId& forkId,
+    const TypePtr& type)
+    : RRef(ownerId, rrefId, type), forkId_(forkId) {
   // Do nothing,
   // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
   //     a RREF_FORK_REQUEST message to the owner.
@@ -134,90 +135,72 @@ UserRRef<T>::UserRRef(
   //     properly notify the owner.
 }
 
-template <typename T>
-UserRRef<T>::~UserRRef() {
-  // TODO: queue this in RRefContext instead of doing it here.
-  auto& ctx = RRefContext::getInstance();
-  if (ctx.getWorkerId() != ownerId_) {
-    auto fm = ctx.agent()->send(
-        ctx.agent()->getWorkerInfo(ownerId_),
-        RRefUserDelete(rrefId_, forkId_).toMessage());
-
-    fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
+UserRRef::~UserRRef() {
+  try {
+    RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
+  } catch (const std::exception& ex) {
+    LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
+               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+               << ex.what();
+  } catch (...) {
+    LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
+               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+               << "unknown error";
   }
 }
 
-template <typename T>
-const ForkId& UserRRef<T>::forkId() const {
+const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-template <>
-IValue UserRRef<IValue>::toHere() {
+IValue UserRRef::toHere() {
   auto agent = RpcAgent::getDefaultRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
   // the message itself does not contain any tensor, because the response would
   // potentially contain tensors.
+  Message msgToSend;
+
+  if (isPyObj()) {
+    msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
+  } else {
+    msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
+  }
+
   auto futureResponse = autograd::sendMessageWithAutograd(
       *agent,
       agent->getWorkerInfo(ownerId_),
-      ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
+      std::move(msgToSend),
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
   RRefContext::handleException(message);
   auto response = deserializeResponse(message);
   auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
-  return rfr.values().front();
+  if (isPyObj()) {
+    return jit::toIValue(PythonRpcHandler::getInstance().deserialize(
+           SerializedPyObj::fromIValues(rfr.values())), PyObjectType::get());
+  } else {
+    return rfr.values().front();
+  }
 }
-
-template <>
-py::object UserRRef<py::object>::toHere() {
-  auto agent = RpcAgent::getDefaultRpcAgent();
-
-  // PythonRRefFetchCall message always carries autograd context id even if
-  // the message itself does not contain any tensor, because the response would
-  // potentially contain tensors.
-  auto futureResponse = autograd::sendMessageWithAutograd(
-      *agent,
-      agent->getWorkerInfo(ownerId_),
-      PythonRRefFetchCall(ownerId_, rrefId()).toMessage(),
-      true /* forceGradRecording */);
-
-  const Message& message = futureResponse->wait();
-  RRefContext::handleException(message);
-  auto response = deserializeResponse(message);
-  auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
-  return PythonRpcHandler::getInstance().deserialize(
-      SerializedPyObj::fromIValues(rfr.values()));
-}
-
-template class UserRRef<IValue>;
-template class UserRRef<py::object>;
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
-template <typename T>
-const T& OwnerRRef<T>::getValue() const {
+const IValue& OwnerRRef::getValue() const {
   // TODO: use callback to make this non-blocking
   std::unique_lock<std::mutex> lock(mutex_);
   valueCV_.wait(lock, [this] { return value_.has_value(); });
   return value_.value();
 }
 
-template <typename T>
-void OwnerRRef<T>::setValue(T&& value) {
+void OwnerRRef::setValue(IValue&& value) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     value_ = std::move(value);
   }
   valueCV_.notify_all();
 }
-
-template class OwnerRRef<IValue>;
-template class OwnerRRef<py::object>;
 
 } // namespace rpc
 } // namespace distributed

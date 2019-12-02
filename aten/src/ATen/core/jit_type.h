@@ -49,7 +49,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(DeviceObjType)          \
   _(FunctionType)           \
   _(ClassType)              \
-  _(PythonObjType)          \
+  _(PyObjectType)           \
   _(CapsuleType)            \
   _(InterfaceType)
 
@@ -1194,25 +1194,25 @@ private:
   : Type(TypeKind::CapsuleType) {}
 };
 
-struct PythonObjType;
-using PythonObjTypePtr = std::shared_ptr<PythonObjType>;
-// This type represents a Python Object Type
-struct CAFFE2_API PythonObjType : public Type {
-  static PythonObjTypePtr create() {
-    return PythonObjTypePtr(new PythonObjType()); // NOLINT(modernize-make-shared)
+struct PyObjectType;
+using PyObjectTypePtr = std::shared_ptr<PyObjectType>;
+// This type represents a PyObject Type
+struct CAFFE2_API PyObjectType : public Type {
+  static PyObjectTypePtr create() {
+    return PyObjectTypePtr(new PyObjectType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "PythonObjType";
+    return "PyObjectType";
   }
-  static const TypeKind Kind = TypeKind::PythonObjType;
+  static const TypeKind Kind = TypeKind::PyObjectType;
   // global singleton
-  static PythonObjTypePtr get();
+  static PyObjectTypePtr get();
 private:
-  PythonObjType()
-  : Type(TypeKind::PythonObjType) {}
+  PyObjectType()
+  : Type(TypeKind::PyObjectType) {}
 };
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);

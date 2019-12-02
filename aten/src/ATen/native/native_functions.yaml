@@ -895,6 +895,11 @@
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
+  supports_named_tensor: True
+
+- func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
+  variants: function, method
+  supports_named_tensor: True
 
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   variants: method
@@ -2627,29 +2632,17 @@
   use_c10_dispatcher: full
   variants: function
   supports_named_tensor: True
-  dispatch:
-    CPU: threshold
-    CUDA: threshold_cuda
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   variants: function
   supports_named_tensor: True
-  dispatch:
-    CPU: threshold_
-    CUDA: threshold__cuda
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: threshold_out
-    CUDA: threshold_out_cuda
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU: threshold_backward
-    CUDA: threshold_backward_cuda
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
@@ -3763,7 +3756,7 @@
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_index_add_
+    CPU: index_add_cpu_
     CUDA: legacy::cuda::_th_index_add_
 
 - func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor

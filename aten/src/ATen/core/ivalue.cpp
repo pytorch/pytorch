@@ -62,8 +62,8 @@ TypePtr IValue::type() const {
       return DeviceObjType::get();
     case Tag::Object:
       return toObjectRef().type();
-    case Tag::PythonObject:
-      return PythonObjType::get();
+    case Tag::PyObject:
+      return PyObjectType::get();
     case Tag::Uninitialized:
       return AnyType::get();
     case Tag::Capsule:
@@ -175,9 +175,9 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict());
-    case IValue::Tag::PythonObject: {
-      auto py_obj = v.toPythonObject();
-      return out << "<PythonObject at" << py_obj.get() << ">";
+    case IValue::Tag::PyObject: {
+      auto py_obj = v.toPyObjectHolder();
+      return out << "<PyObject at" << py_obj.get() << ">";
     }
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
