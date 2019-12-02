@@ -260,6 +260,9 @@ The following functions will use the corresponding magic method on :any:`TorchSc
 {}
 
 These built-in functions do have a schema
+
+.. rst-class:: codeblock-height-limiter
+
 ::
 
 {}
@@ -270,7 +273,7 @@ These built-in functions do have a schema
 
 def _list_supported_ops():
     def emit_block(decls):
-        return '\n::\n\n{}\n'.format(''.join('    {}\n\n'.format(d) for d in decls))
+        return '\n.. rst-class:: codeblock-height-limiter\n\n::\n\n{}\n'.format(''.join('    {}\n\n'.format(d) for d in decls))
 
     body = ''
     op_gathering_fns = (
