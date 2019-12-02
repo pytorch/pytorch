@@ -254,7 +254,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       if (metaDataPos >= metaData.second || n == 0) {
         return 0;
       }
-      size_t toCopy = std::min(metaDataPos + n, metaData.second) - metaDataPos;
+      size_t toCopy =
+        std::min(metaDataPos + n, metaData.second) - metaDataPos;
       memcpy(buf, metaData.first + metaDataPos, toCopy);
       metaDataPos += toCopy;
       return toCopy;
