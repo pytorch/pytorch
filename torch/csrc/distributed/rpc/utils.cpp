@@ -187,28 +187,29 @@ std::string wireSerialize(
   };
   std::vector<Ent> entries;
   std::string metaEntry;
+  std::vector<jit::WriteableTensorData> tensorData;
+
   if (!payload.empty()) {
     entries.push_back({kPayload, payload.data(), payload.size()});
   }
 
-  std::unique_ptr<torch::jit::Pickler> pickler;
   if (!tensors.empty()) {
-    pickler = c10::guts::make_unique<torch::jit::Pickler>(
+    torch::jit::Pickler pickler(
         [&](const void* buf, size_t sz) -> size_t {
           metaEntry.append(static_cast<const char*>(buf), sz);
           return sz;
         },
         nullptr);
-    pickler->protocol();
-    pickler->pushIValue(tensors);
-    pickler->stop();
-    // Memory kept in scope for the function by pickler.
-    auto writeable_tensors = pickler->tensorData();
+    pickler.protocol();
+    pickler.pushIValue(tensors);
+    pickler.stop();
+    // tensorData is in function scope so that the data() pointers stay valid.
+    tensorData = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
-    for (size_t i = 0; i < writeable_tensors.size(); i++) {
+    for (size_t i = 0; i < tensorData.size(); i++) {
       entries.push_back({c10::to_string(i),
-                         writeable_tensors[i].data(),
-                         writeable_tensors[i].sizeInBytes()});
+                         tensorData[i].data(),
+                         tensorData[i].sizeInBytes()});
     }
   }
 
