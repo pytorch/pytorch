@@ -191,17 +191,19 @@ std::string wireSerialize(
     entries.push_back({kPayload, payload.data(), payload.size()});
   }
 
+  std::unique_ptr<torch::jit::Pickler> pickler;
   if (!tensors.empty()) {
-    torch::jit::Pickler pickler(
+    pickler = c10::guts::make_unique<torch::jit::Pickler>(
         [&](const void* buf, size_t sz) -> size_t {
           metaEntry.append(static_cast<const char*>(buf), sz);
           return sz;
         },
         nullptr);
-    pickler.protocol();
-    pickler.pushIValue(tensors);
-    pickler.stop();
-    auto writeable_tensors = pickler.tensorData();
+    pickler->protocol();
+    pickler->pushIValue(tensors);
+    pickler->stop();
+    // Memory kept in scope for the function by pickler.
+    const auto& writeable_tensors = pickler->tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
     for (size_t i = 0; i < writeable_tensors.size(); i++) {
       entries.push_back({c10::to_string(i),
@@ -252,8 +254,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       if (metaDataPos >= metaData.second || n == 0) {
         return 0;
       }
-      size_t toCopy =
-        std::min(metaDataPos + n, metaData.second) - metaDataPos;
+      size_t toCopy = std::min(metaDataPos + n, metaData.second) - metaDataPos;
       memcpy(buf, metaData.first + metaDataPos, toCopy);
       metaDataPos += toCopy;
       return toCopy;
