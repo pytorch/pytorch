@@ -8,7 +8,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
-#include <torch/csrc/utils/auto_gil.h>
+#include <pybind11/pybind11.h>
 #include <ATen/core/EnableNamedTensor.h>
 
 #ifndef _WIN32
@@ -33,11 +33,11 @@ static Engine& get_python_engine() {
 namespace torch { namespace autograd { namespace python {
 
 void PythonEngine::thread_init(int device) {
-  // Create a PyThreadState, but release the GIL. This lets AutoGIL calls
+  // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
-  AutoGIL gil;
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_acquire gil;
+  pybind11::gil_scoped_release no_gil;
   Engine::thread_init(device);
 }
 
@@ -76,7 +76,7 @@ variable_list PythonEngine::execute_with_graph_task(
   try {
     return Engine::execute_with_graph_task(graph_task, graph_root);
   } catch (python_error& e) {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {
       // Set the error indicator only if it is not set already.
       e.restore();
@@ -194,7 +194,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
   variable_list outputs;
   {
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
   }
 
@@ -219,10 +219,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   HANDLE_TH_ERRORS
   _maybe_reinitialize_engine_after_fork();
-  std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { AutoGIL gil; Py_DECREF(obj); });
+  std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { pybind11::gil_scoped_acquire gil; Py_DECREF(obj); });
   Py_INCREF(_callback);
   engine.queue_callback([callback]() {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     THPObjectPtr result {PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) throw python_error();
   });

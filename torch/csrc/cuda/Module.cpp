@@ -217,7 +217,7 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
     if (mutex->try_lock())
       break;
     {
-      AutoNoGIL no_gil;
+      pybind11::gil_scoped_release no_gil;
       std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
   }

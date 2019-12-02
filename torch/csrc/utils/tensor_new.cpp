@@ -1,11 +1,11 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/tensor_new.h>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -87,25 +87,25 @@ void maybe_initialize_cuda(const Device device) {
 
 Tensor dispatch_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::zeros(sizes, options(type_id, scalar_type, device));
 }
 
 Tensor dispatch_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::ones(sizes, options(type_id, scalar_type, device));
 }
 
 Tensor dispatch_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, Scalar fill_value, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::full(sizes, fill_value, options(type_id, scalar_type, device));
 }
 
 Tensor new_with_sizes(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::empty(sizes, options(type_id, scalar_type, device));
 }
 
@@ -247,7 +247,7 @@ Tensor internal_new_from_data(
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(type_id)));
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
   }
@@ -258,7 +258,7 @@ Tensor internal_new_from_data(
     auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
@@ -268,7 +268,7 @@ Tensor internal_new_from_data(
     auto tensor = tensor_from_numpy(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
@@ -288,7 +288,7 @@ Tensor internal_new_from_data(
         inferred_scalar_type, tensor.dtype().itemsize(), data);
   }
   auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   maybe_initialize_cuda(device);
   // However, it is VERY important that we trace the to() call here (even
   // though the reason this is important is a hack).  Without *some* factory
