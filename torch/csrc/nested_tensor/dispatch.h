@@ -1,3 +1,4 @@
+#pragma once
 
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>

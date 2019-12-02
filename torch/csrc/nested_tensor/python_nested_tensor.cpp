@@ -3,6 +3,7 @@
 #include <torch/csrc/nested_tensor/generated/dispatch.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/python_strings.h>
 
 namespace torch {
 namespace nested_tensor {
@@ -11,6 +12,24 @@ using namespace at;
 using namespace torch::autograd;
 using namespace torch::autograd::utils;
 namespace py = pybind11;
+
+inline PyObject* wrap_list(std::vector<PyObject*> list) {
+  auto r = THPObjectPtr{PyTuple_New(list.size())};
+  if (!r)
+    throw python_error();
+  for (size_t i = 0; i < list.size(); ++i) {
+    PyTuple_SET_ITEM(r.get(), i, list[i]);
+  }
+  return r.release();
+}
+
+inline PyObject* wrap_nt(
+    torch::nested_tensor::_ListNestedTensor nested_tensor) {
+  // TODO: Necessary to create new object?
+  // What about copy behavior?
+  return _ListNestedTensorVariable_Wrap(
+      torch::nested_tensor::_ListNestedTensor(nested_tensor));
+}
 
 PyObject* _ListNestedTensorVariableClass = nullptr;
 
@@ -22,7 +41,7 @@ PyObject* _ListNestedTensorVariable_nested_size(PyObject* self_) {
   return map_more<PyObject*>(
       self.get_structure(),
       [](at::Tensor tensor) -> PyObject* { return wrap(tensor.sizes()); },
-      [](std::vector<PyObject*> list) -> PyObject* { return wrap(list); });
+      [](std::vector<PyObject*> list) -> PyObject* { return wrap_list(list); });
 }
 
 PyObject* _ListNestedTensorVariable_nested_stride(PyObject* self_) {
@@ -33,7 +52,7 @@ PyObject* _ListNestedTensorVariable_nested_stride(PyObject* self_) {
   return map_more<PyObject*>(
       self.get_structure(),
       [](at::Tensor tensor) -> PyObject* { return wrap(tensor.strides()); },
-      [](std::vector<PyObject*> list) -> PyObject* { return wrap(list); });
+      [](std::vector<PyObject*> list) -> PyObject* { return wrap_list(list); });
 }
 
 PyObject* _ListNestedTensorVariable_to(
@@ -54,13 +73,13 @@ PyObject* _ListNestedTensorVariable_to(
     Py_INCREF(self_);
     return self_;
   } else if (!device) {
-    return wrap(
+    return _ListNestedTensorVariable_Wrap(
         self.to(scalarType.value(), non_blocking, copy, opt_memory_format));
   } else if (!scalarType) {
-    return wrap(self.to(
+    return _ListNestedTensorVariable_Wrap(self.to(
         self.options().device(device), non_blocking, copy, opt_memory_format));
   } else {
-    return wrap(self.to(
+    return _ListNestedTensorVariable_Wrap(self.to(
         device.value(),
         scalarType.value(),
         non_blocking,
@@ -174,7 +193,7 @@ static PyObject* _ListNestedTensorVariable_dtype(
     void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));
+  return THPUtils_packString(torch::getDtype(self_.scalar_type())->name);
   END_HANDLE_TH_ERRORS
 }
 
@@ -183,7 +202,7 @@ static PyObject* _ListNestedTensorVariable_layout(
     void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getLayout(self_.backend()));
+  return THPUtils_packString(torch::getLayout(self_.backend())->name);
   END_HANDLE_TH_ERRORS
 }
 
@@ -194,6 +213,39 @@ static PyObject* _ListNestedTensorVariable_device(
   auto& self_ = self->cdata;
   return THPDevice_New(self_.device());
   END_HANDLE_TH_ERRORS
+}
+
+static std::string _NestedNode___str__(const _NestedNode& nested_node) {
+  std::stringstream result;
+  if (nested_node._children.size() == 0) {
+    PyObject* objectsRepresentation =
+        PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
+    result << THPUtils_unpackString(objectsRepresentation);
+    return result.str();
+  } else {
+    result << "nested_tensor([";
+    result << std::endl;
+    for (_NestedNode node : nested_node._children) {
+      result << "  ";
+      result << _NestedNode___str__(node);
+      result << ",";
+      result << std::endl;
+    }
+    result << "])";
+    return result.str();
+  }
+}
+
+std::string _ListNestedTensor::__str__() {
+  return _NestedNode___str__(_structure);
+}
+
+// NOTE: Don't delete this. repr is an important concept, this
+// implementation is just faulty due to torch.Tensor.__repr__
+// TODO: Assuming that there is no difference in __str__ and __repr__ for
+// torch.Tensor.
+std::string _ListNestedTensor::__repr__() {
+  return _NestedNode___str__(_structure);
 }
 
 static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {

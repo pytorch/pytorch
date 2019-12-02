@@ -34,11 +34,6 @@ inline PyObject* wrap(double value) {
   return PyFloat_FromDouble(value);
 }
 
-inline PyObject* wrap(std::string value) {
-  //Copies the object and interprets it as UTF-8
-  return PyUnicode_FromStringAndSize(value.c_str(), value.size());
-}
-
 inline PyObject* wrap(std::complex<double> value) {
   // I could probably also use FromComplex with a reinterpret cast,
   // but... eh.
@@ -200,12 +195,4 @@ inline PyObject* wrap(at::IntArrayRef list) {
   return r.release();
 }
 
-inline PyObject* wrap(std::vector<PyObject*> list) {
-  auto r = THPObjectPtr{PyTuple_New(list.size())};
-  if (!r) throw python_error();
-  for (size_t i = 0; i < list.size(); ++i) {
-    PyTuple_SET_ITEM(r.get(), i, list[i]);
-  }
-  return r.release();
-}
 }}} // namespace torch::autograd::utils

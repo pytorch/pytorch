@@ -214,27 +214,6 @@ static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
   }
 }
 
-static std::string _NestedNode___str__(const _NestedNode& nested_node) {
-  std::stringstream result;
-  if (nested_node._children.size() == 0) {
-    PyObject* objectsRepresentation =
-        PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
-    result << PyBytes_AsString(PyUnicode_AsUTF8String(objectsRepresentation));
-    return result.str();
-  } else {
-    result << "nested_tensor([";
-    result << std::endl;
-    for (_NestedNode node : nested_node._children) {
-      result << "  ";
-      result << _NestedNode___str__(node);
-      result << ",";
-      result << std::endl;
-    }
-    result << "])";
-    return result.str();
-  }
-}
-
 static Variable _NestedNode_to_tensor(const _NestedNode& nested_node) {
   if (nested_node._children.size() == 0) {
     return nested_node._variable_node._variable;
@@ -325,16 +304,8 @@ struct TORCH_API _ListNestedTensor {
   int64_t __len__() {
     return _structure._children.size();
   }
-  std::string __str__() {
-    return _NestedNode___str__(_structure);
-  }
-  // NOTE: Don't delete this. repr is an important concept, this
-  // implementation is just faulty due to torch.Tensor.__repr__
-  // TODO: Assuming that there is no difference in __str__ and __repr__ for
-  // torch.Tensor.
-  std::string __repr__() {
-    return _NestedNode___str__(_structure);
-  }
+  std::string __str__();
+  std::string __repr__();
   Variable to_tensor() {
     return _NestedNode_to_tensor(_structure);
   }
@@ -427,16 +398,4 @@ static PyObject* _ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
 }
 
 } // namespace nested_tensor
-} // namespace torch
-namespace torch {
-namespace autograd {
-namespace utils {
-inline PyObject* wrap(torch::nested_tensor::_ListNestedTensor nested_tensor) {
-  // TODO: Necessary to create new object?
-  // What about copy behavior?
-  return _ListNestedTensorVariable_Wrap(
-      torch::nested_tensor::_ListNestedTensor(nested_tensor));
-}
-} // namespace utils
-} // namespace autograd
 } // namespace torch
