@@ -11,7 +11,6 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -56,14 +55,6 @@ inline PyObject* wrap(at::ScalarType scalarType) {
 inline PyObject* wrap(THPLayout *layout) {
   Py_INCREF(layout);
   return (PyObject*)layout;
-}
-
-inline PyObject* wrap(at::Layout layout) {
-  return THPLayout_New(layout, "name");
-}
-
-inline PyObject* wrap(at::Device device) {
-  return THPDevice_New(device);
 }
 
 inline PyObject* wrap(at::Tensor tensor) {
@@ -194,5 +185,4 @@ inline PyObject* wrap(at::IntArrayRef list) {
   }
   return r.release();
 }
-
 }}} // namespace torch::autograd::utils
