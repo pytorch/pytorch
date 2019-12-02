@@ -407,6 +407,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
                 self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
                 self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
             def forward(self, input1, input2, input3):
                 return self.conv1(input1), self.conv2(input2), self.conv3(input3)
 
@@ -416,6 +417,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
                 self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
                 self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
             @torch.jit.script_method
             def forward(self, input1, input2, input3):
                 return self.conv1(input1), self.conv2(input2), self.conv3(input3)
@@ -434,6 +436,7 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super(TraceModel, self).__init__()
                 self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
             def forward(self, input2):
                 return self.conv2(input2)
 
@@ -441,6 +444,7 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super(ScriptModel, self).__init__()
                 self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
             @torch.jit.script_method
             def forward(self, input2):
                 return self.conv2(input2)
