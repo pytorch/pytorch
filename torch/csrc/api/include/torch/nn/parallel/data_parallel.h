@@ -64,7 +64,7 @@ struct ReduceAdd : public autograd::Node {
   ~ReduceAdd() override {}
 
   autograd::variable_list apply(autograd::variable_list&& inputs) override {
-    TORCH_CHECK(!compute_requires_grad(inputs),
+    TORCH_CHECK(!torch::autograd::compute_requires_grad(inputs),
         "ReduceAdd can only be used during the backward pass of data parallel.");
 
     Tensor output = torch::zeros_like(inputs[0], {destination_device_});

@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <c10d/GlooDeviceFactory.hpp>
+
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -30,28 +32,6 @@
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
-
-#if GLOO_HAVE_TRANSPORT_TCP
-#include <gloo/transport/tcp/device.h>
-#endif
-
-#if GLOO_HAVE_TRANSPORT_UV
-#include <gloo/transport/uv/device.h>
-#endif
-
-// On Linux, check that the tcp transport is available.
-#ifdef __linux__
-#if !GLOO_HAVE_TRANSPORT_TCP
-#error "Expected the tcp transport to be available on Linux."
-#endif
-#endif
-
-// On macOS, check that the uv transport is available.
-#ifdef __APPLE__
-#if !GLOO_HAVE_TRANSPORT_UV
-#error "Expected the uv transport to be available on macOS."
-#endif
-#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -351,10 +331,11 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-void ProcessGroupGloo::SendWork::wait() {
+bool ProcessGroupGloo::SendWork::wait() {
+  bool sendCompleted = false;
   std::unique_lock<std::mutex> lock(mutex_);
   try {
-    buffer_->waitSend();
+    sendCompleted = buffer_->waitSend();
   } catch (...) {
     exception_ = std::current_exception();
   }
@@ -363,6 +344,11 @@ void ProcessGroupGloo::SendWork::wait() {
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+  return sendCompleted;
+}
+
+void ProcessGroupGloo::SendWork::abort() {
+  buffer_->abortWaitSend();
 }
 
 ProcessGroupGloo::RecvWork::RecvWork(
@@ -375,10 +361,11 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
   return srcRank_;
 }
 
-void ProcessGroupGloo::RecvWork::wait() {
+bool ProcessGroupGloo::RecvWork::wait() {
+  bool recvCompleted = false;
   std::unique_lock<std::mutex> lock(mutex_);
   try {
-    buffer_->waitRecv(&srcRank_);
+    recvCompleted = buffer_->waitRecv(&srcRank_);
   } catch (...) {
     exception_ = std::current_exception();
   }
@@ -387,6 +374,11 @@ void ProcessGroupGloo::RecvWork::wait() {
   if (exception_) {
     std::rethrow_exception(exception_);
   }
+  return recvCompleted;
+}
+
+void ProcessGroupGloo::RecvWork::abort() {
+  buffer_->abortWaitRecv();
 }
 
 ProcessGroupGloo::Options::Options()
@@ -428,70 +420,40 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 
 } // namespace
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForInterface(const std::string& interface) {
-  ::gloo::transport::tcp::attr attr;
-  attr.iface = interface;
-  return ::gloo::transport::tcp::CreateDevice(attr);
+  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface);
 }
 #endif
 
-#ifdef __APPLE__
-std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForInterface(const std::string& interface) {
-  ::gloo::transport::uv::attr attr;
-  attr.iface = interface;
-  return ::gloo::transport::uv::CreateDevice(attr);
-}
-#endif
-
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
-  ::gloo::transport::tcp::attr attr;
-  attr.hostname = hostname;
   TORCH_CHECK(
-      doesHostnameResolveToUsableAddress(attr.hostname),
+      doesHostnameResolveToUsableAddress(hostname),
       "Cannot resolve ",
       hostname,
       " to a (local) address");
-  return ::gloo::transport::tcp::CreateDevice(attr);
-}
-#endif
-
-#ifdef __APPLE__
-std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForHostname(const std::string& hostname) {
-  ::gloo::transport::uv::attr attr;
-  attr.hostname = hostname;
-  TORCH_CHECK(
-      doesHostnameResolveToUsableAddress(attr.hostname),
-      "Cannot resolve ",
-      hostname,
-      " to a (local) address");
-  return ::gloo::transport::uv::CreateDevice(attr);
+  return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
 }
 #endif
 
 #ifdef __linux__
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice() {
-  ::gloo::transport::tcp::attr attr;
-
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
-  std::array<char, HOST_NAME_MAX> buffer{};
-  auto rv = gethostname(buffer.data(), buffer.size());
+  std::array<char, HOST_NAME_MAX> hostname{};
+  auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
     throw std::system_error(errno, std::system_category());
   }
-  attr.hostname = buffer.data();
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
-    return ::gloo::transport::tcp::CreateDevice(attr);
+  if (doesHostnameResolveToUsableAddress(hostname.data())) {
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname.data());
   }
 
   // Otherwise, use the loopback address.
@@ -506,22 +468,19 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 #ifdef __APPLE__
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice() {
-  ::gloo::transport::uv::attr attr;
-
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
   const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-  auto buffer = std::unique_ptr<char[]>(new char[hostNameMax]);
-  auto rv = gethostname(buffer.get(), hostNameMax);
+  auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
+  auto rv = gethostname(hostname.get(), hostNameMax);
   if (rv != 0) {
     throw std::system_error(errno, std::system_category());
   }
-  attr.hostname = buffer.get();
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(attr.hostname)) {
-    return ::gloo::transport::uv::CreateDevice(attr);
+  if (doesHostnameResolveToUsableAddress(hostname.get())) {
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname.get());
   }
 
   // Otherwise, use the loopback address.

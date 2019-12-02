@@ -258,8 +258,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   pushString(tensor.device().str());
   // size
   pushInt(tensor.storage().size());
-  // view_metadata
-  push<PickleOpCode>(PickleOpCode::NONE);
+
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
