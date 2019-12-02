@@ -6109,6 +6109,10 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
         self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
 
+        # this is only implemented on cpu
+        if (torch.device(device).type == 'cpu'):
+            self.assertRaises(RuntimeError, lambda: torch.ormqr(zero_d, zero_d, zero_d))
+
         # max, min
         self.assertEqual((), torch.max(zero_d, zero_d).shape)
         self.assertEqual((1,), torch.max(one_d, zero_d).shape)
@@ -6119,6 +6123,111 @@ class TestTorchDeviceType(TestCase):
 
         # diag
         self.assertRaises(RuntimeError, lambda: torch.diag(zero_d))
+
+        zero_d_int = torch.tensor(1, device=device)
+        one_d_int = torch.tensor([1], device=device)
+
+        # lshift, rshift
+        self.assertEqual((), (zero_d_int >> zero_d_int).shape)
+        self.assertEqual((), (zero_d_int >> 1).shape)
+        self.assertEqual((1,), (one_d_int >> zero_d_int).shape)
+        self.assertEqual((1,), (zero_d_int >> one_d_int).shape)
+        self.assertEqual((1,), (one_d_int >> 1).shape)
+
+        self.assertEqual((), (zero_d_int << zero_d_int).shape)
+        self.assertEqual((), (zero_d_int << 1).shape)
+        self.assertEqual((1,), (one_d_int << zero_d_int).shape)
+        self.assertEqual((1,), (zero_d_int << one_d_int).shape)
+        self.assertEqual((1,), (one_d_int << 1).shape)
+
+        # or
+        self.assertEqual((), (zero_d_int | zero_d_int).shape)
+        self.assertEqual((), (zero_d_int | 1).shape)
+        self.assertEqual((1,), (one_d_int | zero_d_int).shape)
+        self.assertEqual((1,), (zero_d_int | one_d_int).shape)
+        self.assertEqual((1,), (one_d_int | 1).shape)
+
+        # and
+        self.assertEqual((), (zero_d_int & zero_d_int).shape)
+        self.assertEqual((), (zero_d_int & 1).shape)
+        self.assertEqual((1,), (one_d_int & zero_d_int).shape)
+        self.assertEqual((1,), (zero_d_int & one_d_int).shape)
+        self.assertEqual((1,), (one_d_int & 1).shape)
+
+        # _multinomial_alias_draw
+        self.assertRaises(RuntimeError, lambda: torch._multinomial_alias_draw(zero_d, zero_d_int, 10))
+
+        # clone
+        self.assertEqual((), zero_d.clone().shape)
+
+        zero_d_bool = torch.tensor(True, device=device)
+        one_d_bool = torch.tensor([True], device=device)
+
+        # masked_select
+        self.assertEqual((1,), torch.masked_select(zero_d_bool, zero_d_bool).shape)
+        self.assertEqual((1,), torch.masked_select(zero_d_bool, one_d_bool).shape)
+        self.assertEqual((1,), torch.masked_select(one_d_bool, zero_d_bool).shape)
+
+        zero_d_uint8 = torch.tensor(1, dtype=torch.uint8, device=device)
+        one_d_uint8 = torch.tensor([1], dtype=torch.uint8, device=device)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.assertEqual((1,), torch.masked_select(zero_d_uint8, zero_d_uint8).shape)
+            self.assertEqual((1,), torch.masked_select(zero_d_uint8, one_d_uint8).shape)
+            self.assertEqual((1,), torch.masked_select(one_d_uint8, zero_d_uint8).shape)
+
+        # mode
+        self.assertEqual([(), ()], [x.shape for x in torch.mode(zero_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.mode(zero_d, dim=0, keepdim=False)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.mode(one_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.mode(one_d, dim=0, keepdim=False)])
+
+        # max
+        self.assertEqual([(), ()], [x.shape for x in torch.max(zero_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.max(zero_d, dim=0, keepdim=False)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.max(one_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.max(one_d, dim=0, keepdim=False)])
+
+        # min
+        self.assertEqual([(), ()], [x.shape for x in torch.min(zero_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.min(zero_d, dim=0, keepdim=False)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.min(one_d, dim=0, keepdim=True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.min(one_d, dim=0, keepdim=False)])
+
+        # set_
+        zero_d_clone = zero_d.clone()
+        one_d_clone = one_d.clone()
+        self.assertEqual((), zero_d_clone.set_(one_d.storage(), 0, (), ()).shape)
+        self.assertEqual((1,), zero_d_clone.set_(one_d.storage(), 0, (1,), (1,)).shape)
+        self.assertEqual((), one_d_clone.set_(one_d.storage(), 0, (), ()).shape)
+        self.assertEqual((1,), one_d_clone.set_(one_d.storage(), 0, (1,), (1,)).shape)
+
+        self.assertEqual((), zero_d.clone().set_(zero_d).shape)
+        self.assertEqual((), one_d.clone().set_(zero_d).shape)
+        self.assertEqual((1,), zero_d.clone().set_(one_d).shape)
+        self.assertEqual((1,), one_d.clone().set_(one_d).shape)
+
+        # take
+        self.assertEqual((), torch.randn((2, 3), device=device).take(zero_d_int).shape)
+        self.assertEqual((1,), torch.randn((2, 3), device=device).take(one_d_int).shape)
+
+        # gather
+        self.assertEqual((), torch.gather(zero_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(zero_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((), torch.gather(one_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(one_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+
+        # normal
+        # documentation says out shape matches shape of mean
+        self.assertEqual((), torch.normal(zero_d, zero_d).shape)
+        self.assertEqual((1,), torch.normal(one_d, zero_d).shape)
+        self.assertEqual((), torch.normal(1, zero_d).shape)
+        self.assertEqual((), torch.normal(zero_d, 1).shape)
+        self.assertEqual((1,), torch.normal(one_d, 1).shape)
+        # TODO: this behavior differs on CPU and GPU, see https://github.com/pytorch/pytorch/issues/30480.
+        # self.assertEqual((), torch.normal(zero_d, one_d).shape)
+        # self.assertEqual((), torch.normal(1, one_d).shape)
 
     @onlyCPU
     @dtypes(torch.float)

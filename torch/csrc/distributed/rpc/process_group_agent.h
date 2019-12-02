@@ -14,7 +14,7 @@ namespace distributed {
 namespace rpc {
 
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() noexcept = default;
+  ProcessGroupRpcBackendOptions() = default;
   int numSendRecvThreads;
 };
 
@@ -50,6 +50,8 @@ class ProcessGroupAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
   const WorkerInfo& getWorkerInfo(worker_id_t id) const override;
+
+  std::vector<WorkerInfo> getWorkerInfos() const override;
 
   void join() override;
 

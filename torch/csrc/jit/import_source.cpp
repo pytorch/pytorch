@@ -371,10 +371,7 @@ struct SourceImporterImpl : public Resolver,
 
     // Populate class constants
     for (const auto& assign : constants) {
-      TORCH_INTERNAL_ASSERT(assign.lhs().kind() == TK_VAR);
-      const auto type = assign.type().get();
-      auto rhs = assign.rhs().get();
-      auto const_val = type_parser.parseConstant(type, rhs);
+      auto const_val = type_parser.parseClassConstant(assign);
       const auto name = Var(assign.lhs()).name().name();
       class_type->addConstant(name, const_val);
     }

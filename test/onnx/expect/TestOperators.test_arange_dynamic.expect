@@ -5,10 +5,12 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Shape_0"
     op_type: "Shape"
   }
   node {
     output: "2"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -23,6 +25,7 @@ graph {
     input: "1"
     input: "2"
     output: "3"
+    name: "Gather_2"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -33,10 +36,12 @@ graph {
   node {
     input: "0"
     output: "4"
+    name: "Shape_3"
     op_type: "Shape"
   }
   node {
     output: "5"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -51,6 +56,7 @@ graph {
     input: "4"
     input: "5"
     output: "6"
+    name: "Gather_5"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -60,6 +66,7 @@ graph {
   }
   node {
     output: "7"
+    name: "Constant_6"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -74,23 +81,13 @@ graph {
     input: "6"
     input: "7"
     output: "8"
+    name: "Add_7"
     op_type: "Add"
-  }
-  node {
-    output: "9"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 11
-        raw_data: "\000\000\000\000\000\000\340?"
-      }
-      type: TENSOR
-    }
   }
   node {
     input: "3"
     output: "10"
+    name: "Cast_8"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -101,16 +98,7 @@ graph {
   node {
     input: "8"
     output: "11"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 1
-      type: INT
-    }
-  }
-  node {
-    input: "9"
-    output: "12"
+    name: "Cast_9"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -121,11 +109,17 @@ graph {
   node {
     input: "10"
     input: "11"
-    input: "12"
+    input: "14"
     output: "13"
+    name: "Range_10"
     op_type: "Range"
   }
   name: "torch-jit-export"
+  initializer {
+    data_type: 1
+    name: "14"
+    raw_data: "\000\000\000?"
+  }
   input {
     name: "0"
     type {
