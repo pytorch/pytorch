@@ -384,7 +384,14 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
 
-  std::vector<int64_t> result_size = self.sizes().vec();
+  auto _size_no_scalars = [](const Tensor & self) -> std::vector<int64_t>  {
+    if (self.dim() == 0) {
+      return {1};
+    } else {
+      return self.sizes().vec();
+    }
+  };
+  auto result_size = _size_no_scalars(self);
   result_size[dim] = numel;
   result.resize_(result_size);
 
