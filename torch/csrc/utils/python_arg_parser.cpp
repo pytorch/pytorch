@@ -152,7 +152,7 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       // fallthrough
     case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj) || THPUtils_checkLong(obj)) {
+      if (THPUtils_checkDouble(obj)) {
         return true;
       }
       if (THPVariable_Check(obj)) {
