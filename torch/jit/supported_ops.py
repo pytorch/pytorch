@@ -149,7 +149,12 @@ def _get_math_builtins():
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
             for schema in schemas:
-                functions.append(_emit_schema(mod.__name__, fn.__name__, schema))
+                schema = _emit_schema(mod.__name__, fn.__name__, schema)
+                if 'Tensor' in schema:
+                    # Skip Tensor ops that have the same name as math functions
+                    # (they will show up in the tensor methods section)
+                    continue
+                functions.append(schema)
                 pass
 
     return "``math`` Module", functions
