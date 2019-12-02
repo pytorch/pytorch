@@ -31,9 +31,11 @@ PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
 
 PyRRef::PyRRef(const py::object& value)
     : PyRRef([&value]() {
-        auto rref = RRefContext::getInstance().createOwnerRRef<py::object>();
+        auto rref = RRefContext::getInstance().createOwnerRRef(PyObjectType::get());
         py::object copy(value); // increases refcount
-        rref->setValue(std::move(copy));
+        IValue py_ivalue =
+          jit::toIValue(std::move(copy), PyObjectType::get());
+        rref->setValue(std::move(py_ivalue));
         return rref;
       }()) {}
 
@@ -52,10 +54,10 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
       // GIL.
-      return std::static_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
+      return py::cast<py::object>(std::static_pointer_cast<UserRRef>(rref_)->toHere().toPyObject());
     } else {
       IValue value =
-          std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
+          std::static_pointer_cast<UserRRef>(rref_)->toHere();
 
       {
         // acquiring GIL as torch::jit::toPyObject creates new py::object
@@ -75,8 +77,7 @@ py::object PyRRef::localValue() {
 
   if (rref_->isPyObj()) {
     const py::object& value =
-        std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
-
+        py::cast<py::object>(std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue().toPyObject());
     PythonRpcHandler::getInstance().handleException(value);
     {
       // acquiring GIL as the return statement construct a new py::object from
@@ -86,7 +87,7 @@ py::object PyRRef::localValue() {
     }
   } else {
     auto value =
-        std::dynamic_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
+        std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue();
     {
       // acquiring GIL as torch::jit::toPyObject creates new py::object without
       // grabbing the GIL.

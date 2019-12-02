@@ -22,6 +22,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -68,8 +69,6 @@ Message RequestCallbackImpl::processRpc(
       auto& src = static_cast<ScriptRemoteCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
 
-      auto ownerRRef = ctx.getOrCreateOwnerRRef<IValue>(src.retRRefId());
-
       // TODO: make this asynchronous
       // src is only alive within this block, use reference to avoid copy
       auto& stack = src.stackRef();
@@ -81,6 +80,8 @@ Message RequestCallbackImpl::processRpc(
           "size ",
           stack.size());
 
+      TypePtr ret_type = stack.front().type();
+      auto ownerRRef = ctx.getOrCreateOwnerRRef(src.retRRefId(), ret_type);
       ownerRRef->setValue(std::move(stack.front()));
       ctx.addForkOfOwner(src.retRRefId(), src.retForkId());
       return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
@@ -92,10 +93,12 @@ Message RequestCallbackImpl::processRpc(
       auto forkId = ForkId::fromIValue(prc.retForkId());
       auto& ctx = RRefContext::getInstance();
 
-      auto ownerRRef = ctx.getOrCreateOwnerRRef<py::object>(rrefId);
+      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
 
-      ownerRRef->setValue(
-          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
+      IValue py_ivalue =
+        jit::toIValue(PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()), PyObjectType::get());
+
+      ownerRRef->setValue(std::move(py_ivalue));
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -114,18 +117,18 @@ Message RequestCallbackImpl::processRpc(
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
       // TODO: make this asynchronous
-      std::shared_ptr<OwnerRRef<IValue>> rref =
-          ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
+      std::shared_ptr<OwnerRRef> rref =
+          ctx.getOrCreateOwnerRRef(srf.rrefId());
       return ScriptRRefFetchRet({rref->getValue()}).toMessage();
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
       // TODO: make this asynchronous
-      std::shared_ptr<OwnerRRef<py::object>> rref =
-          ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
+      std::shared_ptr<OwnerRRef> rref =
+          ctx.getOrCreateOwnerRRef(prf.rrefId());
       SerializedPyObj result =
-          PythonRpcHandler::getInstance().serialize(rref->getValue());
+          PythonRpcHandler::getInstance().serialize(py::cast<py::object>(rref->getValue().toPyObject()));
       return PythonRRefFetchRet(result.toIValues()).toMessage();
     }
     case MessageType::RREF_USER_DELETE: {
