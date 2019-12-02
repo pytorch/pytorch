@@ -285,12 +285,6 @@ static auto registry = torch::RegisterOperators().op(
      return at::flatten(self, start_dim, end_dim);
   })
 ).op(
-  "_aten::Int",
-  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
-                                           [](at::Tensor a) -> int64_t {
-                                             return a.item<int64_t>();
-  })
-).op(
   "_prim::NumToTensor",
   torch::RegisterOperators::options().catchAllKernel(
   [](at::Scalar s) -> at::Tensor {
