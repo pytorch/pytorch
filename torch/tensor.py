@@ -743,4 +743,8 @@ class Tensor(torch._C._TensorBase):
                           "be populated. See .retain_grad() if you want the gradient to be saved.")
         return super(Tensor, self).grad
 
+    @grad.setter
+    def grad(self, new_grad):
+        super(Tensor, self).grad = new_grad
+
     __module__ = 'torch'
