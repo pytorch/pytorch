@@ -208,9 +208,8 @@ def _get_global_builtins():
         'getattr': 'Attribute name must be a literal string',
         'hasattr': 'Attribute name must be a literal string',
         'isinstance': 'Result is static',
-        'zip': 'Arguments must be a Tensor, list, tuple, dictionary, '
-               ':any:`torch.nn.ModuleList` or :any:`torch.nn.ModuleDict`',
-        'enumerate': 'Arguments must be lists',
+        'zip': 'Arguments must be iterable. See :ref:`Iterables <jit_iterables>` for details.',
+        'enumerate': 'Arguments must be iterable. See :ref:`Iterables <jit_iterables>` for details.',
         'range': 'Can only be used as an iterator in a for loop',
     }
 

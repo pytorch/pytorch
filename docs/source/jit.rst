@@ -745,6 +745,16 @@ Types produced by :func:`collections.namedtuple <collections.namedtuple>` can be
     ...
 
 
+.. _jit_iterables:
+
+Iterables
+^^^^^^^^^
+
+Some functions (for example, :any:`zip` and :any:`enumerate`) can only operate on iterable types.
+Iterable types in TorchScript include ``Tensor``\s, lists, tuples, dictionaries, strings,
+:any:`torch.nn.ModuleList` and :any:`torch.nn.ModuleDict`.
+
+
 Expressions
 ~~~~~~~~~~~
 
@@ -1635,7 +1645,7 @@ rather build up the result tensor out-of-place with ``torch.cat``:
 .. _Builtin functions:
 
 Built-in Functions and Modules
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 See :ref:`builtin-functions` for a full reference of supported functions.
 
