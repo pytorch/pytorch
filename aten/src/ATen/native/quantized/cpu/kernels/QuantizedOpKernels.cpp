@@ -197,7 +197,6 @@ void qclamp_kernel(
     Scalar min_scalar,
     Scalar max_scalar,
     Tensor& qy) {
-  const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
@@ -213,7 +212,6 @@ void qclamp_kernel(
         at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), min);
     scalar_t max_q =
         at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), max);
-    auto zero_point_vec = Vec(scalar_t(zero_point));
     auto min_vec = Vec(min_q);
     auto max_vec = Vec(max_q);
     cpu_kernel_vec(
