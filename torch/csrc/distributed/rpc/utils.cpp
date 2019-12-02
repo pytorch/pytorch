@@ -203,7 +203,7 @@ std::string wireSerialize(
     pickler->pushIValue(tensors);
     pickler->stop();
     // Memory kept in scope for the function by pickler.
-    const auto& writeable_tensors = pickler->tensorData();
+    auto writeable_tensors = pickler->tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
     for (size_t i = 0; i < writeable_tensors.size(); i++) {
       entries.push_back({c10::to_string(i),
