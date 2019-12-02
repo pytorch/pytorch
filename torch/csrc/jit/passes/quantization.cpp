@@ -144,12 +144,9 @@ class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
       : module_qconfig_map_(map) {}
-  void insertObserversForMethodAndInvokedMethods(script::Module& module, const std::string& method_name);
+  void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
-  void insertObserversForInvokedMethods(
-      script::Module& module, const std::string& method_name);
-
   void insertObserverFor(
       Value* v,
       Graph* g,
@@ -278,8 +275,10 @@ graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %g
   rewriter.runOnGraph(graph, filter);
 }
 
-void InsertObserversHelper::insertObserversForInvokedMethods(
-    script::Module& module, const std::string& method_name) {
+std::vector<std::pair<script::Module, std::string>> getInvokedMethods(
+    script::Module& module,
+    const std::string& method_name) {
+  std::vector<std::pair<script::Module, std::string>> invoked_methods;
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
@@ -310,7 +309,7 @@ void InsertObserversHelper::insertObserversForInvokedMethods(
             callee_module.get_method(module_method_name).graph();
         // Recursively insert observer for the forward function of child
         // module
-        insertObserversForMethodAndInvokedMethods(callee_module, module_method_name);
+        invoked_methods.push_back({callee_module, module_method_name});
       }
 
       for (Block* subblock : n->blocks()) {
@@ -318,7 +317,7 @@ void InsertObserversHelper::insertObserversForInvokedMethods(
       }
     }
   }
-
+  return invoked_methods;
 }
 
 
@@ -411,12 +410,17 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   }
 }
 
-void InsertObserversHelper::insertObserversForMethodAndInvokedMethods(
+void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
   if (!module_qconfig_map_.count(module._ivalue())) {
     // the module is added by us, e.g.: observer module
     return;
+  }
+  for (auto& invoked_methods: getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_methods);
+    const auto& invoked_method_name = std::get<1>(invoked_methods);
+    insertObservers(invoked_module, invoked_method_name);
   }
 
   script::Method method = module.get_method(method_name);
@@ -429,7 +433,6 @@ void InsertObserversHelper::insertObserversForMethodAndInvokedMethods(
       const auto& observer = std::get<1>(observer_attrs);
       module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
     }
-    insertObserversForInvokedMethods(module, method_name);
     return;
   }
 
@@ -437,7 +440,6 @@ void InsertObserversHelper::insertObserversForMethodAndInvokedMethods(
   // must do constant propagation first before replacement
   replaceConvolutionWithConv2d(graph);
   addIntermediateValuesToSkipObserver(module, method_name);
-  insertObserversForInvokedMethods(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -833,7 +835,7 @@ TORCH_API script::Module InsertObservers(
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
-  helper.insertObserversForMethodAndInvokedMethods(module, method_name);
+  helper.insertObservers(module, method_name);
   return module;
 }
 
