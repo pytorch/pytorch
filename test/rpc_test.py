@@ -409,6 +409,8 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
             info = WorkerInfo("", worker_id)
 
+        # If the number in the message does not match, it is likely that the
+        # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             info = WorkerInfo("".join(["a" for i in range(500)]), worker_id)
 
