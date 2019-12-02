@@ -82,7 +82,7 @@ struct PythonResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -101,7 +101,7 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -707,7 +707,8 @@ void initJitScriptBindings(PyObject* module) {
             return pp.str();
           })
       .def("apply", &Module::apply)
-      .def("_clone", &Module::clone);
+      .def("_clone", &Module::clone)
+      .def("_clone_instance", &Module::clone_instance);
 
   slot_dict_impl<script::detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<script::detail::BufferPolicy>::bind(m, "BufferDict");
@@ -993,9 +994,9 @@ void initJitScriptBindings(PyObject* module) {
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
-  m.def("_ivalue_debug_python_object", [](py::object py_obj){
-    IValue pyobj_ivalue = toIValue(py_obj, PythonObjType::get());
-    py::handle ret = pyobj_ivalue.toPythonObject()->getPyObject();
+  m.def("_ivalue_debug_python_object", [](py::object py_obj) {
+    IValue pyobj_ivalue = toIValue(std::move(py_obj), PyObjectType::get());
+    py::handle ret = pyobj_ivalue.toPyObject();
     return ret;
   });
   m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);

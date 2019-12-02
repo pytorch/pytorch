@@ -82,13 +82,13 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
 }
-inline c10::intrusive_ptr<ivalue::PythonObject> IValue::toPythonObject() && {
-  TORCH_INTERNAL_ASSERT(isPythonObject(), "Expected PythonObject but got", tagKind());
-  return moveToIntrusivePtr<ivalue::PythonObject>();
+inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() && {
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  return moveToIntrusivePtr<ivalue::PyObjectHolder>();
 }
-inline c10::intrusive_ptr<ivalue::PythonObject> IValue::toPythonObject() const & {
-  TORCH_INTERNAL_ASSERT(isPythonObject(), "Expected PythonObject but got", tagKind());
-  return toIntrusivePtr<ivalue::PythonObject>();
+inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() const & {
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  return toIntrusivePtr<ivalue::PyObjectHolder>();
 }
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
@@ -190,7 +190,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 };
 
 struct Object;
-struct PythonObject;
+struct PyObjectHolder;
 }
 
 // Future
@@ -400,16 +400,24 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 };
 
 // ivalue Holder that hold a PyObject*
-struct C10_EXPORT ivalue::PythonObject final : c10::intrusive_ptr_target {
+struct C10_EXPORT ivalue::PyObjectHolder final : c10::intrusive_ptr_target {
+ private:
+  c10::intrusive_ptr<ivalue::PyObjectHolder> intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
+    return c10::intrusive_ptr<ivalue::PyObjectHolder>::reclaim(this);
+  }
  public:
-  static c10::intrusive_ptr<PythonObject> create(PyObject* py_obj) {
-    return c10::make_intrusive<PythonObject>(py_obj);
+  static c10::intrusive_ptr<ivalue::PyObjectHolder> create(PyObject* py_obj) {
+    return c10::make_intrusive<ivalue::PyObjectHolder>(py_obj);
   }
   PyObject* getPyObject() {
     return py_obj_;
   }
 
-  PythonObject(PyObject* py_obj): py_obj_(py_obj) {}
+  PyObjectHolder(PyObject* py_obj): py_obj_(py_obj) {}
  private:
     PyObject* py_obj_;
 };
@@ -494,7 +502,8 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
-C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+// TODO this is deprecated but we don't throw a warning because a lot of ops in native_functions.yaml still return std::vector.
+//C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -772,8 +781,8 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(c10::intrusive_ptr<ivalue::PythonObject> v)
-: tag(Tag::PythonObject), is_intrusive_ptr(true) {
+inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
+: tag(Tag::PyObject), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)
@@ -789,6 +798,9 @@ inline const std::string& IValue::toStringRef() const {
   return toString()->string();
 }
 
+inline PyObject* IValue::toPyObject() const {
+  return toPyObjectHolder()->getPyObject();
+}
 template<typename T>
 inline optional<T> IValue::toOptional() {
   if (this->isNone()) {
