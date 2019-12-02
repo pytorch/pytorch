@@ -1247,7 +1247,7 @@ struct PythonPrintImpl {
       const auto& v = moduleType->getConstant(name).value();
 
       indent();
-      body_ << name << " : " << "Final[" + v.type()->python_str() << "] = ";
+      body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
       auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
       printConstant(*ss, v);
       body_ << ss->str() << "\n";

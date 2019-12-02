@@ -234,6 +234,26 @@ class RpcTest(RpcAgentTestFixture):
             unknown_worker_id = rpc.get_worker_info("WorkerUnknown")
 
     @dist_init
+    def test_get_worker_infos(self):
+        worker_infos = rpc.api._agent.get_worker_infos()
+
+        worker_names = {
+            worker_info.name for worker_info in worker_infos
+        }
+        expected_worker_names = {
+            "worker{}".format(rank) for rank in range(self.world_size)
+        }
+        self.assertEqual(worker_names, expected_worker_names)
+
+        worker_ids = {
+            worker_info.id for worker_info in worker_infos
+        }
+        expected_worker_ids = {
+            rank for rank in range(self.world_size)
+        }
+        self.assertEqual(worker_ids, expected_worker_ids)
+
+    @dist_init
     def test_self_add(self):
         self_worker_info = rpc.get_worker_info()
         self_worker_name = "worker{}".format(self.rank)
@@ -306,7 +326,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker1",
             backend=backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -334,7 +353,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -357,7 +375,6 @@ class RpcTest(RpcAgentTestFixture):
             rpc.init_rpc(
                 name="worker{}".format(self.rank),
                 backend=self.rpc_backend,
-                init_method=self.init_method,
                 rank=self.rank,
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
@@ -513,7 +530,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1090,6 +1106,49 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
+    def _test_rref_leak(self, ignore_leak=False):
+        rpc.init_rpc(
+            name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+
+        rref = rpc.remote(
+            "worker{}".format((self.rank + 1) % self.world_size),
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )
+
+        if ignore_leak:
+            import torch.distributed.rpc.api as api
+            api._ignore_rref_leak = True
+
+        rpc.wait_all_workers()
+
+    @dist_init(setup_rpc=False)
+    def test_rref_leak(self):
+        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+            self._test_rref_leak()
+
+    @dist_init(setup_rpc=False)
+    def test_ignore_rref_leak(self):
+        self._test_rref_leak(ignore_leak=True)
+
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
@@ -1102,7 +1161,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
-            init_method=self.init_method,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=rpc_backend_options,

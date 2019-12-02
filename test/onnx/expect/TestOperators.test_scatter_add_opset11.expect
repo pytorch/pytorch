@@ -4,6 +4,7 @@ producer_version: "1.3"
 graph {
   node {
     output: "3"
+    name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -21,6 +22,7 @@ graph {
     input: "1"
     input: "2"
     output: "4"
+    name: "ScatterElements_1"
     op_type: "ScatterElements"
     attribute {
       name: "axis"
@@ -32,6 +34,7 @@ graph {
     input: "0"
     input: "4"
     output: "5"
+    name: "Add_2"
     op_type: "Add"
   }
   name: "torch-jit-export"

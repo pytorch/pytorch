@@ -439,7 +439,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
     for key in sorted(serialized_storages.keys()):
-        name = 'tensors/{}'.format(key)
+        name = 'data/{}'.format(key)
         storage = serialized_storages[key]
         num_bytes = storage.size() * storage.element_size()
         zip_file.write_record(name, storage.data_ptr(), num_bytes)
@@ -525,6 +525,11 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     with _open_file_like(f, 'rb') as opened_file:
         if _is_zipfile(opened_file):
             with _open_zipfile_reader(f) as opened_zipfile:
+                if _is_torchscript_zip(opened_zipfile):
+                    warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
+                                  " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
+                                  " silence this warning)", UserWarning)
+                    return torch.jit.load(f)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
@@ -754,7 +759,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     def load_tensor(obj, size, key, location):
         loaded_storages[key] = restore_location(obj, location)
-        name = 'tensors/{}'.format(key)
+        name = 'data/{}'.format(key)
         size_long = struct.pack("<Q", size)
         tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
         offset = None
@@ -768,7 +773,6 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
         assert typename == 'storage', \
             "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
-
         data_type, key, location, size = data
         if key not in loaded_storages:
             load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
@@ -782,3 +786,11 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
     result = unpickler.load()
 
     return result
+
+
+def _is_torchscript_zip(zip_file):
+    for file_name in zip_file.get_all_records():
+        parts = file_name.split(os.sep)
+        if len(parts) > 1 and parts[1] == 'constants.pkl':
+            return True
+    return False

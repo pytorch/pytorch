@@ -82,13 +82,6 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto key_type = parseTypeFromExpr(subscript.subscript_exprs()[0]);
     auto value_type = parseTypeFromExpr(subscript.subscript_exprs()[1]);
     return DictType::create(key_type, value_type);
-  } else if (typeName == "Final"){
-    if (subscript.subscript_exprs().size() != 1) {
-      throw ErrorReport(subscript)
-          << " expected exactly one element type but found "
-          << subscript.subscript_exprs().size();
-    }
-    return parseTypeFromExpr(*subscript.subscript_exprs().begin());
   } else {
     throw ErrorReport(subscript.range())
         << "Unknown type constructor " << typeName;
@@ -339,7 +332,10 @@ FunctionSchema ScriptTypeParser::parseSchemaFromDef(
       name, "", std::move(args), std::move(returns), false, false);
 }
 
-c10::IValue ScriptTypeParser::parseConstant(const Expr& final_type, const Expr& expr) {
+c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
+  TORCH_INTERNAL_ASSERT(assign.lhs().kind() == TK_VAR);
+  const auto final_type = assign.type().get();
+  auto expr = assign.rhs().get();
   TORCH_INTERNAL_ASSERT(final_type.kind() == TK_SUBSCRIPT);
   auto subscript = Subscript(final_type);
   auto value_name = parseBaseTypeName(subscript.value());
