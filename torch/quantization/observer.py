@@ -150,7 +150,7 @@ class _ObserverBase(ObserverBase):
                 min_val, max_val
             )
         else:
-            assert torch.sum(min_val < max_val) == len(min_val), "min {} should be less than max {}".format(
+            assert torch.sum(min_val <= max_val) == len(min_val), "min {} should be less than max {}".format(
                 min_val, max_val
             )
 
@@ -181,8 +181,8 @@ class _ObserverBase(ObserverBase):
             scale = (max_val - min_val) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(1.0).new_full(scale.size(), self.eps, dtype=torch.float32))
             zero_point = qmin - torch.round(min_val / scale)
-            zero_point = torch.max(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmin))
-            zero_point = torch.min(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmax))
+            zero_point = torch.max(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmin, dtype=torch.float32))
+            zero_point = torch.min(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmax, dtype=torch.float32))
 
         return scale, zero_point
 
