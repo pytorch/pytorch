@@ -412,10 +412,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     iter.add_input(selfSlice);
     iter.build();
 
-    auto nthreads = at::get_num_threads();
     auto grain_size = at::internal::GRAIN_SIZE;
-    auto serial_execution = iter.numel() * numel < grain_size || nthreads == 1;
-
     auto outer_loop = [&](int64_t start, int64_t end) {
       auto sub_iter = TensorIterator(iter);
       for (int64_t i = start; i < end; i++) {
@@ -429,13 +426,26 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
       }
     };
 
-    if (serial_execution) {
+    // parallel on inner loop in case the slice is large enough;
+    // otherwise parallel on outer loop
+    if (slice_size >= grain_size) {
       outer_loop(0, numel);
     } else {
-      // the parallel path will atemp to do parallelization on the outer loop
-      // in case the index size is big enough; otherwise the outer loop go serial
-      // and parallelization will be done on inner loop.
-      at::parallel_for(0, numel, grain_size / slice_size, outer_loop);
+      // use a fast loop when self and result are contiguous and of the same data type
+      if (iter.is_contiguous() && self.scalar_type() == result.scalar_type()) {
+        auto slice_size_bytes = slice_size * elementSize(self.scalar_type());
+        at::parallel_for(0, numel, grain_size / slice_size, [&](int64_t start, int64_t end) {
+          for (int64_t i = start; i < end; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+            auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+            auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
+            memcpy(result_data, self_data, slice_size_bytes);
+          }
+        });
+      } else {
+        at::parallel_for(0, numel, grain_size / slice_size, outer_loop);
+      }
     }
   } else {
     TORCH_CHECK(result.dim() <= 1, "result.dim() (", result.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
