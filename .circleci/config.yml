@@ -678,6 +678,7 @@ jobs:
         no_output_timeout: "5m"
         command: |
             source /env
+            mv /tmp/upload_binary_size_to_scuba.py /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py
             pip3 install requests
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
             CIRCLE_SHA1=${SHA1} python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0

@@ -26,6 +26,7 @@ export CIRCLE_SHA1=${SHA1}
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
+cp .circleci/scripts/upload_binary_size_to_scuba.py /tmp/
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
   git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
