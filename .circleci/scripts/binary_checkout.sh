@@ -21,6 +21,7 @@ fi
 # It is very important that this stays in sync with binary_populate_env.sh
 export PYTORCH_ROOT="$workdir/pytorch"
 export BUILDER_ROOT="$workdir/builder"
+export CIRCLE_SHA1=${SHA1}
 
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"

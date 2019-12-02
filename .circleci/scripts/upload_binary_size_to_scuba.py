@@ -39,9 +39,8 @@ def build_message(size):
             "pr": pr,
             "build": build_num,
             "sha1": sha1,
-            "size": size,
         },
-        "int": {"time": int(time.time())},
+        "int": {"time": int(time.time()), "size": size},
     }
 
 
