@@ -100,6 +100,11 @@ struct LivenessAnalyzer {
         mtc->destroy();
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
+        // everything that is alive at the beginning of the loop
+        // needs to be extended until the end of the loop
+        for (Node* lit : it->blocks()[0]->nodes()) {
+          liveness_sets_.at(lit) |= loop_block;
+        }
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
         auto true_liveness = processBlock(it->blocks()[0], liveness);
