@@ -170,16 +170,17 @@ class _ObserverBase(ObserverBase):
 
         scale = torch.ones(min_val.size(), dtype=torch.float32)
         zero_point = torch.zeros(min_val.size(), dtype=torch.int64)
+        device = 'cuda' if scale.is_cuda else 'cpu'
 
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
             max_val = torch.max(-min_val, max_val)
             scale = max_val / (float(qmax - qmin) / 2)
-            scale = torch.max(scale, torch.tensor(1.0).new_full(scale.size(), self.eps, dtype=torch.float32))
+            scale = torch.max(scale, torch.tensor(1.0, device=device).new_full(scale.size(), self.eps, dtype=torch.float32))
             if self.dtype == torch.quint8:
                 zero_point = zero_point.new_full(zero_point.size(), 128)
         else:
             scale = (max_val - min_val) / float(qmax - qmin)
-            scale = torch.max(scale, torch.tensor(1.0).new_full(scale.size(), self.eps, dtype=torch.float32))
+            scale = torch.max(scale, torch.tensor(1.0, device=device).new_full(scale.size(), self.eps, dtype=torch.float32))
             zero_point = qmin - torch.round(min_val / scale)
             zero_point = torch.max(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmin, dtype=torch.float32))
             zero_point = torch.min(zero_point, torch.tensor(1.0).new_full(zero_point.size(), qmax, dtype=torch.float32))
