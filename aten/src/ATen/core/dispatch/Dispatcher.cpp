@@ -56,9 +56,7 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
-      std::ostringstream str;
-      str << schema << " vs " << found->schema();
-      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", found->schema());
     }
     if (options.isDefaultAliasAnalysisKind()) {
       // just do nothing and let it pass.
