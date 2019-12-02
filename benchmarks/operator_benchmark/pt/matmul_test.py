@@ -12,6 +12,7 @@ import torch
 mm_short_configs = op_bench.config_list(
     attr_names=["M", "N", "K", "trans_a", "trans_b"],
     attrs=[
+        [1, 1, 1, True, False],
         [128, 128, 128, True, False],
         [256, 256, 256, False, True],
     ],
