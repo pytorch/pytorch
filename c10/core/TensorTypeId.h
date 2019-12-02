@@ -45,7 +45,7 @@ enum class TensorTypeId : uint8_t {
   // WARNING! If you add more "wrapper" style tensor ids (tensor
   // ids which don't get kernels directly defined in native_functions.yaml;
   // examples are tracing or profiling) here, you need to also adjust
-  // legacyExtractTypeId in c10/core/TensorTypeId.h to mask them out.
+  // legacyExtractTypeId in c10/core/TensorTypeSet.h to mask them out.
 
   VariableTensorId,
 
