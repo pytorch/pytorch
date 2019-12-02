@@ -193,7 +193,7 @@ static PyObject* _ListNestedTensorVariable_dtype(
     void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return THPUtils_packString(torch::getDtype(self_.scalar_type())->name);
+  return wrap(torch::getDtype(self_.scalar_type()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -202,7 +202,7 @@ static PyObject* _ListNestedTensorVariable_layout(
     void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return THPUtils_packString(torch::getLayout(self_.backend())->name);
+  return wrap(torch::getLayout(self_.backend()));
   END_HANDLE_TH_ERRORS
 }
 
