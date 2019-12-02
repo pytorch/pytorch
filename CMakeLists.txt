@@ -81,11 +81,23 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
-if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
-  set(CPU_INTEL ON)
+if (WIN32)
+  # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
+  # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
+  # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
+  if ($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 else ()
-  set(CPU_INTEL OFF)
+  if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 endif ()
+
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
