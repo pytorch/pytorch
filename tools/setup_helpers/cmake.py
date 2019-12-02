@@ -267,6 +267,8 @@ class CMake:
             # are automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
+            # Most library detection should go to CMake script, except this one, which Python can do a much better job
+            # due to NumPy's inherent Pythonic nature.
             'USE_NUMPY': USE_NUMPY,
         })
 
