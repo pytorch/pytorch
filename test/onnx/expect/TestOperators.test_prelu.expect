@@ -3,27 +3,19 @@ producer_name: "pytorch"
 producer_version: "1.3"
 graph {
   node {
-    input: "weight"
-    output: "2"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 1
-      ints: 2
-      type: INTS
-    }
-  }
-  node {
     input: "input"
-    input: "2"
+    input: "4"
     output: "3"
+    name: "PRelu_0"
     op_type: "PRelu"
   }
   name: "torch-jit-export"
   initializer {
     dims: 2
+    dims: 1
+    dims: 1
     data_type: 1
-    name: "weight"
+    name: "4"
     raw_data: "\000\000\200>\000\000\200>"
   }
   input {
@@ -49,13 +41,19 @@ graph {
     }
   }
   input {
-    name: "weight"
+    name: "4"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
             dim_value: 2
+          }
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 1
           }
         }
       }

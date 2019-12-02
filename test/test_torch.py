@@ -6212,6 +6212,32 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), one_d_clone.set_(one_d.storage(), 0, (), ()).shape)
         self.assertEqual((1,), one_d_clone.set_(one_d.storage(), 0, (1,), (1,)).shape)
 
+        self.assertEqual((), zero_d.clone().set_(zero_d).shape)
+        self.assertEqual((), one_d.clone().set_(zero_d).shape)
+        self.assertEqual((1,), zero_d.clone().set_(one_d).shape)
+        self.assertEqual((1,), one_d.clone().set_(one_d).shape)
+
+        # take
+        self.assertEqual((), torch.randn((2, 3), device=device).take(zero_d_int).shape)
+        self.assertEqual((1,), torch.randn((2, 3), device=device).take(one_d_int).shape)
+
+        # gather
+        self.assertEqual((), torch.gather(zero_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(zero_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((), torch.gather(one_d, 0, torch.zeros((), dtype=torch.int64, device=device)).shape)
+        self.assertEqual((1,), torch.gather(one_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
+
+        # normal
+        # documentation says out shape matches shape of mean
+        self.assertEqual((), torch.normal(zero_d, zero_d).shape)
+        self.assertEqual((1,), torch.normal(one_d, zero_d).shape)
+        self.assertEqual((), torch.normal(1, zero_d).shape)
+        self.assertEqual((), torch.normal(zero_d, 1).shape)
+        self.assertEqual((1,), torch.normal(one_d, 1).shape)
+        # TODO: this behavior differs on CPU and GPU, see https://github.com/pytorch/pytorch/issues/30480.
+        # self.assertEqual((), torch.normal(zero_d, one_d).shape)
+        # self.assertEqual((), torch.normal(1, one_d).shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
