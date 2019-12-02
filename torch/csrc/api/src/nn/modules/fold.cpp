@@ -23,7 +23,13 @@ void FoldImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor FoldImpl::forward(const Tensor& input) {
-  return F::fold(input, options);
+  return F::detail::fold(
+    input,
+    options.output_size(),
+    options.kernel_size(),
+    options.dilation(),
+    options.padding(),
+    options.stride());
 }
 
 // ============================================================================
@@ -41,7 +47,7 @@ void UnfoldImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor UnfoldImpl::forward(const Tensor& input) {
-  return F::unfold(input, options);
+  return F::detail::unfold(input, options.kernel_size(), options.dilation(), options.padding(), options.stride());
 }
 
 } // namespace nn

@@ -114,7 +114,6 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  TORCH_INTERNAL_ASSERT(tensor.is_variable());
   PyObject* py_tensor = THPVariable_Wrap(tensor);
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
@@ -169,8 +168,8 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
       sizes,
       strides,
       [obj](void* data) {
-          AutoGIL gil;
-          Py_DECREF(obj);
+        pybind11::gil_scoped_acquire gil;
+        Py_DECREF(obj);
       },
       at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array)))
   );
@@ -321,8 +320,8 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       sizes,
       strides,
       [obj](void* data) {
-          AutoGIL gil;
-          Py_DECREF(obj);
+        pybind11::gil_scoped_acquire gil;
+        Py_DECREF(obj);
       },
       at::device(kCUDA).dtype(dtype)
   );

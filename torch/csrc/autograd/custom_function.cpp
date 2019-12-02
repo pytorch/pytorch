@@ -55,21 +55,21 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
       var.grad().reset();
-      var.clear_hooks();
-      if (auto grad_acc_fn = var.try_get_grad_accumulator()) {
+      impl::clear_hooks(var);
+      if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
         grad_acc->variable.reset();
       }
       if (cdata) {
-        var.rebase_history({cdata, output_nr});
+        impl::rebase_history(var, {cdata, output_nr});
       }
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
       var = var.view_as(var);
-      var.set_gradient_edge({cdata, output_nr});
+      impl::set_gradient_edge(var, {cdata, output_nr});
     } else if (cdata) {
-      var.set_gradient_edge({cdata, output_nr});
+      impl::set_gradient_edge(var, {cdata, output_nr});
     }
   };
 

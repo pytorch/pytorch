@@ -38,10 +38,8 @@
 #include <torch/csrc/utils.h> // This requires defined Storage and Tensor types
 #include <torch/csrc/utils/byte_order.h>
 
-#ifdef _THP_CORE
 #include <torch/csrc/serialization.h>
 
 #include <torch/csrc/autograd/python_autograd.h>
-#endif
 
 #endif

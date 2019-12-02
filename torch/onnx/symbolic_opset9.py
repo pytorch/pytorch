@@ -376,8 +376,16 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def split(g, self, split_size, dim):
+def split(g, self, split_size_or_sizes, dim):
+    if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
+                           .format('split_size_or_sizes', split_size_or_sizes))
+    split_val = split_size_or_sizes.node()['value']
+    if split_val.dim() > 0:
+        return split_with_sizes(g, self, split_size_or_sizes, dim)
+    split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
+    dim = sym_help._get_const(dim, 'i', 'dim')
+
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
@@ -827,6 +835,38 @@ def __or_(g, input, other):
     return g.op('Or', input, other)
 
 
+def __rshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    rshift = g.op('Div', self, two_pow)
+    return rshift
+
+
+def __lshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    lshift = g.op('Mul', self, two_pow)
+    return lshift
+
+
 def where(g, condition, self, other):
     return g.op("Where", condition, self, other)
 
@@ -836,13 +876,23 @@ def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     # TODO: remove this as onnx opset 11 spec allows negative axes
+    input_dim = input.type().dim()
+    if input_dim is None:
+        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input. Input rank must be known at export time.")
     if dim < 0:
-        dim = input.type().dim() + dim
-    if input.type().dim() != dim + 1:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
+        dim = input_dim + dim
+    is_transpose_required = (input_dim != dim + 1)
+    # ONNX only supports log_softmax with dim = -1. Transpose must be added before and after log_softmax to support other cases.
+    if is_transpose_required:
+        axes = list(range(input_dim))
+        axes[dim], axes[-1] = axes[-1], axes[dim]
+        input = g.op("Transpose", input, perm_i=axes)
+        dim = input_dim - 1
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != 'prim::Constant':
         return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
+    if is_transpose_required:
+        return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
 
 
@@ -883,9 +933,6 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if len(input_sizes) == 2:
-        # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
-        input = g.op("Unsqueeze", input, axes_i=[2])
 
     if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
@@ -897,13 +944,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
+
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
                outputs=1 if not training else 5)
     if not training:
-        if len(input_sizes) == 2:
-            out = g.op("Squeeze", out, axes_i=[2])
         return out
     else:
         res, new_running_mean, new_running_var, saved_mean, saved_var = out
@@ -911,8 +957,6 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         new_running_var.setType(running_var.type())
         saved_mean.setDebugName("batch_norm_dead_output-" + saved_mean.debugName())
         saved_var.setDebugName("batch_norm_dead_output-" + saved_var.debugName())
-        if len(input_sizes) == 2:
-            res = g.op("Squeeze", res, axes_i=[2])
         return res
 
 
@@ -976,11 +1020,6 @@ def unfold(g, input, dimension, size, step):
         return g.op("Concat", *unsqueeze, axis_i=dimension)
     else:
         return _unimplemented("Unfold", "input size not accessible")
-
-
-@parse_args('v', 'v', 'i')
-def _weight_norm(graph, v, g, dim):
-    return graph.op("ATen", v, g, dim_i=dim, operator_s="_weight_norm")
 
 
 @parse_args('v', 't', 't', 't')
@@ -1211,8 +1250,16 @@ def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None)
 
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
-def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def empty_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
+
+
+def scalar_tensor(g, scalar, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    scalar = g.op("Cast", scalar, to_i=sym_help.scalar_type_to_onnx[dtype])
+    return scalar
 
 
 @parse_args('v', 'i', 'v', 'v', 'v')
@@ -1225,7 +1272,7 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1242,7 +1289,7 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'i', 'v', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def ones_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1264,7 +1311,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
+def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1633,18 +1680,28 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
 
 def randn(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
 def rand(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, *others):
-    return g.op('RandomNormalLike', self)
+def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    return g.op('RandomNormalLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+
+
+def rand_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    return g.op('RandomUniformLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
 
 
 @parse_args('v', 'f', 'f', 'i', 'none')
@@ -2052,3 +2109,25 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
     axes = [i for i in range(1, len(input_sizes) - 1)]
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
+
+
+@parse_args('v', 'v', 'i')
+def _weight_norm(g, weight_v, weight_g, dim):
+    rank = weight_v.type().dim()
+    if rank:
+        # W = g * ((v) / ||v||)
+        # Compute norm_except_dim for l2 norm. dim = None means over all dims
+        # torch's weight_norm module sets dim = -1 if it's None.
+        # This conflicts the logic for negative axes to access dims backwards
+        # TODO: Might need a fix in torch group_norm module
+        axes = list(range(rank))
+        if dim:
+            if dim < -1:
+                dim += rank
+            if dim != -1:
+                axes.remove(dim)
+        norm_v = norm(g, weight_v, 2, axes, 1)
+        div = g.op("Div", weight_v, norm_v)
+        return g.op("Mul", div, weight_g)
+    else:
+        return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")

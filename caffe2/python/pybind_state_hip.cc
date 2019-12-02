@@ -47,6 +47,7 @@ void addHIPGlobalMethods(py::module& m) {
     obj["name"] = py::cast(prop.name);
     obj["major"] = py::cast(prop.major);
     obj["minor"] = py::cast(prop.minor);
+    obj["totalGlobalMem"] = py::cast(prop.totalGlobalMem);
     return obj;
   });
 };
