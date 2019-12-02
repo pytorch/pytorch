@@ -108,7 +108,7 @@ inline void assertTypeMatch(
     const at::TensorOptions& options,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
-  if (tensors[index].options().type_equal(options)) {
+  if (!tensors[index].options().type_equal(options)) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
        toString(options) + ", got " + toString(tensors[index].options()) + ")");
   }
