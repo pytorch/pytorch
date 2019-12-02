@@ -557,7 +557,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     //     for `as_strided` is not as efficient as that of `view` (since the
     //     former is meant to handle general cases).
   if (stride.has_value()) {
-    return alias_with_sizes_and_strides(self, shape, *stride);
+    return self.view(shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
