@@ -847,7 +847,7 @@ endif()
 
 
 if(USE_ROCM)
-  target_compile_definitions(torch_hip PRIVATE
+  target_compile_definitions(torch_hip PUBLIC  # experiment
     USE_ROCM
     __HIP_PLATFORM_HCC__
     )
@@ -1075,7 +1075,7 @@ if(USE_ROCM)
   hip_include_directories(${Caffe2_HIP_INCLUDE})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  target_compile_options(torch_hip PRIVATE ${HIP_CXX_FLAGS})
+  target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
   target_link_libraries(torch_hip PUBLIC c10_hip)
 
   if(NOT INTERN_BUILD_MOBILE)
