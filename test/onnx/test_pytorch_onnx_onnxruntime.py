@@ -729,8 +729,8 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_(self):
         class CopyModel(torch.nn.Module):
-            def forward(self, x, update):
-                x[1:3] = update
+            def forward(self, x, data):
+                x[1:3] = data
                 return x
 
         x = torch.randn(3, 4)
@@ -739,8 +739,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         # mixed slice and select
         class CopyModel2(torch.nn.Module):
-            def forward(self, x, update):
-                x[1:3, 0] = update
+            def forward(self, x, data):
+                x[1:3, 0] = data
                 return x
 
         x = torch.randn(3, 4)
@@ -754,8 +754,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CopyModel2(), (x, update))
 
         class CopyModel3(torch.nn.Module):
-            def forward(self, x, udpate):
-                x[1, 1:3] = update
+            def forward(self, x, data):
+                x[1, 1:3] = data
                 return x
 
         x = torch.randn(3, 4)
