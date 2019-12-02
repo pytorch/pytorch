@@ -1068,12 +1068,6 @@ floor() -> Tensor
 See :func:`torch.floor`
 """)
 
-add_docstr_all('floor_divide',
-               r"""
-floor() -> Tensor
-
-See :func:`torch.floor_divide`
-""")
 
 add_docstr_all('flip',
                r"""

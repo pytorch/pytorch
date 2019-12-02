@@ -71,12 +71,21 @@ Tensor& div_(Tensor& self, const Tensor& other) {
   return native::div_out(self, self, other);
 }
 
-Tensor floor_divide(const Tensor& self, const Tensor& other) {
-  Tensor out = self / other;
-  if (out.is_floating_point()) {
-    out = out.trunc();
+Tensor truncate(const Tensor& tensor) {
+  if (tensor.is_floating_point()) {
+    return tensor.trunc();
   }
-  return out;
+  return tensor;
+}
+
+Tensor floor_divide(const Tensor& input, const Tensor& other) {
+  Tensor out = input / other;
+  return truncate(out);
+}
+
+Tensor floor_divide(const Tensor& input, Scalar other) {
+  Tensor out = input / other;
+  return truncate(out);
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {

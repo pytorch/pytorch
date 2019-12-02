@@ -37,11 +37,11 @@ def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
-auto floordiv =
+auto floordiv = CodeTemplate(
     R"SCRIPT(
-def floordiv(self : Tensor, other : Tensor) -> Tensor:
-  return self.floor_divide(other)
-)SCRIPT";
+def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
+  return torch.floor_divide(self, other)
+)SCRIPT");
 
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(
@@ -102,7 +102,11 @@ struct BuiltinFunctionRegistry {
         loadSource(_ntuple_ops.format(env));
       }
     }
-    loadSource(floordiv);
+    for (auto rhs : {"number", "Tensor"}) {
+      TemplateEnv env;
+      env.s("Rhs_Type", rhs);
+      loadSource(floordiv.format(env));
+    }
   }
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
