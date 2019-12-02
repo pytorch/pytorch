@@ -29,7 +29,7 @@ static inline void adagrad_update_base_inlined(
     float gi = g[i];
     float hi = decay * h[i] + gi * gi;
     nh[i] = hi;
-    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
+    nw[i] = w[i] + lr / (std::sqrt(hi) + epsilon) * gi;
   }
 }
 
@@ -300,7 +300,7 @@ int sparse_adagrad(
       if (block_size == 1) {                                             \
         float gi = g[i];                                                 \
         float hi = nh[idx] = h[idx] + gi * gi;                           \
-        nw[idx] = w[idx] + lr * gi / (std::sqrt(hi) + epsilon);          \
+        nw[idx] = w[idx] + lr / (std::sqrt(hi) + epsilon) * gi;          \
       } else {                                                           \
         const int prefdist_T0 = 16;                                      \
         int i_pref = (i < num_rows - prefdist_T0) ? i + prefdist_T0 : i; \
