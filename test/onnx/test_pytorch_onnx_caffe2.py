@@ -151,7 +151,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                       example_outputs=example_outputs,
                                       do_constant_folding=False,
                                       opset_version=self.opset_version,
-                                      keep_initializers_as_inputs=True)
+                                      keep_initializers_as_inputs=True,
+                                      add_node_names=False)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -161,7 +162,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None, do_constant_folding=False):
+                        example_outputs=None, do_constant_folding=True):
         """
         This is what the user facing version will look like
         """
@@ -338,7 +339,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
         # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        # Constant folding works when model has parameters embedded. For this case, we need to disable it 
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -381,7 +384,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
         # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        # Constant folding works when model has parameters embedded. For this case, we need to disable it
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -422,7 +427,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
         # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        # Constant folding works when model has parameters embedded. For this case, we need to disable it
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -437,7 +444,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # predict net. When we embed parameters, there should be more
         # ops in the init net.
         mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params,
-                                                  keep_initializers_as_inputs=True)[0])
+                                                  keep_initializers_as_inputs=True,
+                                                  do_constant_folding=False)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
             assert len(prepared.init_net.op) == 875
@@ -1193,6 +1201,12 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
 
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
     def test_randn(self):
         x = torch.randn(1, 2, 3, 4)
 
@@ -1382,6 +1396,38 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(3, 4, 5)
         self.run_model_test(UnbindModel2(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_zero(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.zero_()
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_fill(self):
+        class Fill_(torch.nn.Module):
+            def forward(self, x):
+                return x.fill_(3)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_inplace_arithmetic(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                x = torch.ones(2, 3, 4)
+                y = torch.ones(2, 3, 4) * 2
+                x.add_(3)
+                y.mul_(x)
+                return x, y
+
+        x = torch.ones(2, 3, 4)
+        y = torch.ones(2, 3, 4) * 2
+        self.run_model_test(Arithmetic(), train=False, input=(), batch_size=BATCH_SIZE, use_gpu=False, example_outputs=(x + 3, y * (x + 3)))
 
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):

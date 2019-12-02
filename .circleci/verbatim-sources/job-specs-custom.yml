@@ -93,7 +93,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -107,7 +107,7 @@
             export IN_CIRCLECI=1
 
             # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
@@ -133,7 +133,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
@@ -154,11 +154,11 @@
       - store_test_results:
           path: test/test-reports
 
-  pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+  pytorch_macos_10_13_cuda10_0_cudnn7_py3_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda10.0-cudnn7-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -172,24 +172,24 @@
 
             export IN_CIRCLECI=1
 
-            # Install CUDA 9.2
-            sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
-            curl https://s3.amazonaws.com/ossci-macos/cuda_9.2.64_mac_installer.zip -o ~/cuda_9.2.64_mac_installer.zip
-            unzip ~/cuda_9.2.64_mac_installer.zip -d ~/
-            sudo ~/cuda_9.2.64_mac_installer.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
-            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-9.2/lib/libcuda.dylib
+            # Install CUDA 10.0
+            sudo rm -rf ~/CUDAMacOSXInstaller.app || true
+            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cuda_10.0.130_mac_installer.zip -o ~/cuda_10.0.130_mac_installer.zip
+            unzip ~/cuda_10.0.130_mac_installer.zip -d ~/
+            sudo ~/CUDAMacOSXInstaller.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
+            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-10.0/lib/libcuda.dylib
             sudo rm -rf /usr/local/cuda || true
 
-            # Install cuDNN 7.1 for CUDA 9.2
-            curl https://s3.amazonaws.com/ossci-macos/cudnn-9.2-osx-x64-v7.1.tgz -o ~/cudnn-9.2-osx-x64-v7.1.tgz
-            rm -rf ~/cudnn-9.2-osx-x64-v7.1 && mkdir ~/cudnn-9.2-osx-x64-v7.1
-            tar -xzvf ~/cudnn-9.2-osx-x64-v7.1.tgz -C ~/cudnn-9.2-osx-x64-v7.1
-            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/include/
-            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-9.2/lib/
-            sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
+            # Install cuDNN 7.6.5 for CUDA 10.0
+            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cudnn-10.0-osx-x64-v7.6.5.32.tgz -o ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz
+            rm -rf ~/cudnn-10.0-osx-x64-v7.6.5.32 && mkdir ~/cudnn-10.0-osx-x64-v7.6.5.32
+            tar -xzvf ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz -C ~/cudnn-10.0-osx-x64-v7.6.5.32
+            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/include/
+            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-10.0/lib/
+            sudo chmod a+r /Developer/NVIDIA/CUDA-10.0/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/lib/libcudnn*
 
             # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
@@ -412,19 +412,27 @@
             export TCLLIBPATH="/usr/local/lib"
 
             # Install conda
-            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            curl --retry 3 -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
             chmod +x ~/Downloads/conda.sh
             /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
             export PATH="~/anaconda/bin:${PATH}"
             source ~/anaconda/bin/activate
+
             # Install dependencies
-            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+            retry () {
+                $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
             git submodule update --init --recursive
+
             # export
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+
             # run build script
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
