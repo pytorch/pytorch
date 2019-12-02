@@ -1985,8 +1985,7 @@ add_docstr(torch.floor_divide,
            r"""
 floor_divide(input, other) -> Tensor
 
-Each element of the tensor ``input`` is divided by each element of the tensor
-``other``. The resulting tensor then truncated if it is floating point. See
+Return the division of the inputs rounded down to the nearest integer. See
 `torch.div` for type promotion and broadcasting rules.
 
 .. math::
@@ -1995,7 +1994,7 @@ Each element of the tensor ``input`` is divided by each element of the tensor
 """ + r"""
 Args:
     input (Tensor): the numerator tensor
-    other (Tensor): the denominator tensor
+    other (Tensor or Scalar): the denominator
 
 Example::
 
@@ -2003,6 +2002,8 @@ Example::
     >>> b = torch.tensor([2.0, 2.0])
     >>> a.floor_divide(b)
     tensor([2.0, 1.0])
+    >>> a.floor_divide(1.4)
+    tensor([2.0, 2.0])
 """.format(**common_args))
 
 add_docstr(torch.fmod,
