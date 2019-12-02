@@ -110,6 +110,8 @@ class ConvPackedParams(torch.nn.Module):
 
 
 class _ConvNd(nn.Module):
+    _version = 2
+
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', spatial_dim=2):
@@ -172,6 +174,19 @@ class _ConvNd(nn.Module):
     # QTensor weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+        if version is None or version == 1:
+            weight = state_dict.pop(prefix + 'weight')
+            bias = state_dict.pop(prefix + 'bias')
+            if isinstance(self, Conv2d):
+                spatial_dim = 2
+            elif isinstance(self, Conv3d):
+                spatial_dim = 3
+            state_dict.update({
+                prefix + '_packed_params.weight' : weight,
+                prefix + '_packed_params.bias' : bias,
+                prefix + '_packed_params.spatial_dim': spatial_dim
+            })
         self.scale = float(state_dict[prefix + 'scale'])
         state_dict.pop(prefix + 'scale')
         self.zero_point = int(state_dict[prefix + 'zero_point'])
