@@ -362,6 +362,13 @@ void initJITBindings(PyObject* module) {
                 UnpackQuantizedWeights(graph, paramsDict);
                 return paramsDict;
              },
+             pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                insertPermutes(graph, paramsDict);
+                return paramsDict;
+             },
              pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
