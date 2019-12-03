@@ -114,7 +114,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
-      "--std=c++11", compute.c_str(), "-default-device"};
+      "--std=c++14", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());

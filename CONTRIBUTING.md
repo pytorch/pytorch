@@ -650,7 +650,7 @@ two dynamic libraries, one linking with the other:
 
 ```CMake
 project(myproject CXX)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 add_library(foo SHARED foo.cpp)
 add_library(bar SHARED bar.cpp)
 # NB: don't forget to __declspec(dllexport) at least one symbol from foo,

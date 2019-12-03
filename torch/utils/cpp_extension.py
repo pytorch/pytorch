@@ -227,7 +227,7 @@ class BuildExtension(build_ext, object):
     A custom :mod:`setuptools` build extension .
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
-    minimum required compiler flags (e.g. ``-std=c++11``) as well as mixed
+    minimum required compiler flags (e.g. ``-std=c++14``) as well as mixed
     C++/CUDA compilation (and support for CUDA files in general).
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
@@ -291,7 +291,7 @@ class BuildExtension(build_ext, object):
                 # NVCC does not allow multiple -std to be passed, so we avoid
                 # overriding the option if the user explicitly passed it.
                 if not any(flag.startswith('-std=') for flag in cflags):
-                    cflags.append('-std=c++11')
+                    cflags.append('-std=c++14')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -1143,7 +1143,7 @@ def _write_ninja_file(path,
         from distutils.spawn import _nt_quote_args
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
+        cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
@@ -1157,7 +1157,7 @@ def _write_ninja_file(path,
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
-                cuda_flags.append('-std=c++11')
+                cuda_flags.append('-std=c++14')
 
         flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
