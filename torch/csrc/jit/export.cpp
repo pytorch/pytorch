@@ -791,11 +791,14 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
     const auto& func = method.function();
     torch::jit::Code code(func.graph());
     for (const auto& node : func.graph()->nodes()) {
-      auto opname = node->schema().operator_name();
-      std::string namestr = opname.name;
-      if (!opname.overload_name.empty())
-        namestr += "." + opname.overload_name;
-      opnames.emplace(namestr);
+      auto op = findOperatorFor(node);
+      if (op) {
+        auto opname = node->schema().operator_name();
+        std::string namestr = opname.name;
+        if (!opname.overload_name.empty())
+          namestr += "." + opname.overload_name;
+        opnames.emplace(namestr);
+      }
     }
   }
   for (const auto& sub_m : m.children()) {
