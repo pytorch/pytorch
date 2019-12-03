@@ -70,9 +70,9 @@ def benchmark_process_group(pg, benchmark):
     data = [(benchmark.generate_inputs(), benchmark.generate_target())]
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(),
-                                0.001,
-                                momentum=0.9,
-                                weight_decay=1e-4)
+                          0.001,
+                          momentum=0.9,
+                          weight_decay=1e-4)
     if pg.size() > 1:
         model = torch.nn.parallel.DistributedDataParallel(
             model,
