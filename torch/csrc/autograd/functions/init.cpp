@@ -18,7 +18,7 @@ using namespace torch::autograd;
 struct DelayedErrorCtor {
   DelayedError* operator()(PyObject* args) {
 
-    TORCH_CHECK(PyTuple_GET_SIZE(args) >= 2, "Too few arguments");
+    TORCH_CHECK(PyTuple_GET_SIZE(args) == 2, "Requires two arguments");
     auto arg1 = PyTuple_GET_ITEM(args, 0);
     TORCH_CHECK(THPUtils_checkString(arg1), "argument 'msg' must be a string");
     std::string msg = THPUtils_unpackString(arg1);
