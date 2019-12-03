@@ -145,7 +145,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
   {
     TestModel model;
     model.register_parameter("undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
-    ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
+    ASSERT_EQ(model.parameters().size(), 0);
   }
   {
     std::stringstream buffer;
@@ -153,7 +153,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
 
     TestModel model;
     model.register_parameter("undefined_tensor", torch::Tensor());
-    ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
+    ASSERT_EQ(model.parameters().size(), 0);
 
     ASSERT_EQ(
       count_substr_occurrences(
@@ -263,6 +263,43 @@ TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor) {
 
 TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor_CUDA) {
   test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCUDA, torch::kDouble);
+}
+
+TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
+  {
+    Linear module(LinearOptions(10, 20).bias(false));
+
+    auto params = module->parameters();
+    ASSERT_EQ(params.size(), 1);
+    auto named_params = module->named_parameters();
+    ASSERT_EQ(named_params.size(), 1);
+
+    ASSERT_TRUE(pointer_equal(params[0], named_params["weight"]));
+    ASSERT_TRUE(pointer_equal(named_params["weight"], module->weight));
+  }
+  {
+    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
+
+    auto buffers = module->buffers();
+    ASSERT_EQ(buffers.size(), 0);
+    auto named_buffers = module->named_buffers();
+    ASSERT_EQ(named_buffers.size(), 0);
+  }
+  {
+    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(true).affine(false));
+
+    auto buffers = module->buffers();
+    ASSERT_EQ(buffers.size(), 3);
+    auto named_buffers = module->named_buffers();
+    ASSERT_EQ(named_buffers.size(), 3);
+
+    ASSERT_TRUE(pointer_equal(buffers[0], named_buffers["running_mean"]));
+    ASSERT_TRUE(pointer_equal(named_buffers["running_mean"], module->running_mean));
+    ASSERT_TRUE(pointer_equal(buffers[1], named_buffers["running_var"]));
+    ASSERT_TRUE(pointer_equal(named_buffers["running_var"], module->running_var));
+    ASSERT_TRUE(pointer_equal(buffers[2], named_buffers["num_batches_tracked"]));
+    ASSERT_TRUE(pointer_equal(named_buffers["num_batches_tracked"], module->num_batches_tracked));
+  }
 }
 
 TEST_F(ModuleTest, Conversion_MultiCUDA) {
