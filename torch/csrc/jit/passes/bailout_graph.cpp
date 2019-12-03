@@ -75,6 +75,20 @@ struct BailOutGraphBuilderForNode {
     return this->old_to_new_[v];
   }
 
+  Node* cloneNode(Node* node) {
+    auto* block = copy_graph_->block();
+    auto env = [this](Value* v) { return getOrAddInputForValue(v); };
+
+    auto new_node = block->appendNode(copy_graph_->createClone(node, env));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      auto oo = node->outputs()[i];
+      auto no = new_node->outputs()[i];
+      old_to_new_[oo] = no;
+    }
+
+    return new_node;
+  }
+
   // buildBailOutBlockFrom builds a bailout graph from
   // a given node `n` until the end of the owning block
   // If `n` belongs to `prim::If` or `prim::Loop`
@@ -82,18 +96,9 @@ struct BailOutGraphBuilderForNode {
   // from block's owning node (e.g. `prim::If` or
   // `prim::Loop`)
   void buildBailOutBlockFrom(Node* n) {
-    auto* block = copy_graph_->block();
     auto b = n->owningBlock();
     for (auto it = n->iterator(); it != b->nodes().end(); it++) {
-      auto env = [this](Value* v) { return getOrAddInputForValue(v); };
-
-      auto node = *it;
-      auto new_node = block->appendNode(copy_graph_->createClone(node, env));
-      for (size_t i = 0; i < node->outputs().size(); ++i) {
-        auto oo = node->outputs()[i];
-        auto no = new_node->outputs()[i];
-        old_to_new_[oo] = no;
-      }
+      cloneNode(*it);
     }
 
     // we are either in `prim::If` or `prim::Loop`
@@ -136,7 +141,24 @@ struct BailOutGraphBuilderForNode {
     updated_max_trip_count =
         copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
     mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
-    buildBailOutBlockFrom(outer_node);
+    auto cur_plus_one = copy_graph_->insert(aten::add, {one, cur_iter});
+
+    auto new_loop = cloneNode(outer_node);
+    LoopView new_lv(new_loop);
+    {
+      WithInsertPoint guard_in_loop(*new_lv.bodyBlock()->nodes().begin());
+      // `one` will be replaced with new_lv.currentTripCount()
+      // but it needs to be done after
+      // new_lv.currentTripCount()->replaceAllUsesWith(adj_iter_ctr);
+      // to avoid cyclical references
+      auto adj_iter_ctr = copy_graph_->insert(aten::add, {cur_plus_one, one});
+      new_lv.currentTripCount()->replaceAllUsesWith(adj_iter_ctr);
+      adj_iter_ctr->node()->replaceInputWith(one, new_lv.currentTripCount());
+    }
+
+    if (outer_node->next()) {
+      buildBailOutBlockFrom(outer_node->next());
+    }
   }
 
   void buildBailOutIf(
