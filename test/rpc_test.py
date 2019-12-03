@@ -1240,3 +1240,13 @@ class RpcTest(RpcAgentTestFixture):
         with _use_rpc_pickler(test_pickler):
             self.assertTrue(torch.distributed.rpc.api._default_pickler is test_pickler)
         self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
+
+    @dist_init(setup_rpc=True)
+    def test_profiler(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with torch.autograd.profiler.profile() as prof:
+            rpc.rpc_sync("worker{}".format(dst_rank), my_sleep_func, args=(7,))
+        averages = prof.key_averages()
+        print(averages.table(sort_by='self_cpu_time_total'))
+
+

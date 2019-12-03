@@ -187,6 +187,8 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
+  RECORD_FUNCTION("pyRpcPythonUdf", std::vector<c10::IValue>());
+
   auto pythonCall = c10::guts::make_unique<PythonCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
