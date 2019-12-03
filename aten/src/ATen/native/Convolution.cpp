@@ -36,7 +36,7 @@ struct ConvParams {
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_miopen(const at::Tensor& input) const;
+  bool use_miopen(const at::Tensor& input, const bool& bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -163,13 +163,14 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   return !is_output_padding_big();
 }
 
-auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
+auto ConvParams::use_miopen(const at::Tensor& input, const bool& bias_defined) const -> bool {
 
   return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
+         && (!(input.scalar_type() == at::kBFloat16) || !bias_defined) // MIOpen doesn't support bias with bfloat16
          ;
 }
 
@@ -586,7 +587,7 @@ at::Tensor _convolution(
             input.contiguous(input.suggest_memory_format()), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
 
-      } else if (params.use_miopen(input)){
+      } else if (params.use_miopen(input, bias.defined())){
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
@@ -610,7 +611,7 @@ at::Tensor _convolution(
           input.contiguous(input.suggest_memory_format()), weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
-  } else if (params.use_miopen(input)) {
+  } else if (params.use_miopen(input, bias.defined())) {
     TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");

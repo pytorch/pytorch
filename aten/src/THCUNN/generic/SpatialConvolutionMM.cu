@@ -194,6 +194,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
+      #elif defined(THC_REAL_IS_BFLOAT16)
+      THCudaBlas_Bgemm(  
       #endif
           state,
           't', 'n',
@@ -232,6 +234,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
+    #elif defined(THC_REAL_IS_BFLOAT16)
+    THCudaBlas_Bgemm(
     #endif
         state,
         'n', 'n',
@@ -329,6 +333,8 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
+    #elif defined(THC_REAL_IS_BFLOAT16)
+    THCudaBlas_Bgemm(
     #endif
         state,
         'n', 't',
@@ -463,6 +469,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
+      #elif defined(THC_REAL_IS_BFLOAT16)
+      THCudaBlas_Bgemm(
       #endif
           state,
           't', 'n',
@@ -499,8 +507,12 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           THCTensor_(data)(state, gradBias), 1
       );
       #endif
+      #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       #ifdef THC_REAL_IS_HALF
       THCudaBlas_Hgemm(
+      #elif defined(THC_REAL_IS_BFLOAT16)
+      THCudaBlas_Bgemm(
+      #endif
           state,
           't', 'n',
           m_, 1, k_,

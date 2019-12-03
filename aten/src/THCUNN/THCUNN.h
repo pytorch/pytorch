@@ -8,3 +8,8 @@ typedef int64_t THCIndex_t;
 
 #include <THCUNN/generic/THCUNN.h>
 #include <THC/THCGenerateFloatTypes.h>
+
+#ifdef __HIP_PLATFORM_HCC__
+#include <THCUNN/generic/THCUNN.h>
+#include <THC/THCGenerateBFloat16Type.h>
+#endif
