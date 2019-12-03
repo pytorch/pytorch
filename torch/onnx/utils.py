@@ -128,10 +128,13 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
             torch.onnx.symbolic_helper._quantized_ops.clear()
+            # Unpack quantized weights for conv and linear ops and insert into graph.
             torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
 
+            # Insert permutes before and after each conv op to ensure correct order.
             torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
+            # Find consecutive permutes that are no-ops and remove them.
             torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
             graph(%Pi):
                 %Pq = quantized::nhwc2nchw(%Pi)

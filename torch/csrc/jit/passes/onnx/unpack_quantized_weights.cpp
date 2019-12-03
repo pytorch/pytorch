@@ -250,6 +250,9 @@ void UnpackQuantizedWeights(
       graph, paramsDict, qconv_relu, "quantized::conv_unpack");
 }
 
+// Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in
+// NCHW. This pass inserts permutes to convert from NCHW to NHWC before each
+// conv op and add another permute from NHWC to NCHW after the conv op.
 void insertPermutesHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, at::Tensor>& paramsDict,
