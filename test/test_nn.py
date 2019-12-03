@@ -3196,8 +3196,7 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
+    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_multihead_attention(self):
         def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):
             """ Numpy-based reference implementation of scaled dot attention
