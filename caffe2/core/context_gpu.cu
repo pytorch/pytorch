@@ -294,7 +294,7 @@ static void Caffe2SetCUDAMemoryPool() {
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  *
- * NB: This behavior is probably too agressive. We should consider asking users
+ * NB: This behavior is probably too aggressive. We should consider asking users
  * to do on-demand memory pinning (like exposed in PyTorch APIs) instead.
  */
 struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {

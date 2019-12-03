@@ -113,7 +113,7 @@ class TORCH_API DistAutogradContext {
 
   // List of futures for RPCs initiated by this node to propagate gradients to
   // other nodes. The distributed autograd engine on this node can return
-  // successfully only if all these futures are done and are successfull.
+  // successfully only if all these futures are done and are successful.
   std::vector<std::shared_ptr<rpc::FutureMessage>> outStandingRpcs_;
 
   // Lock to protect concurrent modification of the context.
