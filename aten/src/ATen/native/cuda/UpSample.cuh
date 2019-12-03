@@ -133,6 +133,15 @@ __host__ __forceinline__ static accscalar_t compute_scales_value(
 }
 
 template <typename accscalar_t>
+__host__ __forceinline__ static accscalar_t compute_scales_value_backwards(
+    const double scale,
+    int64_t input_size,
+    int64_t output_size) {
+  return (scale > 0.) ? (accscalar_t)scale
+                      : (accscalar_t)input_size / output_size;
+}
+
+template <typename accscalar_t>
 __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     int input_size,
     int output_size,

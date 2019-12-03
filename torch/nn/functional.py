@@ -2457,6 +2457,13 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
         when displaying the image.
 
+        Interpolate's behavior with scale_factor is changed in version 1.4.0 to align
+        with other frameworks and libraries (like opencv).
+        Previously scale_factor was used to calculate the output size, which was then
+        used to infer new values for the scales which were used in the interpolation.
+        Interpolate was modified to use scale_factor directly as the scales in the
+        interpolation, when they specified.
+
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
         (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
@@ -2479,6 +2486,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                 and len(scale_factor) != dim:
             raise ValueError('scale_factor shape must match input shape. '
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
+        if scale_factor is not None:
+            warnings.warn("Interpolate's behavior with scale_factor is changed to align with other frameworks/libraries, "
+                          "and now uses scale_factor directly, instead of relying on the computed output size. "
+                          "If you wish to recover the old behavior, please calculate the output size "
+                          "and use interpolate with the parameter size instead.".format(mode))
 
     def _output_size(dim):
         _check_size_scale_factor(dim)
