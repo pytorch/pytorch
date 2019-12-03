@@ -18,6 +18,24 @@ using torch::autograd::Node;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
+namespace {
+
+static std::atomic<int> num_threads_blocked_in_backward = 0;
+
+// Guard to keep track of threads blocked in the autograd backward call.
+class ThreadsBlockedGuard {
+ public:
+  explicit ThreadsBlockedGuard() {
+    num_threads_blocked_in_backward++;
+  }
+
+  ~ThreadsBlockedGuard() {
+    num_threads_blocked_in_backward--;
+  }
+};
+
+} // anonymous namespace
+
 DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
 
@@ -179,6 +197,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   // gradients.
   // TODO: make this non-blocking
   // (https://github.com/pytorch/pytorch/issues/26359)
+  ThreadsBlockedGuard guard;
   variable_list grads = engine_.execute_with_graph_task(
       autogradContext->retrieveGraphTask(), graphRoot);
 
@@ -278,6 +297,15 @@ void DistEngine::clearInitializedContextId(int64_t contextId) {
 size_t DistEngine::numBackwardPasses() const {
   std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
   return initializedContextIds_.size();
+}
+
+std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
+  std::unordered_map<std::string, std::string> debugInfo;
+  debugInfo["num_current_backward_passes"] =
+      std::to_string(numBackwardPasses());
+  debugInfo["num_threads_blocked_in_backward"] =
+      std::to_string(num_threads_blocked_in_backward.load());
+  return debugInfo;
 }
 
 } // namespace autograd
