@@ -28,7 +28,7 @@ class RegularizerContext(ModifierContext):
 class UseRegularizer(UseModifierBase):
     '''
     context class to allow setting the current context.
-    Example useage with layer:
+    Example usage with layer:
         regularizers = {'reg1': reg1, 'reg2': reg2}
         with UseRegularizer(regularizers):
             reg = RegularizerContext.current().get_regularizer('reg1')

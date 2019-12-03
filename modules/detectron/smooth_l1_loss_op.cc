@@ -33,7 +33,7 @@ transition between L2 loss and L1 loss is adjustable by a hyper-parameter beta:
   SmoothL1(x) = 0.5 * x^2 / beta      if |x| < beta
                 |x| - 0.5 * beta      otherwise.
 
-SmoothL1 is used in Fast R-CNN and decendants as the loss function for bounding
+SmoothL1 is used in Fast R-CNN and descendants as the loss function for bounding
 box regression.
 
 The loss computed by this op has a flexible form:

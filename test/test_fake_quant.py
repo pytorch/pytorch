@@ -113,6 +113,8 @@ class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    # https://github.com/pytorch/pytorch/issues/30604
+    @unittest.skip("temporarily disable the test")
     def test_numerical_consistency_per_tensor(self, device, X):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """
