@@ -82,7 +82,7 @@ struct PythonResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -101,7 +101,7 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
