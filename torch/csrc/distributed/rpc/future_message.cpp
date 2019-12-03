@@ -4,6 +4,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+FutureMessage::FutureMessage(Message message) {
+  message_ = std::move(message);
+  completed_ = true;
+}
+
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   finished_cv_.wait(lock, [this] { return completed_.load(); });
@@ -16,14 +21,27 @@ const Message& FutureMessage::wait() {
   return message_;
 }
 
+const Message& FutureMessage::waitNoThrow() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  finished_cv_.wait(lock, [this] { return completed_.load(); });
+  return message_;
+}
+
+Message&& FutureMessage::moveMessage() && {
+  return std::move(message_);
+}
+
 void FutureMessage::markCompleted(Message message) {
   {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(!completed());
     completed_ = true;
     message_ = std::move(message);
-
-    fireCallbacks();
+    std::vector<Callback> cbs = std::move(callbacks_);
+    lock.unlock();
+    for (auto& callback : cbs) {
+      callback(message_);
+    }
   }
   finished_cv_.notify_all();
 }
@@ -44,16 +62,6 @@ void FutureMessage::addCallback(const FutureMessage::Callback& callback) {
     return;
   }
   callbacks_.push_back(callback);
-}
-
-void FutureMessage::fireCallbacks() {
-  TORCH_CHECK(completed(), "Firing callbacks on incomplete FutureMessage.");
-  // There is no need to protect callbacks_ with the lock.
-  // Once completed_ is set to true, no one can add new callback to the list.
-  for (auto& callback : callbacks_) {
-    callback(message_);
-  }
-  callbacks_.clear();
 }
 
 } // namespace rpc

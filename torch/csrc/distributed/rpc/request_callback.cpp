@@ -28,16 +28,23 @@ struct ClearAutogradContextGuard {
 
 } // anonymous namespace
 
-Message RequestCallback::operator()(Message& request) const {
+std::shared_ptr<FutureMessage> RequestCallback::operator()(
+    Message& request) const {
   // For a recv thread, current context id should be invalid outside
   // processMessage().
   ClearAutogradContextGuard guard;
   try {
-    return processMessage(request);
+    // do we need to run clear() in the future invocation?
+    auto ret = processMessage(request);
+    if (!ret->completed()) {
+      // If not yet complete, clear the context when we do.
+      ret->addCallback([](const Message&) { ClearAutogradContextGuard guard2; });
+    }
+    return ret;
   } catch (std::exception& e) {
     LOG(ERROR) << "Received error while processing request type "
                << request.type() << ": " << e.what();
-    return createExceptionResponse(request, e);
+    return std::make_shared<FutureMessage>(createExceptionResponse(request, e));
   }
 }
 
