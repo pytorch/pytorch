@@ -315,7 +315,6 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Node* mergeNodeIntoGroup(Node* group, Node* n) {
-    AT_ASSERT(n->kind() != kind_);
     auto& subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
@@ -1085,15 +1084,15 @@ struct GraphFuser {
   }
 
   void optimizeFusedGraphs() {
-    for (Node* node : block_->nodes()) {
-      if (node->kind() != prim::FusionGroup) {
-        continue;
-      }
-      auto subgraph = node->g(attr::Subgraph);
-      EliminateDeadCode(subgraph);
-      EliminateCommonSubexpression(subgraph);
-      ConstantPooling(subgraph);
-    }
+    // for (Node* node : block_->nodes()) {
+    //   if (node->kind() != prim::FusionGroup) {
+    //     continue;
+    //   }
+    //   auto subgraph = node->g(attr::Subgraph);
+    //   EliminateDeadCode(subgraph);
+    //   EliminateCommonSubexpression(subgraph);
+    //   ConstantPooling(subgraph);
+    // }
   }
 
   void run() {
@@ -1123,6 +1122,7 @@ struct GraphFuser {
         any_changed |= changed;
       }
     }
+
     refreshAliasDb();
 
     fuseConcats();
@@ -1205,16 +1205,137 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 
 } // anonymous namespace
 
-void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph->block(), graph).run();
-  // After FuseGraph some common subexpressions may come back
-  EliminateCommonSubexpression(graph);
-  // We might have emitted a fair amount of useless shape propagating code, so
-  // remove it
-  EliminateDeadCode(graph);
-  // Improve the quality of shape propagation code that was left
-  PeepholeOptimizeShapeExpressions(graph->block());
+
+
+
+// OLD CODE ABOVE
+
+// Replaces given Node n with a fusion group.
+// Notes:
+//  - The fusion node has the same inputs and outputs.
+//  - The fusion node contains a subgraph consisting of the original node.
+Node* makeFusionNode(
+  const int fusion_key
+, std::shared_ptr<Graph>& graph
+, Node* n) {
+  // Creates and inserts fusion node (with its key)
+  auto fusion = graph->createWithSubgraph(prim::FusionGroup);
+  fusion->insertBefore(n);
+  fusion->i_(attr::value, fusion_key);
+
+  // Grabs fusion node's subgraph (as a shorthand)
+  auto& subgraph = *(fusion->g(attr::Subgraph));
+
+  // Adds n's inputs to the fusion and its subgraph
+  for (auto input : n->inputs()) {
+    fusion->addInput(input);
+    subgraph.addInput()->setType(input->type());
+  }
+
+  // Creates the fusion group's output
+  auto new_output = fusion->addOutput();
+  new_output->copyMetadata(n->output());
+
+  // Copies n to the subgraph and adds creates the subgraph output
+  {
+    WithInsertPoint guard(*subgraph.nodes().begin());
+    auto* copy = subgraph.create(n->kind(), subgraph.inputs(), n->outputs().size());
+    auto* out = subgraph.insertNode(copy)->output();
+    out->copyMetadata(n->output());
+    subgraph.registerOutput(out);
+  }
+
+  // Replaces n with the fusion and destroys n
+  n->replaceAllUsesWith(fusion);
+  n->destroy();
+
+  return fusion;
 }
+
+std::unordered_set<Symbol> neverFusibleNodes{
+  prim::BailOut
+, prim::BailoutTemplate
+};
+
+bool FuseBlockHelper(std::shared_ptr<Graph>& graph, Block* block) {
+  bool has_changed = false;
+
+  // Enumerates nodes in reverse topological order
+  auto it = block->nodes().rbegin();
+  while (it != block->nodes().rend()) {
+    auto* node = *it;
+
+    // Skips nonfusible nodes
+    const auto nf_it = neverFusibleNodes.find(node->kind());
+    if (nf_it != neverFusibleNodes.end()) {
+      ++it;
+      continue;
+    }
+
+    // Skips nodes with (sub)blocks
+    if (node->blocks().size() > 0) {
+      ++it;
+      continue;
+    }
+
+    if (node->kind() == prim::FusionGroup) {
+      // TODO
+    } else if (isFusible(node)) {
+      const auto fusion_key = fuse(node);
+      auto* fusion = makeFusionNode(fusion_key, graph, node);
+      it = fusion->reverseIterator();
+      has_changed = true;
+    }
+
+    ++it;
+  }
+
+  return has_changed;
+}
+
+void FuseBlock(std::shared_ptr<Graph>& graph, Block* block) {
+  while (FuseBlockHelper(graph, block));
+
+  // Signals fusions to compile and fuses (sub)blocks
+  for (auto* node : block->nodes()) {
+    if (node->kind() == prim::FusionGroup) {
+      compileFusion(node);
+    }
+
+    for (auto* block : node->blocks()) {
+      FuseBlock(graph, block);
+    }
+  }
+}
+
+// TODO: make fusions inplace operations (pre-allocate inputs)
+void FuseGraph(std::shared_ptr<Graph>& graph) {
+  #if FUSER_DEBUG
+    std::cout << "graph_fuser.cpp: FuseGraph() (reverse iteration)" << std::endl;
+    std::cout << "pre-fusion graph: " << std::endl;
+    std::cout << *graph << std::endl << std::endl;
+  #endif // FUSER_DEBUG
+
+  // Creates fusions
+  FuseBlock(graph, graph->block());
+
+  // Runs clean-up passes
+  EliminateCommonSubexpression(graph);
+  EliminateDeadCode(graph);
+  // TODO: review the following -- remove it?
+  // PeepholeOptimizeShapeExpressions(graph->block());
+
+  #if FUSER_DEBUG
+    std::cout << std::endl;
+    std::cout << "post-fusion graph: " << std::endl;
+    std::cout << *graph << std::endl;
+  #endif // FUSER_DEBUG
+}
+
+
+
+
+// OLD CODE BELOW
 
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
