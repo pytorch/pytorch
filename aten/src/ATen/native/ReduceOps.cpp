@@ -715,8 +715,8 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 
 static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()), fname, " only support floating-point dtypes");
   TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA, fname, " only support CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()), fname, " only support floating-point dtypes");
   TORCH_CHECK(result1.scalar_type() == result2.scalar_type(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.scalar_type()),
