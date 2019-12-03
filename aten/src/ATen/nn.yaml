@@ -31,7 +31,7 @@
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != at::Reduction::None || self_->dim() == 0
+    output: reduction != at::Reduction::None
     total_weight: 'false'
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
@@ -41,7 +41,7 @@
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != at::Reduction::None || self_->dim() == 0
+    output: reduction != at::Reduction::None
     total_weight: 'false'
 
 - name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction)

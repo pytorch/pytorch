@@ -6257,6 +6257,10 @@ class TestTorchDeviceType(TestCase):
         # self.assertEqual((), torch.normal(zero_d, one_d).shape)
         # self.assertEqual((), torch.normal(1, one_d).shape)
 
+        # nll_loss -- verify input can't be 0-dimensional.
+        self.assertRaises(ValueError, lambda: torch.nn.functional.nll_loss(zero_d, zero_d))
+        self.assertRaises(ValueError, lambda: torch.nn.functional.nll_loss(zero_d, one_d))
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
