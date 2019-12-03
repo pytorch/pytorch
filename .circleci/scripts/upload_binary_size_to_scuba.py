@@ -40,7 +40,11 @@ def build_message(size):
             "build": build_num,
             "sha1": sha1,
         },
-        "int": {"time": int(time.time()), "size": size},
+        "int": {
+            "time": int(time.time()),
+            "size": size,
+            "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
+        },
     }
 
 
