@@ -116,7 +116,7 @@ class RRefContext {
       const RRefId& rrefId,
       const ForkId& forkId);
 
-  void logOwnerRRefs(bool verbose = false);
+  std::unordered_map<std::string, std::string> getDebugInfo();
 
  private:
   RRefContext(std::shared_ptr<RpcAgent>);

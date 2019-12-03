@@ -41,24 +41,11 @@ RRefContext::~RRefContext() {
   }
 }
 
-void RRefContext::logOwnerRRefs(bool verbose) {
-  std::stringstream ss;
-
-  ss << "RRefContext[" << getWorkerName() << "] owns " << owners_.size()
-     << " RRefs." << std::endl;
-
-  if (verbose) {
-    std::lock_guard<std::mutex> lock(destroyedMutex_);
-    for (const auto& entry : owners_) {
-      ss << entry.first << " is used by: ";
-      for (const auto& forkId: forks_[entry.first]) {
-        ss << forkId << ", ";
-      }
-      ss << std::endl;
-    }
-  }
-
-  LOG(INFO) << ss.str();
+std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
+  std::unordered_map<std::string, std::string> info;
+  std::lock_guard<std::mutex> lock(destroyedMutex_);
+  info["num_owner_rrefs"] = std::to_string(owners_.size());
+  return info;
 }
 
 void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
@@ -92,8 +79,12 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-  return createUserRRef<T>(
-      ownerId, genGloballyUniqueId(), genGloballyUniqueId());
+  // Explicitly creating rrefId before forkId to make sure the order is
+  // deterministic, as the argument evaluation order is system and compiler
+  // dependent.
+  const auto rrefId = genGloballyUniqueId();
+  const auto forkId = genGloballyUniqueId();
+  return createUserRRef<T>(ownerId, rrefId, forkId);
 }
 
 template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(

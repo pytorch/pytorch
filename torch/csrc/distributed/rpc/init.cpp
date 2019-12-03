@@ -216,8 +216,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
     RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
   });
 
-  module.def("_log_owner_rrefs", [](bool verbose) {
-    RRefContext::getInstance().logOwnerRRefs(verbose);
+  module.def("_get_debug_info", []() {
+    return RRefContext::getInstance().getDebugInfo();
   });
 
   module.def("_cleanup_python_rpc_handler", []() {

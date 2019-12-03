@@ -15,7 +15,7 @@ from torch.distributed.rpc import RRef
 from common_utils import load_tests
 import dist_utils
 from dist_utils import dist_init
-from torch.distributed.rpc.api import _use_rpc_pickler, _log_owner_rrefs
+from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from rpc_agent_test_fixture import RpcAgentTestFixture
 
@@ -224,6 +224,15 @@ def heavy_rpc(tensor):
 def raise_func():
     raise ValueError("Expected error")
 
+global_rref = None
+
+def set_global_rref(rref):
+    global global_rref
+    global_rref = rref
+
+def clear_global_rref():
+    global global_rref
+    global_rref = None
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1174,12 +1183,13 @@ class RpcTest(RpcAgentTestFixture):
 
         dst_rank = (self.rank + 1) % self.world_size
         rref2 = rpc.remote("worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1))
-        expected1 = "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
-        expected2 = "UserRRef(RRefId = {0}({1}, 2), ForkId = {0}({1}, 1))".format(id_class, self.rank)
-        self.assertTrue(rref2.__str__() == expected1 or rref2.__str__() == expected2)
+        self.assertEqual(
+            rref2.__str__(),
+            "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
+        )
 
     @dist_init
-    def test_log_owner_rrefs(self):
+    def test_rref_context_debug_info(self):
         if not dist.is_initialized():
             dist.init_process_group(
                 backend="gloo",
@@ -1188,17 +1198,30 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
             )
 
+        from torch.distributed.rpc import _get_debug_info
         rref1 = RRef(self.rank)
-        _log_owner_rrefs(True)
+        info = _get_debug_info()
+        self.assertIn("num_owner_rrefs", info)
+        # RRef on local value is not added to context until shared across RPC
+        self.assertEqual("0", info["num_owner_rrefs"])
 
         dst_rank = (self.rank + 1) % self.world_size
+        rpc.rpc_sync("worker{}".format(dst_rank), set_global_rref, args=(rref1,))
+        info = _get_debug_info()
+        self.assertIn("num_owner_rrefs", info)
+        self.assertEqual("1", info["num_owner_rrefs"])
+        rpc.rpc_sync("worker{}".format(dst_rank), clear_global_rref)
+
+
         rref2 = rpc.remote("worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1))
         rref3 = rpc.remote("worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1))
         rref2.to_here()
         rref3.to_here()
 
         dist.barrier()
-        _log_owner_rrefs(True)
+        info = _get_debug_info()
+        self.assertIn("num_owner_rrefs", info)
+        self.assertEqual("2", info["num_owner_rrefs"])
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
