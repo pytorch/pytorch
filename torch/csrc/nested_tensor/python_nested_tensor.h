@@ -158,7 +158,8 @@ static inline Variable _get_first_variable(_NestedNode nested_node) {
   }
 }
 
-static inline std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
+static inline std::vector<at::IntArrayRef> _get_flat_sizes(
+    _NestedNode nested_node) {
   if (nested_node._children.size() == 0) {
     return std::vector<at::IntArrayRef>(
         {nested_node._variable_node._variable.sizes()});
@@ -203,7 +204,10 @@ static inline T map_more(_NestedNode nested_node, F fn, G gfn) {
 }
 
 template <class F>
-static inline void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
+static inline void apply2(
+    _NestedNode nested_node1,
+    _NestedNode nested_node2,
+    F fn) {
   if (nested_node1._children.size() == 0) {
     fn(nested_node1._variable_node._variable,
        nested_node2._variable_node._variable);
