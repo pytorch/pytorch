@@ -878,7 +878,6 @@ class DistAutogradTest(RpcAgentTestFixture):
     #
     # These four test ps-trainer groups run on completely separate autograd
     # graphs, but they share the same set of underlying RpcAgents.
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28874")
     @dist_init
     def test_trainer_ps(self):
         local_grads = None
