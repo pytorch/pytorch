@@ -36,6 +36,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
+  # Use linux host toolchain + mobile build options in order to build & test
+  # mobile libtorch without having to setup Android/iOS toolchain/simulator.
+  exec ./scripts/build_mobile.sh -DBUILD_BINARY=ON "$@"
+fi
+
 echo "Python version:"
 python --version
 
@@ -65,8 +71,7 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES=()
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  # TODO: Fix Mac Java build
-  #POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
       echo "Found jni.h under $JH"
@@ -265,7 +270,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Install bazels3cache for cloud cache
   sudo apt-get -qq install npm
   npm config set strict-ssl false
-  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
   sudo apt-get install -qq nodejs
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"
