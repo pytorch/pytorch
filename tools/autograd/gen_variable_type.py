@@ -381,6 +381,22 @@ ${assign_return_values}c10::Dispatcher::singleton()
     .redispatch<${schema_order_ret_and_arg_types}>(${schema_order_trace_dispatch_args});
 """)
 
+FW_DERIVATIVE_CHECK_TEMPLATE = CodeTemplate("""\
+${req_inp}.fw_grad().defined()\
+""")
+
+FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
+if (${if_stmt}) {
+    auto ${out_arg}_new_fw_grad = ${formula};
+    ${out_arg}.set_fw_grad(${out_arg}_new_fw_grad);
+} else if (AnomalyMode::is_enabled() and (${else_stmt})) {
+    std::stringstream ss;
+    ss << "While computing the forward mode for ${fn_name}, ";
+    ss << "only a subset of the inputs had their forward gradient set: ";
+    ss << ${err_msg};
+    throw std::runtime_error(ss.str());
+}
+""")
 
 FACTORY_FUNCTION_NAMES = None
 
@@ -769,6 +785,7 @@ def emit_body(declaration):
     arguments = declaration['arguments']
     returns = declaration['returns']
     func = declaration['derivative']
+    fw_derivatives = declaration['autograd_fw_info']
     name = declaration['name']
     inplace = declaration['inplace']
     is_out_fn = name.endswith('_out')
@@ -823,6 +840,10 @@ def emit_body(declaration):
         base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
         len(differentiable_inputs) > 0 and len(differentiable_outputs) > 0 and
         strategy == 'use_derived')
+
+    requires_fw_derivatives = (
+        base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
+        len(fw_derivatives) > 0 and strategy == 'use_derived')
 
     if func is not None and not requires_derivative:
         raise RuntimeError('ERROR: derivative ignored for {} -- specified an autograd function without derivative'
@@ -1150,6 +1171,31 @@ def emit_body(declaration):
             return []
         return ['increment_version({});'.format(arg['name']) for arg in returns]
 
+    def check_record_function_input_type(simple_type):
+        return simple_type in ['Tensor', 'Scalar']
+
+    def record_function_input_names():
+        return ', '.join([
+            arg['name'] for arg in declaration['arguments']
+            if check_record_function_input_type(arg['simple_type'])])
+
+    def emit_fw_derivatives():
+        content = []
+        for derivative in fw_derivatives:
+            if inplace:
+                res = "self"
+            elif is_out_fn:
+                res = "out"
+            else:
+                res = derivative['out_arg']
+            if_stmt = " and ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
+            else_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
+            err_msg = """ << " " << """.join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
+            content.append(FW_DERIVATIVE_TEMPLATE.substitute(if_stmt=if_stmt, formula=derivative['formula'], out_arg=res,
+                else_stmt=else_stmt, fn_name=declaration["api_name"], err_msg=err_msg))
+        return content
+
+
     env = {}
     combined = nested_dict(env, declaration)
 
@@ -1171,6 +1217,11 @@ def emit_body(declaration):
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.append(emit_history())
+    if requires_fw_derivatives:
+        body.extend(emit_fw_derivatives())
+    # post_record_trace must appear before save_outputs so that saved outputs
+    # have their tracing state saved (that is setup by recordTrace)
+    body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
     if base_name in RESET_GRAD_ACCUMULATOR:

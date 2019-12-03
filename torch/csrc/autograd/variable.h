@@ -190,6 +190,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
 
   Variable grad_;
+  // Does not need to be here but cannot live directly in TensorImpl for now
+  Variable fw_grad_;
   std::shared_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
 
@@ -236,6 +238,23 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
   const Variable& grad() const override {
     return grad_;
+  }
+
+  const Variable& fw_grad() const override {
+    return fw_grad_;
+  }
+
+  Variable& fw_grad() override {
+    return fw_grad_;
+  }
+
+  void set_fw_grad(Variable& new_grad, bool inplace) override {
+    if (inplace and fw_grad_.defined()) {
+      // They are always the same size as the current Tensor
+      fw_grad_.copy_(new_grad);
+    } else {
+      fw_grad_ = new_grad;
+    }
   }
 
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {

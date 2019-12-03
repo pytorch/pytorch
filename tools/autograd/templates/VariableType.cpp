@@ -2,7 +2,8 @@
 
 #include <ATen/TypeDefault.h>
 #include <torch/library.h>
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
+#include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
 
 // ${generated_comment}
 
@@ -37,6 +38,20 @@ namespace{
     AutogradMeta* meta = torch::autograd::impl::get_autograd_meta(self);
     if (meta != nullptr) {
       meta->grad_accumulator_.reset();
+    }
+  }
+  Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
+    bool is_one = false;
+    if (s.isFloatingPoint()) {
+      is_one = s.toDouble() == 1;
+    } else if(s.isIntegral(true)) {
+      is_one = s.toLong() == 1;
+    }
+
+    if (is_one) {
+      return t;
+    } else {
+      return t * s;
     }
   }
 }

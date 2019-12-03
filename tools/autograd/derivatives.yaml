@@ -160,16 +160,20 @@
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
+  result: element_wise
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
+  result: element_wise
 
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: grad
   other: maybe_multiply(grad, alpha)
+  result: linear
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: grad
+  result: linear
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
@@ -211,6 +215,7 @@
 
 - name: alias(Tensor(a) self) -> Tensor(a)
   self: grad
+  result: element_wise
 
 - name: angle(Tensor self) -> Tensor
   self: grad.to(self.scalar_type()) * (self*Scalar(c10::complex<double>{0.0, 1.0})).conj() / self.abs().pow(2)
@@ -252,9 +257,11 @@
 
 - name: asin(Tensor self) -> Tensor
   self: grad * (-self * self + 1).rsqrt()
+  result: element_wise
 
 - name: atan(Tensor self) -> Tensor
   self: grad / (self * self + 1)
+  result: element_wise
 
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
@@ -290,6 +297,7 @@
 
 - name: ceil(Tensor self) -> Tensor
   self: zeros_like(grad, at::MemoryFormat::Preserve)
+  result: element_wise
 
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
@@ -301,16 +309,16 @@
   self: cholesky_inverse_backward(grad, self, upper, result)
 
 - name: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_int8_weight_fp32_activation only supported for inference")
+  input: not_implemented("fbgemm_linear_int8_weight_fp32_activation only supported for inference")
 
 - name: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_int8_weight only supported for inference")
+  input: not_implemented("fbgemm_linear_int8_weight only supported for inference")
 
 - name: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_fp16_weight_fp32_activation only supported for inference")
+  input: not_implemented("fbgemm_linear_fp16_weight_fp32_activation only supported for inference")
 
 - name: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
-  self: not_implemented("fbgemm_linear_fp16_weight only supported for inference")
+  input: not_implemented("fbgemm_linear_fp16_weight only supported for inference")
 
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.

@@ -136,6 +136,9 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
+  virtual at::Tensor& fw_grad() = 0;
+  virtual const at::Tensor& fw_grad() const = 0;
+  virtual void set_fw_grad(at::Tensor& new_grad, bool inplace) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -585,6 +588,26 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [Tensor versus Variable in C++].
    */
   const at::Tensor& grad() const;
+
+  /**
+   * Return the accumulated gradient of a tensor. This gradient is computed
+   * using forward mode AD. This is populated during initial computation
+   * of the content of this Tensor the set with set_fw_grad().
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  at::Tensor& fw_grad();
+  const at::Tensor& fw_grad() const;
+
+  /**
+   * Sets the forward gradient for this Tensor.
+   * Inplace can be used to override the existing gradient if it exists.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  void set_fw_grad(at::Tensor& new_grad, bool inplace=true);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.

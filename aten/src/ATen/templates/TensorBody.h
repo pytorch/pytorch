@@ -552,6 +552,16 @@ class CAFFE2_API Tensor {
     return impl_->grad();
   }
 
+  void set_fw_grad(Tensor& new_grad, bool inplace=true) {
+    impl_->set_fw_grad(new_grad, inplace);
+  }
+  const Tensor& fw_grad() const {
+    return impl_->fw_grad();
+  }
+  Tensor& fw_grad() {
+    return impl_->fw_grad();
+  }
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
