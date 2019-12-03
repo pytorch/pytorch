@@ -8,7 +8,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
 from .modules import utils
-from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from . import _VF
@@ -1118,7 +1117,7 @@ def gelu(input):
     r"""gelu(input) -> Tensor
 
     Applies element-wise the function
-    :math:`\text{GeLU}(x) = x * \Phi(x)`
+    :math:`\text{GELU}(x) = x * \Phi(x)`
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
@@ -1280,14 +1279,14 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
-    gumbels = -torch.empty_like(logits).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()  # ~Gumbel(0,1)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
     if hard:
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
@@ -1379,6 +1378,22 @@ def linear(input, weight, bias=None):
 
 def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
+    r"""
+    Applies a bilinear transformation to the incoming data:
+    :math:`y = x_1 A x_2 + b`
+
+    Shape:
+
+        - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}`
+          and :math:`*` means any number of additional dimensions.
+          All but the last dimension of the inputs should be the same.
+        - input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`
+        - weight: :math:`(\text{out\_features}, \text{in1\_features},
+          \text{in2\_features})`
+        - bias: :math:`(\text{out\_features})`
+        - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+          and all but the last dimension are the same shape as the input.
+    """
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -1831,8 +1846,17 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         if target.size()[1:] != input.size()[2:]:
             raise ValueError('Expected target size {}, got {}'.format(
                 out_size, target.size()))
-        input = input.contiguous().view(n, c, 1, -1)
-        target = target.contiguous().view(n, 1, -1)
+        input = input.contiguous()
+        target = target.contiguous()
+        # support empty batches, see #15870
+        if input.numel() > 0:
+            input = input.view(n, c, 1, -1)
+        else:
+            input = input.view(n, c, 0, 0)
+        if target.numel() > 0:
+            target = target.view(n, 1, -1)
+        else:
+            target = target.view(n, 0, 0)
         reduction_enum = _Reduction.get_enum(reduction)
         if reduction != 'none':
             ret = torch._C._nn.nll_loss2d(
@@ -1923,6 +1947,9 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
+
+    .. _Kullback-Leibler divergence:
+        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -2462,7 +2489,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
         # make scale_factor a tensor in tracing so constant doesn't get baked in
         if torch._C._get_tracing_state():
-            return [(torch.floor((input.size(i + 2) * torch.tensor(float(scale_factors[i]))).float())) for i in range(dim)]
+            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
+                     dtype=torch.float32)).float())) for i in range(dim)]
         else:
             return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
@@ -2574,8 +2602,8 @@ GRID_SAMPLE_PADDING_MODES = {
 }
 
 
-def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
-    # type: (Tensor, Tensor, str, str) -> Tensor
+def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None):
+    # type: (Tensor, Tensor, str, str, Optional[bool]) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -2613,7 +2641,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
           and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
-    .. Note:: This function is often used in building `Spatial Transformer Networks`_ .
+    .. note::
+        This function is often used in conjunction with :func:`affine_grid`
+        to build `Spatial Transformer Networks`_ .
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -2625,12 +2655,31 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
             ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
+        align_corners (bool, optional): Geometrically, we consider the pixels of the
+            input  as squares rather than points.
+            If set to ``True``, the extrema (``-1`` and ``1``) are considered as referring
+            to the center points of the input's corner pixels. If set to ``False``, they
+            are instead considered as referring to the corner points of the input's corner
+            pixels, making the sampling more resolution agnostic.
+            This option parallels the ``align_corners`` option in
+            :func:`interpolate`, and so whichever option is used here
+            should also be used there to resize the input image before grid sampling.
+            Default: ``False``
 
     Returns:
         output (Tensor): output Tensor
 
     .. _`Spatial Transformer Networks`:
         https://arxiv.org/abs/1506.02025
+
+    .. warning::
+        When ``align_corners = True``, the grid positions depend on the pixel
+        size relative to the input image size, and so the locations sampled by
+        :func:`grid_sample` will differ for the same input given at different
+        resolutions (that is, after being upsampled or downsampled).
+        The default behavior up to version 1.2.0 was ``align_corners = True``.
+        Since then, the default behavior has been changed to ``align_corners = False``,
+        in order to bring it in line with the default for :func:`interpolate`.
     """
     if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
@@ -2642,34 +2691,112 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 
     if mode == 'bilinear':
         mode_enum = 0
-    else:
+    else:  # mode == 'nearest'
         mode_enum = 1
 
     if padding_mode == 'zeros':
         padding_mode_enum = 0
     elif padding_mode == 'border':
         padding_mode_enum = 1
-    else:
+    else:  # padding_mode == 'reflection'
         padding_mode_enum = 2
 
-    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum)
+    if align_corners is None:
+        warnings.warn("Default grid_sample and affine_grid behavior has changed "
+                      "to align_corners=False since 1.3.0. Please specify "
+                      "align_corners=True if the old behavior is desired. "
+                      "See the documentation of grid_sample for details.")
+        align_corners = False
+
+    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
 
 
-def affine_grid(theta, size):
-    # type: (Tensor, List[int]) -> Tensor
-    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
-    Generally used in conjunction with :func:`grid_sample` to
-    implement Spatial Transformer Networks.
+def affine_grid(theta, size, align_corners=None):
+    # type: (Tensor, List[int], Optional[bool]) -> Tensor
+    r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
+    affine matrices :attr:`theta`.
+
+    .. note::
+        This function is often used in conjunction with :func:`grid_sample`
+        to build `Spatial Transformer Networks`_ .
 
     Args:
-        theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
-        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`).
+        theta (Tensor): input batch of affine matrices with shape
+            (:math:`N \times 2 \times 3`) for 2D or
+            (:math:`N \times 3 \times 4`) for 3D
+        size (torch.Size): the target output image size.
+            (:math:`N \times C \times H \times W` for 2D or
+            :math:`N \times C \times D \times H \times W` for 3D)
             Example: torch.Size((32, 3, 24, 24))
+        align_corners (bool, optional): if ``True``, consider ``-1`` and ``1``
+            to refer to the centers of the corner pixels rather than the image corners.
+            Refer to :func:`grid_sample` for a more complete description.
+            A grid generated by :func:`affine_grid` should be passed to :func:`grid_sample`
+            with the same setting for this option.
+            Default: ``False``
 
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
+
+    .. _`Spatial Transformer Networks`:
+        https://arxiv.org/abs/1506.02025
+
+    .. warning::
+        When ``align_corners = True``, the grid positions depend on the pixel
+        size relative to the input image size, and so the locations sampled by
+        :func:`grid_sample` will differ for the same input given at different
+        resolutions (that is, after being upsampled or downsampled).
+        The default behavior up to version 1.2.0 was ``align_corners = True``.
+        Since then, the default behavior has been changed to ``align_corners = False``,
+        in order to bring it in line with the default for :func:`interpolate`.
+    .. warning::
+        When ``align_corners = True``, 2D affine transforms on 1D data and
+        3D affine transforms on 2D data (that is, when one of the spatial
+        dimensions has unit size) are ill-defined, and not an intended use case.
+        This is not a problem when ``align_corners = False``.
+        Up to version 1.2.0, all grid points along a unit dimension were
+        considered arbitrarily to be at ``-1``.
+        From version 1.3.0, under ``align_corners = True`` all grid points
+        along a unit dimension are condsidered to be at ```0``
+        (the center of the input image).
     """
-    return vision.affine_grid_generator(theta, size)
+    if align_corners is None:
+        warnings.warn("Default grid_sample and affine_grid behavior has changed "
+                      "to align_corners=False since 1.3.0. Please specify "
+                      "align_corners=True if the old behavior is desired. "
+                      "See the documentation of grid_sample for details.")
+        align_corners = False
+
+    # enforce floating point dtype on theta
+    if not theta.is_floating_point():
+        raise ValueError("Expected theta to have floating point type, but got {}"
+                         .format(theta.dtype))
+    # check that shapes and sizes match
+    if len(size) == 4:
+        if theta.dim() != 3 or theta.shape[-2] != 2 or theta.shape[-1] != 3:
+            raise ValueError("Expected a batch of 2D affine matrices of shape Nx2x3 "
+                             "for size {}. Got {}.".format(size, theta.shape))
+        spatial_size = size[-2:]  # spatial dimension sizes
+    elif len(size) == 5:
+        if theta.dim() != 3 or theta.shape[-2] != 3 or theta.shape[-1] != 4:
+            raise ValueError("Expected a batch of 3D affine matrices of shape Nx3x4 "
+                             "for size {}. Got {}.".format(size, theta.shape))
+        spatial_size = size[-3:]  # spatial dimension sizes
+    else:
+        raise NotImplementedError("affine_grid only supports 4D and 5D sizes, "
+                                  "for 2D and 3D affine transforms, respectively. "
+                                  "Got size {}.".format(size))
+    # check for empty span
+    if align_corners and min(spatial_size) == 1:
+        warnings.warn("Since version 1.3.0, affine_grid behavior has changed "
+                      "for unit-size grids when align_corners=True. "
+                      "This is not an intended use case of affine_grid. "
+                      "See the documentation of affine_grid for details.")
+    elif min(size) <= 0:
+        raise ValueError("Expected non-zero, positive output size. Got {}"
+                         .format(size))
+
+    return torch.affine_grid_generator(theta, size, align_corners)
 
 
 def pad(input, pad, mode='constant', value=0):
@@ -3053,7 +3180,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         attn_mask: mask that prevents attention to certain positions. This is an additive mask
             (i.e. the values will be added to the attention layer).
         use_separate_proj_weight: the function accept the proj. weights for query, key,
-            and value in differnt forms. If false, in_proj_weight will be used, which is
+            and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
@@ -3081,24 +3208,20 @@ def multi_head_attention_forward(query,                           # type: Tensor
           L is the target sequence length, S is the source sequence length.
     """
 
-    qkv_same = torch.equal(query, key) and torch.equal(key, value)
-    kv_same = torch.equal(key, value)
-
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
-    assert list(query.size()) == [tgt_len, bsz, embed_dim]
     assert key.size() == value.size()
 
     head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if use_separate_proj_weight is not True:
-        if qkv_same:
+    if not use_separate_proj_weight:
+        if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
             q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-        elif kv_same:
+        elif torch.equal(key, value):
             # encoder-decoder attention
             # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias

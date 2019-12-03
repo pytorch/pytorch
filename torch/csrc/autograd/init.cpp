@@ -7,7 +7,7 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 
-PyObject* THPAutograd_initExtension(PyObject* _unused) {
+PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
   if (!tensor_module)

@@ -142,7 +142,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
     diff_input_list = list(iter_tensors(input, True))
     jacobian = make_jacobian(input, output.numel())
     jacobian_reentrant = make_jacobian(input, output.numel())
-    grad_output = torch.zeros_like(output)
+    grad_output = torch.zeros_like(output, memory_format=torch.legacy_contiguous_format)
     flat_grad_output = grad_output.view(-1)
     reentrant = True
     correct_grad_sizes = True
@@ -300,7 +300,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         diff_input_list = list(iter_tensors(tupled_inputs, True))
         if not diff_input_list:
             raise RuntimeError("no Tensors requiring grad found in input")
-        grads_input = torch.autograd.grad(output, diff_input_list, [torch.zeros_like(o) for o in output],
+        grads_input = torch.autograd.grad(output, diff_input_list, [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output],
                                           allow_unused=True)
         for gi, i in zip(grads_input, diff_input_list):
             if gi is None:
@@ -381,7 +381,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            y = torch.testing.randn_like(x if x.is_floating_point() else x.double())
+            y = torch.testing.randn_like(x if x.is_floating_point() else x.double(), memory_format=torch.legacy_contiguous_format)
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
             return y.requires_grad_()

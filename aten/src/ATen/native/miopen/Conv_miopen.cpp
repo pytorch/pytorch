@@ -669,6 +669,10 @@ Tensor miopen_convolution_forward(
                                      padding, stride, dilation, groups),
                     input->options());
 
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
   // Avoid ambiguity of "output" when this is being used as backwards
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);

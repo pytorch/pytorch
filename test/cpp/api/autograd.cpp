@@ -1,8 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-#include <torch/utils.h>
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
@@ -20,6 +19,108 @@ std::string graph_desc(std::shared_ptr<Node> node) {
     result += graph_desc(edge.function);
   }
   return result+")";
+}
+
+Variable simple_fn(const Variable& x, const Variable& y) {
+  return x + 2 * y + x * y;
+}
+
+TEST(AutogradAPITests, BackwardSimpleTest) {
+  Variable x = torch::randn({2, 2}, torch::requires_grad());
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  backward({res.sum()}, {});
+
+  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({2, 2}));
+  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
+}
+
+TEST(AutogradAPITests, BackwardTest) {
+  Variable x = torch::randn({2, 2}, torch::requires_grad());
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  backward({res}, {torch::ones({2, 2})}, {}, true);
+
+  backward({res}, {torch::ones({2, 2})});
+
+  ASSERT_VARIABLE_EQ(x.grad(), 2* (y + torch::ones({2, 2})));
+  ASSERT_VARIABLE_EQ(y.grad(), 2 * (x + torch::ones({2, 2})*2));
+}
+
+TEST(AutogradAPITests, GradSimpleTest) {
+  // basic grad
+  Variable x = torch::randn({2,2}, torch::requires_grad());
+  Variable y = torch::randn({2,2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  auto grad_res = grad({res}, {x, y}, {torch::ones({2, 2})});
+
+  ASSERT_VARIABLE_EQ(grad_res[0], y + torch::ones({2, 2}));
+  ASSERT_VARIABLE_EQ(grad_res[1], x + torch::ones({2, 2}) * 2);
+}
+
+TEST(AutogradAPITests, GradTest) {
+  Variable x = torch::randn({2, 2}, torch::requires_grad());
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  auto res = simple_fn(x, y);
+  res.backward(torch::ones({2, 2}), false, true);
+
+  Variable x_grad = y + torch::ones({2, 2});
+  Variable y_grad = x + torch::ones({2, 2}) * 2;
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad);
+  ASSERT_VARIABLE_EQ(y.grad(), y_grad);
+
+  Variable grad_sum = 2 * x.grad() + y.grad();
+  auto x_hv = grad({grad_sum}, {x}, {torch::ones({2, 2})}, {}, true);
+
+  ASSERT_VARIABLE_EQ(x_hv[0], torch::ones({2, 2}));
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad);
+  ASSERT_VARIABLE_EQ(y.grad(), y_grad);
+}
+
+TEST(AutogradAPITests, GradNonLeafTest) {
+  Variable x_init = torch::randn({2, 2}, torch::requires_grad());
+  Variable x = x_init;
+  Variable y = torch::randn({2, 2}, torch::requires_grad());
+  Variable grad_output = torch::ones({2, 2});
+
+  for (int i = 0; i < 5; ++ i) {
+    auto res = simple_fn(x, y);
+    auto input_grads = grad({res}, {x}, {grad_output}, {}, true);
+
+    Variable grad_x_expected = y + torch::ones({2, 2});
+    ASSERT_VARIABLE_EQ(input_grads[0], grad_x_expected);
+    ASSERT_FALSE(x.grad().defined());
+    ASSERT_FALSE(y.grad().defined());
+    x = x + 0.05 * input_grads[0];
+  }
+
+  float val_init = simple_fn(x_init, y).sum().item().toFloat();
+  float val_final = simple_fn(x, y).sum().item().toFloat();
+  ASSERT_TRUE(val_final > val_init);
+
+  x.backward(grad_output, false, true);
+  ASSERT_TRUE(x_init.grad().defined());
+  ASSERT_TRUE(y.grad().defined());
+}
+
+TEST(AutogradAPITests, GradUnreachableTest) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  Variable y = torch::ones({1}, torch::requires_grad());
+
+  Variable z = x * 2;
+  Variable w = y * 2;
+
+  auto grad_res = grad({x * 2}, {x, y}, {}, {}, false, true);
+  ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
+  ASSERT_FALSE(grad_res[1].defined());
+
+  // This is slightly different than the case above, because z doesn't even
+  // have a grad accumulator allocated.
+  z = torch::ones({1}, torch::requires_grad());
+  grad_res = grad({x * 2}, {x, z}, {}, {}, false, true);
+
+  ASSERT_VARIABLE_EQ(grad_res[0], x * 2);
+  ASSERT_FALSE(grad_res[1].defined());
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
@@ -248,8 +349,6 @@ TEST(CustomAutogradTest, InvalidGradients) {
   ASSERT_THROWS_WITH(
     MyFunction::apply(input1).sum().backward(), "expected shape");
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
-  ASSERT_THROWS_WITH(
-    MyFunction::apply(input2).sum().backward(), "expected type");
 }
 
 TEST(CustomAutogradTest, NoGradInput) {
@@ -379,7 +478,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
   };
 
   // This should not stack overflow
-  auto v = torch::tensor(8193, torch::requires_grad());
+  auto v = torch::tensor({8193}, torch::dtype(torch::kFloat).requires_grad(true));
   DeepReenter::apply(v).sum().backward();
 }
 
@@ -419,8 +518,8 @@ TEST(CustomAutogradTest, ReentrantPriority) {
     }
   };
 
-  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()));
-  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()));
+  auto a = MyFunction::apply(torch::tensor({6}, torch::dtype(torch::kFloat).requires_grad(true)));
+  auto b = Reenter::apply(torch::tensor({9}, torch::dtype(torch::kFloat).requires_grad(true)));
   auto v = a*b;
   v.backward();
 

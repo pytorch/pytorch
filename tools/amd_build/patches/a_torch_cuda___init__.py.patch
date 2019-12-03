@@ -1,26 +1,23 @@
 diff --git a/torch/cuda/__init__.py b/torch/cuda/__init__.py
-index f52ab04f1..4e3f63c4b 100644
+index 21227ba9c0..994c778c74 100644
 --- a/torch/cuda/__init__.py
 +++ b/torch/cuda/__init__.py
-@@ -123,7 +123,7 @@ def _lazy_call(callable):
+@@ -148,8 +148,6 @@ def _lazy_call(callable):
          # Don't store the actual traceback to avoid memory cycle
          _queued_calls.append((callable, traceback.format_stack()))
  
 -_lazy_call(_check_capability)
-+#_lazy_call(_check_capability)
- 
+-
  
  class DeferredCudaCallError(Exception):
-@@ -159,9 +159,9 @@ def _lazy_init():
-             "Cannot re-initialize CUDA in forked subprocess. " + msg)
-     _check_driver()
-     torch._C._cuda_init()
--    _cudart = _load_cudart()
--    _cudart.cudaGetErrorName.restype = ctypes.c_char_p
--    _cudart.cudaGetErrorString.restype = ctypes.c_char_p
-+    # _cudart = _load_cudart()
-+    #_cudart.cudaGetErrorName.restype = ctypes.c_char_p
-+    #_cudart.cudaGetErrorString.restype = ctypes.c_char_p
-     _original_pid = os.getpid()
-     _initialized = True
-     # Important to do this after _initialized, since some queued calls
+     pass
+@@ -195,9 +193,6 @@ def _lazy_init():
+                 "Cannot re-initialize CUDA in forked subprocess. " + msg)
+         _check_driver()
+         torch._C._cuda_init()
+-        _cudart = _load_cudart()
+-        _cudart.cudaGetErrorName.restype = ctypes.c_char_p
+-        _cudart.cudaGetErrorString.restype = ctypes.c_char_p
+         # Some of the queued calls may reentrantly call _lazy_init();
+         # we need to just return without initializing in that case.
+         # However, we must not let any *other* threads in!

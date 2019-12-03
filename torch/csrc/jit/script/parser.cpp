@@ -19,7 +19,7 @@ Decl mergeTypesFromTypeComment(
     expected_num_annotations -= 1;
   }
   if (expected_num_annotations != type_annotation_decl.params().size()) {
-    throw ErrorReport(type_annotation_decl.range())
+    throw ErrorReport(decl.range())
         << "Number of type annotations ("
         << type_annotation_decl.params().size()
         << ") did not match the number of "
@@ -269,7 +269,7 @@ struct ParserImpl {
       if (kind == TK_FOR) {
         // TK_FOR targets should only parse exprs prec greater than 4, which only
         // includes subset of Exprs that suppose to be on the LHS according to the
-        // python grammer https://docs.python.org/3/reference/grammar.html
+        // python grammar https://docs.python.org/3/reference/grammar.html
         auto target = parseLHSExp();
         L.expect(TK_IN);
         auto iter = parseExp();
@@ -318,12 +318,12 @@ struct ParserImpl {
 
   StringLiteral parseConcatenatedStringLiterals() {
     auto range = L.cur().range;
-    std::stringstream ss;
+    std::string ss;
     while (L.cur().kind == TK_STRINGLITERAL) {
       auto literal_range = L.cur().range;
-      ss << parseStringLiteral(literal_range, L.next().text());
+      ss.append(parseStringLiteral(literal_range, L.next().text()));
     }
-    return StringLiteral::create(range, ss.str());
+    return StringLiteral::create(range, ss);
   }
 
   Expr parseAttributeValue() {
@@ -344,7 +344,7 @@ struct ParserImpl {
   }
 
   // parse LHS acceptable exprs, which only includes subset of Exprs that prec is
-  // greater than 4 according to the python grammer
+  // greater than 4 according to the python grammar
   Expr parseLHSExp() {
     return parseExp(4);
   }
@@ -450,11 +450,24 @@ struct ParserImpl {
       // There is an assignment operator, parse the RHS and generate the
       // assignment.
       auto rhs = parseExpOrExpTuple();
-      L.expect(TK_NEWLINE);
       if (maybeOp.value()->kind() == '=') {
+        std::vector<Expr> lhs_list = {lhs};
+        while (L.nextIf('=')) {
+          lhs_list.push_back(rhs);
+          rhs = parseExpOrExpTuple();
+        }
+        if (type.present() && lhs_list.size() > 1) {
+          throw ErrorReport(type.range())
+              << "Annotated multiple assignment is not supported in python";
+        }
+        L.expect(TK_NEWLINE);
         return Assign::create(
-            lhs.range(), lhs, Maybe<Expr>::create(rhs.range(), rhs), type);
+            lhs.range(),
+            List<Expr>::create(lhs_list[0].range(), lhs_list),
+            Maybe<Expr>::create(rhs.range(), rhs),
+            type);
       } else {
+        L.expect(TK_NEWLINE);
         // this is an augmented assignment
         if (lhs.kind() == TK_TUPLE_LITERAL) {
           throw ErrorReport(lhs.range())
@@ -468,7 +481,10 @@ struct ParserImpl {
       TORCH_INTERNAL_ASSERT(type.present());
       L.expect(TK_NEWLINE);
       return Assign::create(
-          lhs.range(), lhs, Maybe<Expr>::create(lhs.range()), type);
+          lhs.range(),
+          List<Expr>::create(lhs.range(), {lhs}),
+          Maybe<Expr>::create(lhs.range()),
+          type);
     }
   }
 
@@ -513,17 +529,11 @@ struct ParserImpl {
       }
       case TK_BREAK: {
         auto range = L.next().range;
-        if (cur_loop_count == 0) {
-          throw ErrorReport(range) << "SyntaxError: 'break' outside loop";
-        }
         L.expect(TK_NEWLINE);
         return Break::create(range);
       }
       case TK_CONTINUE: {
         auto range = L.next().range;
-        if (cur_loop_count == 0) {
-          throw ErrorReport(range) << "SyntaxError: 'continue' outside loop";
-        }
         L.expect(TK_NEWLINE);
         return Continue::create(range);
       }
@@ -572,9 +582,7 @@ struct ParserImpl {
     L.expect(TK_WHILE);
     auto cond = parseExp();
     L.expect(':');
-    cur_loop_count++;
     auto body = parseStatements(/*expect_indent=*/true);
-    cur_loop_count--;
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
 
@@ -583,9 +591,7 @@ struct ParserImpl {
     L.expect(TK_FOR);
     auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseLHSExp);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
-    cur_loop_count++;
     auto body = parseStatements(/*expect_indent=*/true);
-    cur_loop_count--;
     return For::create(r, targets, itrs, body);
   }
 
@@ -652,8 +658,6 @@ TreeRef parseClass() {
   }
 
   TreeRef parseFunction(bool is_method) {
-    size_t old_loop_count = cur_loop_count;
-    cur_loop_count = 0;
     L.expect(TK_DEF);
     auto name = parseIdent();
     auto decl = parseDecl();
@@ -668,7 +672,6 @@ TreeRef parseClass() {
     }
 
     auto stmts_list = parseStatements(false);
-    cur_loop_count = old_loop_count;
     return Def::create(
         name.range(), Ident(name), Decl(decl), List<Stmt>(stmts_list));
   }
@@ -687,7 +690,6 @@ TreeRef parseClass() {
   TreeRef makeList(const SourceRange& range, TreeList&& trees) {
     return create_compound(TK_LIST, range, std::move(trees));
   }
-  size_t cur_loop_count = 0;
   Lexer L;
   SharedParserData& shared;
 };

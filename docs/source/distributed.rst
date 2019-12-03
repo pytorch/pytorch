@@ -223,7 +223,7 @@ distributed package and ``group_name`` is deprecated as well.
     In other words, if the file is not removed/cleaned up and you call
     :func:`init_process_group` again on that file, failures are expected.
     The rule of thumb here is that, make sure that the file is non-existent or
-    empty everytime :func:`init_process_group` is called.
+    empty every time :func:`init_process_group` is called.
 
 ::
 
@@ -410,7 +410,7 @@ both python2 and python3.
 Spawn utility
 -------------
 
-The :doc:`torch.multiprocessing` package also provides a ``spawn``
+The :ref:`multiprocessing-doc` package also provides a ``spawn``
 function in :func:`torch.multiprocessing.spawn`. This helper function
 can be used to spawn multiple processes. It works by passing in the
 function that you want to run and spawns N processes to run it. This

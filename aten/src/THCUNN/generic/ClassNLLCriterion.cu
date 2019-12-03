@@ -42,7 +42,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
             " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
-  if (reduction == Reduction::None && n_dims == 2) {
+  if (reduction == at::Reduction::None && n_dims == 2) {
     THCTensor_(resize1d)(state, output, batch_size);
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
@@ -87,7 +87,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::Mean,
+        reduction == at::Reduction::Mean,
         n_classes,
         ignore_index
     );
@@ -100,7 +100,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::Mean,
+        reduction == at::Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
@@ -160,7 +160,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THError("weight tensor should be defined either for all or no classes");
   }
 
-  if (reduction == Reduction::None && n_dims == 2) {
+  if (reduction == at::Reduction::None && n_dims == 2) {
     THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
@@ -202,7 +202,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights_data,
         target_data,
         total_weight_data,
-        reduction == Reduction::Mean,
+        reduction == at::Reduction::Mean,
         n_classes,
         ignore_index
     );
@@ -214,7 +214,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         target_data,
         weights_data,
         total_weight_data,
-        reduction == Reduction::Mean,
+        reduction == at::Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,

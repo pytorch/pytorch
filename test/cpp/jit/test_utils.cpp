@@ -1,4 +1,6 @@
 #include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/clear_undefinedness.h>
 
 namespace torch {
 namespace jit {
@@ -25,6 +27,11 @@ std::vector<at::Tensor> run(
   return fmap(stack, [](const IValue& i) { return i.toTensor(); });
 }
 
+static void unpackReturnTuple(Stack &stack) {
+  auto tuple = pop(stack).toTuple();
+  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
+}
+
 std::pair<tensor_list, tensor_list> runGradient(
     Gradient& grad_spec,
     tensor_list& tensors_in,
@@ -32,6 +39,7 @@ std::pair<tensor_list, tensor_list> runGradient(
   static const auto as_tensorlist = [](const Stack& stack) {
     return fmap(stack, [](const IValue& i) { return i.toTensor(); });
   };
+  ClearUndefinedness(grad_spec.df);
   Code f_code{grad_spec.f}, df_code{grad_spec.df};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
@@ -46,56 +54,40 @@ std::pair<tensor_list, tensor_list> runGradient(
   for (auto offset : grad_spec.df_input_captured_outputs)
     df_stack.push_back(f_stack[offset]);
   df_interpreter.run(df_stack);
-
+  unpackReturnTuple(df_stack);
   // Outputs of f needs to be sliced
   f_stack.erase(f_stack.begin() + grad_spec.f_real_outputs, f_stack.end());
   return std::make_pair(as_tensorlist(f_stack), as_tensorlist(df_stack));
 }
 
-std::tuple<Var, Var> build_lstm_body(
-    Graph& g,
-    Var input,
-    Var hx,
-    Var cx,
-    Var w_ih,
-    Var w_hh) {
-  auto gates = input.mm(w_ih);
-  gates = gates + hx.mm(w_hh);
-  auto outputs = gates.chunk(4, 1);
-  auto ingate = outputs[0];
-  auto forgetgate = outputs[1];
-  auto cellgate = outputs[2];
-  auto outgate = outputs[3];
-  ingate = ingate.sigmoid();
-  outgate = outgate.sigmoid();
-  cellgate = cellgate.tanh();
-  forgetgate = forgetgate.sigmoid();
-
-  auto cy = forgetgate * cx;
-  cy = cy + ingate * cellgate;
-  auto hy = outgate * cy.tanh();
-
-  return std::make_tuple(hy, cy);
-}
-
 std::shared_ptr<Graph> build_lstm() {
-  auto r = std::make_shared<Graph>();
-  auto& g = *r;
-  Value* input = g.addInput();
-  Value* hx = g.addInput();
-  Value* cx = g.addInput();
-  Value* w_ih = g.addInput();
-  Value* w_hh = g.addInput();
+  const auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor,
+          %2 : Tensor,
+          %3 : Tensor,
+          %4 : Tensor):
+      %5 : Tensor = aten::mm(%0, %3)
+      %6 : Tensor = aten::mm(%1, %4)
+      %7 : int = prim::Constant[value=1]()
+      %8 : Tensor = aten::add(%5, %6, %7)
+      %9 : Tensor, %10 : Tensor, %11 : Tensor, %12 : Tensor = prim::ConstantChunk[chunks=4, dim=1](%8)
+      %13 : Tensor = aten::sigmoid(%9)
+      %14 : Tensor = aten::sigmoid(%12)
+      %15 : Tensor = aten::tanh(%11)
+      %16 : Tensor = aten::sigmoid(%10)
+      %17 : Tensor = aten::mul(%16, %2)
+      %18 : Tensor = aten::mul(%13, %15)
+      %19 : int = prim::Constant[value=1]()
+      %20 : Tensor = aten::add(%17, %18, %19)
+      %21 : Tensor = aten::tanh(%20)
+      %22 : Tensor = aten::mul(%14, %21)
+      return (%22, %20))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::script::parseIR(graph_string, g.get());
+  g->lint();
 
-  Var hy;
-  Var cy;
-  std::tie(hy, cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
-
-  hy.addAsOutput();
-  cy.addAsOutput();
-  g.lint();
-
-  return r;
+  return g;
 }
 
 at::Tensor t_use(at::Tensor x) {

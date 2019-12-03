@@ -12,6 +12,8 @@ namespace jit {
   _(ADFormulas)                        \
   _(Attributes)                        \
   _(Blocks)                            \
+  _(CallStack)                         \
+  _(CallStackCaching)                  \
   _(CodeTemplate)                      \
   _(ControlFlow)                       \
   _(CreateAutodiffSubgraphs)           \
@@ -19,9 +21,9 @@ namespace jit {
   _(CustomOperatorAliasing)            \
   _(IValueKWargs)                      \
   _(CustomFusion)                      \
+  _(SchemaMatching)                    \
   _(Differentiate)                     \
   _(DifferentiateWithRequiresGrad)     \
-  _(DynamicDAG)                        \
   _(FromQualString)                    \
   _(InternedStrings)                   \
   _(IValue)                            \
@@ -53,17 +55,26 @@ namespace jit {
   _(RecordFunction)                    \
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
+  _(SubgraphRewriter)                  \
+  _(ModuleCloneInstance)               \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
   _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
-  _(InsertConstant)                    \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
-  _(ImportTooNew)                      \
-  _(ClassDerive)
+  _(ClassDerive)                       \
+  _(ModuleInterfaceSerialization)      \
+  _(ClassTypeAddRemoveAttr)            \
+  _(Inliner)                           \
+  _(LiteInterpreterAdd)                \
+  _(LiteInterpreterConv)               \
+  _(LiteInterpreterInline)             \
+  _(LiteInterpreterTuple)              \
+  _(LiteInterpreterPrimOverload)       \
+  _(CommonAncestor)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

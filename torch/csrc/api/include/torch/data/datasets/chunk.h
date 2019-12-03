@@ -350,16 +350,16 @@ class ChunkDataset final
       "Dataset needs to call reset() before calling get_batch().");
 
     TORCH_CHECK(
-      batch_size == options_.batch_size_,
+      batch_size == options_.batch_size(),
       "The requested batch size does not match with the initialized batch size.\n"
       " The requested batch size is ", batch_size,
-      ", while the dataset is created with batch size equal to ", options_.batch_size_);
+      ", while the dataset is created with batch size equal to ", options_.batch_size());
     return batch_buffer_->get_batch();
   }
 
   /// Helper method around get_batch as `batch_size` is not strictly necessary
   BatchType get_batch() {
-    return get_batch(options_.batch_size_);
+    return get_batch(options_.batch_size());
   }
 
   /// This will clear any internal state and starts the internal prefetching
@@ -383,16 +383,16 @@ class ChunkDataset final
     // chunk buffer.
     batch_buffer_ = torch::make_unique<
         detail::BatchDataBuffer<UnwrappedBatchType, ExampleSamplerType>>(
-        options_.batch_size_,
+        options_.batch_size(),
         example_sampler_,
-        options_.cache_size_);
+        options_.cache_size());
 
     // create new workers for this new epoch.
     quit_worker_ = false;
 
     AT_ASSERT(running_preloaders_ == 0);
-    running_preloaders_ = options_.preloader_count_;
-    for (size_t i = 0; i < options_.preloader_count_; ++i) {
+    running_preloaders_ = options_.preloader_count();
+    for (size_t i = 0; i < options_.preloader_count(); ++i) {
       preload_threads_.emplace_back([this, i]() { this->preloader(i); });
     }
   }
@@ -427,7 +427,7 @@ class ChunkDataset final
         std::vector<size_t> chunk_idx;
         {
           std::lock_guard<std::mutex> lock(chunk_index_guard_);
-          if (auto chunk_sampler_result = chunk_sampler_.next(this->options_.cross_chunk_shuffle_count_)) {
+          if (auto chunk_sampler_result = chunk_sampler_.next(this->options_.cross_chunk_shuffle_count())) {
             chunk_idx = chunk_sampler_result.value();
           } else {
             break;

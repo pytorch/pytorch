@@ -751,9 +751,9 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state, 
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
-    auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output);
-    auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
-    auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
+    auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT)) : grad_cy_r;
 
     Tensor dx, dhx, dcx, ws;
     std::tie(dx, dhx, dcx, ws) = at::native::miopen_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
@@ -806,7 +806,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     int64_t hidden_size = hx.size(2);
 
     AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-    IntArrayRef batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+    IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());
 

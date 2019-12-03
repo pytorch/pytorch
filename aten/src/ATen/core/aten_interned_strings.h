@@ -41,6 +41,8 @@ _(aten, _cat) \
 _(aten, _ceil) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
+_(aten, convolution_overrideable) \
+_(aten, convolution_backward_overrideable) \
 _(aten, _convolution_nogroup) \
 _(aten, _copy_ignoring_overlaps) \
 _(aten, _cos) \
@@ -335,6 +337,7 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, ge) \
+_(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
@@ -498,6 +501,8 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, bitwise_not) \
+_(aten, bitwise_xor) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -576,7 +581,6 @@ _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
 _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
-_(aten, s_native_addmm) \
 _(aten, scatter) \
 _(aten, scatter_add) \
 _(aten, select) \
@@ -646,9 +650,9 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
-_(aten, thnn_conv3d) \
-_(aten, thnn_conv3d_backward) \
-_(aten, thnn_conv3d_forward) \
+_(aten, slow_conv3d) \
+_(aten, slow_conv3d_backward) \
+_(aten, slow_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \

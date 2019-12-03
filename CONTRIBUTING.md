@@ -1,3 +1,33 @@
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  * [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+- [Writing documentation](#writing-documentation)
+  * [Building documentation](#building-documentation)
+    + [Tips](#tips)
+  * [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with--py-spy-)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c---development-tips)
+  * [Build only what you need](#build-only-what-you-need)
+  * [Code completion and IDE support](#code-completion-and-ide-support)
+  * [Make no-op build fast](#make-no-op-build-fast)
+    + [Use Ninja](#use-ninja)
+    + [Use CCache](#use-ccache)
+    + [Use a faster linker](#use-a-faster-linker)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
+  * [Running clang-tidy](#running-clang-tidy)
+  * [Pre-commit tidy/linting hook](#pre-commit-tidy-linting-hook)
+  * [Building PyTorch with ASAN](#building-pytorch-with-asan)
+    + [Getting `ccache` to work](#getting--ccache--to-work)
+    + [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with--ld-preload--and--libasan-rt--)
+    + [Why LD_PRELOAD in the build function?](#why-ld-preload-in-the-build-function-)
+    + [Why no leak detection?](#why-no-leak-detection-)
+- [Caffe2 notes](#caffe2-notes)
+
 ## Contributing to PyTorch
 
 If you are interested in contributing to PyTorch, your contributions will fall
@@ -204,6 +234,139 @@ We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
 commands. To run this check locally, run `./check-doxygen.sh` from inside
 `docs/cpp`.
 
+### Building documentation
+
+To build the documentation:
+
+1. Build and install PyTorch
+
+2. Install the prequesities
+
+```bash
+cd docs
+pip install -r requirements.txt
+# `katex` must also be available in your PATH.
+# You can either install katex globally if you have properly configured npm:
+# npm install -g katex
+# Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
+# npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
+```
+
+3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
+
+```bash
+cd docs
+make html
+```
+
+4. To view HTML files, you must start an HTTP server. For example
+
+```bash
+# Start a server from the current directory (Python 3 only)
+cd docs/build/html
+python -m http.server
+```
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine on your local machine. To map
+remote port 8086 to local port 8086, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8086:my_machine:8086
+
+# For Eternal Terminal
+et my_machine -t="8086:8086"
+```
+
+Then navigate to `localhost:8086` in your web browser.
+
+#### Tips
+
+The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
+files pull in docstrings from PyTorch Python code (for example, via
+the `autofunction` or `autoclass` directives). To vastly shorten doc build times,
+it is helpful to remove the files you are not working on, only keeping the base
+`index.rst` file and the files you are editing. The Sphinx build will produce
+missing file warnings but will still complete. For example, to work on `jit.rst`:
+
+```bash
+cd docs/source
+ls | grep rst | grep -v index | grep -v jit | xargs rm
+
+# Make your changes, build the docs, etc.
+
+# Don't commit the deletions!
+git add index.rst jit.rst
+...
+```
+
+
+### Adding documentation tests
+
+It is easy for code snippets in docstrings and `.rst` files to get out of date. The docs
+build includes the [Sphinx Doctest Extension](https://www.sphinx-doc.org/en/master/usage/extensions/doctest.html),
+which can run code in documentation as a unit test. To use the extension, use
+the `.. testcode::` directive in your `.rst` and docstrings.
+
+To manually run these tests, follow steps 1 and 2 above, then run:
+
+```bash
+cd docs
+make doctest
+```
+
+## Profiling with `py-spy`
+
+Evaluating the performance impact of code changes in PyTorch can be complicated,
+particularly if code changes happen in compiled code. One simple way to profile
+both Python and C++ code in PyTorch is to use
+[`py-spy`](https://github.com/benfred/py-spy), a sampling profiler for Python
+that has the ability to profile native code and Python code in the same session.
+
+`py-spy` can be installed via `pip`:
+
+```bash
+$ pip install py-spy
+```
+
+To use `py-spy`, first write a Python test script that exercises the
+functionality you would like to profile. For example, this script profiles
+`torch.add`:
+
+```python
+import torch
+
+t1 = torch.tensor([[1, 1], [1, 1.]])
+t2 = torch.tensor([[0, 0], [0, 0.]])
+
+for _ in range(1000000):
+    torch.add(t1, t2)
+```
+
+Since the `torch.add` operation happens in microseconds, we repeat it a large
+number of times to get good statistics. The most straightforward way to use
+`py-spy` with such a script is to generate a [flame
+graph](http://www.brendangregg.com/flamegraphs.html):
+
+```bash
+$ py-spy record -o profile.svg --native -- python test_tensor_tensor_add.py
+```
+
+This will output a file named `profile.svg` containing a flame graph you can
+view in a web browser or SVG viewer. Individual stack frame entries in the graph
+can be selected interactively with your mouse to zoom in on a particular part of
+the program execution timeline. The `--native` command-line option tells
+`py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
+for C++ code it may be necessary to compile PyTorch in debug mode by prepending
+your `setup.py develop` call to compile PyTorch with `DEBUG=1`. Depending on
+your operating system it may also be necessary to run `py-spy` with root
+privileges.
+
+`py-spy` can also work in an `htop`-like "live profiling" mode and can be
+tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
+details.
+
 ## Managing multiple build trees
 
 One downside to using `python setup.py develop` is that your development
@@ -223,7 +386,7 @@ source activate pytorch-myfeature
 python setup.py develop
 ```
 
-## C++ Development tips
+## C++ development tips
 
 If you are working on the C++ code, there are a few important things that you
 will want to keep in mind:
@@ -231,7 +394,7 @@ will want to keep in mind:
 1. How to rebuild only the code you are working on.
 2. How to make rebuilds in the absence of changes go faster.
 
-### Build only what you need.
+### Build only what you need
 
 `python setup.py build` will build everything by default, but sometimes you are
 only interested in a specific component.
@@ -274,7 +437,7 @@ C++ code. You need to `pip install ninja` to generate accurate
 information for the code in `torch/csrc`. More information at:
 - https://sarcasm.github.io/notes/dev/compilation-database.html
 
-### Make no-op build fast.
+### Make no-op build fast
 
 #### Use Ninja
 
@@ -358,18 +521,50 @@ ccache -F 0
 # deploy (and add to ~/.bashrc for later)
 export PATH="/usr/lib/ccache:$PATH"
 ```
+
+It is also possible to install `ccache` via `conda` by installing it from the
+community-maintained `conda-forge` channel. Here is how to set up `ccache` this
+way:
+
+```bash
+# install ccache
+conda install -c conda-forge ccache
+
+# set up ccache compiler symlinks
+mkdir ~/ccache
+mkdir ~/ccache/lib
+mkdir ~/ccache/cuda
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/cc
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/c++
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/gcc
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/g++
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/cuda/nvcc
+
+# update PATH to reflect symlink locations, consider
+# adding this to your .bashrc
+export PATH=~/ccache/lib:$PATH
+export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
+
+# increase ccache cache size to 25 GiB
+ccache -M 25Gi
+```
+
+To check this is working, do two clean builds of pytorch in a row. The second
+build should be substantially and noticeably faster than the first build.
+
+
 #### Use a faster linker
-If you are editing a single file and rebuilding in a tight loop, the time spent 
-linking will dominate. The system linker available in most Linux distributions 
+If you are editing a single file and rebuilding in a tight loop, the time spent
+linking will dominate. The system linker available in most Linux distributions
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
 
-The easiest way to use `lld` this is download the 
+The easiest way to use `lld` this is download the
 [latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
 ```
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
-## CUDA Development tips
+## CUDA development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
@@ -524,7 +719,12 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   This causes preprocessor tokens inside the literal like an`#endif`  to be incorrectly
   treated as preprocessor directives. See https://godbolt.org/z/eVTIJq as an example.
 
-### Running Clang-Tidy
+* Either MSVC or the Windows headers have a PURE macro defined and will replace
+  any occurrences of the PURE token in code with an empty string. This is why
+  we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
+  The same is likely true for other identifiers that we just didn't try to use yet.
+
+### Running clang-tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
@@ -555,7 +755,7 @@ root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
 to change the clang-tidy this script uses. Make sure you have PyYaml installed,
 which is in PyTorch's `requirements.txt`.
 
-### Pre-commit Tidy/Linting Hook
+### Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
 flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
@@ -569,6 +769,100 @@ performing these checks, before a commit is created:
 You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
+
+### Building PyTorch with ASAN
+
+[ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
+useful for debugging memory errors in C++. We run it in CI, but here's how to
+get the same thing to run on your local machine.
+
+First, install LLVM 8. The easiest way is to get [prebuilt
+binaries](http://releases.llvm.org/download.html#8.0.0) and extract them to
+folder (later called `$LLVM_ROOT`).
+
+Then set up the appropriate scripts. You can put this in your `.bashrc`:
+
+```
+LLVM_ROOT=<wherever your llvm install is>
+PYTORCH_ROOT=<wherever your pytorch checkout is>
+
+LIBASAN_RT="$LLVM_ROOT/lib/clang/8.0.0/lib/linux/libclang_rt.asan-x86_64.so"
+build_with_asan()
+{
+  LD_PRELOAD=${LIBASAN_RT} \
+  CC="$LLVM_ROOT/bin/clang" \
+  CXX="$LLVM_ROOT/bin/clang++" \
+  LDSHARED="clang --shared" \
+  LDFLAGS="-stdlib=libstdc++" \
+  CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
+  CXX_FLAGS="-pthread" \
+  NO_CUDA=1 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 NO_DISTRIBUTED=1 DEBUG=1 \
+  python setup.py develop
+}
+
+run_with_asan()
+{
+  LD_PRELOAD=${LIBASAN_RT} $@
+}
+
+# you can look at build-asan.sh to find the latest options the CI uses
+export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PYTORCH_ROOT/ubsan.supp
+export ASAN_SYMBOLIZER_PATH=$LLVM_ROOT/bin/llvm-symbolizer
+```
+
+Then you can use the scripts like:
+
+```
+suo-devfair ~/pytorch ❯ build_with_asan
+suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
+```
+
+#### Getting `ccache` to work
+
+The scripts above specify the `clang` and `clang++` binaries directly, which
+bypasses `ccache`. Here's how to get `ccache` to work:
+
+1. Make sure the ccache symlinks for `clang` and `clang++` are set up (see
+   CONTRIBUTING.md)
+2. Make sure `$LLVM_ROOT/bin` is available on your `$PATH`.
+3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
+   directly to `clang` and `clang++`.
+
+#### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
+
+The “standard” workflow for ASAN assumes you have a standalone binary:
+
+1. Recompile your binary with `-fsanitize=address`.
+2. Run the binary, and ASAN will report whatever errors it find.
+
+Unfortunately, PyTorch is a distributed as a shared library that is loaded by
+a third-party executable (Python). It’s too much of a hassle to recompile all
+of Python every time we want to use ASAN. Luckily, the ASAN folks have a
+workaround for cases like this:
+
+1. Recompile your library with `-fsanitize=address -shared-libasan`. The
+   extra `-shared-libasan` tells the compiler to ask for the shared ASAN
+   runtime library.
+2. Use `LD_PRELOAD` to tell the dynamic linker to load the ASAN runtime
+   library before anything else.
+
+More information can be found
+[here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
+
+#### Why LD_PRELOAD in the build function?
+
+We need `LD_PRELOAD` because there is a cmake check that ensures that a
+simple program builds and runs. If we are building with ASAN as a shared
+library, we need to `LD_PRELOAD` the runtime library, otherwise there will
+dynamic linker errors and the check will fail.
+
+We don’t actually need either of these if we fix the cmake checks.
+
+#### Why no leak detection?
+
+Python leaks a lot of memory. Possibly we could configure a suppression file,
+but we haven’t gotten around to it.
 
 ## Caffe2 notes
 

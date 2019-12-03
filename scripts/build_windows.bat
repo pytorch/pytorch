@@ -58,6 +58,8 @@ if NOT DEFINED CMAKE_GENERATOR (
   set CMAKE_GENERATOR=Ninja
 )
 
+set CMAKE_VERBOSE_MAKEFILE=1
+
 :: Install pyyaml for Aten codegen
 pip install pyyaml ninja
 

@@ -2,8 +2,6 @@
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/throughput_benchmark.h>
 
-#include <ATen/native/Convolution.h>
-
 #include <pybind11/functional.h>
 
 namespace torch {
@@ -43,17 +41,11 @@ void initThroughputBenchmarkBindings(PyObject* module) {
         // The benchmark always runs without the GIL. GIL will be used where
         // needed. This will happen only in the nn.Module mode when manipulating
         // inputs and running actual inference
-        AutoNoGIL no_gil_guard;
+        pybind11::gil_scoped_release no_gil_guard;
         return self.benchmark(config);
       });
 
 
-  m.def("_enable_mkldnn_conv", []() {
-    at::native::disable_mkldnn_conv.exchange(false);
-  });
-  m.def("_disable_mkldnn_conv", []() {
-    at::native::disable_mkldnn_conv.exchange(true);
-  });
 }
 
 } // namespace throughput_benchmark

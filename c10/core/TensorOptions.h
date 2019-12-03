@@ -5,6 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
+#include <c10/core/TensorTypeSet.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -55,7 +56,7 @@ namespace c10 {
 /// NOTE [ TensorOptions Constructors ]
 ///
 /// TensorOptions is like a dictionary with entries from the set:
-/// {requires_grad, is_variable, device, dtype, layout}, where each entry may be
+/// {requires_grad, device, dtype, layout}, where each entry may be
 /// unspecified (i.e., is optional). It is used to specify the properties of
 /// tensors in many places both in C++ internal and API, e.g., tensor factory
 /// methods like `at::empty({10}, options)`, tensor conversions like
@@ -99,13 +100,11 @@ namespace c10 {
 struct C10_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
-    , is_variable_(false)
     , pinned_memory_(false)
     , has_device_(false)
     , has_dtype_(false)
     , has_layout_(false)
     , has_requires_grad_(false)
-    , has_is_variable_(false)
     , has_pinned_memory_(false)
     {}
 
@@ -143,27 +142,6 @@ struct C10_API TensorOptions {
   /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
-  }
-
-  /// True if all elements of the `TensorOptions` match that of the other.
-  bool operator==(const TensorOptions& other) const noexcept {
-    return
-        has_dtype_ == other.has_dtype_ &&
-        has_layout_ == other.has_layout_ &&
-        has_device_ == other.has_device_ &&
-        has_requires_grad_ == other.has_requires_grad_ &&
-        has_is_variable_ == other.has_is_variable_ &&
-        (!has_dtype_ || dtype_ == other.dtype_) &&
-        (!has_layout_ || layout_ == other.layout_) &&
-        (!has_device_ || device_ == other.device_) &&
-        (!requires_grad_ || requires_grad_ == other.requires_grad_) &&
-        (!is_variable_ || is_variable_ == other.is_variable_);
-  }
-
-  /// True if any of the elements of this `TensorOptions` do not match that of
-  /// the other.
-  bool operator!=(const TensorOptions& other) const noexcept {
-    return !(*this == other);
   }
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
@@ -226,14 +204,6 @@ struct C10_API TensorOptions {
     r.set_requires_grad(requires_grad);
     return r;
   }
-
-  /// Sets the `is_variable` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions is_variable(c10::optional<bool> is_variable) const noexcept {
-    TensorOptions r = *this;
-    r.set_is_variable(is_variable);
-    return r;
-  }
-
 
   /// Sets the `pinned_memory` property on the `TensorOptions`.
   C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
@@ -312,17 +282,6 @@ struct C10_API TensorOptions {
                               : c10::nullopt;
   }
 
-  /// Returns the `is_variable` property of the `TensorOptions`.
-  bool is_variable() const noexcept {
-    return has_is_variable_ ? is_variable_ : false;
-  }
-
-  /// Returns whether the `is_variable` is specified.
-  bool has_is_variable() const noexcept {
-    return has_is_variable_;
-  }
-
-
   /// Returns the `pinned_memory` property of the `TensorOptions`.
   bool pinned_memory() const noexcept {
     return has_pinned_memory_ ? pinned_memory_ : false;
@@ -334,13 +293,6 @@ struct C10_API TensorOptions {
   }
 
 
-  /// Returns the `is_variable` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `is_variable` is not specified.
-  c10::optional<bool> is_variable_opt() const noexcept {
-    return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
-  }
-
-
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.
   c10::optional<bool> pinned_memory_opt() const noexcept {
@@ -348,59 +300,88 @@ struct C10_API TensorOptions {
   }
 
   // Resolves the ATen backend specified by the current construction axes.
+  // TODO: Deprecate this
   Backend backend() const noexcept {
     return at::tensorTypeIdToBackend(computeTensorTypeId());
+  }
+
+  /// Return the right-biased merge of two TensorOptions.  This has the
+  /// effect of overwriting settings from self with specified options
+  /// of options.
+  ///
+  /// NB: This merging operation does NOT respect device merges.
+  /// For example, if you device({kCUDA, 1}).merge_in(kCUDA)
+  /// you will get kCUDA in the end!  Functions like Tensor.new_empty
+  /// ensure the right device is selected anyway by way of a
+  /// device guard.
+  ///
+  TensorOptions merge_in(TensorOptions options) const noexcept {
+    TensorOptions r = options;
+    if (!r.has_device()) r.set_device(device());
+    if (!r.has_dtype()) r.set_dtype(dtype());
+    if (!r.has_layout()) r.set_layout(layout());
+    // NB: requires grad is right biased; not a logical AND/OR!
+    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
+    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    return r;
+  }
+
+  // Resolves the tensor type set specified by the current construction axes.
+  TensorTypeSet type_set() const noexcept {
+    return TensorTypeSet(computeTensorTypeId()).add(TensorTypeId::VariableTensorId);
   }
 
   inline TensorTypeId computeTensorTypeId() const {
     switch (layout()) {
       case Layout::Strided:
         switch (device().type()) {
-          case DeviceType::CPU:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return ComplexCPUTensorId();
+          case DeviceType::CPU: {
+            auto dtype_tmp = typeMetaToScalarType(dtype());
+            if (isComplexType(dtype_tmp)) {
+              return TensorTypeId::ComplexCPUTensorId;
             }
-            if (isQIntType(typeMetaToScalarType(dtype()))) {
-              return QuantizedCPUTensorId();
+            if (isQIntType(dtype_tmp)) {
+              return TensorTypeId::QuantizedCPUTensorId;
             }
-            return CPUTensorId();
+            return TensorTypeId::CPUTensorId;
+            }
           case DeviceType::CUDA:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return ComplexCUDATensorId();
+              return TensorTypeId::ComplexCUDATensorId;
             }
-            return CUDATensorId();
+            return TensorTypeId::CUDATensorId;
           case DeviceType::MKLDNN:
-            return MKLDNNTensorId();
+            return TensorTypeId::MKLDNNTensorId;
           case DeviceType::OPENGL:
-            return OpenGLTensorId();
+            return TensorTypeId::OpenGLTensorId;
           case DeviceType::OPENCL:
-            return OpenCLTensorId();
+            return TensorTypeId::OpenCLTensorId;
           case DeviceType::IDEEP:
-            return IDEEPTensorId();
+            return TensorTypeId::IDEEPTensorId;
           case DeviceType::HIP:
-            return HIPTensorId();
+            return TensorTypeId::HIPTensorId;
           case DeviceType::MSNPU:
-            return MSNPUTensorId();
+            return TensorTypeId::MSNPUTensorId;
           case DeviceType::XLA:
-            return XLATensorId();
+            return TensorTypeId::XLATensorId;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
         }
       case Layout::Sparse:
         switch (device().type()) {
           case DeviceType::CPU:
-            return SparseCPUTensorId();
+            return TensorTypeId::SparseCPUTensorId;
           case DeviceType::CUDA:
-            return SparseCUDATensorId();
+            return TensorTypeId::SparseCUDATensorId;
           case DeviceType::HIP:
-            return SparseHIPTensorId();
+            return TensorTypeId::SparseHIPTensorId;
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", device().type());
         }
       case Layout::Mkldnn:
         switch (device().type()) {
           case DeviceType::CPU:
-            return MkldnnCPUTensorId();
+            return TensorTypeId::MkldnnCPUTensorId;
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
         }
@@ -473,16 +454,6 @@ struct C10_API TensorOptions {
     }
   }
 
-  /// Mutably set the `is_variable` property of `TensorOptions`.
-  void set_is_variable(c10::optional<bool> is_variable) & noexcept {
-    if (is_variable) {
-      is_variable_ = *is_variable;
-      has_is_variable_ = true;
-    } else {
-      has_is_variable_ = false;
-    }
-  }
-
   /// Mutably set the `pinned_memory` property of `TensorOptions`.
   void set_pinned_memory(c10::optional<bool> pinned_memory) & noexcept {
     if (pinned_memory) {
@@ -507,7 +478,6 @@ struct C10_API TensorOptions {
   // for that matter)
 
   bool requires_grad_     : 1;
-  bool is_variable_       : 1;
   bool pinned_memory_     : 1;
 
 
@@ -515,7 +485,6 @@ struct C10_API TensorOptions {
   bool has_dtype_         : 1;
   bool has_layout_        : 1;
   bool has_requires_grad_ : 1;
-  bool has_is_variable_   : 1;
   bool has_pinned_memory_ : 1;
 };
 
@@ -581,34 +550,38 @@ inline TensorTypeId computeTensorTypeId(TensorOptions options) {
 }
 
 inline DeviceType computeDeviceType(TensorTypeId tid) {
-  if (tid == CPUTensorId()) {
+  if (tid == TensorTypeId::CPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == CUDATensorId()) {
+  } else if (tid == TensorTypeId::CUDATensorId) {
     return DeviceType::CUDA;
-  } else if (tid == HIPTensorId()) {
+  } else if (tid == TensorTypeId::HIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MKLDNNTensorId()) {
+  } else if (tid == TensorTypeId::MKLDNNTensorId) {
     return DeviceType::MKLDNN;
-  } else if (tid == OpenGLTensorId()) {
+  } else if (tid == TensorTypeId::OpenGLTensorId) {
     return DeviceType::IDEEP;
-  } else if (tid == OpenCLTensorId()) {
+  } else if (tid == TensorTypeId::OpenCLTensorId) {
     return DeviceType::OPENCL;
-  } else if (tid == IDEEPTensorId()) {
+  } else if (tid == TensorTypeId::IDEEPTensorId) {
     return DeviceType::IDEEP;
-  } else if (tid == HIPTensorId()) {
+  } else if (tid == TensorTypeId::HIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MSNPUTensorId()) {
+  } else if (tid == TensorTypeId::MSNPUTensorId) {
     return DeviceType::MSNPU;
-  } else if (tid == XLATensorId()) {
+  } else if (tid == TensorTypeId::XLATensorId) {
     return DeviceType::XLA;
-  } else if (tid == SparseCPUTensorId()) {
+  } else if (tid == TensorTypeId::SparseCPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == SparseCUDATensorId()) {
+  } else if (tid == TensorTypeId::SparseCUDATensorId) {
     return DeviceType::CUDA;
-  } else if (tid == SparseHIPTensorId()) {
+  } else if (tid == TensorTypeId::SparseHIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MkldnnCPUTensorId()) {
+  } else if (tid == TensorTypeId::MkldnnCPUTensorId) {
     return DeviceType::CPU;
+  } else if (tid == TensorTypeId::ComplexCPUTensorId) {
+    return DeviceType::CPU;
+  } else if (tid == TensorTypeId::ComplexCUDATensorId) {
+    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }

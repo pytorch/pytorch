@@ -174,13 +174,20 @@ def parse_args():
                              "--master_addr can simply be 127.0.0.1")
     parser.add_argument("--master_port", default=29500, type=int,
                         help="Master node (rank 0)'s free port that needs to "
-                             "be used for communciation during distributed "
+                             "be used for communication during distributed "
                              "training")
     parser.add_argument("--use_env", default=False, action="store_true",
                         help="Use environment variable to pass "
                              "'local rank'. For legacy reasons, the default value is False. "
                              "If set to True, the script will not pass "
                              "--local_rank as argument, and will instead set LOCAL_RANK.")
+    parser.add_argument("-m", "--module", default=False, action="store_true",
+                        help="Changes each process to interpret the launch script "
+                             "as a python module, executing with the same behavior as"
+                             "'python -m'.")
+    parser.add_argument("--no_python", default=False, action="store_true",
+                        help="Do not prepend the training script with \"python\" - just exec "
+                             "it directly. Useful when the script is not a Python script.")
 
     # positional
     parser.add_argument("training_script", type=str,
@@ -223,14 +230,24 @@ def main():
         current_env["LOCAL_RANK"] = str(local_rank)
 
         # spawn the processes
-        if args.use_env:
-            cmd = [sys.executable, "-u",
-                   args.training_script] + args.training_script_args
+        with_python = not args.no_python
+        cmd = []
+        if with_python:
+            cmd = [sys.executable, "-u"]
+            if args.module:
+                cmd.append("-m")
         else:
-            cmd = [sys.executable,
-                   "-u",
-                   args.training_script,
-                   "--local_rank={}".format(local_rank)] + args.training_script_args
+            if not args.use_env:
+                raise ValueError("When using the '--no_python' flag, you must also set the '--use_env' flag.")
+            if args.module:
+                raise ValueError("Don't use both the '--no_python' flag and the '--module' flag at the same time.")
+
+        cmd.append(args.training_script)
+
+        if not args.use_env:
+            cmd.append("--local_rank={}".format(local_rank))
+
+        cmd.extend(args.training_script_args)
 
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)

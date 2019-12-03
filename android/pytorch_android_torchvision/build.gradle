@@ -1,0 +1,56 @@
+apply plugin: 'com.android.library'
+apply plugin: 'maven'
+
+android {
+    compileSdkVersion rootProject.compileSdkVersion
+    buildToolsVersion rootProject.buildToolsVersion
+
+
+    defaultConfig {
+        minSdkVersion rootProject.minSdkVersion
+        targetSdkVersion rootProject.targetSdkVersion
+        versionCode 0
+        versionName "0.1"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            debuggable true
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    useLibrary 'android.test.runner'
+    useLibrary 'android.test.base'
+    useLibrary 'android.test.mock'
+}
+
+dependencies {
+    implementation project(':pytorch_android')
+
+    implementation 'com.android.support:appcompat-v7:28.0.0'
+
+    testImplementation 'junit:junit:' + rootProject.junitVersion
+    testImplementation 'androidx.test:core:' + rootProject.coreVersion
+
+    androidTestImplementation 'junit:junit:' + rootProject.junitVersion
+    androidTestImplementation 'androidx.test:core:' + rootProject.coreVersion
+    androidTestImplementation 'androidx.test.ext:junit:' + rootProject.extJUnitVersion
+    androidTestImplementation 'androidx.test:rules:' + rootProject.rulesVersion
+    androidTestImplementation 'androidx.test:runner:' + rootProject.runnerVersion
+}
+
+apply from: rootProject.file('gradle/release.gradle')
+
+task sourcesJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier = 'sources'
+}
+
+artifacts.add('archives', sourcesJar)
