@@ -340,6 +340,9 @@ inline Tensor threshold(Tensor input, const ThresholdFuncOptions& options) {
   return detail::threshold(input, options.threshold(), options.value(), options.inplace());
 }
 
+// ============================================================================
+
+namespace detail {
 inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& query,
   const Tensor& key,
@@ -602,11 +605,12 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     return std::make_tuple(attn_output, Tensor());
   }
 }
+} // namespace detail
 
 inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& query, const Tensor& key, const Tensor& value,
   const MultiheadAttentionForwardOptions& options) {
-  return multi_head_attention_forward(
+  return detail::multi_head_attention_forward(
     query,
     key,
     value,

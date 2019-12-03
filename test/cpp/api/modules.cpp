@@ -4,6 +4,12 @@
 
 #include <test/cpp/api/support.h>
 
+#include <random>
+#include <torch/nn/options/activation.h>
+#include <torch/nn/functional/activation.h>
+#include <torch/expanding_array.h>
+#include <limits>
+
 using namespace torch::nn;
 using namespace torch::test;
 
@@ -3042,6 +3048,276 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
     )(output, target);
     ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
   }
+}
+
+namespace detail {
+
+  namespace F = torch::nn::functional;
+
+  torch::Tensor _batchmatmul(torch::Tensor a, torch::Tensor b) {
+    assert(a.size(0) == b.size(0));
+    assert(a.size(1) == b.size(1));
+    auto retval = torch::zeros({a.size(0), a.size(1), a.size(2), b.size(3)}, torch::kFloat32);
+    for (int i = 0; i < a.size(0); i++) {
+      for (int j = 0; j < a.size(1); j++) {
+        retval[i][j] = torch::matmul(a[i][j], b[i][j]);
+      }
+    }
+    return retval;
+  }
+
+  torch::Tensor _softmax(const torch::Tensor& x) {
+    auto output = torch::zeros(x.sizes(), torch::kFloat64);
+    for (int i = 0; i < x.size(0); i++) {
+      for (int j = 0; j < x.size(1); j++) {
+        for (int k = 0; k < x.size(2); k++) {
+          const auto& x_curr = x[i][j][k];
+          const auto e_x = torch::exp(x_curr - torch::max(x_curr));
+          output[i][j][k] = e_x / torch::sum(e_x);
+        }
+      }
+    }
+    return output;
+  }
+
+  std::tuple<torch::Tensor, torch::Tensor> _scaled_dot_attn_ref(
+    torch::Tensor Q, torch::Tensor K, torch::Tensor V,
+    at::IntArrayRef dims, torch::Tensor unseen_mask = {},
+    torch::Tensor key_padding_mask = {}) {
+    auto QKT = _batchmatmul(
+      Q,
+      K.permute({0, 1, 3, 2}) / std::sqrt(dims[3])
+    );
+    const auto b1 = QKT.size(0);
+    const auto b2 = QKT.size(1);
+    const auto s1 = QKT.size(2);
+    const auto s2 = QKT.size(3);
+    if (unseen_mask.defined() || key_padding_mask.defined()) {
+      for (int i = 0; i < b1; i++) {
+        for (int j = 0; j < b2; j++) {
+          for (int m = 0; m < s1; m++) {
+            for (int n = 0; n < s2; n++) {
+              if (unseen_mask.defined() && unseen_mask[m][n].item<double>() == 0) {
+                QKT[i][j][m][n] = -std::numeric_limits<double>::infinity();
+              }
+              if (key_padding_mask.defined() && key_padding_mask[i][n].item<double>() != 0) {
+                QKT[i][j][m][n] = -std::numeric_limits<double>::infinity();
+              }
+            }
+          }
+        }
+      }
+    }
+    auto reference = _softmax(QKT);
+    auto ref_attn_weight = reference;
+    ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
+    reference = _batchmatmul(reference, V);
+    return std::tie(reference, ref_attn_weight);
+  }
+
+  torch::Tensor _split_heads_ref(const torch::Tensor& X, at::IntArrayRef dims, int nheads, int d_head) {
+    auto X_split = X.reshape({dims[0], dims[1], nheads, d_head});
+    auto X_split_transposed = X_split.permute({0, 2, 1, 3});
+    return X_split_transposed.reshape({dims[0], nheads, dims[1], d_head});
+  }
+
+  torch::Tensor _fc(torch::Tensor X, torch::Tensor X_weight, torch::Tensor X_bias) {
+    auto X_fc_b = X_bias;//.detach().numpy()
+    auto X_fc_w = X_weight;//.detach().numpy()
+    return torch::matmul(X, torch::t(X_fc_w)) + X_fc_b;
+  }
+
+  void _multihead_attn_test_helper(bool add_key_padding_mask = false,
+    bool add_bias_kv = false, bool add_zero_attn = false,
+    bool saved_kv = false, bool same_embed_dim = false) {
+    std::random_device device;
+    std::mt19937 generator(device());
+    std::uniform_int_distribution<int> d_2_10(2, 10);
+    std::uniform_int_distribution<int> d_3_10(3, 10);
+    for (int i = 0; i < 100; i++) {
+      const auto batch_sz = d_2_10(generator);
+      const auto seq_len = d_2_10(generator);
+      const auto d_head = d_3_10(generator);
+      const auto nheads = d_3_10(generator);
+      const auto d_model = d_head * nheads;
+      int kv_dim;
+      if (same_embed_dim) {
+        kv_dim = d_model;
+      } else {
+        std::uniform_int_distribution<int> d(5, 20);
+        kv_dim = d(generator);
+      }
+      std::vector<int64_t> dims {batch_sz, seq_len, kv_dim};
+      torch::Tensor saved_k;
+      torch::Tensor saved_k_tensor;
+      torch::Tensor saved_v;
+      torch::Tensor saved_v_tensor;
+      if (saved_kv) {
+        saved_k = torch::rand({batch_sz * nheads, seq_len, d_head});
+        saved_k_tensor = saved_k;
+        saved_v = torch::rand({batch_sz * nheads, seq_len, d_head});
+        saved_v_tensor = saved_v;
+      }
+      torch::Tensor key_padding_mask;
+      torch::Tensor key_padding_mask_tensor;
+      if (add_key_padding_mask) {
+        const auto seq_mask = torch::randint(0, 2, {1, seq_len});
+        key_padding_mask = seq_mask.repeat({batch_sz, seq_len}) == 1;
+        key_padding_mask_tensor = key_padding_mask;
+      }
+      const auto decoder_state = torch::rand({batch_sz, d_model}, torch::kFloat64);
+      const torch::Tensor K = torch::rand(dims, torch::kFloat64);
+      const torch::Tensor V = K;
+      const torch::Tensor Q = decoder_state.expand({batch_sz, d_model, 1});
+      auto attn_mask = torch::randint(0, 2, {1, seq_len});
+      const torch::Tensor attn_mask_tensor = attn_mask;
+      attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
+      attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, double(0.0));
+      // attn_mask_tensor = attn_mask_tensor.double();
+
+      const torch::Tensor decoder_state_tensor = decoder_state;
+      const torch::Tensor source_hid_tensor = K.transpose(0, 1);
+
+      const auto options = MultiheadAttentionOptions(d_model, nheads)
+          .add_bias_kv(add_bias_kv)
+          .add_zero_attn(add_zero_attn)
+          .kdim(kv_dim)
+          .vdim(kv_dim);
+      const auto multihead_attn_module = MultiheadAttention(options);
+
+      torch::Tensor bias_k;
+      torch::Tensor bias_v;
+      if (add_bias_kv) {
+        bias_k = multihead_attn_module->bias_k.detach();
+        bias_v = multihead_attn_module->bias_v.detach();
+      } else {
+        bias_k = {};
+        bias_v = {};
+      }
+
+      // _batch_size = decoder_state_tensor.shape[0];
+      torch::Tensor _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1);
+      torch::Tensor _V = source_hid_tensor;
+      torch::Tensor _K = source_hid_tensor;
+
+      torch::Tensor result;
+      torch::Tensor result_weight;
+      if (multihead_attn_module->_qkv_same_embed_dim) {
+        std::tie(result, result_weight) = F::multi_head_attention_forward(
+          _Q, _K, _V,
+          F::MultiheadAttentionForwardOptions(
+            /*embed_dim_to_check=*/d_model,
+            /*num_heads=*/nheads,
+            /*in_proj_weight=*/multihead_attn_module->in_proj_weight,
+            /*in_proj_bias=*/multihead_attn_module->in_proj_bias,
+            /*bias_k=*/multihead_attn_module->bias_k,
+            /*bias_v=*/multihead_attn_module->bias_v,
+            /*add_zero_attn=*/multihead_attn_module->options.add_zero_attn(),
+            /*dropout_p=*/multihead_attn_module->options.dropout(),
+            /*out_proj_weight=*/multihead_attn_module->out_proj->weight,
+            /*out_proj_bias=*/multihead_attn_module->out_proj->bias
+          )
+          .training(multihead_attn_module->is_training())
+          .key_padding_mask(key_padding_mask_tensor)
+          .need_weights(true)
+          .attn_mask(attn_mask_tensor)
+          .static_k(saved_k_tensor)
+          .static_v(saved_v_tensor)
+        );
+      } else {
+        std::tie(result, result_weight) = F::multi_head_attention_forward(
+          _Q, _K, _V,
+          F::MultiheadAttentionForwardOptions(
+            /*embed_dim_to_check=*/d_model,
+            /*num_heads=*/nheads,
+            /*in_proj_weight=*/{},
+            /*in_proj_bias=*/multihead_attn_module->in_proj_bias,
+            /*bias_k=*/multihead_attn_module->bias_k,
+            /*bias_v=*/multihead_attn_module->bias_v,
+            /*add_zero_attn=*/multihead_attn_module->options.add_zero_attn(),
+            /*dropout_p=*/multihead_attn_module->options.dropout(),
+            /*out_proj_weight=*/multihead_attn_module->out_proj->weight,
+            /*out_proj_bias=*/multihead_attn_module->out_proj->bias
+          )
+          .training(multihead_attn_module->is_training())
+          .key_padding_mask(key_padding_mask_tensor)
+          .need_weights(true)
+          .attn_mask(attn_mask_tensor)
+          .use_separate_proj_weight(true)
+          .q_proj_weight(multihead_attn_module->q_proj_weight)
+          .k_proj_weight(multihead_attn_module->k_proj_weight)
+          .v_proj_weight(multihead_attn_module->v_proj_weight)
+          .static_k(saved_k_tensor)
+          .static_v(saved_v_tensor)
+        );
+      }
+      // result = result.squeeze(0).detach().numpy();
+      torch::Tensor q_proj_weight;
+      torch::Tensor k_proj_weight;
+      torch::Tensor v_proj_weight;
+      if (multihead_attn_module->_qkv_same_embed_dim) {
+        q_proj_weight = multihead_attn_module->in_proj_weight.slice(/*dim=*/0, 0, d_model);
+        k_proj_weight = multihead_attn_module->in_proj_weight.slice(/*dim=*/0, d_model, (d_model * 2));
+        v_proj_weight = multihead_attn_module->in_proj_weight.slice(/*dim=*/0, (d_model * 2));
+      } else {
+        q_proj_weight = multihead_attn_module->q_proj_weight;
+        k_proj_weight = multihead_attn_module->k_proj_weight;
+        v_proj_weight = multihead_attn_module->v_proj_weight;
+      }
+      const auto Q_fc = _fc(Q, q_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, 0, d_model));
+      const auto K_fc = _fc(K, k_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, d_model, (d_model * 2)));
+      const auto V_fc = _fc(V, v_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, (d_model * 2)));
+      const auto Q_split = _split_heads_ref(
+        Q_fc, {batch_sz, 1, d_model}, nheads, d_head
+      );
+      torch::Tensor K_split;
+      if (saved_k.defined()) {
+        K_split = saved_k.permute({dims[0], nheads, dims[1], d_head});
+      } else {
+        K_split = _split_heads_ref(K_fc, dims, nheads, d_head);
+      }
+      torch::Tensor V_split;
+      if (saved_v.defined()) {
+        V_split = saved_v.permute({dims[0], nheads, dims[1], d_head});
+      } else {
+        V_split = _split_heads_ref(V_fc, dims, nheads, d_head);
+      }
+      if (add_zero_attn) {
+        dims[1] += 1;
+        K_split = torch::cat({
+          K_split,
+          torch::zeros({K_split.size(0), K_split.size(1), 1, K_split.size(3)})
+        }, /*dim=*/2);
+        V_split = torch::cat({
+          V_split,
+          torch::zeros({V_split.size(0), V_split.size(1), 1, V_split.size(3)})
+        }, /*dim=*/2);
+        if (attn_mask.defined()) {
+          attn_mask = torch::cat({attn_mask, torch::ones({1, 1})}, /*dim=*/1);
+        }
+        if (key_padding_mask.defined()) {
+          key_padding_mask = torch::cat({key_padding_mask, torch::full({batch_sz, 1}, false, torch::kBool)}, /*dim=*/1);
+        }
+      }
+      torch::Tensor attn_heads;
+      torch::Tensor ref_attn_weight;
+      std::tie(attn_heads, ref_attn_weight) = _scaled_dot_attn_ref(
+          Q_split,
+          K_split,
+          V_split,
+          Q_split.sizes(),
+          attn_mask,
+          key_padding_mask
+      );
+      // combined_attn_heads = _combine_heads_ref(
+      //     X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
+      // )
+    }
+  }
+}
+
+TEST_F(ModulesTest, MultiheadAttention) {
+
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {

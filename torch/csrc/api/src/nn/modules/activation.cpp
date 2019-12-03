@@ -405,7 +405,7 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
   if (_qkv_same_embed_dim) {
     return F::multi_head_attention_forward(
       query, key, value, 
-      MultiheadAttentionForwardOptions(
+      F::MultiheadAttentionForwardOptions(
         /*embed_dim_to_check=*/options.embed_dim(),
         /*num_heads=*/options.num_heads(),
         /*in_proj_weight=*/in_proj_weight,
@@ -424,7 +424,7 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
   } else {
     return F::multi_head_attention_forward(
       query, key, value, 
-      MultiheadAttentionForwardOptions(
+      F::MultiheadAttentionForwardOptions(
         /*embed_dim_to_check=*/options.embed_dim(),
         /*num_heads=*/options.num_heads(),
         /*in_proj_weight=*/in_proj_weight,

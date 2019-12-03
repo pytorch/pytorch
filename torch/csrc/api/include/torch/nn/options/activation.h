@@ -356,7 +356,9 @@ struct TORCH_API MultiheadAttentionOptions {
 
 // ============================================================================
 
-/// Options for `torch::nn::functional::multi_head_attention_forward()`
+namespace functional {
+
+/// Options for `torch::nn::functional::multi_head_attention_forward`
 struct TORCH_API MultiheadAttentionForwardOptions {
 
   MultiheadAttentionForwardOptions(
@@ -407,6 +409,8 @@ struct TORCH_API MultiheadAttentionForwardOptions {
 
   TORCH_ARG(Tensor, static_v) = {};
 };
+
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

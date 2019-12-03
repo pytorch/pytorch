@@ -534,7 +534,6 @@ class TORCH_API MultiheadAttentionImpl
   /// The options with which this `Module` was constructed.
   MultiheadAttentionOptions options;
 
- private:
   bool _qkv_same_embed_dim;
   Tensor in_proj_weight;
   Tensor in_proj_bias;

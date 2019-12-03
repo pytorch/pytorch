@@ -1937,7 +1937,7 @@ class TestNN(NNTestCase):
         amount requested by the user the moment the pruning method
         is initialized. This test checks that the expected errors are
         raised whenever the amount is invalid.
-        The orginal function runs basic type checking + value range checks.
+        The original function runs basic type checking + value range checks.
         It doesn't check the validity of the pruning amount with
         respect to the size of the tensor to prune. That's left to
         `_validate_pruning_amount`, tested below.
@@ -3209,7 +3209,7 @@ class TestNN(NNTestCase):
                 / np.sqrt(dims[3], dtype=np.float32),  # divide by sqrt(d_head)
             )
             b1, b2, s1, s2 = QKT.shape
-            if unseen_mask is not None or src_lengths is not None:
+            if unseen_mask is not None or key_padding_mask is not None:
                 # assert s1 == s2
                 for i in range(b1):
                     for j in range(b2):
@@ -3337,7 +3337,6 @@ class TestNN(NNTestCase):
                     bias_k = None
                     bias_v = None
 
-                _batch_size = decoder_state_tensor.shape[0]
                 _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1)
                 _V = source_hid_tensor
                 _K = source_hid_tensor
@@ -3397,7 +3396,7 @@ class TestNN(NNTestCase):
                 else:
                     K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
 
-                if saved_k is not None:
+                if saved_v is not None:
                     V_split = np.reshape(saved_v, [dims[0], nheads, dims[1], d_head])
                 else:
                     V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
