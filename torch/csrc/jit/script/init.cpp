@@ -83,7 +83,7 @@ struct PythonResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -102,7 +102,7 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -1054,8 +1054,8 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
-  m.def("opnames",
-          [](script::Module& sm) {return debugMakeList(torch::jit::opnames(sm));});
+  m.def("export_opnames",
+          [](script::Module& sm) {return debugMakeList(torch::jit::export_opnames(sm));});
 
   py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")
