@@ -84,7 +84,12 @@ public:
         }
       }
     }
-    return typeSetToDispatchKey_(ts);
+    if (C10_UNLIKELY(ts.empty())) {
+      return c10::nullopt;
+    }
+
+    // TODO: Don't use legacy extractor; blocked on c10 understanding variable
+    return c10::legacyExtractTypeId(ts);
   }
 
   template<class... Args>
