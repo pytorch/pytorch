@@ -181,5 +181,20 @@ class TestQuantizedOps(unittest.TestCase):
         x = np.random.rand(1, 2, 3, 4).astype("float32")
         self.generic_test(QReshapeModule(), (x,), input_names=["x"])
 
+    def test_slice(self):
+        class QSliceModule(torch.nn.Module):
+            def __init__(self):
+                super(QSliceModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                qx = self.quant1(x)
+                res = qx[:, 1:2]
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        self.generic_test(QSliceModule(), (x,), input_names=["x"])
+
 if __name__ == '__main__':
     unittest.main()
