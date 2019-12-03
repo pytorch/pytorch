@@ -314,8 +314,6 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
               "or child instance in insert_observers_pass right now");
           callee_module = module;
         }
-        // Recursively insert observer for the forward function of child
-        // module
         invoked_methods.push_back({callee_module, module_method_name});
       }
 
