@@ -19,6 +19,7 @@ using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
+<<<<<<< HEAD:torch/csrc/jit/ir/attributes.h
 enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys, ival };
 static inline const char* toString(AttributeKind kind) {
   static const char* names[] = {"f",
@@ -34,6 +35,12 @@ static inline const char* toString(AttributeKind kind) {
                                 "ty",
                                 "tys",
                                 "ival"};
+=======
+enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys, v };
+static inline const char* toString(AttributeKind kind) {
+  static const char* names[] = {
+      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs", "ty", "tys", "v"};
+>>>>>>> file:torch/csrc/jit/attributes.h
   AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
   return names[int(kind)];
 }
@@ -98,7 +105,11 @@ using TensorAttr = ScalarAttributeValue<at::Tensor, AttributeKind::t>;
 using TensorsAttr = VectorAttributeValue<at::Tensor, AttributeKind::ts>;
 using TypeAttr = ScalarAttributeValue<c10::TypePtr, AttributeKind::ty>;
 using TypesAttr = VectorAttributeValue<c10::TypePtr, AttributeKind::tys>;
+<<<<<<< HEAD:torch/csrc/jit/ir/attributes.h
 using IValueAttr = ScalarAttributeValue<at::IValue, AttributeKind::ival>;
+=======
+using VoidAttr = ScalarAttributeValue<void*, AttributeKind::v>;
+>>>>>>> file:torch/csrc/jit/attributes.h
 
 struct Graph;
 
