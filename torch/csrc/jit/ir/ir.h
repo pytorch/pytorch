@@ -733,7 +733,11 @@ struct TORCH_API Node {
   CREATE_ACCESSOR(Graphs, gs)
   CREATE_ACCESSOR(Type, ty)
   CREATE_ACCESSOR(Types, tys)
+<<<<<<< HEAD:torch/csrc/jit/ir/ir.h
   CREATE_ACCESSOR(IValue, ival)
+=======
+  CREATE_ACCESSOR(Void, v)
+>>>>>>> init:torch/csrc/jit/ir.h
 
 #undef CREATE_ACCESSOR
 
