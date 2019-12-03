@@ -110,6 +110,11 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   // function
   void InferCommonOp(const OperatorDef& op);
 
+  // Initialize parameters
+  virtual void Initialize(
+      const std::unordered_map<std::string, ShapeInfo>& info,
+      bool extract_feature_len);
+
   void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) const;
 
   TensorBoundShape::DimType current_dim_type_{TensorBoundShape_DimType_BATCH};

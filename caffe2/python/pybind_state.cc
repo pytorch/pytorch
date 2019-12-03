@@ -247,7 +247,8 @@ bool feedBlob(
   }
 #ifdef FBCODE_CAFFE2
   if (auto module = torch::jit::script::as_module(arg)) {
-    blob->GetMutable<std::unique_ptr<torch::jit::script::Module>>()->reset(new torch::jit::script::Module(*module));
+    blob->GetMutable<std::unique_ptr<torch::jit::script::Module>>()->reset(
+        new torch::jit::script::Module(*module));
     return true;
   }
 #endif
@@ -1720,10 +1721,18 @@ void addGlobalMethods(py::module& m) {
             ParseProtoFromLargeString(
                 pred_net_str.cast<std::string>(), &pred_net),
             "broken pred_net protobuf");
-        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        ShapeInfoMap shape_map;
         for (const auto& it : shapes) {
-          tensor_shapes.emplace(
-              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+          std::vector<TensorBoundShape_DimType> dimType(
+              it.second.size(), TensorBoundShape_DimType_CONSTANT);
+          if (dimType.size()) {
+            dimType[0] = TensorBoundShape_DimType_BATCH;
+          }
+          shape_map.emplace(
+              std::piecewise_construct,
+              std::forward_as_tuple(it.first),
+              std::forward_as_tuple(
+                  dimType, CreateTensorShape(it.second, TensorProto::FLOAT)));
         }
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
@@ -1745,7 +1754,7 @@ void addGlobalMethods(py::module& m) {
             curr_ws,
             &pred_net,
             weight_names_overwrite,
-            tensor_shapes,
+            shape_map,
             blacklist_set);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);

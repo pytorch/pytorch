@@ -853,7 +853,7 @@ void OnnxifiTransformer::transform(
     Workspace* ws,
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints,
+    const ShapeInfoMap& input_shape_hints,
     const std::unordered_set<int>& blacklisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
@@ -880,8 +880,10 @@ void OnnxifiTransformer::transform(
   // blob for output is created. This causes problem if inferShape uses original
   // ws since it does not expect the output blob to be present.
   Workspace mapped_ws(ws, input_mapping_);
-  ShapeInfoMap shape_hints = inferShapes(
+  ShapeInfoMap shape_hints;
+  shape_hints = inferShapes(
       &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);
+
   if (opts_.use_onnx) {
     shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
   }

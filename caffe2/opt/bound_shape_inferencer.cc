@@ -52,6 +52,13 @@ void BoundShapeInferencer::EnsureShapeNames(
   }
 }
 
+void BoundShapeInferencer::Initialize(
+    const std::unordered_map<std::string, ShapeInfo>& info,
+    bool extract_feature_len) {
+  shape_info_ = info;
+  extract_feature_len_ = extract_feature_len;
+}
+
 void BoundShapeInferencer::InferOps(
     const OperatorDef& op,
     caffe2::Workspace* /* ws */) {
@@ -89,8 +96,7 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     caffe2::Workspace* ws,
     bool extract_feature_len) {
   const static std::unordered_set<std::string> unsupported{"Tile"};
-  shape_info_ = info;
-  extract_feature_len_ = extract_feature_len;
+  Initialize(info, extract_feature_len);
 
   bool inferFinished = false;
 
@@ -286,6 +292,14 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   // scale and 4 byte for bias (https://fburl.com/t6dp9tsc)
   if (op.type() == "SparseLengthsSumFused8BitRowwise" ||
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
+    CAFFE_ENFORCE(
+        it->second.shape.data_type() == TensorProto_DataType_INT8 ||
+            it->second.shape.data_type() == TensorProto_DataType_UINT8,
+        "First input of ",
+        op.type(),
+        " is ",
+        it->second.shape.data_type(),
+        ", expected INT8 or UINT8");
     output_dim1 -= 8;
   }
   CAFFE_ENFORCE_GE(
