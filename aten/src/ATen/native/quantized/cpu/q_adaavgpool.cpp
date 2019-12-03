@@ -11,9 +11,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
+
+namespace {
 
 inline int start_index(int out_idx, int out_len, int in_len) {
   /*
