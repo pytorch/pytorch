@@ -23,7 +23,9 @@ void THNN_(GatedLinear_updateOutput)(
   THTensor *secondHalf = THTensor_(newNarrow)(input, dim, inputSize, inputSize);
 
   // x = x1:cmul( sigmoid(x2) )
-  THTensor_(sigmoid)(output, secondHalf);
+  at::Tensor output_wrap = THTensor_wrap(output);
+  at::Tensor secondHalf_wrap = THTensor_wrap(secondHalf);
+  at::native::sigmoid_out(output_wrap, secondHalf_wrap);
   THTensor_(cmul)(output, output, firstHalf);
 
   c10::raw::intrusive_ptr::decref(firstHalf);
@@ -49,7 +51,9 @@ void THNN_(GatedLinear_updateGradInput)(
   THTensor *gradInputfirstHalf = THTensor_(newNarrow)(gradInput, dim, 0, inputSize);
   THTensor *gradInputsecondHalf = THTensor_(newNarrow)(gradInput, dim, inputSize, inputSize);
 
-  THTensor_(sigmoid)(gradInputfirstHalf, secondHalf);
+  at::Tensor gradInputfirstHalf_wrap = THTensor_wrap(gradInputfirstHalf);
+  at::Tensor secondHalf_wrap = THTensor_wrap(secondHalf);
+  at::native::sigmoid_out(gradInputfirstHalf_wrap, secondHalf_wrap);
 
   TH_TENSOR_APPLY2(scalar_t, gradInputsecondHalf, scalar_t, gradInputfirstHalf,
     scalar_t z = *gradInputfirstHalf_data;

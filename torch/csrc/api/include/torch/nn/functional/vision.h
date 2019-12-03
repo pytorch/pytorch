@@ -53,39 +53,22 @@ namespace detail {
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,
-    std::string mode,
-    std::string padding_mode,
+    GridSampleFuncOptions::mode_t mode,
+    GridSampleFuncOptions::padding_mode_t padding_mode,
     c10::optional<bool> align_corners) {
-
-  if ((mode.compare("bilinear") != 0) && (mode.compare("nearest") != 0)) {
-    TORCH_CHECK(false, "nn::functional::grid_sample(): expected mode to be ",
-                         "'bilinear' or 'nearest', but got: '", mode, "'");
-  }
-
-  if ((padding_mode.compare("zeros") != 0) &&
-      (padding_mode.compare("border") != 0) &&
-      (padding_mode.compare("reflection") != 0)) {
-    TORCH_CHECK(false, "nn::functional::grid_sample(): expected padding_mode ",
-                         "to be 'zeros', 'border', or 'reflection', ",
-                         "but got: '", padding_mode, "'");
-  }
-
   int64_t mode_enum, padding_mode_enum;
 
-  if (mode.compare("bilinear") == 0) {
+  if (c10::get_if<enumtype::kBilinear>(&mode)) {
     mode_enum = 0;
-  }
-  else { /// mode == 'nearest'
+  } else { /// mode == 'nearest'
     mode_enum = 1;
   }
 
-  if (padding_mode.compare("zeros") == 0) {
+  if (c10::get_if<enumtype::kZeros>(&padding_mode)) {
     padding_mode_enum = 0;
-  }
-  else if (padding_mode.compare("border") == 0) {
+  } else if (c10::get_if<enumtype::kBorder>(&padding_mode)) {
     padding_mode_enum = 1;
-  }
-  else { /// padding_mode == 'reflection'
+  } else { /// padding_mode == 'reflection'
     padding_mode_enum = 2;
   }
 
@@ -104,7 +87,7 @@ inline Tensor grid_sample(
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,
-    GridSampleFuncOptions options = {}) {
+    const GridSampleFuncOptions& options = {}) {
   return detail::grid_sample(
     input,
     grid,

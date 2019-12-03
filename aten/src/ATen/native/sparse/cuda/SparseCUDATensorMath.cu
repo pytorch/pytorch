@@ -629,7 +629,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       auto policy = thrust::cuda::par(allocator).on(stream);
       typedef thrust::device_ptr<int64_t> thrust_ptr;
 
-      grad_input_values = at::empty_like(input_values, grad_values.options());
+      grad_input_values = at::empty_like(input_values, grad_values.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       AT_ASSERT(grad_input_values.is_cuda());
 
       // get 1D indices
@@ -642,7 +642,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       thrust_ptr input_indices_iter(input_indices_1D.data_ptr<int64_t>());
 
       // store lower_bound of input indices at grad indices
-      LongTensor input_indices_pos = at::empty_like(input_indices_1D);
+      LongTensor input_indices_pos = at::empty_like(input_indices_1D, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       thrust_ptr input_indices_pos_iter(input_indices_pos.data_ptr<int64_t>());
       thrust::lower_bound(policy,
                           grad_indices_iter, grad_indices_iter + grad_nnz,

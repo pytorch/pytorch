@@ -27,26 +27,8 @@ public:
     return schema_;
   }
 
-  template<class Return, class... Args>
-  Return callUnboxed(Args... args) const {
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
-        return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
-    });
-  }
-
-  template<class Return, class... Args>
-  Return callUnboxedOnly(Args... args) const {
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
-        return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
-    });
-  }
-
-  void callBoxed(Stack* stack) const {
-    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
-        dispatchTable.lookupBoxed(stack).callBoxed(stack);
-    });
+  const DispatchTable& dispatch_table() const {
+    return dispatchTable_;
   }
 
   void prepareForDeregistration();
@@ -58,6 +40,10 @@ public:
     return options_;
   }
 
+  void updateOptionsAliasAnalysis(AliasAnalysisKind a) {
+    options_.setAliasAnalysis(a);
+  }
+
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel);
   void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
@@ -65,7 +51,7 @@ private:
   FunctionSchema schema_;
 
   // The dispatchTable stores the current kernel for each dispatch key
-  LeftRight<DispatchTable> dispatchTable_;
+  DispatchTable dispatchTable_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.

@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "ReduceProd_0"
     op_type: "ReduceProd"
     attribute {
       name: "axes"
