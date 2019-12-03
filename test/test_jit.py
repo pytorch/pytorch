@@ -13576,8 +13576,11 @@ a")
         with warnings.catch_warnings(record=True) as warns:
             torch.jit.trace(*args, **kwargs)
         self.assertGreater(len(warns), 0)
+        found_warning = False
         for warn in warns:
-            self.assertIn("cause the trace to be incorrect", str(warn.message))
+            if "cause the trace to be incorrect" in str(warn.message):
+                found_warning = True
+        self.assertTrue(found_warning)
 
     def test_trace_checker_slice_lhs(self):
         def foo(x):
