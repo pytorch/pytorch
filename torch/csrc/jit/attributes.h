@@ -19,10 +19,10 @@ using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
-enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys };
+enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys, v };
 static inline const char* toString(AttributeKind kind) {
   static const char* names[] = {
-      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs", "ty", "tys"};
+      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs", "ty", "tys", "v"};
   AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
   return names[int(kind)];
 }
@@ -87,6 +87,7 @@ using TensorAttr = ScalarAttributeValue<at::Tensor, AttributeKind::t>;
 using TensorsAttr = VectorAttributeValue<at::Tensor, AttributeKind::ts>;
 using TypeAttr = ScalarAttributeValue<c10::TypePtr, AttributeKind::ty>;
 using TypesAttr = VectorAttributeValue<c10::TypePtr, AttributeKind::tys>;
+using VoidAttr = ScalarAttributeValue<void*, AttributeKind::v>;
 
 struct Graph;
 
