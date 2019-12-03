@@ -1,7 +1,8 @@
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/script/module_python.h>
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <memory>
 #include <sstream>
@@ -200,7 +201,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
-  // eventhough it is possible, though rare, for someone to mutate them
+  // even though it is possible, though rare, for someone to mutate them
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
@@ -214,7 +215,7 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
     const SourceRange& loc,
     Function& m) {
   std::vector<std::string> submoduleNames;
-  const auto& selfType = concreteType_->getJitType();
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
     if (!attrType) {
@@ -265,23 +266,23 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     Function& m,
     const std::string& field) {
   // 1. Look inside script::Module object for the field.
-  const auto& selfType = concreteType_->getJitType();
+  const auto& selfType_ = concreteType_->getJitType();
+  if (selfType_->cast<InterfaceType>()) {
+    return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+  }
+
+  const auto& selfType = selfType_->expect<ClassType>();
+
   if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
-    if (submoduleConcreteType != nullptr) {
-      return std::make_shared<ModuleValue>(
-          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
-    } else {
-      // if submodule concrete type is not found, it is a Module Interface type,
-      // we return a SimpleValue instead of ModuleValue.
-      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
-    }
+    return std::make_shared<ModuleValue>(
+        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
   } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
-      // ...otherwise, methods, parameters, attributes, and buffers are all
-      // first class so they get returned as SimpleValues
-      return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+    // ...otherwise, methods, parameters, attributes, and buffers are all
+    // first class so they get returned as SimpleValues
+    return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   }
 
   // 2. Check if it's a user-provided constant property.
@@ -477,6 +478,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
+      return toSimple(g.insertConstant(v, loc));
+    } else if (THPMemoryFormat_Check(obj.ptr())) {
+      auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+      const auto v = static_cast<int64_t>(memory_format->memory_format);
       return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());

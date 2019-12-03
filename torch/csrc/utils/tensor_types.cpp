@@ -46,7 +46,7 @@ at::DeprecatedTypeProperties* type_from_string(const std::string& str) {
   if (str == "torch.Tensor") {
     auto backend = tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id());
     auto scalar_type = torch::tensors::get_default_scalar_type();
-    return &getNonVariableDeprecatedTypeProperties(backend, scalar_type);
+    return &getDeprecatedTypeProperties(backend, scalar_type);
   }
 
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin()).first == cuda_prefix.end()) {

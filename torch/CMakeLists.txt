@@ -71,11 +71,13 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/scalar_type_analysis.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/unpack_quantized_weights.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
@@ -105,7 +107,6 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
     ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
     ${JIT_TEST_SRCS}
     )
@@ -125,7 +126,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/pybind11/include
+    ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include

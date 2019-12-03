@@ -164,6 +164,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
 SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "sparse division only supports division by a scalar (got shape ",
       value.sizes(), " for argument 'other')");
+  TORCH_CHECK(!value.is_sparse(), "A Sparse Tensor can only be divided by a scalar or zero-dim dense tensor");
 
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
@@ -1134,7 +1135,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     Tensor grad_input_values;
     if (sum_sparse_dim) {
       // see NOTE [ sparse.sum() backward ]
-      grad_input_values = at::zeros_like(input_values, grad_values.options());
+      grad_input_values = at::zeros_like(input_values, grad_values.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       // get flatten indices for grad and input
       auto grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);

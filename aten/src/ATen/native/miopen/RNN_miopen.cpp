@@ -509,7 +509,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         size_t reserver_size;
         MIOPEN_CHECK(miopenGetRNNTrainingReserveSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &reserver_size));
         reserve = at::empty(reserver_size, input.options().dtype(kByte));
-
+        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardTraining(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -521,6 +521,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
                 workspace.data_ptr(), workspace_size, reserve.data_ptr(), reserver_size ));
     } else { //Inference.
         reserve = at::empty({0}, input.options().dtype(kByte));
+        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardInference(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -629,6 +630,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
         ));
     auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
+    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -713,6 +715,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto x_descs_arr = descs.get_x_descs();
     auto y_descs_arr = descs.get_y_descs();
 
+    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
@@ -751,9 +754,9 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state, 
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
-    auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, at::MemoryFormat::Contiguous);
-    auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, at::MemoryFormat::Contiguous);
-    auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, at::MemoryFormat::Contiguous)) : grad_cy_r;
+    auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT)) : grad_cy_r;
 
     Tensor dx, dhx, dcx, ws;
     std::tie(dx, dhx, dcx, ws) = at::native::miopen_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});

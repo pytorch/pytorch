@@ -556,7 +556,7 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(self, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), 0, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -576,7 +576,7 @@ Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(p, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), -1, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
