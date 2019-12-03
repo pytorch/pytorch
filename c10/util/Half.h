@@ -427,6 +427,14 @@ struct Converter<
 #pragma warning( disable : 4804 )
 #endif
 
+// The overflow checks may involve float to int conversion which may
+// trigger precision loss warning. Re-enable the warning once the code
+// is fixed. See T58053069.
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#endif
 
 // bool can be converted to any type.
 // Without specializing on bool, in pytorch_linux_trusty_py2_7_9_build:
@@ -466,6 +474,10 @@ overflows(From f) {
   }
   return f < limit::lowest() || f > limit::max();
 }
+
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
 
 #ifdef _MSC_VER
 #pragma warning( pop )
