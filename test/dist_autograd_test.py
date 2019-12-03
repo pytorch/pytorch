@@ -1419,6 +1419,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         assert (debug_info is not None)
         self.assertEqual(0, int(debug_info['num_current_backward_passes']))
         self.assertEqual(0, int(debug_info['num_threads_blocked_in_backward']))
+        self.assertEqual(0, int(debug_info['local_autograd_engine_cpu_queue_size']))
 
 
 if __name__ == '__main__':

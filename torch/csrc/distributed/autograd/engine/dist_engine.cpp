@@ -18,6 +18,11 @@ using torch::autograd::Node;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
+static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
+static constexpr char* kNumThreadsBlocked = "num_threads_blocked_in_backward";
+static constexpr char* kEngineCPUQueueSize =
+    "local_autograd_engine_cpu_queue_size";
+
 namespace {
 
 static std::atomic<int> num_threads_blocked_in_backward = 0;
@@ -301,10 +306,11 @@ size_t DistEngine::numBackwardPasses() const {
 
 std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, std::string> debugInfo;
-  debugInfo["num_current_backward_passes"] =
-      std::to_string(numBackwardPasses());
-  debugInfo["num_threads_blocked_in_backward"] =
+  debugInfo[kNumBackwardPasses] = std::to_string(numBackwardPasses());
+  debugInfo[kNumThreadsBlocked] =
       std::to_string(num_threads_blocked_in_backward.load());
+  debugInfo[kEngineCPUQueueSize] =
+      std::to_string(engine_.ready_queue_size(at::kCPU));
   return debugInfo;
 }
 
