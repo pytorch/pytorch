@@ -356,7 +356,7 @@ static void PrepareListPopForONNX(Block* b) {
   }
 }
 
-static void PrepareListAppendInsertForONNX(Block *b) {
+static void PrepareListAppendAndInsertForONNX(Block *b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       PrepareListPopForONNX(child_block);
@@ -378,7 +378,7 @@ void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
   PrepareCopyForONNX(graph->block());
   PrepareIndexPutForONNX(graph->block());
   PrepareListPopForONNX(graph->block());
-  PrepareListAppendInsertForONNX(graph->block());
+  PrepareListAppendAndInsertForONNX(graph->block());
 }
 
 } // namespace jit

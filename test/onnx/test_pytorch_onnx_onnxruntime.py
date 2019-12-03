@@ -1834,8 +1834,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x):
                 tensors = x.unbind()
                 res = []
-                res = res.append(tensors[0])
-                res = res.append(tensors[1])
+                res.append(tensors[0])
+                res.append(tensors[1])
                 res.pop(1)
 
                 res.insert(0, tensors[1])
