@@ -6709,7 +6709,7 @@ this normalizes the result by multiplying it with
 
     Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
     :attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
-    and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
+    and preferably a :attr:`signal_sizes` is given to avoid size mismatch. See the
     example below for a case of size mismatch.
 
     See :func:`~torch.rfft` for details on conjugate symmetry.

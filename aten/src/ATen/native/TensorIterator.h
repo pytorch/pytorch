@@ -12,7 +12,7 @@
 #include <ATen/core/EnableNamedTensor.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
-// arithmetic, comparisions, and trigonometric functions. It handles
+// arithmetic, comparisons, and trigonometric functions. It handles
 // broadcasting and type conversions of operands.
 //
 // This is inspired by NumPy's Array Iterator API (NpyIter).
