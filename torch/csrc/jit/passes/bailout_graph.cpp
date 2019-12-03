@@ -96,7 +96,6 @@ struct BailOutGraphBuilderForNode {
   // from block's owning node (e.g. `prim::If` or
   // `prim::Loop`)
   void buildBailOutBlockFrom(Node* n) {
-    auto* block = copy_graph_->block();
     auto b = n->owningBlock();
     for (auto it = n->iterator(); it != b->nodes().end(); it++) {
       cloneNode(*it);
@@ -147,7 +146,7 @@ struct BailOutGraphBuilderForNode {
     auto new_loop = cloneNode(outer_node);
     LoopView new_lv(new_loop);
     {
-      WithInsertPoint guard(*new_lv.bodyBlock()->nodes().begin());
+      WithInsertPoint guard_in_loop(*new_lv.bodyBlock()->nodes().begin());
       // `one` will be replaced with new_lv.currentTripCount()
       // but it needs to be done after
       // new_lv.currentTripCount()->replaceAllUsesWith(adj_iter_ctr);
