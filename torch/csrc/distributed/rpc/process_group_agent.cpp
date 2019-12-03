@@ -374,7 +374,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           if (futureResponse->completed()) {
             send(work.from_, std::move(*futureResponse).moveMessage());
           } else {
-            auto fromID = work.from_.id_;
+            auto fromId = work.from_.id_;
             futureResponse->addCallback([this, fromId](
                                             const Message& msg) {
               send(getWorkerInfo(fromId), std::move(const_cast<Message&>(msg)));
