@@ -28,20 +28,30 @@ struct TORCH_API Object {
   }
 
   void setattr(const std::string& name, c10::IValue v) {
-    // TODO: constant
-    size_t slot = _ivalue()->type()->getAttributeSlot(name);
-    const c10::TypePtr& expected = _ivalue()->type()->getAttribute(slot);
-    TORCH_CHECK(expected, "Module has no attribute '", name, "'");
-    TORCH_CHECK(
-        v.type()->isSubtypeOf(expected),
-        "Expected a value of type '",
-        expected->python_str(),
-        "' for field '",
-        name,
-        "', but found '",
-        v.type()->python_str(),
-        "'");
-    _ivalue()->setSlot(slot, std::move(v));
+    if (auto slot = _ivalue()->type()->findAttributeSlot(name)) {
+      const c10::TypePtr& expected = _ivalue()->type()->getAttribute(*slot);
+      TORCH_CHECK(
+          v.type()->isSubtypeOf(expected),
+          "Expected a value of type '",
+          expected->python_str(),
+          "' for field '",
+          name,
+          "', but found '",
+          v.type()->python_str(),
+          "'");
+      _ivalue()->setSlot(*slot, std::move(v));
+    } else if (auto v = _ivalue()->type()->getConstant(name)) {
+      TORCH_CHECK(
+          false,
+          "Can't set constant '",
+          name,
+          "' which has value:",
+          v);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Module has no attribute '", name, "'");
+    }
   }
 
   c10::IValue attr(const std::string& name) const {
