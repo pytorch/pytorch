@@ -298,9 +298,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
         continue;
       }
       if (n->kind() == prim::CallMethod) {
-        // If we find a call to a method of a child module,
-        // we'll recursively insert observers for the forward function to
-        // the child module.
+        // Record all method calls in the graph
         auto module_instance = n->inputs()[0];
         auto module_method_name = n->s(attr::name);
         script::Module callee_module;
