@@ -333,10 +333,16 @@ FunctionSchema ScriptTypeParser::parseSchemaFromDef(
 }
 
 c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
-  TORCH_INTERNAL_ASSERT(assign.lhs().kind() == TK_VAR);
+  if (assign.lhs().kind() != TK_VAR) {
+    throw ErrorReport(assign.range())
+      << "Expected to a variable for class constant";
+  }
   const auto final_type = assign.type().get();
   auto expr = assign.rhs().get();
-  TORCH_INTERNAL_ASSERT(final_type.kind() == TK_SUBSCRIPT);
+  if (final_type.kind() != TK_SUBSCRIPT) {
+    throw ErrorReport(assign.range())
+      << "Expected subscripted type for class constant";
+  }
   auto subscript = Subscript(final_type);
   auto value_name = parseBaseTypeName(subscript.value());
   if (!value_name) {
