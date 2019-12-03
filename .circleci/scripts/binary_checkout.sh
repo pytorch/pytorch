@@ -24,7 +24,7 @@ export BUILDER_ROOT="$workdir/builder"
 export CIRCLE_SHA1=${SHA1}
 
 # Clone the Pytorch branch
-retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
+retry git clone https://github.com/mingbowan/pytorch.git "$PYTORCH_ROOT"
 cp /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py /tmp/
 pushd "$PYTORCH_ROOT"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
