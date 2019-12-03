@@ -992,7 +992,7 @@ class Operator : public OperatorBase {
 
       // Clear floating point exception flags before RunOnDevice. We will test
       // exception flags afterwards, and raise an error if an exception has
-      // happend.
+      // happened.
       if (FLAGS_caffe2_operator_throw_if_fp_exceptions ||
           FLAGS_caffe2_operator_throw_if_fp_overflow_exceptions) {
         std::feclearexcept(FE_ALL_EXCEPT);

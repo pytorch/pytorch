@@ -141,7 +141,7 @@ class CRFWithLoss(object):
             to
 
             input_blob: the input sequence in a format T x N x D
-            where T is sequence size, N - batch size and D - input dimention
+            where T is sequence size, N - batch size and D - input dimension
             ##Only supports batch-size 1##
 
             seq_lengths: blob containing sequence lengths (unused)

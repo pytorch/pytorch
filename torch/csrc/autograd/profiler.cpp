@@ -12,7 +12,7 @@ namespace torch { namespace autograd { namespace profiler {
 
 CUDAStubs default_stubs;
 constexpr CUDAStubs* default_stubs_addr = &default_stubs;
-// constant initialization, so it is guarenteed to be initialized before
+// constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerCUDAMethods
 static CUDAStubs* cuda_stubs = default_stubs_addr;
 

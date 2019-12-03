@@ -299,7 +299,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     # nested rpc call to next dst. In return route, receive result tensor t3
     # from next dst and forwarding t3 back to previous calls.
     # For this context in this rank, it expects graph like this:
-    #  send and recv functions for receving and forwarding t1 and t2:
+    #  send and recv functions for receiving and forwarding t1 and t2:
     #       rpcSendBackward
     #          /          \
     # t1.recvRpcBackward    t2.recvRpcBackward

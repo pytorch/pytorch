@@ -1391,7 +1391,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __setitem__(self, k, v):
         # Cases where sub-module can be re-assigned after ScriptModule construction
-        # 1. If the attr is an module interface type, it's guranteed that the module is
+        # 1. If the attr is an module interface type, it's guaranteed that the module is
         #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
         # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
         #    and it's legit to swap a new module in.

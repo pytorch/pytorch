@@ -141,7 +141,7 @@ namespace {
 // iterations. This would give the accurate result, but is relatively slow and
 // is an overkill for most cases where double's precision suffice.
 //
-// If we directly use sqrt to calculate the root, the convertion from int64_t
+// If we directly use sqrt to calculate the root, the conversion from int64_t
 // to double would lose 11 bits precision.
 //
 // The following solution uses sqrt directly for most cases, and would only

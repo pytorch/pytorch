@@ -28,7 +28,7 @@ from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 #      | Tensor # any tensor, as defined by at::Tensor
 #      | Type[] # a dynamically sized list[ of a type
 #      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
-#      | (Type1, Type2, ...) # a heterogenous tuple
+#      | (Type1, Type2, ...) # a heterogeneous tuple
 #      | Layout | ScalarType | Device | Generator # special singleton types for built-in concepts in tensor lib
 
 # clean up the variety of C++ types in the ATen declarations

@@ -133,7 +133,7 @@ class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
    * we have to call Deserialize multiple times to get the complete deserialized
    * Tensor, each call will fill part of the Tensor given the segment begin and
    * end information in proto, therefore we have to pass in the Tensor pointer
-   * rather than create a new Tensor everytime.
+   * rather than create a new Tensor every time.
    *
    * Precondition: Tensor must be initialized
    */

@@ -119,7 +119,7 @@ static int64_t floordiv(int64_t a, int64_t b) {
     // simple case, both have same sign
     return a / b;
   } else {
-    // in python division rounds down, it doesnt not truncate like in c++
+    // in python division rounds down, it doesn't not truncate like in c++
     auto r = lldiv(a, b);
     return (r.rem) ? r.quot - 1 : r.quot;
   }

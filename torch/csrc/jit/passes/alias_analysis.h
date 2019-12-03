@@ -77,7 +77,7 @@ class AliasDb {
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
   // Tries to preserve value dependencies, so other nodes might be moved. We
-  // make two gurantees about the postcondition of the node list:
+  // make two guarantees about the postcondition of the node list:
   //   - `n` is directly after `movePoint`.
   //   - only nodes between `n` and `movePoint` have been moved.
   //

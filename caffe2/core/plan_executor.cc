@@ -164,7 +164,7 @@ struct CompiledExecutionStep;
  * ExecuteStepRecursive will call call compiled() once before the given
  * execution step is run and keep it alive for the length of its execution.
  * This means that, for steps with create_workspace=true, a child workspace
- * will be created everytime the step is executed, and destroyed right
+ * will be created every time the step is executed, and destroyed right
  * afterwards.
  */
 struct ExecutionStepWrapper {

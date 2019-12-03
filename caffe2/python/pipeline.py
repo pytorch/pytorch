@@ -111,9 +111,9 @@ def pipe(
                      until a stop is signaled either by the reader or the
                      writer.
         output:      either a Writer, a Queue or a DataStream that will be
-                     writen to as long as neither reader nor writer signal
+                     written to as long as neither reader nor writer signal
                      a stop condition. If output is not provided or is None,
-                     a Queue is created with given `capacity` and writen to.
+                     a Queue is created with given `capacity` and written to.
         num_threads: number of concurrent threads used for processing and
                      piping. If set to 0, no Task is created, and a
                      reader is returned instead -- the reader returned will

@@ -269,7 +269,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
-  // to our receving queue.
+  // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     TORCH_CHECK(!message.isShutdown(), "Shutting down self not supported");
     threadPool_.run(std::bind(

@@ -101,7 +101,7 @@ __global__ void RoIAlignRotatedForward(
     T roi_height = offset_bottom_rois[4] * spatial_scale;
     T theta = offset_bottom_rois[5] * M_PI / 180.0;
 
-    if (!continuous_coordinate) { // backward compatiblity
+    if (!continuous_coordinate) { // backward compatibility
       // Force malformed ROIs to be 1x1
       roi_width = c10::cuda::compat::max(roi_width, (T)1.);
       roi_height = c10::cuda::compat::max(roi_height, (T)1.);

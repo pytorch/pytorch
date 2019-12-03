@@ -8,7 +8,7 @@
 // The gpu_kernel_with_scalars generates specializations that support a
 // single scalar CPU argument, such as from `cuda_tensor + 5`. The CPU scalar
 // is lifted to a kernel paramter instead of copying to device memory.
-// This should be  used in conjuction with TensorIterator::allow_cpu_scalars_,
+// This should be  used in conjunction with TensorIterator::allow_cpu_scalars_,
 // which is the default for TensorIterator::binary_op. Otherwise, all inputs
 // and the output must be on the GPU.
 //

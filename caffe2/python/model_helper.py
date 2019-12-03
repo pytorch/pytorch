@@ -170,7 +170,7 @@ class ModelHelper(object):
         be created in the CurrentNameScope with the respect of all parameter
         sharing logic, i.e. 'resolved_name_scope/param_name'.
 
-        Parameter sharing logic is going to override CurrentNameScope accoring
+        Parameter sharing logic is going to override CurrentNameScope according
         to the rules that are specified through ParameterSharing contexts,
         all ParameterSharing contexts are applied recursively until there are no
         extra overrides present, where on each step the best match will be

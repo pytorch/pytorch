@@ -847,7 +847,7 @@ struct to_ir {
   }
 
   void emitClosure(const Def& def) {
-    // invoked once the closure block is set as the enviroment
+    // invoked once the closure block is set as the environment
     auto emit_body = [&](Block* closure_block) {
       emitDef(
           def,

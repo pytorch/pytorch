@@ -96,7 +96,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             - VALUE: index of dynamic axes for given key and potentially the name to be used for
             exported dynamic axes. In general the value is defined according to one of the following
             ways or a combination of both:
-            (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
+            (1). A list of integers specifying the dynamic axes of provided input. In this scenario
             automated names will be generated and applied to dynamic axes of provided input/output
             during export.
             OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in

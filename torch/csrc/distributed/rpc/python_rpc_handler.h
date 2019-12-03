@@ -47,7 +47,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // See similar issues reported https://github.com/pybind/pybind11/issues/1598
   // and https://github.com/pybind/pybind11/issues/1493
   // Our local tests also caught this segment faults if py::objects are cleaned
-  // up at program exit. The explaination is: CPython cleans up most critical
+  // up at program exit. The explanation is: CPython cleans up most critical
   // utilities before cleaning up PythonRpcHandler singleton, so when
   // PythonRpcHandler signleton cleans up py::objects and call dec_ref(), it
   // will crash.

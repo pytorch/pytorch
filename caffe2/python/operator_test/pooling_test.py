@@ -165,7 +165,7 @@ class TestPooling(hu.HypothesisTestCase):
         # Currently MIOpen Pooling only supports 2d pooling
         if hiputl.run_in_hip(gc, dc):
             assume(engine != "CUDNN")
-        # pad and stride ignored because they will be infered in global_pooling
+        # pad and stride ignored because they will be inferred in global_pooling
         op = core.CreateOperator(
             op_type,
             ["X"],
