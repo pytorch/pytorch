@@ -47,7 +47,7 @@ class Cloneable : public virtual Module {
         "parameters as the original module after calling reset(). "
         "Are you sure you called register_parameter() inside reset() "
         "and not the constructor?");
-    for (const auto& parameter : parameters_) {
+    for (const auto& parameter : named_parameters(/*recurse=*/false)) {
       auto& tensor = *parameter;
       auto data = device && tensor.device() != *device ?
           tensor.to(*device) : autograd::Variable(tensor).clone();
@@ -59,7 +59,7 @@ class Cloneable : public virtual Module {
         "buffers as the original module after calling reset(). "
         "Are you sure you called register_buffer() inside reset() "
         "and not the constructor?");
-    for (const auto& buffer : buffers_) {
+    for (const auto& buffer : named_buffers(/*recurse=*/false)) {
       auto& tensor = *buffer;
       auto data = device && tensor.device() != *device ?
           tensor.to(*device) : autograd::Variable(tensor).clone();

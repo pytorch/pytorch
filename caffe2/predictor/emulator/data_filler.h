@@ -86,7 +86,7 @@ void fill_with_type(
 
 /*
  * @run_net: the predict net with parameter and input names
- * @input_dims: the input dimentions of all operator inputs of run_net
+ * @input_dims: the input dimensions of all operator inputs of run_net
  * @input_types: the input types of all operator inputs of run_net
  */
 class DataRandomFiller : public Filler {
