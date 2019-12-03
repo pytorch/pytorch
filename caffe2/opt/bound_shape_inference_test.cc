@@ -8,11 +8,11 @@ using namespace caffe2;
 namespace {
 
 ShapeInfo makeTensorInfo(
-    ShapeInfo::DimType t,
+    const std::vector<TensorBoundShape::DimType>& t,
     const std::vector<int64_t>& dims,
     TensorProto::DataType dtype = TensorProto_DataType_FLOAT) {
   ShapeInfo info;
-  info.dim_type = t;
+  info.setDimType(t);
   TensorShape& shape = info.shape;
   for (const auto d : dims) {
     shape.add_dims(d);
@@ -24,14 +24,14 @@ ShapeInfo makeTensorInfo(
 void verifyShapeInfo(
     const ShapeInfoMap& info,
     const std::string& name,
-    ShapeInfo::DimType t,
+    const std::vector<TensorBoundShape::DimType>& t,
     const std::vector<int64_t>& dims,
     TensorProto::DataType dtype = TensorProto_DataType_FLOAT) {
   LOG(INFO) << "Checking " << name;
   const auto it = info.find(name);
   ASSERT_TRUE(it != info.end());
   const auto& shape_info = it->second;
-  EXPECT_EQ(shape_info.dim_type, t);
+  EXPECT_EQ(shape_info.getDimType(), t);
   const auto& shape = shape_info.shape;
   ASSERT_EQ(shape.dims_size(), dims.size());
   for (int i = 0; i < dims.size(); ++i) {
@@ -48,27 +48,37 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       "SparseLengthsSum", "", {"Weights", "Data", "Lengths"}, {"Out"}, {}));
   ShapeInfoMap shape_map;
   shape_map.emplace(
-      "Weights", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {1000, 16}));
+      "Weights",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1000, 16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
-      out_shape, "Weights", ShapeInfo::DimType::CONSTANT, {1000, 16});
+      out_shape,
+      "Weights",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {1000, 16});
   verifyShapeInfo(
       out_shape,
       "Data",
-      ShapeInfo::DimType::SEQ,
+      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
       {spec.max_seq_size},
       TensorProto_DataType_INT64);
   verifyShapeInfo(
       out_shape,
       "Lengths",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH},
       {spec.max_batch_size},
       TensorProto_DataType_INT32);
   verifyShapeInfo(
-      out_shape, "Out", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+      out_shape,
+      "Out",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 16});
 }
 
 TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
@@ -83,7 +93,10 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
   shape_map.emplace(
       "Weights",
       makeTensorInfo(
-          ShapeInfo::DimType::CONSTANT, {1000, 58}, TensorProto_DataType_INT8));
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1000, 58},
+          TensorProto_DataType_INT8));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -91,39 +104,33 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
   verifyShapeInfo(
       out_shape,
       "Weights",
-      ShapeInfo::DimType::CONSTANT,
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
       {1000, 58},
       TensorProto_DataType_INT8);
   verifyShapeInfo(
       out_shape,
       "Data",
-      ShapeInfo::DimType::SEQ,
+      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
       {spec.max_seq_size},
       TensorProto_DataType_INT64);
   verifyShapeInfo(
       out_shape,
       "Lengths",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH},
       {spec.max_batch_size},
       TensorProto_DataType_INT32);
   verifyShapeInfo(
-      out_shape, "Out", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 50});
+      out_shape,
+      "Out",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 50});
 }
 
 TEST(BoundShapeInference, LengthsRangeFill) {
   NetDef net;
-  net.add_op()->CopyFrom(CreateOperatorDef(
-    "LengthsRangeFill",
-    "",
-    {"X"},
-    {"Y"},
-    {}));
-  net.add_op()->CopyFrom(CreateOperatorDef(
-    "Copy",
-    "",
-    {"Y"},
-    {"Z"},
-    {}));
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("LengthsRangeFill", "", {"X"}, {"Y"}, {}));
+  net.add_op()->CopyFrom(CreateOperatorDef("Copy", "", {"Y"}, {"Z"}, {}));
   ShapeInfoMap shape_map;
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
@@ -132,19 +139,19 @@ TEST(BoundShapeInference, LengthsRangeFill) {
   verifyShapeInfo(
       out_shape,
       "X",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH},
       {spec.max_batch_size},
       TensorProto_DataType_INT32);
   verifyShapeInfo(
       out_shape,
       "Y",
-      ShapeInfo::DimType::SEQ,
+      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
       {spec.max_seq_size},
       TensorProto_DataType_INT32);
   verifyShapeInfo(
       out_shape,
       "Z",
-      ShapeInfo::DimType::SEQ,
+      {TensorBoundShape_DimType_FEATURE_MAX_DEFAULT},
       {spec.max_seq_size},
       TensorProto_DataType_INT32);
 }
@@ -171,20 +178,32 @@ TEST(BoundShapeInference, Reshape) {
       {MakeArgument<std::vector<int>>("shape", new_shape2)}));
   ShapeInfoMap shape_map;
   shape_map.emplace(
-      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16, 1024}));
-  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+      "W0",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {16, 1024}));
+  shape_map.emplace(
+      "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
-      out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
+      out_shape,
+      "X0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 1024});
   verifyShapeInfo(
-      out_shape, "X1", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+      out_shape,
+      "X1",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 16});
   verifyShapeInfo(
       out_shape,
       "Y1",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH,
+       TensorBoundShape_DimType_CONSTANT}, // TODO
       {spec.max_batch_size * 16 / 8, 8});
   EXPECT_TRUE(out_shape.find("Y2") == out_shape.end());
 }
@@ -201,16 +220,23 @@ TEST(BoundShapeInference, ConcatMissingInput) {
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "I0",
-      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60}));
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
-      out_shape, "I0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60});
+      out_shape,
+      "I0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 60});
   verifyShapeInfo(
       out_shape,
       "Cout",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH,
+       TensorBoundShape_DimType_CONSTANT,
+       TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 2, 60});
 }
 
@@ -228,23 +254,39 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "I0",
-      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60}));
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {spec.max_batch_size, 60}));
   shape_map.emplace(
-      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {101, 16}));
-  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+      "W0",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {101, 16}));
+  shape_map.emplace(
+      "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
-      out_shape, "I0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60});
+      out_shape,
+      "I0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 60});
   verifyShapeInfo(
-      out_shape, "Cout", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 101});
+      out_shape,
+      "Cout",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 101});
   verifyShapeInfo(
-      out_shape, "Y", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+      out_shape,
+      "Y",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 16});
   verifyShapeInfo(
       out_shape,
       "I1",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 101 - 60});
 }
 
@@ -259,14 +301,17 @@ TEST(BoundShapeInference, Bucketize) {
   BoundShapeSpec spec(20, 1000);
   ShapeInfoMap shape_map;
   shape_map.emplace(
-      "In", makeTensorInfo(ShapeInfo::DimType::SEQ, {spec.max_batch_size, 60}));
+      "In",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape,
       "Out",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 60},
       TensorProto_DataType_INT32);
 }
@@ -292,37 +337,66 @@ TEST(BoundShapeInference, Split) {
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "X",
-      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48}));
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {spec.max_batch_size, 48}));
   shape_map.emplace(
       "X1",
-      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2, 48}));
+      makeTensorInfo(
+          {TensorBoundShape_DimType_BATCH,
+           TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {spec.max_batch_size, 2, 48}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
-      out_shape, "X", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+      out_shape,
+      "X",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 48});
   verifyShapeInfo(
-      out_shape, "X1", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2, 48});
+      out_shape,
+      "X1",
+      {TensorBoundShape_DimType_BATCH,
+       TensorBoundShape_DimType_CONSTANT,
+       TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 2, 48});
   verifyShapeInfo(
       out_shape,
       "Y0",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 48 / 2});
   verifyShapeInfo(
       out_shape,
       "Y1",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 48 / 2});
   verifyShapeInfo(
-      out_shape, "Y2", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 4});
+      out_shape,
+      "Y2",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 4});
   verifyShapeInfo(
-      out_shape, "Y3", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 30});
+      out_shape,
+      "Y3",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 30});
   verifyShapeInfo(
-      out_shape, "Y4", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 14});
+      out_shape,
+      "Y4",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 14});
   verifyShapeInfo(
-      out_shape, "Y5", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+      out_shape,
+      "Y5",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 48});
   verifyShapeInfo(
-      out_shape, "Y6", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+      out_shape,
+      "Y6",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 48});
 }
 
 TEST(BoundShapeInference, FC) {
@@ -333,25 +407,44 @@ TEST(BoundShapeInference, FC) {
       CreateOperatorDef("FCTransposed", "", {"X1", "W1", "B1"}, {"Out1"}, {}));
   ShapeInfoMap shape_map;
   shape_map.emplace(
-      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16, 1024}));
-  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+      "W0",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {16, 1024}));
   shape_map.emplace(
-      "W1", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16, 1024}));
-  shape_map.emplace("B1", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {1024}));
+      "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
+  shape_map.emplace(
+      "W1",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {16, 1024}));
+  shape_map.emplace(
+      "B1", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {1024}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
-      out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
+      out_shape,
+      "X0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 1024});
   verifyShapeInfo(
-      out_shape, "Out0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+      out_shape,
+      "Out0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 16});
   verifyShapeInfo(
-      out_shape, "X1", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+      out_shape,
+      "X1",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 16});
   verifyShapeInfo(
       out_shape,
       "Out1",
-      ShapeInfo::DimType::BATCH,
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 1024});
 }
 
@@ -361,16 +454,28 @@ TEST(BoundShapeInference, FC3D) {
       CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"Out0"}, {}));
   ShapeInfoMap shape_map;
   shape_map.emplace(
-      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16, 1, 1024}));
-  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+      "W0",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {16, 1, 1024}));
+  shape_map.emplace(
+      "B0", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
-      out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
+      out_shape,
+      "X0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 1024});
   verifyShapeInfo(
-      out_shape, "Out0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+      out_shape,
+      "Out0",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 16});
 }
 
 TEST(BoundShapeInference, Combo0) {
@@ -397,16 +502,27 @@ TEST(BoundShapeInference, Combo0) {
       CreateOperatorDef("BatchGather", "", {"Fout", "Indices"}, {"Gout"}, {}));
   ShapeInfoMap shape_map;
   shape_map.emplace(
-      "Weights0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {1000, 16}));
+      "Weights0",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1000, 16}));
   shape_map.emplace(
-      "Weights1", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {20000, 16}));
+      "Weights1",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {20000, 16}));
   shape_map.emplace(
-      "Indices", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {2}));
+      "Indices", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {2}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   LOG(INFO) << eng.PrintShapeInfo();
   verifyShapeInfo(
-      out_shape, "Gout", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2});
+      out_shape,
+      "Gout",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 2});
 }
