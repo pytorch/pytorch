@@ -108,8 +108,8 @@ class Linear(torch.nn.Module):
         return 'QuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, scale={}, zero_point={}'.format(
-            self.in_features, self.out_features, self.scale, self.zero_point
+        return 'in_features={}, out_features={}, scale={}, zero_point={}, qscheme={}'.format(
+            self.in_features, self.out_features, self.scale, self.zero_point, self.weight().qscheme()
         )
 
     def forward(self, x):
