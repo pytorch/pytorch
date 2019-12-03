@@ -1475,7 +1475,7 @@ class TestQuantizedConv(unittest.TestCase):
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
 
-        # Quantize reference results for comparision
+        # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
             dtype=torch.quint8)
