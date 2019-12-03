@@ -38,6 +38,8 @@ struct RRefForkData {
       const RRefId& rrefId_,
       const ForkId& forkId_,
       worker_id_t parent);
+
+  static RRefForkData fromIValue(const at::IValue&);
 };
 
 static_assert(
