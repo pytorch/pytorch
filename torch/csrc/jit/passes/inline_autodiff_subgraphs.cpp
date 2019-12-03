@@ -10,7 +10,8 @@ namespace jit {
 namespace {
 
 bool canRunWithAutograd(Node* node) {
-  return node->kind() != prim::FusionGroup;
+  auto kind = node->kind();
+  return kind != prim::FusionGroup && (kind.is_aten() || kind.is_prim());
 }
 
 void InlineAutodiffSubgraphs(Block* block, size_t threshold);
