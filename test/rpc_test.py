@@ -1174,9 +1174,10 @@ class RpcTest(RpcAgentTestFixture):
 
         dst_rank = (self.rank + 1) % self.world_size
         rref2 = rpc.remote("worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1))
-        expected1 = "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
-        expected2 = "UserRRef(RRefId = {0}({1}, 2), ForkId = {0}({1}, 1))".format(id_class, self.rank)
-        self.assertTrue(rref2.__str__() == expected1 or rref2.__str__() == expected2)
+        self.assertEqual(
+            rref2.__str__(),
+            "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
+        )
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
