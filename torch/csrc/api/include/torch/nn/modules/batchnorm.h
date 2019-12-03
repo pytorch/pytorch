@@ -9,8 +9,6 @@
 
 #include <cstdint>
 
-namespace F = torch::nn::functional;
-
 namespace torch {
 namespace nn {
 
@@ -178,7 +176,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
       }
     }
 
-    return F::detail::batch_norm(
+    return torch::nn::functional::detail::batch_norm(
         input,
         this->running_mean,
         this->running_var,
