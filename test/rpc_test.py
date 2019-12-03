@@ -571,6 +571,44 @@ class RpcTest(RpcAgentTestFixture):
         # it's safe to call shutdown() multiple times
         rpc.shutdown()
 
+    @dist_init(clean_shutdown=False)
+    def test_wait_all_workers(self):
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            assert self.world_size >= 3
+
+            num_repeat = 30
+            futs = []
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+        # worker0 calls this at the end after waiting for RPC responses.
+        # worker1/2 calls this immediately and has some works after it.
+        # worker3 calls this immediately and has no more work.
+        rpc.api._wait_all_workers()
+        rpc.shutdown(graceful=False)
+
     @dist_init
     def test_expected_src(self):
         dst_rank = (self.rank + 1) % self.world_size
@@ -1170,9 +1208,7 @@ class RpcTest(RpcAgentTestFixture):
         # without sending any messages.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1186,9 +1222,7 @@ class RpcTest(RpcAgentTestFixture):
         # test that we can start RPC, send RPCs, and then run local shutdown.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1215,7 +1249,7 @@ class RpcTest(RpcAgentTestFixture):
         # multiple times.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options
@@ -1223,7 +1257,7 @@ class RpcTest(RpcAgentTestFixture):
         from torch.distributed.rpc.api import _wait_all_workers
         # intentional call to internal _wait_all_workers.
         _wait_all_workers()
-        rpc.shutdown()
+        rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
