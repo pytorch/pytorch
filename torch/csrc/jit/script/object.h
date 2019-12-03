@@ -59,7 +59,7 @@ struct TORCH_API Object {
   }
 
   // each object owns its methods. The reference returned here
-  // is guarenteed to stay valid until this module has been destroyed
+  // is guaranteed to stay valid until this module has been destroyed
   Method get_method(const std::string& name) const {
     if (auto method = find_method(name)) {
       return *method;
