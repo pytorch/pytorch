@@ -170,7 +170,7 @@ class _ObserverBase(ObserverBase):
 
         scale = torch.ones(min_val.size(), dtype=torch.float32)
         zero_point = torch.zeros(min_val.size(), dtype=torch.int64)
-        device = 'cuda' if self.eps.is_cuda else 'cpu'
+        device = 'cuda' if min_val.is_cuda else 'cpu'
 
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
             max_val = torch.max(-min_val, max_val)
