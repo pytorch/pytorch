@@ -39,6 +39,7 @@
 
 # Computes the gradient of current tensor w.r.t. graph leaves.
 - func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
+  manual_kernel_registration: True
   variants: method
 
 # DEPRECATED. Sets the tensor data held by this `Variable` to be the same as
@@ -49,14 +50,19 @@
 # where Variables *are* Tensors (as opposed to them containing tensors, which
 # is what the previous interpretation was.)
 - func: set_data(Tensor(a!) self, Tensor new_data) -> ()
-  use_c10_dispatcher: unboxed_only
+  use_c10_dispatcher: full
+  manual_kernel_registration: True
   variants: method
 
 - func: data(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  manual_kernel_registration: True
   variants: method
 
 # True if this `Variable` is a leaf and thus does not have a `grad_fn`.
 - func: is_leaf(Tensor self) -> bool
+  use_c10_dispatcher: full
+  manual_kernel_registration: True
   variants: method
 
 # Returns the output index of this variable from the forward operation that
@@ -70,13 +76,18 @@
 #   assert y2.output_nr == 2
 #
 - func: output_nr(Tensor self) -> int
+  use_c10_dispatcher: full
+  manual_kernel_registration: True
   variants: method
   supports_named_tensor: True
 
 - func: _version(Tensor self) -> int
+  use_c10_dispatcher: full
+  manual_kernel_registration: True
   variants: method
 
 - func: requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)
+  manual_kernel_registration: True
   variants: method
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
@@ -716,6 +727,7 @@
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+  manual_kernel_registration: True
   variants: method
   device_guard: False
   supports_named_tensor: True
@@ -1040,13 +1052,10 @@
     QuantizedCPU: empty_per_channel_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
+  manual_kernel_registration: True
   supports_named_tensor: True
   variants: method
   device_guard: False
-  dispatch:
-    CPU: resize_cpu_
-    CUDA: resize_cuda_
-    QuantizedCPU: quantized_resize_cpu_
 
 - func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
   device_guard: False
@@ -2370,6 +2379,7 @@
 # be updated.
 - func: detach(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  manual_kernel_registration: True
   supports_named_tensor: True
   variants: function, method
 
@@ -2377,6 +2387,7 @@
 # only be called on non-view `Variable`s. You can use `is_view()` to check
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
+  manual_kernel_registration: True
   supports_named_tensor: True
   variants: function, method
 
@@ -2975,6 +2986,7 @@
   supports_named_tensor: True
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
+  manual_kernel_registration: True
   supports_named_tensor: True
   variants: function, method
 
