@@ -784,7 +784,7 @@ void OnnxifiTransformer::getBackendId() {
     return;
   }
   // Try to find a backend that support Caffe2 proto. Note that this is quite
-  // opportunistic as we don't offcially support Caffe2 proto.
+  // opportunistic as we don't officially support Caffe2 proto.
   char buf[kBufferSize];
   for (int i = 0; i < backend_ids_.size(); ++i) {
     size_t len = kBufferSize;

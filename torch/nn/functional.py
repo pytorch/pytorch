@@ -3180,7 +3180,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         attn_mask: mask that prevents attention to certain positions. This is an additive mask
             (i.e. the values will be added to the attention layer).
         use_separate_proj_weight: the function accept the proj. weights for query, key,
-            and value in differnt forms. If false, in_proj_weight will be used, which is
+            and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
@@ -3208,9 +3208,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
           L is the target sequence length, S is the source sequence length.
     """
 
-    qkv_same = torch.equal(query, key) and torch.equal(key, value)
-    kv_same = torch.equal(key, value)
-
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
     assert key.size() == value.size()
@@ -3219,12 +3216,12 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if use_separate_proj_weight is not True:
-        if qkv_same:
+    if not use_separate_proj_weight:
+        if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
             q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-        elif kv_same:
+        elif torch.equal(key, value):
             # encoder-decoder attention
             # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
