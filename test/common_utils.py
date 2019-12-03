@@ -286,9 +286,9 @@ ALL_TENSORTYPES = [torch.float,
 
 if TEST_WITH_ROCM:
     ALL_TENSORTYPES2 = [torch.float,
-                       torch.double,
-                       torch.half,
-                       torch.bfloat16]
+                        torch.double,
+                        torch.half,
+                        torch.bfloat16]
 else:
     ALL_TENSORTYPES2 = ALL_TENSORTYPES
 
