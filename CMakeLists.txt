@@ -81,11 +81,23 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
-if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
-  set(CPU_INTEL ON)
+if (WIN32)
+  # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
+  # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
+  # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
+  if ($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 else ()
-  set(CPU_INTEL OFF)
+  if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 endif ()
+
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
@@ -205,6 +217,8 @@ cmake_dependent_option(
   "MSVC" OFF)
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+set(SELECTED_OP_LIST "" CACHE STRING
+    "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk

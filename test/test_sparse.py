@@ -2109,6 +2109,11 @@ class TestSparse(TestCase):
         t_nan = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, True]))
         self.assertEqual(torch.isnan(t).int(), t_nan.int())
 
+    def test_div_by_sparse_error(self):
+        self.assertRaisesRegex(RuntimeError, 'A Sparse Tensor can only be divided',
+                               lambda: torch.tensor(1., device=self.device).to_sparse() / torch.tensor(1., device=self.device).to_sparse())
+
+
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()

@@ -5,7 +5,6 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_helper import _black_list_in_opset
 from torch.onnx.symbolic_opset9 import expand
 from torch.nn.modules.utils import _single, _pair, _triple
 
@@ -15,13 +14,17 @@ from torch.nn.modules.utils import _single, _pair, _triple
 
 # This file exports ONNX ops for opset 11
 
-black_listed_operators = [
-    "hardtanh"
-]
 
-
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+@parse_args('v', 'f', 'f')
+def hardtanh(g, self, min_val, max_val):
+    dtype = self.type().scalarType()
+    if dtype is not None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    max_val = g.op("Constant", value_t=torch.tensor(max_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    return g.op("Clip", self, min_val, max_val)
 
 
 def clamp(g, self, min, max):
@@ -60,7 +63,7 @@ def _interpolate(name, dim, interpolate_mode):
 
         return g.op("Resize",
                     input,
-                    empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                    empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
                     empty_tensor,  # scales is not needed since we are sending out_size
                     output_size,
                     coordinate_transformation_mode_s=coordinate_transformation_mode,
@@ -89,7 +92,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
     align_corners = False if not isinstance(align_corners, bool) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
-    # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+    # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
@@ -181,6 +184,10 @@ def masked_scatter(g, self, mask, source):
                                     ends=size(g, index, torch.LongTensor([0])),
                                     dynamic_slice=True)
     return g.op('ScatterND', self, index, source)
+
+
+def __getitem_(g, self, i):
+    return g.op("SequenceAt", self, i)
 
 
 @parse_args('v', 'i', 'i', 'i')
@@ -376,3 +383,41 @@ def index_copy(g, self, dim, index, source):
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
+
+
+def __rshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    if self.type().scalarType() == 'Byte':
+        return g.op('BitShift', self, other, direction_s="RIGHT")
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    rshift = g.op('Div', self, two_pow)
+    return rshift
+
+
+def __lshift_(g, self, other):
+    # make sure to cast other to self's type
+    # (when self is long, make sure that other is not float)
+    if other.type().scalarType() != self.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+
+    if self.type().scalarType() == 'Byte':
+        return g.op('BitShift', self, other, direction_s="LEFT")
+
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float32))
+    # exponent (same type as self) has to be float or double in onnx::Pow
+    if not sym_help._is_fp(self):
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    two_pow = g.op('Pow', two, other)
+
+    lshift = g.op('Mul', self, two_pow)
+    return lshift
