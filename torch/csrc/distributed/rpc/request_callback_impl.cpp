@@ -181,7 +181,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       // Make a FutureMessage that is completed when the original RPC completes.
       auto result = std::make_shared<FutureMessage>();
       wrappedRpcResponseFuture->addCallback(
-          [result, fromWorkerId, messageId](const Message& receivedResp) {
+          [result, fromWorkerId, messageId](const rpc::Message& receivedResp) {
             auto message = getMessageWithAutograd(
                 fromWorkerId,
                 std::move(const_cast<Message&>(receivedResp)),
@@ -209,10 +209,17 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       sendFunction->setGrads(gradientsCall.getGrads());
 
       // Now execute the autograd graph using the "distributed engine."
-      DistEngine::getInstance().executeSendFunction(
+      auto future = DistEngine::getInstance().executeSendFunctionAsync(
           autogradContext, sendFunction);
 
-      return wrap(std::move(PropagateGradientsResp()).toMessage());
+      // Return a FutureMessage that is set when done.
+      auto result = std::make_shared<FutureMessage>();
+      future->addCallback([result, messageId](const rpc::Message& receiveResp) {
+        auto msg = (PropagateGradientsResp()).toMessage();
+        msg.setId(messageId);
+        result->markCompleted(std::move(msg));
+      });
+      return result;
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);

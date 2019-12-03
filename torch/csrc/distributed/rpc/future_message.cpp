@@ -4,10 +4,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-FutureMessage::FutureMessage(Message message) {
-  message_ = std::move(message);
-  completed_ = true;
-}
+FutureMessage::FutureMessage(Message message)
+    : completed_(true), message_(std::move(message)) {}
 
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);

@@ -119,6 +119,32 @@ void DistAutogradContext::clearAndWaitForOutstandingRpcs() {
   }
 }
 
+std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
+    clearAndWaitForOutstandingRpcsAsync() {
+  std::unique_lock<std::mutex> lock(lock_);
+  auto outStandingRpcs = std::move(outStandingRpcs_);
+  lock.unlock();
+
+  struct State {
+    std::shared_ptr<rpc::FutureMessage> future;
+    std::atomic<int32_t> remaining;
+  };
+  auto state = std::make_shared<State>();
+  state->remaining = outStandingRpcs.size();
+  state->future = std::make_shared<rpc::FutureMessage>();
+  for (auto& rpc : outStandingRpcs) {
+    rpc->addCallback([state](const rpc::Message&) {
+      if (--state->remaining == 0) {
+        state->future->markCompleted();
+      }
+    });
+  }
+  if (outStandingRpcs.empty()) {
+    state->future->markCompleted();
+  }
+  return state->future;
+}
+
 std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
     int64_t autograd_message_id) {
   std::lock_guard<std::mutex> guard(lock_);
