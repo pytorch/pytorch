@@ -22,7 +22,8 @@ from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
-                                     FunctionEvent, record_function, emit_nvtx)
+                                     FunctionEvent, FunctionEventAvg,
+                                     record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
@@ -2570,6 +2571,23 @@ class TestAutograd(TestCase):
             return [child.id for child in event.cpu_children]
 
         assert([get_children_ids(event) for event in events] == res)
+
+    def test_profiler_function_event_avg(self):
+        avg = FunctionEventAvg()
+        avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
+        avg.add(FunctionEvent(id=1, name="foo", thread=0, cpu_start=20, cpu_end=30))
+        avg.add(avg)
+        self.assertEqual(avg.key, "foo")
+
+        # aggregate stats
+        self.assertEqual(avg.count, 4)
+        self.assertEqual(avg.cpu_time_total, 30)
+        self.assertEqual(avg.self_cpu_time_total, 30)
+        self.assertEqual(avg.cuda_time_total, 0)
+
+        # average stats
+        self.assertEqual(avg.cpu_time, 7.5)
+        self.assertEqual(avg.cuda_time_total, 0)
 
     def test_profiler_shapes(self):
         print("")
