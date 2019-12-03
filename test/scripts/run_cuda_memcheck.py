@@ -41,6 +41,8 @@ parser.add_argument('--ci', action='store_true',
                          'an error is detected. Also, it will not show tqdm progress bar, but directly print the error'
                          'to stdout instead.')
 parser.add_argument('--nohang', action='store_true', help='Treat timeout as success')
+parser.add_argument('--split', type=int, default=1, help='Split the job into pieces')
+parser.add_argument('--rank', type=int, default=0, help='Which piece this process should pick')
 args = parser.parse_args()
 
 # Filters that ignores cublas/cudnn errors
@@ -74,6 +76,21 @@ for line in lines:
         line = line[line.find('::') + 2:]
         line = line.replace('::', '.')
         ALL_TESTS.append(line)
+
+# Do a simple filtering:
+# if 'cpu' or 'CPU' is in the name and 'cuda' or 'CUDA' is not in the name, then skip it
+def is_cpu_only(name):
+    name = name.lower()
+    return ('cpu' in name) and not ('cuda' in name)
+
+ALL_TESTS = [x for x in ALL_TESTS if not is_cpu_only(x)]
+
+# Split all tests into chunks, and only on the selected chunk
+ALL_TESTS.sort()
+chunk_size = (len(ALL_TESTS) + args.split - 1) // args.split
+start = chunk_size * args.rank
+end = chunk_size * (args.rank + 1)
+ALL_TESTS = ALL_TESTS[start:end]
 
 # Run tests:
 # Since running cuda-memcheck on PyTorch unit tests is very slow, these tests must be run in parallel.
