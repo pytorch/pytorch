@@ -9,5 +9,4 @@ ATEN_CORE_HEADER_FILES = [
 
 ATEN_CORE_SRC_FILES = [
     "aten/src/ATen/core/grad_mode.cpp",
-    "aten/src/ATen/core/VariableFallbackKernel.cpp",
 ]
