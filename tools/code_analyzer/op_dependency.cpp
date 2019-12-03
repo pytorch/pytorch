@@ -5,12 +5,31 @@
 // contains ops needed by the specific model - unregistered / unused ops can be
 // stripped at link time.
 //
+// [Approach]
 // To generate the dependency graph it searches for 3 types of connections in
 // LLVM bitcode / assembly:
 //  1) op registration: op name (schema string literal) -> registered function;
 //  2) regular function call: function -> function;
 //  3) op invocation: function -> op name (schema string literal)
 //
+// For #2 it uses similar algorithm as llvm::LazyCallGraph - not only looks into
+// call/invoke instructions but also recursively searches for function pointers
+// in each instruction's operands.
+//
+// For #1 and #3 it searches for connections between operator name string
+// literals / function pointers and c10 op registration/invocation API calls in
+// LLVM IR graph via "use" edges. It can print instruction level data flow and
+// show warning message if it encounters unexpected cases (e.g.: found 0 or
+// multiple op names per registration/invocation API call).
+//
+// [Limitation]
+// For now the search doesn't go beyond the function boundary because the
+// reference to op name string literals and c10 op registration/invocation
+// APIs are almost always in the same function. If we create helper function
+// around c10 API (e.g. the "callOp" method defined in aten/native), we could
+// simply add them to the regular expression used to identify c10 API.
+//
+// [Example]
 // In the following example, it finds out:
 //  1) the registered function for "quantized:add" operator;
 //  2) one possible call path to at::empty() function;
@@ -286,7 +305,7 @@ private:
   // to connect them to the c10 op registration/invocation APIs.
   // For now the search doesn't go beyond the function boundary because the
   // reference to op name string literals and c10 op registration/invocation
-  // APIs are always in the same function.
+  // APIs are almost always in the same function.
   static void scanConnectedNodes(
       Value* src,
       const VALUE_SET& blocked,
@@ -416,7 +435,7 @@ private:
   // into the same c10 op registration API call via "use" edges in IR graph.
   // It assumes that the function pointers are needed (registered) for the op.
   //
-  // For example, from op name to registration API call:
+  // For example, from op name "aten::add" to registration API call:
   // [OP_SCHEMA] aten::add
   // [PATH][1][CONST] [70 x i8] c"aten::add.Scalar(Tensor self...\00"
   // [PATH][2][CONST] @.str.55.20575 = private unnamed_addr constant [70 x i8]
@@ -424,7 +443,8 @@ private:
   // [PATH][3][CONST] i8* getelementptr inbounds ([70 x i8], [70 x i8]*
   //                  @.str.55.20575, i64 0, i64 0)
   // [PATH][4][INST]  invoke void @std::basic_string<...>::basic_string(...)
-  //                  (... %1477, ... @.str.55.20575 ...)
+  //                  (%"class.std::basic_string"* ... %1477,
+  //                  i8* getelementptr ... @.str.55.20575 ...)
   // [PATH][5][INST]  %1477 = alloca %"class.std::basic_string" ...
   // [PATH][6][INST]  %4086 = invoke ...
   //                  @c10::RegisterOperators::Options::schema(... %1477)
@@ -438,7 +458,7 @@ private:
   //
   // From function pointer to registration API call:
   // [FUNC] at::TypeDefault::add(at::Tensor const&, c10::Scalar, c10::Scalar)
-  // [PATH][1][FUNC] at::TypeDefault::add(at::Tensor const&...)
+  // [PATH][1][FUNC]  at::TypeDefault::add(at::Tensor const&...)
   // [PATH][2][INST]  %4088 = invoke ... @...catchAllKernel...(... %4086, ...
   //                  @at::TypeDefault::add(at::Tensor const&...))
   // [PATH][3][INST]  %4090 = invoke ...
@@ -450,11 +470,16 @@ private:
       VALUE_SET& instructions, SET* opSchemaStrs, GRAPH* schemaStrToFunctions) {
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
+      // We only need to process call/invoke instructions.
       if (!I || !CallSite(I)) continue;
       if (Verbose > 2) {
         std::cerr << "[DEBUG][REG][INST] " << *I << std::endl;
       }
       SET visitedOps, visitedFunctions;
+      // Pass in "instructions" set as "blocked" set - all operator registration
+      // calls are connected to global op registry object so we should avoid
+      // going from one op registration call to another op registration call via
+      // the global registry object.
       scanOpSchemaStrAndFunction(
           I, instructions, &visitedOps, &visitedFunctions);
       if (visitedOps.size() != 1) {
@@ -485,10 +510,34 @@ private:
   // Similar as scanOpRegistration - it searches for op schema strings that flow
   // into c10 op invocation API call and assume the parent function of the API
   // call invokes the operator.
+  //
+  // For example, from op name "aten::empty" to invocation API call:
+  // [OP_SCHEMA] aten::empty
+  // [PATH][1][CONST] [12 x i8] c"aten::empty\00"
+  // [PATH][2][CONST] @.str.69.1990 = private unnamed_addr constant [12 x i8]
+  //                  c"aten::empty\00", align 1
+  // [PATH][3][CONST] i8* getelementptr inbounds ([12 x i8], [12 x i8]*
+  //                  @.str.69.1990, i64 0, i64 0)
+  // [PATH][4][INST]  invoke void @std::basic_string<...>::basic_string(...
+  //                  (%"class.std::basic_string"* nonnull %19,
+  //                  i8* getelementptr inbounds ([12 x i8], [12 x i8]*
+  //                  @.str.69.1990, i64 0, i64 0) ...
+  // [PATH][5][INST]  %19 = alloca %"class.std::basic_string", align 8
+  // [PATH][6][INST]  %53 = bitcast %"class.std::basic_string"* %19 to i64*
+  // [PATH][7][INST]  %54 = load i64, i64* %53, align 8, !tbaa !4
+  // [PATH][8][INST]  store i64 %54, i64* %55, align 8, !tbaa !4
+  // [PATH][9][INST]  %55 = bitcast %"struct.c10::OperatorName"* %18 to i64*
+  // [PATH][10][INST] %18 = alloca %"struct.c10::OperatorName", align 8
+  // [PATH][11][INST] invoke void @c10::Dispatcher::findSchema(c10::OperatorName
+  //                  const&)(%"class.c10::optional.105"* nonnull sret %17,
+  //                  %"class.c10::Dispatcher.6320"* nonnull %45,
+  //                  %"struct.c10::OperatorName"* nonnull dereferenceable(16)
+  //                  %18)
   static void scanOpInvocation(
       VALUE_SET& instructions, SET* opSchemaStrs, GRAPH* functionToSchemaStrs) {
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
+      // We only need to process call/invoke instructions.
       if (!I || !CallSite(I)) continue;
       if (Verbose > 2) {
         std::cerr << "[DEBUG][CALL][INST] " << *I << std::endl;
@@ -496,8 +545,12 @@ private:
       std::string caller = I->getFunction()->getName();
       SET visitedOps;
       scanOpSchemaStrAndFunction(I, {}, &visitedOps, nullptr);
-      if (visitedOps.empty()) {
-        std::cerr << "[WARNING] could not find called op in function: "
+      if (visitedOps.size() != 1) {
+        std::cerr << "[WARNING] found " << visitedOps.size() << " ops ( ";
+        for (auto& op : visitedOps) {
+          std::cerr << op << " ";
+        }
+        std::cerr << ") in a invocation call in function: "
                   << demangle(caller) << std::endl;
       }
       for (const auto& op : visitedOps) {
