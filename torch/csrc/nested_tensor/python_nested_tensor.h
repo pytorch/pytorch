@@ -44,7 +44,7 @@ struct _NestedNode {
   _VariableNode _variable_node;
 };
 
-static size_t _num_tensor(const _NestedNode& meta_node) {
+static inline size_t _num_tensor(const _NestedNode& meta_node) {
   size_t result = 0;
   for (size_t i = 0; i < meta_node._children.size(); i++) {
     result += _num_tensor(meta_node._children[i]);
@@ -52,7 +52,7 @@ static size_t _num_tensor(const _NestedNode& meta_node) {
   return result;
 }
 
-static int64_t _numel(const _NestedNode& meta_node) {
+static inline int64_t _numel(const _NestedNode& meta_node) {
   if (meta_node._children.size() == 0) {
     return meta_node._variable_node._variable.numel();
   } else {
@@ -64,7 +64,7 @@ static int64_t _numel(const _NestedNode& meta_node) {
   }
 }
 
-static Variable _get_first_variable(PyObject* tensors) {
+static inline Variable _get_first_variable(PyObject* tensors) {
   if (THPVariable_Check(tensors)) {
     return THPVariable_Unpack(tensors);
   } else {
@@ -72,7 +72,7 @@ static Variable _get_first_variable(PyObject* tensors) {
   }
 }
 
-static bool _verify_variables(
+static inline bool _verify_variables(
     const Variable& first_variable,
     PyObject* tensors) {
   // The attributes must match across all constiuents
@@ -118,7 +118,7 @@ static bool _verify_variables(
   }
 }
 
-static _NestedNode _get_structure(PyObject* tensors) {
+static inline _NestedNode _get_structure(PyObject* tensors) {
   if (THPVariable_Check(tensors)) {
     Variable variable = THPVariable_Unpack(tensors);
     return _NestedNode(_VariableNode(variable));
@@ -139,7 +139,7 @@ static _NestedNode _get_structure(PyObject* tensors) {
   }
 }
 
-static Variable _get_first_variable(_NestedNode nested_node) {
+static inline Variable _get_first_variable(_NestedNode nested_node) {
   const _NestedNode* start = &nested_node;
   while (start->_children.size()) {
     start = &start->_children[0];
@@ -158,7 +158,7 @@ static Variable _get_first_variable(_NestedNode nested_node) {
   }
 }
 
-static std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
+static inline std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
   if (nested_node._children.size() == 0) {
     return std::vector<at::IntArrayRef>(
         {nested_node._variable_node._variable.sizes()});
@@ -175,7 +175,7 @@ static std::vector<at::IntArrayRef> _get_flat_sizes(_NestedNode nested_node) {
 }
 
 template <typename T, class F>
-static T map(_NestedNode nested_node, F fn) {
+static inline T map(_NestedNode nested_node, F fn) {
   if (nested_node._children.size() == 0) {
     T new_nested_node(_VariableNode(fn(nested_node._variable_node._variable)));
     return new_nested_node;
@@ -189,7 +189,7 @@ static T map(_NestedNode nested_node, F fn) {
 }
 
 template <typename T, class F, class G>
-static T map_more(_NestedNode nested_node, F fn, G gfn) {
+static inline T map_more(_NestedNode nested_node, F fn, G gfn) {
   if (nested_node._children.size() == 0) {
     T result = fn(nested_node._variable_node._variable);
     return result;
@@ -203,7 +203,7 @@ static T map_more(_NestedNode nested_node, F fn, G gfn) {
 }
 
 template <class F>
-static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
+static inline void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
   if (nested_node1._children.size() == 0) {
     fn(nested_node1._variable_node._variable,
        nested_node2._variable_node._variable);
@@ -214,7 +214,7 @@ static void apply2(_NestedNode nested_node1, _NestedNode nested_node2, F fn) {
   }
 }
 
-static Variable _NestedNode_to_tensor(const _NestedNode& nested_node) {
+static inline Variable _NestedNode_to_tensor(const _NestedNode& nested_node) {
   if (nested_node._children.size() == 0) {
     return nested_node._variable_node._variable;
   } else {
@@ -378,7 +378,7 @@ void initialize_python_bindings();
 
 // Creates a new Python object for a Variable. The Variable must not already
 // have a PyObject* associated with it.
-static PyObject* _ListNestedTensorVariable_NewWithVar(
+static inline PyObject* _ListNestedTensorVariable_NewWithVar(
     PyTypeObject* type,
     _ListNestedTensor nested_tensor) {
   PyObject* obj = type->tp_alloc(type, 0);
@@ -392,7 +392,7 @@ static PyObject* _ListNestedTensorVariable_NewWithVar(
   }
 }
 
-static PyObject* _ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
+static inline PyObject* _ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
   return _ListNestedTensorVariable_NewWithVar(
       (PyTypeObject*)_ListNestedTensorVariableClass, std::move(var));
 }
