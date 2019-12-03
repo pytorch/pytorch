@@ -305,13 +305,13 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else {
-                // This is a regular attribute assignment, of the form:
-                //   foo : Tensor
                 if (assign.rhs().present()) {
                   // This is a constant assignemnt, of the form:
                   // foo : Final[int] = 3
                   constants.push_back(assign);
                 } else {
+                  // This is a regular attribute assignment, of the form:
+                  // foo : Tensor
                   attributes.push_back(assign);
                 }
               }
