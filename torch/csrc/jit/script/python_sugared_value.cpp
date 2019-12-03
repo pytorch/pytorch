@@ -450,7 +450,7 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
 std::shared_ptr<SugaredValue> toSugaredValue(
     const IValue& v,
     Function& m,
-    SourceRange loc) {
+    const SourceRange& loc) {
   if (v.isTuple()) {
     auto tp = v.toTuple();
     std::vector<Value*> values;
