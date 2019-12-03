@@ -152,7 +152,7 @@ class InsertObserversHelper {
     script::Module& module,
     const std::string& method_name);
 
-  Node* insertObserverFor(
+  void insertObserverFor(
       Value* v,
       Graph* g,
       script::Module& module,
@@ -176,6 +176,8 @@ class InsertObserversHelper {
   // record the current unique id used to avoid incrementing from 0
   // every time to find a unique id.
   int uid_ = 0;
+  // Set of observer forward call nodes
+  std::unordered_set<Node*> observer_nodes_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -289,6 +291,10 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
+      // Skip observer nodes
+      if (observer_nodes_.count(n)) {
+        continue;
+      }
       if (n->kind() == prim::CallMethod) {
         // Record all method calls in the graph
         auto module_instance = n->inputs()[0];
@@ -318,14 +324,15 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* InsertObserversHelper::insertObserverFor(
+void InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
     const QConfig& qconfig) {
+
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
-    return nullptr;
+    return;
   }
 
   script::Module observer_module;
@@ -368,7 +375,7 @@ Node* InsertObserversHelper::insertObserverFor(
     // The above also replaced the input to `call`, so switch it back to
     // the correct value
     call->replaceInput(1, v);
-    return call;
+    observer_nodes_.emplace(call);
   }
 }
 
@@ -424,10 +431,6 @@ void InsertObserversHelper::insertObservers(
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
 
-  // Mark observer nodes for inputs so we dont add observers
-  // for observers while traversing graph
-  std::unordered_set<Node*> observer_for_input;
-
   // Add observer for external input nodes excluding parameters
   // These are treated as activation as they vary across batches
   // and need to be observed.
@@ -440,11 +443,7 @@ void InsertObserversHelper::insertObservers(
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
       auto qconfig = module_qconfig_map_.at(module._ivalue());
       if (qconfig) {
-        auto observer_node =
-            insertObserverFor(v, v->owningGraph(), module, qconfig.value());
-        if (observer_node) {
-          observer_for_input.emplace(observer_node);
-        }
+        insertObserverFor(v, v->owningGraph(), module, qconfig.value());
       }
     }
   }
@@ -455,10 +454,9 @@ void InsertObserversHelper::insertObservers(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       // Skip observer nodes
-      if (observer_for_input.count(n) != 0) {
+      if (observer_nodes_.count(n)) {
         continue;
       }
-
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
