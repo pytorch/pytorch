@@ -435,6 +435,9 @@
 - name: inverse(Tensor self) -> Tensor
   self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
 
+- name: isnan(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
