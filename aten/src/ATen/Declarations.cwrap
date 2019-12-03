@@ -830,6 +830,7 @@
     - CUDA
   variants:
     - function
+  scalar_check: false
   options:
     - cname: cinv
       return: argument 0
