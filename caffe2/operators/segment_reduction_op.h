@@ -1981,7 +1981,7 @@ This op is basically Gather and Lengths{op} fused together.
 INDICES should contain integers in range 0..N-1 where N is the first dimension
 of DATA. INDICES represent which slices of DATA need to be pulled in.
 
-LENGTHS is a vector that defines slice sizes by first dimention of DATA. Values
+LENGTHS is a vector that defines slice sizes by first dimension of DATA. Values
 belonging to the same segment are aggregated together. sum(LENGTHS) has
 to match INDICES size.
 
