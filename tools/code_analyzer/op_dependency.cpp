@@ -4,6 +4,39 @@
 // custom LibTorch library with optimal build size which only registers and
 // contains ops needed by the specific model - unregistered / unused ops can be
 // stripped at link time.
+//
+// To generate the dependency graph it searches for 3 types of connections in
+// LLVM bitcode / assembly:
+//  1) op registration: op name (schema string literal) -> registered function;
+//  2) regular function call: function -> function;
+//  3) op invocation: function -> op name (schema string literal)
+//
+// In the following example, it finds out:
+//  1) the registered function for "quantized:add" operator;
+//  2) one possible call path to at::empty() function;
+//  3) the called operator name "aten::empty":
+//
+// - quantized::add
+// - c10::detail::wrap_kernel_functor_unboxed_<at::native::(anonymous
+//   namespace)::QAdd<false>, at::Tensor (at::Tensor, at::Tensor, double,
+//   long)>::call(c10::OperatorKernel*, at::Tensor, at::Tensor, double, long)
+// - at::native::(anonymous namespace)::QAdd<false>::operator()(at::Tensor,
+//   at::Tensor, double, long)
+// - void at::native::DispatchStub<void (*)(at::Tensor&, at::Tensor const&,
+//   at::Tensor const&), at::native::qadd_stub>::operator()<at::Tensor&,
+//   at::Tensor const&, at::Tensor const&>(c10::DeviceType, at::Tensor&,
+//   at::Tensor const&, at::Tensor const&)
+// - at::native::DispatchStub<void (*)(at::Tensor&, at::Tensor const&,
+//   at::Tensor const&), at::native::qadd_stub>::choose_cpu_impl()
+// - void at::native::(anonymous namespace)::qadd_kernel<false>(at::Tensor&,
+//   at::Tensor const&, at::Tensor const&)
+// - at::TensorIterator::binary_op(at::Tensor&, at::Tensor const&, at::Tensor
+//   const&, bool)
+// - at::TensorIterator::build()
+// - at::TensorIterator::fast_set_up()
+// - at::empty(c10::ArrayRef<long>, c10::TensorOptions const&,
+//   c10::optional<c10::MemoryFormat>)
+// - aten::empty
 
 #include <deque>
 #include <iostream>
@@ -47,8 +80,7 @@ static RegexOpt FunctionSchemaPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
     "op_schema_pattern",
     cl::desc("Op schema regex pattern. "
-             "Example: -op_schema_pattern "
-             "'(^aten::[^ ]+)|(^quantized::[^ ]+)'"),
+             "Example: -op_schema_pattern '^(aten|quantized)::[^ ]+'"),
     cl::location(FunctionSchemaPatternLoc),
     cl::Required,
     cl::ValueRequired);
@@ -57,8 +89,7 @@ static RegexOpt OpRegistrationPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
     "op_register_pattern",
     cl::desc("Op registration signature regex pattern. "
-             "Example: -op_register_pattern "
-             "'^c10::RegisterOperators::op'"),
+             "Example: -op_register_pattern 'c10::RegisterOperators::op'"),
     cl::location(OpRegistrationPatternLoc),
     cl::Required,
     cl::ValueRequired);
@@ -67,8 +98,7 @@ static RegexOpt OpInvocationPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
     "op_invoke_pattern",
     cl::desc("Op invocation signature regex pattern. "
-             "Example: -op_invoke_pattern "
-             "'^c10::Dispatcher::findSchema'"),
+             "Example: -op_invoke_pattern 'c10::Dispatcher::findSchema'"),
     cl::location(OpInvocationPatternLoc),
     cl::Required,
     cl::ValueRequired);
@@ -249,23 +279,30 @@ private:
   }
 
   // Naive connectivity analysis to find out all nodes that are reachable from a
-  // specific node in IR graph by following each node's "use" edges (to its
+  // specific node in IR graph by following each node's "use" edges (link to its
   // operands and users).
+  // This is the core algorithm we use to find the connection between op name
+  // string literals and registered/invoked functions - there should be a path
+  // to connect them to the c10 op registration/invocation APIs.
+  // For now the search doesn't go beyond the function boundary because the
+  // reference to op name string literals and c10 op registration/invocation
+  // APIs are always in the same function.
   static void scanConnectedNodes(
       Value* src,
       const VALUE_SET& blocked,
       const std::function<void(Value*)>& CB, LINK* debugLink) {
-    std::deque<Value*> queue;
+    std::deque<Value*> worklist;
     SmallPtrSet<Value*, 16> visited;
 
     auto insert = [&](Value* cur, Value* parent) -> void {
       if (!blocked.count(cur) && visited.insert(cur).second) {
-        queue.push_back(cur);
+        worklist.push_back(cur);
         if (debugLink) (*debugLink).emplace(cur, parent);
       }
     };
 
     auto expandOperands = [&](Value* V) -> void {
+      // Stops if it doesn't have operands (!isa<User>) or it is a function.
       if (!isa<User>(V) || isa<Function>(V)) return;
       auto node = dyn_cast<User>(V);
       for (auto& O : node->operands()) {
@@ -274,6 +311,16 @@ private:
     };
 
     auto expandUsers = [&](Value* V) -> void {
+      // If the value is not constant, then the user of the value might pass
+      // other value into it, e.g.:
+      //   store @.str.15, %10
+      //   invoke @c10.reg_op, %10, @foo
+      // The store instruction, which is the user of "%10", passes "@.str.15" to
+      // "%10" which in turn is passed to "@c10.reg_op" API function.
+      // Users of constants are not interesting as they cannot change the state
+      // of the constant. We skip users of functions as well assuming
+      // interesting values (op names and function pointers) are not set via
+      // other invocations of the function.
       if (!isa<User>(V) || isa<Constant>(V) || isa<Function>(V)) return;
       for (auto U : V->users()) {
         insert(U, V);
@@ -286,9 +333,9 @@ private:
     };
 
     expand(src);
-    while (!queue.empty()) {
-      auto cur = queue.front();
-      queue.pop_front();
+    while (!worklist.empty()) {
+      auto cur = worklist.front();
+      worklist.pop_front();
       expand(cur);
 
       if (isa<Function>(cur) || isa<Constant>(cur)) {
@@ -365,6 +412,40 @@ private:
     scanConnectedNodes(src, blocked, callback, debugLink.get());
   }
 
+  // This method looks for op schema strings and function pointers that "flow"
+  // into the same c10 op registration API call via "use" edges in IR graph.
+  // It assumes that the function pointers are needed (registered) for the op.
+  //
+  // For example, from op name to registration API call:
+  // [OP_SCHEMA] aten::add
+  // [PATH][1][CONST] [70 x i8] c"aten::add.Scalar(Tensor self...\00"
+  // [PATH][2][CONST] @.str.55.20575 = private unnamed_addr constant [70 x i8]
+  //                  c"aten::add.Scalar(Tensor self, ...\00", align 1
+  // [PATH][3][CONST] i8* getelementptr inbounds ([70 x i8], [70 x i8]*
+  //                  @.str.55.20575, i64 0, i64 0)
+  // [PATH][4][INST]  invoke void @std::basic_string<...>::basic_string(...)
+  //                  (... %1477, ... @.str.55.20575 ...)
+  // [PATH][5][INST]  %1477 = alloca %"class.std::basic_string" ...
+  // [PATH][6][INST]  %4086 = invoke ...
+  //                  @c10::RegisterOperators::Options::schema(... %1477)
+  // [PATH][7][INST]  %4088 = invoke ... @...catchAllKernel...(... %4086, ...
+  //                  @at::TypeDefault::add(at::Tensor const&...))
+  // [PATH][8][INST]  %4090 = invoke ...
+  //                  &&(%"class.c10::RegisterOperators::Options"*... %4088 ...)
+  // [PATH][9][INST]  invoke void
+  //                  @c10::RegisterOperators::checkSchemaAndRegisterOp_(...
+  //                  %"class.c10::RegisterOperators::Options"* ... %4090)
+  //
+  // From function pointer to registration API call:
+  // [FUNC] at::TypeDefault::add(at::Tensor const&, c10::Scalar, c10::Scalar)
+  // [PATH][1][FUNC] at::TypeDefault::add(at::Tensor const&...)
+  // [PATH][2][INST]  %4088 = invoke ... @...catchAllKernel...(... %4086, ...
+  //                  @at::TypeDefault::add(at::Tensor const&...))
+  // [PATH][3][INST]  %4090 = invoke ...
+  //                  &&(%"class.c10::RegisterOperators::Options"*... %4088 ...)
+  // [PATH][4][INST]  invoke void
+  //                  @c10::RegisterOperators::checkSchemaAndRegisterOp_(...
+  //                  %"class.c10::RegisterOperators::Options"* ... %4090)
   static void scanOpRegistration(
       VALUE_SET& instructions, SET* opSchemaStrs, GRAPH* schemaStrToFunctions) {
     for (auto V : instructions) {
@@ -401,6 +482,9 @@ private:
     }
   }
 
+  // Similar as scanOpRegistration - it searches for op schema strings that flow
+  // into c10 op invocation API call and assume the parent function of the API
+  // call invokes the operator.
   static void scanOpInvocation(
       VALUE_SET& instructions, SET* opSchemaStrs, GRAPH* functionToSchemaStrs) {
     for (auto V : instructions) {
