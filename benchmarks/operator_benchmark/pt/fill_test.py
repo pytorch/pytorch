@@ -6,6 +6,7 @@ import torch
 fill_short_configs = op_bench.config_list(
     attr_names=["N"],
     attrs=[
+        [1],
         [1024],
         [2048],
     ],
@@ -34,7 +35,7 @@ class Fill_Benchmark(op_bench.TorchBenchmarkBase):
         return self.input_one.fill_(10)
 
 
-op_bench.generate_pt_test(fill_short_configs + fill_long_configs, 
+op_bench.generate_pt_test(fill_short_configs + fill_long_configs,
                           Fill_Benchmark)
 
 
