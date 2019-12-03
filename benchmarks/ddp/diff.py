@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Computes difference between measurements produced by ./main.py.
+# Computes difference between measurements produced by ./benchmark.py.
 #
 
 import argparse
