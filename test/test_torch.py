@@ -50,8 +50,8 @@ if TEST_NUMPY:
 if TEST_SCIPY:
     from scipy import signal
 
-#if TEST_LIBROSA:
-    #import librosa
+if TEST_LIBROSA:
+    import librosa
 
 SIZE = 100
 
