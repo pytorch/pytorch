@@ -49,7 +49,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(FunctionType)           \
   _(ClassType)              \
   _(CapsuleType)            \
-  _(InterfaceType)
+  _(InterfaceType)          \
+  _(QschemeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1090,6 +1091,28 @@ struct CAFFE2_API GeneratorType : public Type {
   GeneratorType() : Type(TypeKind::GeneratorType) {}
 };
 
+struct QschemeType;
+using QschemeTypePtr = std::shared_ptr<QschemeType>;
+// This type represents a Qscheme
+struct CAFFE2_API QschemeType : public Type {
+  static QschemeTypePtr create() {
+    return QschemeTypePtr(
+        new QschemeType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Qscheme";
+  }
+  static const TypeKind Kind = TypeKind::QschemeType;
+  // global singletonq
+  static QschemeTypePtr get();
+
+ private:
+  QschemeType() : Type(TypeKind::QschemeType) {}
+};
+
 struct DeviceObjType;
 using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
 // This type represents a Generator
@@ -1261,9 +1284,9 @@ struct getTypePtr_<at::Scalar> final {
   }
 };
 template <>
-struct getTypePtr_<at::QScheme*> final {
+struct getTypePtr_<c10::QScheme> final {
   static TypePtr call() {
-    return OptionalType::create(QScheme::get());
+    return QSchemeType::get();
   }
 };
 template <>

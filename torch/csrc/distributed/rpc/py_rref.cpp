@@ -60,7 +60,7 @@ py::object PyRRef::toHere() {
       {
         // acquiring GIL as torch::jit::toPyObject creates new py::object
         // without grabbing the GIL.
-        AutoGIL ag;
+        pybind11::gil_scoped_acquire ag;
         return torch::jit::toPyObject(std::move(value));
       }
     }
@@ -77,10 +77,11 @@ py::object PyRRef::localValue() {
     const py::object& value =
         std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
 
+    PythonRpcHandler::getInstance().handleException(value);
     {
       // acquiring GIL as the return statement construct a new py::object from
       // a const reference.
-      AutoGIL ag;
+      pybind11::gil_scoped_acquire ag;
       return value;
     }
   } else {
@@ -89,7 +90,7 @@ py::object PyRRef::localValue() {
     {
       // acquiring GIL as torch::jit::toPyObject creates new py::object without
       // grabbing the GIL.
-      AutoGIL ag;
+      pybind11::gil_scoped_acquire ag;
       return torch::jit::toPyObject(std::move(value));
     }
   }

@@ -75,59 +75,6 @@ struct ConvOptions {
 
   /// Accepted values `zeros` and `circular` Default: `zeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
-
-  // FIXME: The following methods are added so that we can merge PR #28917
-  // without breaking torchvision builds in CI. After PR #28917 is merged
-  // and a new PyTorch nightly is built, @yf225 will open a PR to torchvision
-  // to change the following:
-  //
-  // 1. `with_bias` -> `bias`
-  // 2. `input_channels` -> `in_channels`
-  // 3. `output_channels` -> `out_channels`
-  //
-  // and then he will open a PR to PyTorch to remove the methods below.
- public:
-  inline auto input_channels(const int64_t& new_input_channels)->decltype(*this) {
-    this->in_channels_ = new_input_channels;
-    return *this;
-  }
-
-  inline auto input_channels(int64_t&& new_input_channels)->decltype(*this) {
-    this->in_channels_ = std::move(new_input_channels);
-    return *this;
-  }
-
-  inline const int64_t& input_channels() const noexcept {
-    return this->in_channels_;
-  }
-
-  inline auto output_channels(const int64_t& new_output_channels)->decltype(*this) {
-    this->out_channels_ = new_output_channels;
-    return *this;
-  }
-
-  inline auto output_channels(int64_t&& new_output_channels)->decltype(*this) {
-    this->out_channels_ = std::move(new_output_channels);
-    return *this;
-  }
-
-  inline const int64_t& output_channels() const noexcept {
-    return this->out_channels_;
-  }
-
-  inline auto with_bias(const bool& new_with_bias)->decltype(*this) {
-    this->bias_ = new_with_bias;
-    return *this;
-  }
-
-  inline auto with_bias(bool&& new_with_bias)->decltype(*this) {
-    this->bias_ = std::move(new_with_bias);
-    return *this;
-  }
-
-  inline const bool& with_bias() const noexcept {
-    return this->bias_;
-  }
 };
 
 /// `ConvOptions` specialized for 1-D convolution.

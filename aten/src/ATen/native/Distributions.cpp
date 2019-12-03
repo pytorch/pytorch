@@ -22,8 +22,6 @@
 #include <cpuinfo.h>
 #include <float.h>
 
-#include <TH/THMath.h>
-
 namespace {
 /*
  * This section is a counterpart to Distributions.cu
