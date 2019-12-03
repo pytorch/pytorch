@@ -741,10 +741,14 @@ class Tensor(torch._C._TensorBase):
         if not hasattr(self, "retains_grad") and not self.is_leaf:
             warnings.warn("Accessing .grad on a Tensor that is not a leaf Tensor: its .grad attribute won't "
                           "be populated. See .retain_grad() if you want the gradient to be saved.")
-        return super(Tensor, self).grad
+        return self._grad
 
     @grad.setter
     def grad(self, new_grad):
-        super(Tensor, self).grad = new_grad
+        self._grad = new_grad
+
+    @grad.deleter
+    def grad(self):
+        del self._grad
 
     __module__ = 'torch'
