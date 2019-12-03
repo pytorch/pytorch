@@ -331,13 +331,9 @@ void InsertObserversHelper::insertObserverFor(
     Graph* g,
     script::Module& module,
     const QConfig& qconfig) {
+
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
-    return;
-  }
-
-  // Skip observer nodes
-  if (observer_nodes_.count(v->node())) {
     return;
   }
 
@@ -471,6 +467,10 @@ void InsertObserversHelper::insertObservers(
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
+      // Skip observer nodes
+      if (observer_nodes_.count(n)) {
+        continue;
+      }
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {

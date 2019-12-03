@@ -830,6 +830,7 @@
     - CUDA
   variants:
     - function
+  scalar_check: false
   options:
     - cname: cinv
       return: argument 0
@@ -980,6 +981,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -994,6 +996,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1007,6 +1010,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
