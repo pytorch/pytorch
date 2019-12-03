@@ -6109,6 +6109,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.erf(one_d).shape)
         self.assertEqual((1,), torch.erfc(one_d).shape)
 
+        # clamp
+        self.assertEqual((), torch.clamp(zero_d, min=0, max=1).shape)
+        self.assertEqual((), torch.clamp(zero_d, min=0).shape)
+        self.assertEqual((), torch.clamp(zero_d, max=1).shape)
+        self.assertEqual((1,), torch.clamp(one_d, min=0, max=1).shape)
+        self.assertEqual((1,), torch.clamp(one_d, min=0).shape)
+        self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
+
         # cumsum / cumprod
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
