@@ -444,7 +444,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/object.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
@@ -491,6 +490,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
     if (USE_DISTRIBUTED)
@@ -745,6 +745,9 @@ ENDIF()
 
   if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    if (USE_DISTRIBUTED)
+      add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+    endif()
   endif()
 
   if (BUILD_TEST AND NOT NO_API)
@@ -821,7 +824,9 @@ if (NOT NO_API)
 endif()
 
 
-find_package(OpenMP QUIET)
+if(USE_OPENMP)
+  find_package(OpenMP QUIET)
+endif()
 if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
