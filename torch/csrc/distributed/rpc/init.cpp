@@ -44,6 +44,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
           module,
           "WorkerInfo",
           R"(Encapsulates information of a worker in the system.)")
+          .def(
+              py::init<std::string, worker_id_t>(),
+              py::arg("name"),
+              py::arg("id"))
           .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker.)")
           .def_readonly(
               "id", &WorkerInfo::id_, R"(Globally unique id of the worker.)")
