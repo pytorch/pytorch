@@ -1541,7 +1541,7 @@ struct CAFFE2_API ClassType : public NamedType {
   c10::optional<IValue> getConstant(const std::string& name) const;
 
   size_t numConstants() const {
-    AT_ASSERT(constantNames_.size() == constantValues_.size());
+    TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
     return constantNames_.size();
   }
 
