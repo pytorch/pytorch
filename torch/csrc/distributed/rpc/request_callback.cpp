@@ -38,7 +38,8 @@ std::shared_ptr<FutureMessage> RequestCallback::operator()(
     auto ret = processMessage(request);
     if (!ret->completed()) {
       // If not yet complete, clear the context when we do.
-      ret->addCallback([](const Message&) { ClearAutogradContextGuard guard2; });
+      ret->addCallback(
+          [](const Message&) { ClearAutogradContextGuard guard2; });
     }
     return ret;
   } catch (std::exception& e) {
