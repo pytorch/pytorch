@@ -400,6 +400,59 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    def test_conv(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super(TraceModel, self).__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        class ScriptModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
+            @torch.jit.script_method
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        x1 = torch.randn(20, 16, 50)
+        x2 = torch.randn(20, 16, 50, 100)
+        x3 = torch.randn(20, 16, 10, 50, 100)
+
+        self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
+        self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
+
+    # TODO: Add ConvTranspose1d and ConvTranspose3d when supported in ORT
+    # TODO : Add test with dilation != 1 when ORT fixed
+    def test_conv_transpose(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super(TraceModel, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
+            def forward(self, input2):
+                return self.conv2(input2)
+
+        class ScriptModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
+            @torch.jit.script_method
+            def forward(self, input2):
+                return self.conv2(input2)
+
+        x2 = torch.randn(20, 16, 50, 100)
+
+        self.run_test(TraceModel(), (x2,), atol=10e-5)
+        self.run_test(ScriptModel(), (x2,), atol=10e-5)
 
     def test_squeeze(self):
         class Squeeze(torch.nn.Module):
