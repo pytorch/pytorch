@@ -6,6 +6,7 @@ graph {
     input: "x"
     input: "y"
     output: "2"
+    name: "Greater_0"
     op_type: "Greater"
   }
   name: "torch-jit-export"
