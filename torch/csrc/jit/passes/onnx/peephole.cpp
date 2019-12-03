@@ -78,7 +78,7 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
 
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
-// occurences of 1 in `from` are treated as wildcards.
+// occurrences of 1 in `from` are treated as wildcards.
 c10::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {

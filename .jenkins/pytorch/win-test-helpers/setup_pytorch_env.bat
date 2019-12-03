@@ -3,7 +3,7 @@ if exist "%TMP_DIR%/ci_scripts/pytorch_env_restore.bat" (
     exit /b 0
 )
 
-set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;%PATH%
+set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
 :: Install Miniconda3
 if "%BUILD_ENVIRONMENT%"=="" (
@@ -37,8 +37,8 @@ call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary
 @echo on
 popd
 
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
-set CUDA_PATH_V9_0=%CUDA_PATH%
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.2
+set CUDA_PATH_V9_2=%CUDA_PATH%
 
 goto cuda_build_common
 
@@ -56,6 +56,7 @@ goto cuda_build_common
 
 :cuda_build_common
 
+set DISTUTILS_USE_SDK=1
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
