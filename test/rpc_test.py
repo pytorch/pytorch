@@ -396,86 +396,23 @@ class RpcTest(RpcAgentTestFixture):
             )
         rpc.shutdown()
 
-    @unittest.skip("test_invalid_names is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
+        from torch.distributed.rpc import WorkerInfo
+        worker_id = 0
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            store, _, _ = next(torch.distributed.rendezvous(
-                self.init_method, rank=self.rank, world_size=self.world_size
-            ))
-            rpc._init_rpc_backend(
-                backend=self.rpc_backend,
-                store=store,
-                name="abc*",
-                rank=self.rank,
-                world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        base_file_name = self.file_name
-        # Use a different file path for FileStore to avoid rendezvous mismatch.
-        self.file_name = base_file_name + "1"
+            info = WorkerInfo("abc*", worker_id)
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            store, _, _ = next(torch.distributed.rendezvous(
-                self.init_method, rank=self.rank, world_size=self.world_size
-            ))
-            rpc._init_rpc_backend(
-                backend=self.rpc_backend,
-                store=store,
-                name=" ",
-                rank=self.rank,
-                world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
-            )
+            info = WorkerInfo(" ", worker_id)
 
-        # Use a different file path for FileStore to avoid rendezvous mismatch.
-        self.file_name = base_file_name + "2"
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            store, _, _ = next(torch.distributed.rendezvous(
-                self.init_method, rank=self.rank, world_size=self.world_size
-            ))
-            rpc._init_rpc_backend(
-                backend=self.rpc_backend,
-                store=store,
-                name="",
-                rank=self.rank,
-                world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
-            )
+            info = WorkerInfo("", worker_id)
 
-        # Use a different file path for FileStore to avoid rendezvous mismatch.
-        self.file_name = base_file_name + "3"
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            store, _, _ = next(torch.distributed.rendezvous(
-                self.init_method, rank=self.rank, world_size=self.world_size
-            ))
-            rpc._init_rpc_backend(
-                backend=self.rpc_backend,
-                store=store,
-                name="".join(["a" for i in range(500)]),
-                rank=self.rank,
-                world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-        from torch.distributed.rpc.api import _agent
-        self.assertEqual(_agent, None)
-        # shutdown() should not do anything as _agent is None
-        rpc.shutdown()
-        # We need this barrier here because although init_process_group is
-        # blocking, it does not guarantee that all ranks are done with
-        # initialization after the call. We did run into issues with it where
-        # rank 3 crashed with "connection closed by peer" RuntimeError, which is
-        # caused by other ranks exit before rank 3 is ready. This can be fixed
-        # by adding a collective call to sync all processes.
-        #
-        # We decided not fixing this issue in init_process_group because it
-        # would add extra overhead to the call, and normal use cases won't
-        # create a progress group and exit without doing anything. Hence, it is
-        # not worthy to introduce the overhead just for this test case.
+            info = WorkerInfo("".join(["a" for i in range(500)]), worker_id)
 
     @dist_init
     def test_add(self):
