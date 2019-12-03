@@ -346,7 +346,6 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_new.cpp",
         "torch/csrc/utils/tensor_numpy.cpp",
         "torch/csrc/utils/tensor_types.cpp",
-        "torch/csrc/utils/tuple_parser.cpp",
         "test/cpp/jit/torch_python_test.cpp",
     ]
 
