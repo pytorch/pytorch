@@ -44,7 +44,7 @@ RRefContext::~RRefContext() {
 std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
   std::unordered_map<std::string, std::string> info;
   std::lock_guard<std::mutex> lock(destroyedMutex_);
-  info["num_owner_rrefs"] = std::to_string(owners_.size());
+  info["num_owner_rrefs"] = c10::to_string(owners_.size());
   return info;
 }
 
