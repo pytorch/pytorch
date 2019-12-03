@@ -1,6 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
-#include <torch/csrc/nested_tensor/generated/dispatch.h>
+#include <torch/csrc/nested_tensor/dispatch.h>
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/python_strings.h>
