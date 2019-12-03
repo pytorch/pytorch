@@ -105,7 +105,7 @@ def get_closure(fn):
 # because it is used as a variable inside the body of the function, and we
 # can resolve it using the captures returned from `get_closure`. However,
 # the type annotations are not captured by the closure. In Python
-# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be available as
 # annotations on `eg``, but starting in Python 4.0, they will represented as
 # strings and no longer present. Furthermore, since the body of `eg` does
 # not reference those names, they do not appear in the list of closed over
