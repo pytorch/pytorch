@@ -56,7 +56,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            int64_t ignore_index)
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
-  THCTensor_(resize1d)(state, output, 1);
+  THCTensor_(resize0d)(state, output);
   THCTensor_(resize0d)(state, total_weight);
 
   if (weights)

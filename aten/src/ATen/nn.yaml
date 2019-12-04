@@ -31,8 +31,9 @@
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != at::Reduction::None
+    output: 'false'
     total_weight: 'false'
+    grad_input: 'false'
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
@@ -41,8 +42,9 @@
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != at::Reduction::None
+    output: 'false'
     total_weight: 'false'
+    grad_input: 'false'
 
 - name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
   cname: SoftMarginCriterion
