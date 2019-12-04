@@ -348,7 +348,7 @@ class LogBarrier(Regularizer):
             **self.discount_options
         )
         # TODO(xlwang): param might still be negative at the initialization time or
-        # slighly negative due to the distributed training. Enforce it's non-negativity
+        # slightly negative due to the distributed training. Enforce it's non-negativity
         # for now (at least above machine epsilon)
         param_non_neg = net.NextScopedBlob(param + "_non_neg")
         net.Clip([param], [param_non_neg], min=self.kEpsilon)

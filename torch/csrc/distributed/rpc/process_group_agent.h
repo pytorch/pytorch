@@ -14,7 +14,7 @@ namespace distributed {
 namespace rpc {
 
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() noexcept = default;
+  ProcessGroupRpcBackendOptions() = default;
   int numSendRecvThreads;
 };
 
@@ -31,11 +31,16 @@ struct SendWork {
 // SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
 // to allow us to run serialization/deserialization in the worker threads.
 struct RecvWork {
-  RecvWork(const WorkerInfo& from, MessageType type, torch::Tensor&& payload)
-      : from_(from), type_(type), payload_(payload) {}
+  RecvWork(
+      const WorkerInfo& from,
+      MessageType type,
+      int64_t id,
+      torch::Tensor&& payload)
+      : from_(from), type_(type), id_(id), payload_(payload) {}
 
   const WorkerInfo& from_;
   const MessageType type_;
+  const int64_t id_;
   torch::Tensor payload_;
 };
 
@@ -50,6 +55,8 @@ class ProcessGroupAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
   const WorkerInfo& getWorkerInfo(worker_id_t id) const override;
+
+  std::vector<WorkerInfo> getWorkerInfos() const override;
 
   void join() override;
 
@@ -95,7 +102,7 @@ class ProcessGroupAgent : public RpcAgent {
           startTime_(startTime),
           dstRank_(dstRank),
           timeout_(timeout) {}
-    FutureInfo() {}
+    FutureInfo() = delete;
   };
 
   void collectNames();
@@ -161,6 +168,8 @@ class ProcessGroupAgent : public RpcAgent {
   // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
   // ProcessGroupAgent::join. It controls whether several background threads
   // should be running.
+  // We lock access to this in shutdown() and pollTimedOutRPCs() to prevent race
+  // conditions when notifying condition variables.
   std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
@@ -168,6 +177,8 @@ class ProcessGroupAgent : public RpcAgent {
   std::thread listenerThread_;
   // A thread to poll existing futures and check for timed out ones.
   std::thread futureTimeoutThread_;
+  // Lock and shared ptr to currently pending work, set in listenloop() and
+  // interruptible in shutdown().
   std::mutex recvWorkMutex_;
   std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
   // A threadPool that processing both SendWork and RecvWork. There are two
