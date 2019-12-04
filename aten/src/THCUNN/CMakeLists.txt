@@ -15,7 +15,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SoftShrink.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialClassNLLCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionMM.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/Tanh.cu
 PARENT_SCOPE)
 
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}

@@ -158,15 +158,5 @@ TH_API void THNN_(SoftShrink_updateGradInput)(
           THTensor *gradInput,
           accreal lambda);
 
-TH_API void THNN_(Tanh_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output);
-TH_API void THNN_(Tanh_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *output);
-
 #endif
 #endif

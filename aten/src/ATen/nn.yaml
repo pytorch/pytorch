@@ -112,12 +112,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_tanh(Tensor self)
-  cname: Tanh
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Convolutions
 
 - name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding)

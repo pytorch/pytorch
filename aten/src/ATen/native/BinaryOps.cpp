@@ -26,6 +26,7 @@ DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
+DEFINE_DISPATCH(tanh_backward_stub);
 
 static inline void alpha_check(const TensorIterator& iter, Scalar alpha) {
   TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool,
@@ -134,6 +135,19 @@ Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   sigmoid_backward_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& tanh_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+  auto iter = TensorIterator::binary_op(result, grad_output, output);
+  tanh_backward_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor tanh_backward(const Tensor& grad_output, const Tensor& output) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, output);
+  tanh_backward_stub(iter.device_type(), iter);
   return iter.output();
 }
 
