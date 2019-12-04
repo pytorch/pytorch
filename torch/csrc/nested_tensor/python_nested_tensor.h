@@ -49,10 +49,10 @@ struct _FutureNestedNode {
   _FutureNestedNode() : is_leaf(true) {}
   _FutureNestedNode(const std::vector<_FutureNestedNode> children)
       : _children(children), is_leaf(false) {}
-  _FutureNestedNode(c10::intrusive_ptr<Future> future)
+  _FutureNestedNode(c10::intrusive_ptr<c10::ivalue::Future> future)
       : _future_variable(future), is_leaf(true) {}
   const std::vector<_FutureNestedNode> _children;
-  c10::intrusive_ptr<Future> _future_variable;
+  c10::intrusive_ptr<c10::ivalue::Future> _future_variable;
   const bool is_leaf;
 };
 
@@ -257,28 +257,28 @@ struct TORCH_API _ListNestedTensor {
       at::TensorOptions options,
       bool non_blocking,
       bool copy,
-      c10::optional<MemoryFormat> memory_format) {
+      c10::optional<c10::MemoryFormat> memory_format) {
     return _ListNestedTensor(
         map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
           return tensor.to(options, non_blocking, copy, memory_format);
         }));
   }
   _ListNestedTensor to(
-      ScalarType dtype,
+      at::ScalarType dtype,
       bool non_blocking,
       bool copy,
-      c10::optional<MemoryFormat> memory_format) {
+      c10::optional<c10::MemoryFormat> memory_format) {
     return _ListNestedTensor(
         map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
           return tensor.to(dtype, non_blocking, copy, memory_format);
         }));
   }
   _ListNestedTensor to(
-      Device device,
-      ScalarType dtype,
+      at::Device device,
+      at::ScalarType dtype,
       bool non_blocking,
       bool copy,
-      c10::optional<MemoryFormat> memory_format) {
+      c10::optional<c10::MemoryFormat> memory_format) {
     return _ListNestedTensor(
         map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
           return tensor.to(device, dtype, non_blocking, copy, memory_format);
