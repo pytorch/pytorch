@@ -283,7 +283,7 @@ Frequently asked questions
 -  **How can I contribute as a reviewer?** There is lots of value if
    community developer reproduce issues, try out new functionality, or
    otherwise help us identify or troubleshoot issues. Commenting on
-   tasks or pull requests with your enviroment details is helpful and
+   tasks or pull requests with your environment details is helpful and
    appreciated.
 -  **CI tests failed, what does it mean?** Maybe you need to merge with
    master or rebase with latest changes. Pushing your changes should
