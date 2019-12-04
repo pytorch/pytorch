@@ -1,5 +1,6 @@
 #include "caffe2/operators/half_float_ops.h"
 #include <c10/util/Half.h>
+#include "caffe2/perfkernels/fp16.h"
 
 namespace caffe2 {
 
@@ -12,9 +13,7 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   at::Half* out = output->template mutable_data<at::Half>();
   auto N = input.numel();
 
-  for (size_t i = 0; i < N; i++) {
-    out[i] = data[i];
-  }
+  FloatToFloat16(data, out, N);
 
   return true;
 }
@@ -28,9 +27,8 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   float* out = output->template mutable_data<float>();
   auto N = input.numel();
 
-  for (size_t i = 0; i < N; i++) {
-    out[i] = data[i];
-  }
+  Float16ToFloat(data, out, N);
+
   return true;
 }
 
