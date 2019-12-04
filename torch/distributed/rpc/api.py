@@ -16,6 +16,7 @@ import contextlib
 import functools
 import numbers
 import sys
+import threading
 import torch
 import torch.distributed as dist
 
@@ -57,6 +58,28 @@ def _require_initialized(func):
         return func(*args, **kwargs)
     return wrapper
 
+# States used by `def _wait_all_workers()`.
+_ALL_WORKER_NAMES = None
+_DONE_WORKER_NAMES = set()
+_TERMINATION_SIGNAL = threading.Event()
+
+def _on_master_follower_report_done(worker_name):
+    assert (
+        worker_name in _ALL_WORKER_NAMES
+    ), "{worker_name} is not expected by master.".format(worker_name=worker_name)
+    assert (
+        worker_name not in _DONE_WORKER_NAMES
+    ), "{worker_name} reported done twice. ".format(worker_name=worker_name)
+    _DONE_WORKER_NAMES.add(worker_name)
+    if _ALL_WORKER_NAMES != _DONE_WORKER_NAMES:
+        return
+    _set_termination_signal()
+
+
+def _set_termination_signal():
+    assert not _TERMINATION_SIGNAL.is_set(), "Termination signal got set twice."
+    _TERMINATION_SIGNAL.set()
+
 
 def _wait_all_workers():
     r"""
@@ -66,10 +89,45 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    global _agent
+    if _agent is None:
+        return
 
-    if _agent:
-        _agent.join()
+    assert _ALL_WORKER_NAMES is not None, (
+        "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
+    )
+    master_worker_name = sorted(_ALL_WORKER_NAMES)[0]
+
+    self_worker_name = _agent.get_worker_info().name
+    assert self_worker_name not in _DONE_WORKER_NAMES, (
+        "Can not call _wait_all_workers() twice."
+    )
+
+    is_master_worker = master_worker_name == self_worker_name
+
+    # All follower report done to the master.
+    if is_master_worker:
+        _on_master_follower_report_done(self_worker_name)
+    else:
+        rpc_async(
+            master_worker_name,
+            _on_master_follower_report_done,
+            args=(self_worker_name,),
+        )
+
+    _TERMINATION_SIGNAL.wait()
+
+    # Master's termination signal is the first to be unblocked,
+    # after receiving all followers' done reports.
+    if is_master_worker:
+        # The master sends out termination commands to all followers.
+        futs = []
+        for follower_worker_name in _ALL_WORKER_NAMES - {master_worker_name}:
+            fut = rpc_async(follower_worker_name, _set_termination_signal, args=())
+            futs.append(fut)
+        for fut in futs:
+            ret = fut.wait()
+            assert ret is None, "Sending termination signal failed. {ret}".format(ret=ret)
+
 
 def shutdown(graceful=True):
     r"""
@@ -104,17 +162,21 @@ def shutdown(graceful=True):
         >>> rpc.shutdown()
     """
     global _agent
-    if _agent:
-        if graceful:
-            _wait_all_workers()
-        _destroy_rref_context(_ignore_rref_leak)
-        _agent.shutdown()
-        # clean up python rpc handler in shutdown(), see comments in
-        # PythonRpcHandler::cleanup(), call it in python API because the
-        # cleanup() function has python dependency, it assumes python
-        # interpreter exists
-        _cleanup_python_rpc_handler()
-        _agent = None
+
+    if _agent is None:
+        return
+
+    if graceful:
+        _wait_all_workers()
+    _destroy_rref_context(_ignore_rref_leak)
+    _agent.shutdown()
+    # clean up python rpc handler in shutdown(), see comments in
+    # PythonRpcHandler::cleanup(), call it in python API because the
+    # cleanup() function has python dependency, it assumes python
+    # interpreter exists
+    _cleanup_python_rpc_handler()
+    _agent = None
+
 
 # TODO: add a context manager to wrap _init_rpc_backend and shutdown
 def _init_rpc_backend(
@@ -146,6 +208,10 @@ def _init_rpc_backend(
         rpc_backend_options=rpc_backend_options,
     )
     _start_rpc_agent(_agent)
+
+    worker_infos = _agent.get_worker_infos()
+    global _ALL_WORKER_NAMES
+    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
 
 
 @_require_initialized
