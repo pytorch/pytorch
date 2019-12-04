@@ -1548,6 +1548,554 @@ workflows:
   build:
     jobs:
       - setup
+      #     name: binary_linux_manywheel_2_7mu_cu101_devtoolset7_nightly_build
+      #     build_environment: "manywheel 2.7mu cu101 devtoolset7"
+      #     requires:
+      #       - setup
+      #     docker_image: "pytorch/manylinux-cuda101"
+      # - binary_linux_build:
+      #     name: binary_linux_manywheel_3_5m_cu101_devtoolset7_nightly_build
+      #     build_environment: "manywheel 3.5m cu101 devtoolset7"
+      #     requires:
+      #       - setup
+      #     docker_image: "pytorch/manylinux-cuda101"
+      # - binary_linux_build:
+      #     name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
+      #     build_environment: "manywheel 3.6m cu101 devtoolset7"
+      #     requires:
+      #       - setup
+      #     docker_image: "pytorch/manylinux-cuda101"
+      # - binary_linux_build:
+      #     name: binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_build
+      #     build_environment: "manywheel 3.7m cu101 devtoolset7"
+      #     requires:
+      #       - setup
+      #     docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-455b5c1a7d1503c03853e37b5a2caf60948359eb
+          sha1: 455b5c1a7d1503c03853e37b5a2caf60948359eb
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-4da509090e6619d96f084e0b2123be0e670f5512
+          sha1: 4da509090e6619d96f084e0b2123be0e670f5512
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-eb292766234260d669bcc2031f6d68ab2c3643cc
+          sha1: eb292766234260d669bcc2031f6d68ab2c3643cc
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-4553d5e69b3bdac43964aeded4b48814702bdd1c
+          sha1: 4553d5e69b3bdac43964aeded4b48814702bdd1c
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-27afac2134b1803f0e4f836bc8a8b8218c110dfa
+          sha1: 27afac2134b1803f0e4f836bc8a8b8218c110dfa
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-fbabf72829f7d8fc044b2eef876280f387d083a3
+          sha1: fbabf72829f7d8fc044b2eef876280f387d083a3
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-b730d04ed246d5e9370b1c791432cdf242430dd9
+          sha1: b730d04ed246d5e9370b1c791432cdf242430dd9
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-0a33c3f1a102cc2dc535643a799d116f36a3b8ed
+          sha1: 0a33c3f1a102cc2dc535643a799d116f36a3b8ed
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-a5b4d78c6d4c24206abbefb1ab7bf556dc21cb9d
+          sha1: a5b4d78c6d4c24206abbefb1ab7bf556dc21cb9d
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-2a442f5dca48055c70c326311a04db871a1afdb0
+          sha1: 2a442f5dca48055c70c326311a04db871a1afdb0
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-c543034531d70e4bb21be76a73acf59056921500
+          sha1: c543034531d70e4bb21be76a73acf59056921500
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-f1860aea83dbf880cff242c18cb286cc502544e6
+          sha1: f1860aea83dbf880cff242c18cb286cc502544e6
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-5cad7d42ef14b35af28cb1d86db5b314fa739c81
+          sha1: 5cad7d42ef14b35af28cb1d86db5b314fa739c81
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-c300f086a40a686cd501b0e86f1f5bd18c97d4d3
+          sha1: c300f086a40a686cd501b0e86f1f5bd18c97d4d3
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-a6a31c6dc2d62e1c2c0bf28b4b398b01006f2f11
+          sha1: a6a31c6dc2d62e1c2c0bf28b4b398b01006f2f11
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-6c7a0c68f9d12e4ff8fb352e5b7fae1ef1660f6d
+          sha1: 6c7a0c68f9d12e4ff8fb352e5b7fae1ef1660f6d
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-79f063671880ce6d61e4b31e2c8f94689cef5383
+          sha1: 79f063671880ce6d61e4b31e2c8f94689cef5383
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-ee5201cd7c8998c9091a069a25d8965a20d8c6c9
+          sha1: ee5201cd7c8998c9091a069a25d8965a20d8c6c9
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-d87655f51583932ce5be3294a9824fb695433303
+          sha1: d87655f51583932ce5be3294a9824fb695433303
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-fe575b44eeaf88b4d1180f4223a933328326e6ad
+          sha1: fe575b44eeaf88b4d1180f4223a933328326e6ad
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-98362977a0557a752c2c19d3bd95a8ab3b6b827b
+          sha1: 98362977a0557a752c2c19d3bd95a8ab3b6b827b
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-61df98a083df8e9fca8be85e9a01af0c2c4b9a7b
+          sha1: 61df98a083df8e9fca8be85e9a01af0c2c4b9a7b
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-92a512b5832e91f64d9bca98b8a93897460b3cb8
+          sha1: 92a512b5832e91f64d9bca98b8a93897460b3cb8
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-6c39e5033c1109b1a90964bbf35219d3993fdf8b
+          sha1: 6c39e5033c1109b1a90964bbf35219d3993fdf8b
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-ff4e782e79da5c518497c7231f9fcbba1c24c740
+          sha1: ff4e782e79da5c518497c7231f9fcbba1c24c740
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-3003c5f91bbe19fcfea6cf4471dd2e640bc166d6
+          sha1: 3003c5f91bbe19fcfea6cf4471dd2e640bc166d6
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-d22f61432dc71315029641b01bf264482bc9c5ca
+          sha1: d22f61432dc71315029641b01bf264482bc9c5ca
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-3f5dc95b57496c4ea938be381efcdc2ea92bb4cc
+          sha1: 3f5dc95b57496c4ea938be381efcdc2ea92bb4cc
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-acb81008103de8c63607819f7b87819bd50d991c
+          sha1: acb81008103de8c63607819f7b87819bd50d991c
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-7807d4493438670875e39af02d1c25c6c05a8d3d
+          sha1: 7807d4493438670875e39af02d1c25c6c05a8d3d
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-5ab6635de12f3f8d45a0af88fc825c60cda071c4
+          sha1: 5ab6635de12f3f8d45a0af88fc825c60cda071c4
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-8e61287d1bfcda8851bf1a4d9fe1c94192484da0
+          sha1: 8e61287d1bfcda8851bf1a4d9fe1c94192484da0
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-4442fa59c7ebf342596e3ec31dea3f3665077d9f
+          sha1: 4442fa59c7ebf342596e3ec31dea3f3665077d9f
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-7889e1e3f947275ae370b9a6089b549217710dd8
+          sha1: 7889e1e3f947275ae370b9a6089b549217710dd8
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-69e343f2cc26f7a090fa0a4c4f8cf5064d4df1c9
+          sha1: 69e343f2cc26f7a090fa0a4c4f8cf5064d4df1c9
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-23fcc409d533cb8b5b6b2696be976e2eaf875eda
+          sha1: 23fcc409d533cb8b5b6b2696be976e2eaf875eda
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-a9c719ba825ebbe3dacf12db938df4c23ad9fba1
+          sha1: a9c719ba825ebbe3dacf12db938df4c23ad9fba1
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-9ec1727ea689fb936959b42db5ad382a5eaf4fc8
+          sha1: 9ec1727ea689fb936959b42db5ad382a5eaf4fc8
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-0108f473ad3b46cea1734c1f770b875d9ff2748e
+          sha1: 0108f473ad3b46cea1734c1f770b875d9ff2748e
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-60ad2a96f0c7649d8b0b86da6119cb9a839a1526
+          sha1: 60ad2a96f0c7649d8b0b86da6119cb9a839a1526
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-5e53c1501a95fd46bc3d821f6ac4144bb2e452b4
+          sha1: 5e53c1501a95fd46bc3d821f6ac4144bb2e452b4
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-510ef4b63ac6d09dc32763e294ba5ea30e286a95
+          sha1: 510ef4b63ac6d09dc32763e294ba5ea30e286a95
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-e1a309a647c5096bddaf44c423cc5dea8d6cae6c
+          sha1: e1a309a647c5096bddaf44c423cc5dea8d6cae6c
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-a34cc01dcc5e89bd9c210d856d45706588f54562
+          sha1: a34cc01dcc5e89bd9c210d856d45706588f54562
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-3fa5917530d44213f71740e6a60293315356e4ad
+          sha1: 3fa5917530d44213f71740e6a60293315356e4ad
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-6dc8d72f94172aff2c55d1b7ab254a6ff3222d74
+          sha1: 6dc8d72f94172aff2c55d1b7ab254a6ff3222d74
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-893105b79e735bdf737394907e13a99a3b572af7
+          sha1: 893105b79e735bdf737394907e13a99a3b572af7
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-831f25c53bfb6dca6ac0e367a379263f3d68ebe6
+          sha1: 831f25c53bfb6dca6ac0e367a379263f3d68ebe6
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-b508de6412332778864f298bf045d364309c7b35
+          sha1: b508de6412332778864f298bf045d364309c7b35
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-9371b31818af12b0e4e7384278b6806ea3f1739f
+          sha1: 9371b31818af12b0e4e7384278b6806ea3f1739f
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-60a33cac2bdfa34fadcd9dbc884c1f2770a5244e
+          sha1: 60a33cac2bdfa34fadcd9dbc884c1f2770a5244e
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-90e3bbf3ab93fb20279a4d0dfa2269d60b4efca1
+          sha1: 90e3bbf3ab93fb20279a4d0dfa2269d60b4efca1
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-5da2bf945e3c3980a0c056274924813daf6f5597
+          sha1: 5da2bf945e3c3980a0c056274924813daf6f5597
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-371da6acefda2d7394348e35a9a62679dc653047
+          sha1: 371da6acefda2d7394348e35a9a62679dc653047
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-7a6c3b36a1254c9063f7e60fa11f9a6f4b49c00f
+          sha1: 7a6c3b36a1254c9063f7e60fa11f9a6f4b49c00f
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-902c1f9ef1c3fd4e8a7d2880b4bb44d83a75d740
+          sha1: 902c1f9ef1c3fd4e8a7d2880b4bb44d83a75d740
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-77bb41c96553756dea5e350ad02383bc5f00b7ab
+          sha1: 77bb41c96553756dea5e350ad02383bc5f00b7ab
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-06ef4a757dbb611431910d0dde5bc0e4afe22e0e
+          sha1: 06ef4a757dbb611431910d0dde5bc0e4afe22e0e
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-ce7058337c16590280523c6db80fe017db225ee2
+          sha1: ce7058337c16590280523c6db80fe017db225ee2
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-bfedace5e3a404faee3a3941ed148a5a99eb8e76
+          sha1: bfedace5e3a404faee3a3941ed148a5a99eb8e76
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-eef349a679f5331e05de3c9462e285d1ab99c8a8
+          sha1: eef349a679f5331e05de3c9462e285d1ab99c8a8
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-65bb34d88561b0011f0b74bd866a3ca22587e251
+          sha1: 65bb34d88561b0011f0b74bd866a3ca22587e251
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-8d23f7a3a8bdd84efbd5ab6e168520d674ee17c3
+          sha1: 8d23f7a3a8bdd84efbd5ab6e168520d674ee17c3
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-7f4d4254c3da679c33fae5fcb595a2c4546f7226
+          sha1: 7f4d4254c3da679c33fae5fcb595a2c4546f7226
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-90ac35b7bdf4b722c3e3374ab66933dca5f4f64e
+          sha1: 90ac35b7bdf4b722c3e3374ab66933dca5f4f64e
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-747233e3bd0f051315b99624c5e77055546e7d9e
+          sha1: 747233e3bd0f051315b99624c5e77055546e7d9e
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-c5ac70a0eab97e62c912f2a121de467b92dfc969
+          sha1: c5ac70a0eab97e62c912f2a121de467b92dfc969
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-ad95099f45fba84bb3746d3ab91bb161ab4d5f4a
+          sha1: ad95099f45fba84bb3746d3ab91bb161ab4d5f4a
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-b70d571233adc3e4b7295022d3272e9abaafa27b
+          sha1: b70d571233adc3e4b7295022d3272e9abaafa27b
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-e53b5107733b5713388183a6c3c245ed6d9663bd
+          sha1: e53b5107733b5713388183a6c3c245ed6d9663bd
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-dfa9c9e227b6989d342c61f8e0229c53c50c09a0
+          sha1: dfa9c9e227b6989d342c61f8e0229c53c50c09a0
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-01d76145fc15d0bc40fc1a856cd8a9bd00f3a0aa
+          sha1: 01d76145fc15d0bc40fc1a856cd8a9bd00f3a0aa
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-bf80664515f4ceb9af15fd8eb7dec2cd79519cd5
+          sha1: bf80664515f4ceb9af15fd8eb7dec2cd79519cd5
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-2d7d53cd878ada6d488f18adc14ab406f3c4d73b
+          sha1: 2d7d53cd878ada6d488f18adc14ab406f3c4d73b
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-4a1fcc0b83504525556d35046063fadd6f153a22
+          sha1: 4a1fcc0b83504525556d35046063fadd6f153a22
+          build_environment: "manywheel 2.7m cu101 devtoolset7"
+          requires:
+            - setup
+          docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_2_7m_cu101_devtoolset7_nightly_build-9fd7db616a0e220a74f4459958ea2d3186d5e55a
           sha1: 9fd7db616a0e220a74f4459958ea2d3186d5e55a
@@ -2052,26 +2600,3 @@ workflows:
           requires:
             - setup
           docker_image: "pytorch/manylinux-cuda101"
-              #     name: binary_linux_manywheel_2_7mu_cu101_devtoolset7_nightly_build
-      #     build_environment: "manywheel 2.7mu cu101 devtoolset7"
-      #     requires:
-      #       - setup
-      #     docker_image: "pytorch/manylinux-cuda101"
-      # - binary_linux_build:
-      #     name: binary_linux_manywheel_3_5m_cu101_devtoolset7_nightly_build
-      #     build_environment: "manywheel 3.5m cu101 devtoolset7"
-      #     requires:
-      #       - setup
-      #     docker_image: "pytorch/manylinux-cuda101"
-      # - binary_linux_build:
-      #     name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
-      #     build_environment: "manywheel 3.6m cu101 devtoolset7"
-      #     requires:
-      #       - setup
-      #     docker_image: "pytorch/manylinux-cuda101"
-      # - binary_linux_build:
-      #     name: binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_build
-      #     build_environment: "manywheel 3.7m cu101 devtoolset7"
-      #     requires:
-      #       - setup
-      #     docker_image: "pytorch/manylinux-cuda101"
