@@ -2529,14 +2529,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         class GlobalLocalUnusedParamModule(nn.Module):
             class Task(nn.Module):
                 def __init__(self):
-                    super().__init__()
+                    super(GlobalLocalUnusedParamModule.Task, self).__init__()
                     self.p = nn.Parameter(torch.ones(2, 2))
 
                 def forward(self, x):
                     return self.p + x
 
             def __init__(self):
-                super().__init__()
+                super(GlobalLocalUnusedParamModule, self).__init__()
                 self.t0 = self.Task()
                 self.t1 = self.Task()
                 self.task_unused = self.Task()
