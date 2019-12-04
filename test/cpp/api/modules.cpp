@@ -3121,6 +3121,12 @@ namespace detail {
     return X_split_transposed.reshape({dims[0], nheads, dims[1], d_head});
   }
 
+  torch::Tensor _combine_heads_ref(const torch::Tensor& X, at::IntArrayRef dims, int nheads, int d_head) {
+    auto X_transposed = X.permute({0, 2, 1, 3});
+    auto reference = X_transposed.reshape({dims[0], dims[1], nheads * d_head});
+    return reference;
+  }
+
   torch::Tensor _fc(torch::Tensor X, torch::Tensor X_weight, torch::Tensor X_bias) {
     auto X_fc_b = X_bias;//.detach().numpy()
     auto X_fc_w = X_weight;//.detach().numpy()
@@ -3168,7 +3174,7 @@ namespace detail {
       const auto decoder_state = torch::rand({batch_sz, d_model}, torch::kFloat64);
       const torch::Tensor K = torch::rand(dims, torch::kFloat64);
       const torch::Tensor V = K;
-      const torch::Tensor Q = decoder_state.expand({batch_sz, d_model, 1});
+      const torch::Tensor Q = decoder_state.clone().resize_({batch_sz, 1, d_model});
       auto attn_mask = torch::randint(0, 2, {1, seq_len});
       const torch::Tensor attn_mask_tensor = attn_mask;
       attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
@@ -3309,15 +3315,65 @@ namespace detail {
           attn_mask,
           key_padding_mask
       );
-      // combined_attn_heads = _combine_heads_ref(
-      //     X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
-      // )
+      const auto combined_attn_heads = _combine_heads_ref(attn_heads, {batch_sz, 1}, nheads, d_head);
+      auto reference = _fc(combined_attn_heads, multihead_attn_module->out_proj->weight, multihead_attn_module->out_proj->bias);
+      reference = torch::squeeze(reference, /*axis=*/1);
+
+      // result = reference
+      ASSERT_EQ(result.sizes(), std::vector<int64_t>({batch_sz, d_model}));
+      ASSERT_TRUE(torch::allclose(result, reference, 1e-5));
+
+      // result_weight = ref_attn_weight
+      result_weight = result_weight.detach();
+      ASSERT_EQ(result_weight.sizes(), ref_attn_weight.sizes());
+      ASSERT_TRUE(torch::allclose(result_weight, ref_attn_weight, 1e-5));
     }
   }
 }
 
 TEST_F(ModulesTest, MultiheadAttention) {
+  using namespace ::detail;
+  // test_multihead_attn_add_bias_kv
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/false,
+    /*add_bias_kv=*/true,
+    /*add_zero_attn=*/false,
+    /*saved_kv=*/false,
+    /*same_embed_dim=*/false
+  );
 
+  // // test_multihead_attn_add_zero_attn
+  // _multihead_attn_test_helper(
+  //   /*add_key_padding_mask=*/false,
+  //   /*add_bias_kv=*/false,
+  //   /*add_zero_attn=*/true,
+  //   /*saved_kv=*/false,
+  //   /*same_embed_dim=*/false
+  // );
+
+  // // test_multihead_attn_no_masking():
+  // _multihead_attn_test_helper();
+
+  // // test_multihead_attn_key_padding_mask
+  // _multihead_attn_test_helper(add_key_padding_mask=True);
+
+  // // test_multihead_attn_saved_kv
+  // _multihead_attn_test_helper(saved_kv=True);
+
+  // // test_multihead_attn_add_bias_kv_zero_attn
+  // _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
+  //                             add_zero_attn=True)
+
+  // // test_multihead_attn_all_arguments1
+  // _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True, saved_kv=True)
+
+  // // test_multihead_attn_all_arguments2
+  // _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
+  //                             add_zero_attn=True, saved_kv=True)
+
+  // // test_multihead_attn_all_arguments3
+  // _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
+  //                             saved_kv=True, same_embed_dim=True)
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
