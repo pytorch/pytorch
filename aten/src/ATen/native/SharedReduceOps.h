@@ -23,8 +23,8 @@
 #define MAX(X, Y) ::max(X,Y)
 #define MIN(X, Y) ::min(X,Y)
 #else
-#define MAX(X, Y) std::max(X,Y)
-#define MIN(X, Y) std::min(X,Y)
+#define MAX(X, Y) max_impl(X,Y)
+#define MIN(X, Y) min_impl(X,Y)
 #endif
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
@@ -144,7 +144,7 @@ template <typename acc_t>
 struct AbsMinOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return MIN(acc, std::abs(data));
+    return MIN(acc, acc_t(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -166,7 +166,7 @@ template <typename acc_t>
 struct AbsMaxOps {
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return MAX(acc, std::abs(data));
+    return MAX(acc, acc_t(std::abs(data)));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -186,10 +186,10 @@ struct AbsMaxOps {
 
 template <typename acc_t>
 struct NormOps {
-  acc_t norm;
+  acc_t norm_;
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + compat_pow(std::abs(data), norm);
+    return acc + compat_pow(std::abs(data), norm_);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -197,7 +197,7 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
-    return compat_pow(a, acc_t(1.0)/norm);
+    return compat_pow(a, acc_t(1.0)/norm_);
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -206,7 +206,7 @@ struct NormOps {
   }
 #endif
 
-  NormOps(acc_t norm): norm(norm) {
+  NormOps(acc_t norm_): norm_(norm_) {
   }
 };
 
