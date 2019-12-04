@@ -823,23 +823,6 @@
         - real p
 ]]
 [[
-  name: _th_reciprocal
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  scalar_check: false
-  options:
-    - cname: cinv
-      return: argument 0
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-]]
-[[
   name: _th_histc
   cname: histc
   types:
