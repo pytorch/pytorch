@@ -13,7 +13,7 @@ from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
                                DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST)
-from .stubs import DeQuantStub, QuantWrapper
+from .stubs import DeQuantStub, QuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig
 
 def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
@@ -356,3 +356,78 @@ def get_observer_dict(mod, target_dict, prefix=""):
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
         get_observer_dict(child, target_dict, module_prefix)
+
+class Shadow(nn.Module):
+    def __init__(self, q_module, float_module):
+        super(Shadow, self).__init__()
+        self.orig_module = q_module
+        self.shadow_module = float_module
+        self.dequant = nnq.DeQuantize()
+
+        self.orig_ob = torch.quantization.RecordingObserver()
+        self.shadow_ob =  torch.quantization.RecordingObserver()
+
+    def forward(self, x):
+        output = self.orig_module(x)
+
+        # Output is in float for dynamic quantization
+        if output.is_quantized:
+            self.orig_ob(output.dequantize())
+        else:
+            self.orig_ob(output)
+
+        # Handle dynamic quantization
+        if x.is_quantized:
+            x = x.dequantize()
+
+        shadow_output = self.shadow_module(x)
+        self.shadow_ob(shadow_output)
+        return output
+
+def add_shadow_module(mod, mapping):
+    new_mod = mod
+     # Always replace dequantstub with dequantize
+    if hasattr(mod, 'qconfig') and mod.qconfig is not None or type(mod) == DeQuantStub:
+        if type(mod) in mapping:
+            if type(mod) == QuantStub or type(mod) == DeQuantStub:
+                new_mod = mapping[type(mod)].from_float(mod)
+            else:
+                qmod = mapping[type(mod)].from_float(mod)
+                new_mod = Shadow(qmod, mod)
+    return new_mod
+
+def transform_shadow(module, mapping=None, inplace=False):
+    r"""Converts the float module with observers (where we can get quantization
+    parameters) to a quantized module, and add float module as the shadow module.
+
+    Args:
+        module: calibrated module with observers
+        mapping: a dictionary that maps from float module type to quantized
+                 module type, can be overwrritten to allow swapping user defined
+                 Modules
+        inplace: carry out model transformations in-place, the original module
+                 is mutated
+
+    """
+    if mapping is None:
+        mapping = DEFAULT_MODULE_MAPPING
+    if not inplace:
+        module = copy.deepcopy(module)
+    reassign = {}
+    SWAPPABLE_MODULES = (nni.ConvBn2d,
+                         nni.ConvBnReLU2d,
+                         nni.LinearReLU,
+                         nni.ConvReLU2d)
+
+    for name, mod in module.named_children():
+        if type(mod) not in SWAPPABLE_MODULES:
+            transform_shadow(mod, mapping, inplace=True)
+        if type(mod) in SWAPPABLE_MODULES:
+            reassign[name] = add_shadow_module(mod, mapping)
+        else:
+            reassign[name] = swap_module(mod, mapping)
+
+    for key, value in reassign.items():
+        module._modules[key] = value
+
+    return module

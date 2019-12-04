@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
-from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
+from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, Shadow, \
     default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
@@ -122,6 +122,9 @@ class QuantizationTestCase(TestCase):
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
+
+    def checkShadow(self, mod):
+        self.assertEqual(type(mod), Shadow)
 
     # calib_data follows the same schema as calib_data for
     # test_only_eval_fn, i.e. (input iterable, output iterable)

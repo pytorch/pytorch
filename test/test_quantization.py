@@ -13,7 +13,7 @@ from torch.quantization import \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
     PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
-    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn
+    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, transform_shadow
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
@@ -23,7 +23,7 @@ from torch.quantization._quantize_script import quantize_script
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, \
-    AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
+    AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, LinearReluModel, \
     AnnotatedConvModel, ConvModel, \
     AnnotatedConvBnModel, ConvBnModel, \
     SkipQuantModel, QuantStubModel, \
@@ -1420,6 +1420,29 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         self.assertEqual(myobs.bins, loaded_obs.bins)
         self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
+@unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+                     " with instruction set support avx2 or newer.")
+class ShadowTransformTest(QuantizationTestCase):
+    @no_deadline
+    @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
+    def test_linear_relu_shadow(self, qconfig):
+        r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
+        to Shadow(nnq.Linear, torch.nn.Linear) which includes the quantized version of the module with
+        original float module as shadow module
+        """
+        model = LinearReluModel()
+        torch.quantization.fuse_modules(model, ['fc', 'relu'], inplace=True)
+        model.qconfig = qconfig
+        model = prepare(model)
+
+        test_only_eval_fn(model, self.calib_data)
+        model = transform_shadow(model)
+
+        def checkQuantized(model):
+            self.checkShadow(model.fc)
+
+        checkQuantized(model)
 
 if __name__ == '__main__':
     run_tests()
