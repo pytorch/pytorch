@@ -812,6 +812,7 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   std::vector<Tensor> inputs(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     inputs[i] = tensors[i].unsqueeze(dim);
+    // std::cout << inputs[i].strides() << " --- " << tensors[i].strides() << "\n";
   }
   return inputs;
 }
@@ -826,8 +827,67 @@ Tensor stack(TensorList tensors, int64_t dim) {
 Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
+ // check dtype
+ // check shapes
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-  return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+  auto stack_inputs = get_stack_inputs(tensors, dim);
+  auto result_size = stack_inputs[0].sizes().vec();
+  auto memory_format = stack_inputs[0].suggest_memory_format();
+  result_size[dim] = stack_inputs.size();
+  result.resize_(result_size, memory_format);
+  std::cout << stack_inputs[0].sizes() << " " << stack_inputs[0].strides() << " "<< memory_format << " stack_out new implementation\n";
+
+
+  //
+  //
+  // // return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+  //
+  //
+  // // Tensor& index_add_cpu_(Tensor & self, int64_t dim, , const Tensor & source) {
+  //
+  //
+  //   auto numel = index.numel();
+  //   // Extend to check all inpus (and check input shapes too!)
+  //   // TORCH_CHECK(self.scalar_type() == source.scalar_type(),
+  //               // "index_add_(): self and source must have the same scalar type");
+  //
+  //   auto index_contig = index.contiguous();
+  //   auto index_data = index_contig.data_ptr<int64_t>();
+  //
+  //   if (self.dim() > 1) {
+  //     // Equivalent to:
+  //     //   for (auto i = 0; i < numel; i++) {
+  //     //     auto selfSlice = self.select(dim, index_data[i]);
+  //     //     auto sourceSlice = source.select(dim, i);
+  //     //     selfSlice.add_(sourceSlice);
+  //     //   }
+  //     // But much faster as this reuses the iterator from add_
+  //     if (numel == 0) {
+  //       return self;
+  //     }
+  //     auto selfSlice = self.select(dim, 0);
+  //     auto sourceSlice = source.select(dim, 0);
+  //     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
+  //     auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
+  //     auto self_dim_size = self.size(dim);
+  //     auto iter = TensorIterator::binary_op(selfSlice, selfSlice, sourceSlice);
+  //
+  //     for (auto i = 0; i < numel; i++) {
+  //       auto self_i = index_data[i];
+  //       TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+  //       auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+  //       auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+  //       iter.unsafe_replace_operand(0, self_data);
+  //       iter.unsafe_replace_operand(1, self_data);
+  //       iter.unsafe_replace_operand(2, source_data);
+  //       add_stub(iter.device_type(), iter, 1);
+  //     }
+  //   }
+  //   return self;
+  // }
+
+
+
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
