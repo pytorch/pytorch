@@ -349,7 +349,10 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
     throw ErrorReport(subscript.value().range())
       << "Subscripted type must be a type identifier";
   }
-  TORCH_INTERNAL_ASSERT(*value_name == "Final");
+  if (*value_name != "Final") {
+    throw ErrorReport(subscript.range())
+      << "Base type must be Final for class constant";
+  }
   if (subscript.subscript_exprs().size() != 1) {
     throw ErrorReport(subscript)
       << " expected exactly one element type but found "

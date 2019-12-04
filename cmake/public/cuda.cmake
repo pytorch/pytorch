@@ -401,12 +401,12 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration se
   list(APPEND CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
 endforeach()
 
-# Set C++11 support
+# Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (MSVC)
   list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "/EHa")
 else()
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
+  list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
