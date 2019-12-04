@@ -138,6 +138,9 @@ ONNX <-> PyTorch
 ~~~~~~~~~~~~~~~~
 
 -  Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
+-  Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
+-  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
 
 Windows
 ~~~~~~~

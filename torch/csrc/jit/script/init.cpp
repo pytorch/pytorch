@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/export.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -82,7 +83,7 @@ struct PythonResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -101,7 +102,7 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -301,8 +302,8 @@ static Decl computeOverloadDecl(
     const Decl& impl_decl,
     const FunctionDefaults& defaults) {
   std::vector<Param> adjusted_params;
-  const auto& new_params = overload_decl.params();
-  const auto& old_params = impl_decl.params();
+  const auto& overload_params = overload_decl.params();
+  const auto& impl_params = impl_decl.params();
 
   // following PEP specification that the following should work:
   // @overload
@@ -311,53 +312,40 @@ static Decl computeOverloadDecl(
   // def mouse_event(x1: int, y1: int, x2: Optional[int] = None, y2:
   // Optional[int] = None)
   TORCH_CHECK(
-      new_params.size() <= old_params.size(),
+      overload_params.size() <= impl_params.size(),
       "Overload should not have more parameters than implementation function",
       overload_decl.range(),
       impl_decl.range());
 
-  for (size_t i = 0; i < new_params.size(); ++i) {
-    auto overload_name = new_params[i].ident().name();
-    auto impl_name = old_params[i].ident().name();
+  for (size_t i = 0; i < overload_params.size(); ++i) {
+    auto overload_name = overload_params[i].ident().name();
+    auto impl_name = impl_params[i].ident().name();
     if (overload_name != impl_name) {
       throw ErrorReport(overload_decl.range())
           << "Overload parameters must have the same names. "
           << "Found " << overload_name << " and " << impl_name
           << " on argument " << i;
     }
-    adjusted_params.push_back(new_params[i]);
+    adjusted_params.push_back(overload_params[i]);
   }
-  for (size_t i = new_params.size(); i < old_params.size(); ++i) {
-    if (!defaults.count(old_params[i].ident().name())) {
+  for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
+    if (!defaults.count(impl_params[i].ident().name())) {
       throw ErrorReport(impl_decl.range())
           << "Expected to find default parameter on argument"
-          << old_params[i].ident().name()
+          << impl_params[i].ident().name()
           << " because it is not defined on the overloaded declaration";
     }
-    if (!old_params[i].type().present()) {
+    if (!impl_params[i].type().present()) {
       throw ErrorReport(impl_decl.range())
           << "Parameters not specified on the overloaded declaration must have a type annotation in the implementation function."
-          << " Did not find type for param " << old_params[i].ident().name();
+          << " Did not find type for param " << impl_params[i].ident().name();
     }
-    adjusted_params.push_back(old_params[i]);
+    adjusted_params.push_back(impl_params[i]);
   }
   return Decl::create(
       overload_decl.range(),
       List<Param>::create(overload_decl.range(), adjusted_params),
       overload_decl.return_type());
-}
-
-void checkSchema(const FunctionSchema& schema, const SourceRange& range) {
-  bool seen_default_arg = false;
-  for (const auto& arg : schema.arguments()) {
-    if (arg.default_value()) {
-      seen_default_arg = true;
-    } else if (seen_default_arg && !arg.kwarg_only()) {
-      throw ErrorReport(range)
-          << "Non-default positional argument follows default argument. Parameter "
-          << arg.name() << " in " << schema;
-    }
-  }
 }
 
 static StrongFunctionPtr script_compile_overloaded_function(
@@ -385,7 +373,6 @@ static StrongFunctionPtr script_compile_overloaded_function(
       defined->getSchema(),
       new_def.name().name(),
       updated_defaults));
-  checkSchema(defined->getSchema(), overload_decl.range());
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
@@ -407,7 +394,6 @@ static StrongFunctionPtr script_compile_function(
   auto& defined = defined_functions[0];
   defined->setSchema(getSchemaWithNameAndDefaults(
       def.range(), defined->getSchema(), def.name().name(), defaults));
-  checkSchema(defined->getSchema(), def.range());
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
@@ -1177,6 +1163,9 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
     return Module(get_python_cu(), type);
   });
+
+  m.def("export_opnames",
+          [](script::Module& sm) {return debugMakeList(torch::jit::export_opnames(sm));});
 
   py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")
