@@ -1,4 +1,3 @@
-#include <TH/THTensor.hpp>
 #include <algorithm>
 #include <vector>
 #include <ATen/ATen.h>
@@ -512,6 +511,32 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
+Tensor alias_with_sizes_and_strides(
+    const Tensor& self,
+    const c10::IntArrayRef sizes,
+    const c10::IntArrayRef strides) {
+  Tensor self_;
+  if (self.is_quantized()) {
+    auto impl = c10::make_intrusive<QTensorImpl>(
+        Storage(self.storage()),
+        self.type_set(),
+        get_qtensorimpl(self)->quantizer());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(sizes, strides);
+    self_ = Tensor(std::move(impl));
+  } else {
+    auto impl = c10::make_intrusive<TensorImpl>(
+        Storage(self.storage()), self.type_set());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(sizes, strides);
+    self_ = Tensor(std::move(impl));
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(self_, self);
+#endif
+  return self_;
+}
+
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -522,15 +547,16 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  if (THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    // `THTensor_compute_stride` returns the proper strides to use if this
+  auto stride =
+      at::detail::computeStride(self.sizes(), self.strides(), shape);
+    // `computeStride` returns the proper strides to use if this
     // `reshape` can be just a view.
     //
     // NB: Even though we have viewable geometry and the target strides here,
     //     we do not just call `as_strided` on `self` because the backward
     //     for `as_strided` is not as efficient as that of `view` (since the
-    //     former is meant to handle general cases). We will redo a
-    //     `THTensor_compute_stride` in `view` but that is quite cheap anyways.
+    //     former is meant to handle general cases).
+  if (stride.has_value()) {
     return self.view(shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
@@ -1201,33 +1227,11 @@ Tensor view(const Tensor& self, IntArrayRef size) {
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  auto self_ = self.alias();
-  self_.set_(
-    self.storage(), self.storage_offset(), inferred_size, stride_value);
-  return self_;
+  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
 Tensor alias(const Tensor& self) {
-  Tensor self_;
-  if (self.is_quantized()) {
-    auto impl = c10::make_intrusive<QTensorImpl>(
-                    Storage(self.storage()),
-                    self.type_set(),
-                    get_qtensorimpl(self)->quantizer());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(self.sizes(), self.strides());
-    self_ = Tensor(std::move(impl));
-  } else {
-    auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
-                                                self.type_set());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(self.sizes(), self.strides());
-    self_ = Tensor(std::move(impl));
-  }
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(self_, self);
-#endif
-  return self_;
+    return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
 
 Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
