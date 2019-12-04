@@ -563,6 +563,34 @@
     CUDA: logical_xor_out
   supports_named_tensor: True
 
+- func: logical_and(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+
+- func: logical_and_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  supports_named_tensor: True
+
+- func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_and_out
+    CUDA: logical_and_out
+  supports_named_tensor: True
+
+- func: logical_or(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+
+- func: logical_or_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  supports_named_tensor: True
+
+- func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: logical_or_out
+    CUDA: logical_or_out
+  supports_named_tensor: True
+
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2141,15 +2169,9 @@
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _reciprocal__cpu
-    CUDA: _reciprocal__cuda
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _reciprocal_out_cpu
-    CUDA: _reciprocal_out_cuda
 
 - func: neg(Tensor self) -> Tensor
   use_c10_dispatcher: full
