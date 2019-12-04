@@ -538,10 +538,10 @@ class RpcTest(RpcAgentTestFixture):
             assert self.world_size >= 3
 
             num_repeat = 30
-            futs = []
 
             # Phase 1: Only worker1 has workload.
             dst = "worker1"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
@@ -554,6 +554,7 @@ class RpcTest(RpcAgentTestFixture):
             # If join is not correctly implemented,
             # worker2 should be closed by now.
             dst = "worker2"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
@@ -774,10 +775,10 @@ class RpcTest(RpcAgentTestFixture):
             assert self.world_size >= 3
 
             num_repeat = 100
-            futs = []
 
             # Phase 1: Only worker1 has workload.
             dst = "worker1"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
@@ -790,6 +791,7 @@ class RpcTest(RpcAgentTestFixture):
             # If join is not correctly implemented,
             # worker2 should be closed by now.
             dst = "worker2"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
