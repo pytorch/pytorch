@@ -82,32 +82,6 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
   return RRefForkData(ownerId, rrefId, forkId, parent);
 }
 
-RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
-  auto ivalues = ivalue.toTuple()->elements();
-
-  TORCH_INTERNAL_ASSERT(
-      ivalues.size() == 4,
-      "Constructing RRefForkData from ivalue "
-      "expects a GenericList of 4 elements, but got ",
-      ivalues.size());
-
-  int64_t ownerId = ivalues[0].toInt();
-  TORCH_INTERNAL_ASSERT(
-      ownerId < std::numeric_limits<worker_id_t>::max(),
-      "RRefId createdOn out of range, got ",
-      ownerId);
-
-  RRefId rrefId = RRefId::fromIValue(ivalues[1]);
-  ForkId forkId = ForkId::fromIValue(ivalues[2]);
-
-  int64_t parent = ivalues[3].toInt();
-  TORCH_INTERNAL_ASSERT(
-      parent < std::numeric_limits<worker_id_t>::max(),
-      "RRefId createdOn out of range, got ",
-      parent);
-  return RRefForkData(ownerId, rrefId, forkId, parent);
-}
-
 //////////////////////////////  RRef  /////////////////////////////////////
 
 RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)

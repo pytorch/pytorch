@@ -1267,16 +1267,17 @@ def create_generic(top_env, declarations):
         abstract = False
         if isinstance(type_method_dispatch, dict):
             abstract = True
-            assert not option['manual_kernel_registration'] # Having manual_kernel_registration for an abstract method doesn't make sense.
+            # Having manual_kernel_registration for an abstract method doesn't make sense.
+            assert not option['manual_kernel_registration']
         else:
+            top_env['type_method_declarations'].append(
+                check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
+            top_env['type_method_definitions'].append(
+                check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
             if option['manual_kernel_registration']:
                 top_env['function_registrations'].append(
                         check_namedtensor_enabled(DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
             else:
-                top_env['type_method_declarations'].append(
-                    check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
-                top_env['type_method_definitions'].append(
-                    check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
                 if option['use_c10_dispatcher'] == 'full':
                     top_env['function_registrations'].append(
                         check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
@@ -1731,12 +1732,12 @@ def create_derived(backend_type_env, declarations):
             backend = backend_type_env['Backend']
             if backend in option['backend_types']:
                 native_dispatch = dispatch.get(backend)
+                type_object_declarations.append(
+                    NATIVE_DISPATCH_DECLARATION.substitute(env))
+                option['native_type_method_dispatch'] = native_dispatch
+                type_object_definitions.append(
+                    NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
                 if native_dispatch:
-                    type_object_declarations.append(
-                        NATIVE_DISPATCH_DECLARATION.substitute(env))
-                    option['native_type_method_dispatch'] = native_dispatch
-                    type_object_definitions.append(
-                        NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
                     if option['use_c10_dispatcher'] == 'full':
                         function_registrations.append(
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))

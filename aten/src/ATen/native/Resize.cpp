@@ -11,8 +11,6 @@ namespace at { namespace native {
 // this function in native_functions.yaml
 Tensor& resize_as_sparse_(Tensor& self, const Tensor& src);
 
-namespace {
-
 // TODO(VitalyFedyunin): Move it to HTML docs.
 //
 // Strides of the output tensor of `resize_as_` operator is defined by input
@@ -62,7 +60,7 @@ Tensor& resize_as_(
   return result;
 }
 
-Tensor& resize_cpu_(
+Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
@@ -89,15 +87,13 @@ Tensor& resize_cpu_(
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<decltype(resize_cpu_), &resize_cpu_>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<decltype(resize_), &resize_>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
     .impl_unboxedOnlyCatchAllKernel<decltype(resize_as_), &resize_as_>()
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
   ;
-
-} // namespace
 
 } // namespace native
 } // namespace at

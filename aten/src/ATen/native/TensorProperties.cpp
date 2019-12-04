@@ -55,7 +55,6 @@ bool cudnn_is_acceptable(const Tensor& self) {
   return true;
 }
 
-namespace {
 Tensor detach(const Tensor& self) {
 #ifndef USE_STATIC_DISPATCH
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
@@ -84,7 +83,6 @@ static auto registry = torch::RegisterOperators()
     .impl_unboxedOnlyCatchAllKernel<decltype(detach_), &detach_>()
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
   ;
-}
 
 Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);
