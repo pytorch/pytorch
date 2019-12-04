@@ -4907,6 +4907,28 @@ a")
         ''')
         FileCheck().check("aa").check("a\\n\\tb\\n").run(str(cu.foo.graph))
 
+    def test_function_compilation_caching(self):
+        def fun():
+            return 1 + 2
+
+        fun_compiled = torch.jit.script(fun)
+        # python wrapper around the script function is a different pointer,
+        # but the underlying script function graph is the same
+        self.assertIs(fun_compiled.graph, torch.jit.script(fun).graph)
+
+        def fun():
+            return 3 + 4
+
+        num_ref_counts = sys.getrefcount(fun)
+
+        # caching doesn't get tripped up by same qualname
+        fun_compiled_2 = torch.jit.script(fun)
+        self.assertIsNot(fun_compiled, fun_compiled_2)
+        self.assertEqual(fun_compiled_2(), 7)
+
+        # caching doesnt increase refcounts to function (holds weak reference)
+        self.assertTrue(sys.getrefcount(fun), num_ref_counts)
+
     def test_string_ops(self):
         def foo():
             a = "a" + "b"
@@ -7662,8 +7684,8 @@ a")
                 ret += 1
             return ret, int(tensor)
 
-        self.checkScript(test, (1,))
-        self.checkScript(test, (2,))
+        self.assertEqual(torch.jit.script(test)(1), test(1))
+        self.assertEqual(torch.jit.script(test)(2), test(2))
         no_bool_loop_outputs(torch.jit.script(test).graph)
 
         def foo():
@@ -13012,15 +13034,15 @@ a")
             return e
 
         self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
-        tuple_graph = torch.jit.script(tuple_slice).graph
+        scripted_fn = torch.jit.script(tuple_slice)
+        self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
+        tuple_graph = scripted_fn.graph
         slices = tuple_graph.findAllNodes("prim::TupleSlice")
         num_outputs = set(map(lambda x: len(x.output().type().elements()), slices))
         # one tuple slice should have an output with 2 elements, other 4
         self.assertTrue(num_outputs == {2, 4})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
-        tuple_comp = torch.jit.script(tuple_slice)
-        self.assertEqual(tuple_comp(torch.tensor(1)), (2, 3))
 
         @torch.jit.script
         def test_indexing_end_out_of_bounds():
