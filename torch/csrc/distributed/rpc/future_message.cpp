@@ -19,12 +19,6 @@ const Message& FutureMessage::wait() {
   return message_;
 }
 
-const Message& FutureMessage::waitNoThrow() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  finished_cv_.wait(lock, [this] { return completed_.load(); });
-  return message_;
-}
-
 Message&& FutureMessage::moveMessage() && {
   return std::move(message_);
 }

@@ -18,7 +18,6 @@ struct TORCH_API FutureMessage final {
   // TODO: add a get() API that returns immediately with an optional Message
   // object.
   const Message& wait();
-  const Message& waitNoThrow();
   Message&& moveMessage() &&;
   void markCompleted(Message message);
   void markCompleted();
