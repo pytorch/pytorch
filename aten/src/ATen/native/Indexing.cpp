@@ -399,7 +399,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
   auto index_data = index_contig.data_ptr<int64_t>();
 
   if (self.dim() > 1) {
-    if (numel == 0) {
+    if (numel == 0 || self.numel() == 0) {
       return result;
     }
 
@@ -411,10 +411,6 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
     auto self_dim_size = self.size(dim);
     auto slice_size = selfSlice.numel();
-
-    if (slice_size == 0) {
-      return result;
-    }
 
     auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
