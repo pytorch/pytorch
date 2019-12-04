@@ -1,3 +1,33 @@
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  * [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+- [Writing documentation](#writing-documentation)
+  * [Building documentation](#building-documentation)
+    + [Tips](#tips)
+  * [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with--py-spy-)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c---development-tips)
+  * [Build only what you need](#build-only-what-you-need)
+  * [Code completion and IDE support](#code-completion-and-ide-support)
+  * [Make no-op build fast](#make-no-op-build-fast)
+    + [Use Ninja](#use-ninja)
+    + [Use CCache](#use-ccache)
+    + [Use a faster linker](#use-a-faster-linker)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
+  * [Running clang-tidy](#running-clang-tidy)
+  * [Pre-commit tidy/linting hook](#pre-commit-tidy-linting-hook)
+  * [Building PyTorch with ASAN](#building-pytorch-with-asan)
+    + [Getting `ccache` to work](#getting--ccache--to-work)
+    + [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with--ld-preload--and--libasan-rt--)
+    + [Why LD_PRELOAD in the build function?](#why-ld-preload-in-the-build-function-)
+    + [Why no leak detection?](#why-no-leak-detection-)
+- [Caffe2 notes](#caffe2-notes)
+
 ## Contributing to PyTorch
 
 If you are interested in contributing to PyTorch, your contributions will fall
@@ -185,7 +215,7 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
-## Writing Documentation
+## Writing documentation
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
@@ -204,7 +234,7 @@ We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
 commands. To run this check locally, run `./check-doxygen.sh` from inside
 `docs/cpp`.
 
-### Building Documentation
+### Building documentation
 
 To build the documentation:
 
@@ -267,12 +297,12 @@ ls | grep rst | grep -v index | grep -v jit | xargs rm
 # Make your changes, build the docs, etc.
 
 # Don't commit the deletions!
-git add index.rst jit.rst 
+git add index.rst jit.rst
 ...
 ```
 
 
-### Adding Documentation Tests
+### Adding documentation tests
 
 It is easy for code snippets in docstrings and `.rst` files to get out of date. The docs
 build includes the [Sphinx Doctest Extension](https://www.sphinx-doc.org/en/master/usage/extensions/doctest.html),
@@ -337,7 +367,7 @@ privileges.
 tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
 details.
 
-## Managing Multiple Build Trees
+## Managing multiple build trees
 
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
@@ -356,7 +386,7 @@ source activate pytorch-myfeature
 python setup.py develop
 ```
 
-## C++ Development tips
+## C++ development tips
 
 If you are working on the C++ code, there are a few important things that you
 will want to keep in mind:
@@ -364,7 +394,7 @@ will want to keep in mind:
 1. How to rebuild only the code you are working on.
 2. How to make rebuilds in the absence of changes go faster.
 
-### Build only what you need.
+### Build only what you need
 
 `python setup.py build` will build everything by default, but sometimes you are
 only interested in a specific component.
@@ -407,7 +437,7 @@ C++ code. You need to `pip install ninja` to generate accurate
 information for the code in `torch/csrc`. More information at:
 - https://sarcasm.github.io/notes/dev/compilation-database.html
 
-### Make no-op build fast.
+### Make no-op build fast
 
 #### Use Ninja
 
@@ -534,7 +564,7 @@ The easiest way to use `lld` this is download the
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
-## CUDA Development tips
+## CUDA development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
@@ -620,7 +650,7 @@ two dynamic libraries, one linking with the other:
 
 ```CMake
 project(myproject CXX)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 add_library(foo SHARED foo.cpp)
 add_library(bar SHARED bar.cpp)
 # NB: don't forget to __declspec(dllexport) at least one symbol from foo,
@@ -694,7 +724,7 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
   The same is likely true for other identifiers that we just didn't try to use yet.
 
-### Running Clang-Tidy
+### Running clang-tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
@@ -725,7 +755,7 @@ root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
 to change the clang-tidy this script uses. Make sure you have PyYaml installed,
 which is in PyTorch's `requirements.txt`.
 
-### Pre-commit Tidy/Linting Hook
+### Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
 flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
@@ -829,7 +859,7 @@ dynamic linker errors and the check will fail.
 
 We don’t actually need either of these if we fix the cmake checks.
 
-#### Why no Leak detection?
+#### Why no leak detection?
 
 Python leaks a lot of memory. Possibly we could configure a suppression file,
 but we haven’t gotten around to it.

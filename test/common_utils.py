@@ -754,7 +754,7 @@ class TestCase(expecttest.TestCase):
                         raise TypeError("Was expecting both tensors to be bool type.")
                     else:
                         if a.dtype == torch.bool and b.dtype == torch.bool:
-                            # we want to respect precision but as bool doesn't support substraction,
+                            # we want to respect precision but as bool doesn't support subtraction,
                             # boolean tensor has to be converted to int
                             a = a.to(torch.int)
                             b = b.to(torch.int)
