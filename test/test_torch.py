@@ -6266,6 +6266,15 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='mean').shape)
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='sum').shape)
 
+        # multi_margin_loss
+        for input in (zero_d, one_d, torch.randn(1,1, device=device)):
+            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device)):
+                    # for 2-d: (N, C) -> (N,).  for 1-d: (C) -> (), for 0-d: () -> ()
+                    output_shape = (input.shape[0],) if input.dim() == 2 else ()
+                    self.assertEqual(output_shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
+                    self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
+                    self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):

@@ -22,7 +22,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   {
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
-    THCTensor_(resize1d)(state, output, 1);
+    THCTensor_(resize0d)(state, output);
     if (p == 1)
     {
       cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
@@ -88,7 +88,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
     else
     {
-      THCTensor_(resize1d)(state, output, 1);
+      THCTensor_(resize0d)(state, output);
       THCTensor *output_ = THCTensor_(newWithSize1d)(state, input->size(0));  // tmp output buffer
       if (p == 1)
       {
