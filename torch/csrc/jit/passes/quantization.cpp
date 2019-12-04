@@ -19,6 +19,7 @@ namespace torch {
 namespace jit {
 namespace {
 
+using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
 // This struct contains a compiled IR pattens slated for use in the
 // findPatternMatches function. The struct encapsulates the common
 // information from parseIR that is used in conjunction with the
@@ -147,7 +148,11 @@ class InsertObserversHelper {
   void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
-  Node* insertObserverFor(
+  ModuleMethodVector getInvokedMethods(
+    script::Module& module,
+    const std::string& method_name);
+
+  void insertObserverFor(
       Value* v,
       Graph* g,
       script::Module& module,
@@ -171,6 +176,14 @@ class InsertObserversHelper {
   // record the current unique id used to avoid incrementing from 0
   // every time to find a unique id.
   int uid_ = 0;
+  // Set of observer forward call nodes
+  std::unordered_set<Node*> observer_nodes_;
+  // Map from graph to a vector of observer name and observer modules we
+  // want to add to the module instance that has the graph
+  std::unordered_map<
+      Graph*,
+      std::vector<std::tuple<std::string, script::Module>>>
+      graph_observer_map_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -271,16 +284,61 @@ graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %g
   rewriter.runOnGraph(graph, filter);
 }
 
+ModuleMethodVector InsertObserversHelper::getInvokedMethods(
+    script::Module& module,
+    const std::string& method_name) {
+  ModuleMethodVector invoked_methods;
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      // Skip observer nodes
+      if (observer_nodes_.count(n)) {
+        continue;
+      }
+      if (n->kind() == prim::CallMethod) {
+        // Record all method calls in the graph
+        auto module_instance = n->inputs()[0];
+        auto module_method_name = n->s(attr::name);
+        script::Module callee_module;
+        if (module_instance->node()->kind() == prim::GetAttr) {
+          auto child_module_name = module_instance->node()->s(attr::name);
+          callee_module = module.attr(child_module_name).toModule();
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              module_instance == graph->inputs()[0],
+              "We only support call method either on %self"
+              "or child instance in insert_observers_pass right now");
+          callee_module = module;
+        }
+        invoked_methods.push_back({callee_module, module_method_name});
+      }
+
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  return invoked_methods;
+}
+
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
-Node* InsertObserversHelper::insertObserverFor(
+void InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
     const QConfig& qconfig) {
+
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
-    return nullptr;
+    return;
   }
 
   script::Module observer_module;
@@ -293,12 +351,13 @@ Node* InsertObserversHelper::insertObserverFor(
     observer_module = std::get<0>(qconfig);
   }
 
-  script::Module observer = observer_module.clone();
+  script::Module observer = observer_module.clone_instance();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
+  graph_observer_map_[g].push_back(std::make_tuple(observer_name, observer));
 
   // Get handle of observer module
   Node* observer_instance =
@@ -323,7 +382,7 @@ Node* InsertObserversHelper::insertObserverFor(
     // The above also replaced the input to `call`, so switch it back to
     // the correct value
     call->replaceInput(1, v);
-    return call;
+    observer_nodes_.emplace(call);
   }
 }
 
@@ -361,9 +420,25 @@ void InsertObserversHelper::insertObservers(
     // the module is added by us, e.g.: observer module
     return;
   }
+  for (auto& invoked_methods: getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_methods);
+    const auto& invoked_method_name = std::get<1>(invoked_methods);
+    insertObservers(invoked_module, invoked_method_name);
+  }
 
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+
+  if (graph_observer_map_.count(graph.get())) {
+    // instance clone of observer module and setAttr
+    for (const auto& observer_attrs : graph_observer_map_.at(graph.get())) {
+      const auto& name = std::get<0>(observer_attrs);
+      const auto& observer = std::get<1>(observer_attrs);
+      module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+    }
+    return;
+  }
+
   ConstantPropagation(graph);
   // must do constant propagation first before replacement
   replaceConvolutionWithConv2d(graph);
@@ -373,10 +448,6 @@ void InsertObserversHelper::insertObservers(
 
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
-
-  // Mark observer nodes for inputs so we dont add observers
-  // for observers while traversing graph
-  std::unordered_set<Node*> observer_for_input;
 
   // Add observer for external input nodes excluding parameters
   // These are treated as activation as they vary across batches
@@ -390,11 +461,7 @@ void InsertObserversHelper::insertObservers(
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
       auto qconfig = module_qconfig_map_.at(module._ivalue());
       if (qconfig) {
-        auto observer_node =
-            insertObserverFor(v, v->owningGraph(), module, qconfig.value());
-        if (observer_node) {
-          observer_for_input.emplace(observer_node);
-        }
+        insertObserverFor(v, v->owningGraph(), module, qconfig.value());
       }
     }
   }
@@ -405,40 +472,15 @@ void InsertObserversHelper::insertObservers(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       // Skip observer nodes
-      if (observer_for_input.count(n) != 0) {
+      if (observer_nodes_.count(n)) {
         continue;
       }
-
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
         if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
-      }
-
-      if (n->kind() == prim::CallMethod) {
-        // If we find a call to a method of a child module,
-        // we'll recursively insert observers for the forward function to
-        // the child module.
-        auto module_instance = n->inputs()[0];
-        auto module_method_name = n->s(attr::name);
-        script::Module callee_module;
-        if (module_instance->node()->kind() == prim::GetAttr) {
-          auto child_module_name = module_instance->node()->s(attr::name);
-          callee_module = module.attr(child_module_name).toModule();
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              module_instance == graph->inputs()[0],
-              "We only support call method either on %self"
-              "or child instance in insert_observers_pass right now");
-          callee_module = module;
-        }
-        auto method_graph =
-            callee_module.get_method(module_method_name).graph();
-        // Recursively insert observer for the forward function of child
-        // module
-        insertObservers(callee_module, module_method_name);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -525,9 +567,9 @@ c10::optional<std::string> findObserverName(Value* v) {
   return c10::nullopt;
 }
 
-class QuantizeHelper {
+class InsertQuantDeQuantHelper {
  public:
-  QuantizeHelper(script::Module& m) : module_(m) {}
+  InsertQuantDeQuantHelper(script::Module& m) : module_(m) {}
   // quantization parameters and scalar type
   std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
@@ -544,7 +586,7 @@ class QuantizeHelper {
   std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
 };
 
-void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
+void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
@@ -568,7 +610,7 @@ void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   values_to_qparams_.insert({new_value, getQParams(v)});
 }
 
-void QuantizeHelper::removeObservers() {
+void InsertQuantDeQuantHelper::removeObservers() {
   for (auto& n : nodes_to_destroy_) {
     n->removeAllInputs();
   }
@@ -586,7 +628,7 @@ void QuantizeHelper::removeObservers() {
   }
 }
 
-void QuantizeHelper::quantizeTensors() {
+void InsertQuantDeQuantHelper::quantizeTensors() {
   for (auto& v : values_to_quantize_) {
     TORCH_INTERNAL_ASSERT(values_to_qparams_.count(v));
     auto tp = values_to_qparams_[v];
@@ -629,7 +671,7 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
+std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -647,7 +689,7 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   return std::make_tuple(qparams, scalar_type);
 }
 
-c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
+c10::optional<script::Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
     Value* child_instance) {
   TORCH_INTERNAL_ASSERT(
       child_instance->node()->kind() == prim::GetAttr,
@@ -676,7 +718,7 @@ void InsertQuantDeQuantImpl(
     }
   }
 
-  QuantizeHelper qh(module);
+  InsertQuantDeQuantHelper qh(module);
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
