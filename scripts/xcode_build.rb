@@ -51,7 +51,7 @@ end
 
 # link static libraries
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 for lib in libs do 
     path = "#{install_path}/lib/#{lib}"
     if File.exist?(path)
