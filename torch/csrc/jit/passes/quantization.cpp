@@ -785,15 +785,12 @@ void InsertQuantDeQuantHelper::run(
   for (Value* v : input_values) {
     collectObserverNodesAndValueToQuantize(module, v);
   }
-  GRAPH_DUMP("Before Remove Observers:",
-             graph);
+  GRAPH_DUMP("Before Remove Observers:", graph);
   removeObservers(module, graph.get());
-  GRAPH_DUMP("Before Quantize Tensors:",
-             graph);
+  GRAPH_DUMP("Before Quantize Tensors:", graph);
   Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
-  GRAPH_DUMP("After Quantize Tensors:",
-             graph);
+  GRAPH_DUMP("After Quantize Tensors:", graph);
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
