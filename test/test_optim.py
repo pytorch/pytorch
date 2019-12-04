@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, \
+from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
@@ -681,7 +681,6 @@ class TestLRScheduler(TestCase):
     def _test_lr_is_constant_for_constant_epoch(self, scheduler):
         l = []
 
-        # warnings.filterwarnings("ignore", category=DeprecationWarning)
         for _ in range(10):
             scheduler.step(2)
             l.append(self.opt.param_groups[0]['lr'])
@@ -1242,6 +1241,14 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
+    def test_multiplicative_lr(self):
+        epochs = 10
+        self.opt.param_groups[0]['lr'] = 0.05
+        self.opt.param_groups[1]['lr'] = 0.4
+        targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x) for x in range(epochs)]]
+        scheduler = MultiplicativeLR(self.opt, lr_lambda=[lambda x1: 0.9, lambda x2: 0.8])
+        self._test(scheduler, targets, epochs)
+
     def test_CosineAnnealingWarmRestarts_lr1(self):
         iters = 100
         eta_min = 1e-10
@@ -1412,7 +1419,6 @@ class TestLRScheduler(TestCase):
     def _test_against_closed_form(self, scheduler, closed_form_scheduler, epochs=10):
         self.setUp()
         targets = []
-        # warnings.filterwarnings("ignore", category=DeprecationWarning)
         for epoch in range(epochs):
             closed_form_scheduler.step(epoch)
             targets.append([group['lr'] for group in self.opt.param_groups])

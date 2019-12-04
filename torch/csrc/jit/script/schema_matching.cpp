@@ -440,6 +440,17 @@ MatchedSchema matchSchema(
   throw ErrorReport(loc) << failure_messages.str();
 }
 
+MatchedSchema matchSchema(
+    const ::c10::FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<Value*> args,
+    at::ArrayRef<NamedValue> kwargs) {
+  std::vector<NamedValue> named_args =
+      fmap(args, [](Value* v) { return NamedValue(v); });
+  return matchSchema(schema, loc, graph, named_args, kwargs);
+}
+
 static std::string prefixLine(
     const std::string& str,
     const std::string& prefix) {
@@ -513,13 +524,13 @@ static Value* packOutputs(
     return values[0];
   }
   std::shared_ptr<FunctionSchema> schema;
+  TupleTypePtr named_tuple = nullptr;
   if (field_names) {
-    schema = TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName(), field_names.value(), fmap(values, [](Value* v) { return v->type(); }));
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    named_tuple = TupleType::createNamed(
+        c10::nullopt, field_names.value(), std::move(types));
   }
-  return g
-      .insertNode(
-          g.createTuple(values, c10::nullopt, std::move(schema)))
-      ->output();
+  return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node
