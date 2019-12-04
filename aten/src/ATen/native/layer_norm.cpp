@@ -23,25 +23,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     int64_t M,
     int64_t N,
     double eps) {
-  Tensor Y = at::native::empty_like(X);
+  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
-  LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  return std::make_tuple(Y, mean, rstd);
-}
-
-std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
-    const Tensor& X,
-    const Tensor& gamma /* optional */,
-    const Tensor& beta /* optional */,
-    int64_t M,
-    int64_t N,
-    double eps) {
-  Tensor Y = at::native::empty_like(X);
-  Tensor mean = at::empty({M}, X.options());
-  Tensor rstd = at::empty({M}, X.options());
-  LayerNormKernel(kCUDA, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  return std::make_tuple(Y, mean, rstd);
+  if (M > 0) {
+    LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  }
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
@@ -57,43 +45,19 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X);
+    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
+    dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
+    dbeta = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  LayerNormBackwardKernel(
-      kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
-}
-
-std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
-    const Tensor& dY,
-    const Tensor& X,
-    const Tensor& mean,
-    const Tensor& rstd,
-    const Tensor& gamma,
-    int64_t M,
-    int64_t N,
-    std::array<bool, 3> grad_input_mask) {
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
-  if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X);
+  if (M > 0) {
+    LayerNormBackwardKernel(
+        kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
   }
-  if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
-  }
-  if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
-  }
-  LayerNormBackwardKernel(
-      kCUDA, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor layer_norm(

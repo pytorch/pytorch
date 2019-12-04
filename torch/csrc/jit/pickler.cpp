@@ -128,8 +128,24 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       push<PickleOpCode>(PickleOpCode::SETITEMS);
     }
     push<PickleOpCode>(PickleOpCode::BUILD);
+  } else if (ivalue.isDevice()) {
+    pushDevice(ivalue);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
+  }
+}
+
+void Pickler::pushDevice(const IValue& ivalue) {
+  auto device = ivalue.toDevice();
+  auto it = memoized_devices_map_.find(device.str());
+  if (it == memoized_devices_map_.end()) {
+    pushGlobal("torch", "device");
+    pushString(ivalue.toDevice().str());
+    push<PickleOpCode>(PickleOpCode::TUPLE1);
+    push<PickleOpCode>(PickleOpCode::REDUCE);
+    memoized_devices_map_[device.str()] = pushNextBinPut();
+  } else {
+    pushBinGet(it->second);
   }
 }
 
@@ -233,19 +249,16 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // typename
   pushString("storage");
   // data_type
-  std::stringstream data_type;
-  data_type << toString(tensor.scalar_type()) << "Storage";
-  pushGlobal("torch", data_type.str());
+  std::string data_type =
+    std::string(toString(tensor.scalar_type())).append("Storage");
+  pushGlobal("torch", data_type);
   // root_key
-  pushString(std::to_string(tensor_data_.size()));
+  pushString(c10::to_string(tensor_data_.size()));
   // location
-  std::stringstream ss;
-  ss << tensor.device();
-  pushString(ss.str());
+  pushString(tensor.device().str());
   // size
   pushInt(tensor.storage().size());
-  // view_metadata
-  push<PickleOpCode>(PickleOpCode::NONE);
+
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
@@ -271,9 +284,9 @@ void Pickler::pushBytes(const std::string& string) {
 void Pickler::pushGlobal(
     const std::string& module_name,
     const std::string& class_name) {
-  std::stringstream ss;
-  ss << module_name << "\n" << class_name << "\n";
-  std::string key = ss.str();
+  std::string key;
+  key.reserve(module_name.size() + class_name.size() + 2);
+  key.append(module_name).append("\n").append(class_name).append("\n");
   auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
@@ -402,30 +415,30 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushDouble(double value) {
-  AT_ASSERT(sizeof(double) == 8);
-  char* bytes = reinterpret_cast<char*>(&value);
-
-  push<PickleOpCode>(PickleOpCode::BINFLOAT);
-  for (size_t i = 0; i < 8; ++i) {
-    push<uint8_t>(bytes[8 - i - 1]);
+static inline double swapDouble(double value) {
+  const char* bytes = reinterpret_cast<const char*>(&value);
+  double flipped;
+  char* out_bytes = reinterpret_cast<char*>(&flipped);
+  for (size_t i = 0; i < sizeof(double); ++i) {
+    out_bytes[i] = bytes[sizeof(double) - i - 1];
   }
+  return *reinterpret_cast<double*>(out_bytes);
+}
+
+void Pickler::pushDouble(double value) {
+  push<PickleOpCode>(PickleOpCode::BINFLOAT);
+  // Python pickle format is big endian, swap.
+  push<double>(swapDouble(value));
 }
 
 void Pickler::pushLong(const std::string& data) {
   uint64_t size = data.size();
 
-  if (size <= std::numeric_limits<uint8_t>::max()) {
-    push<PickleOpCode>(PickleOpCode::LONG1);
-    push<uint8_t>(size);
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        data.size() > std::numeric_limits<uint32_t>::max(),
-        "Cannot pickle a long with a size larger than 4 bytes")
-    push<PickleOpCode>(PickleOpCode::LONG4);
-    // TODO: should this be uint32_t instead?
-    push<uint64_t>(size);
-  }
+  TORCH_INTERNAL_ASSERT(
+    size <= std::numeric_limits<uint8_t>::max(),
+    "Cannot pickle a long larger than 255 bytes");
+  push<PickleOpCode>(PickleOpCode::LONG1);
+  push<uint8_t>(size);
   pushBytes(data);
 }
 
