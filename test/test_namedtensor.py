@@ -705,6 +705,9 @@ class TestNamedTensor(TestCase):
         def method(name, *args, **kwargs):
             return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
 
+        def function(name, *args, **kwargs):
+            return [Function(name, lambda a, b: getattr(torch, name)(a, b, *args, **kwargs))]
+
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
 
@@ -730,6 +733,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('pow'),
             fn_method_and_inplace('atan2'),
             method('copy_'),
+            function('floor_divide'),
         ]
         tests = flatten(tests)
 
