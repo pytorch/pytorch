@@ -94,7 +94,7 @@ Value* TracingState::getValue(const IValue& var) {
         ->insertNode(graph->createList(
             TensorType::get(),
             fmap(
-                var.toTensorListRef(),
+                var.toTensorVector(),
                 [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isTuple()) {
@@ -259,8 +259,9 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     return std::move(dict);
   } else if (auto list_type = type->cast<ListType>()) {
     size_t num_elems = input.isGenericList() ? input.toGenericListRef().size()
-                                             : input.toTensorListRef().size();
-    auto list_unpack = state->graph->insertNode(state->graph->createListUnpack(value, num_elems));
+                                             : input.toTensorVector().size();
+    auto list_unpack = state->graph->insertNode(
+        state->graph->createListUnpack(value, num_elems));
     auto unpack_outputs = list_unpack->outputs();
 
     if (input.isTensorList()) {

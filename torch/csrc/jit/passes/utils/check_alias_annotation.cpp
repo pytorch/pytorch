@@ -18,7 +18,7 @@ IValue deepCopy(const IValue& self) {
   }
   if (self.isTensorList()) {
     c10::List<at::Tensor> newList;
-    for (const at::Tensor& oldTensor : self.toTensorListRef()) {
+    for (const at::Tensor& oldTensor : self.toTensorVector()) {
       newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
     }
     return newList;
@@ -68,7 +68,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
   } else if (lhs.isNone() && rhs.isNone()) {
     return true;
   } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntListRef() == rhs.toIntListRef();
+    return lhs.toIntVector() == rhs.toIntVector();
   } else if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }

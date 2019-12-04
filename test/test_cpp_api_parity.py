@@ -43,7 +43,7 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
   // `IValue` constructor), and here we check that all elements in the `ExpandingArray`
   // are equal to the Python `int` attribute.
   if (ivalue_python.isInt() && ivalue_cpp.isIntList()) {
-    auto ivalue_cpp_list = ivalue_cpp.toIntListRef();
+    auto ivalue_cpp_list = ivalue_cpp.toIntVector();
     std::vector<int64_t> ivalue_python_vec(ivalue_cpp_list.size());
     std::fill(ivalue_python_vec.begin(), ivalue_python_vec.end(), ivalue_python.toInt());
     return ivalue_python_vec == ivalue_cpp_list;
@@ -79,7 +79,7 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
   } else if (ivalue_python.isTensor()) {
     return check_tensor_equality(ivalue_python.toTensor(), ivalue_cpp.toTensor());
   } else if (ivalue_python.isIntList()) {
-    return ivalue_python.toIntListRef() == ivalue_cpp.toIntListRef();
+    return ivalue_python.toIntVector() == ivalue_cpp.toIntVector();
   } else if (ivalue_python.isNone()) {
     return ivalue_cpp.isNone();
   } else {

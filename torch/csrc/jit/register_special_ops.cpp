@@ -200,7 +200,7 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntListRef(),
+              (std::move(peek(stack, 1, 3))).toIntVector(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, std::move(result));
@@ -227,7 +227,7 @@ RegisterOperators reg({
           RECORD_FUNCTION("sizes", last(stack, 2));
 
           auto list = peek(stack, 0, 2).toIntList().copy();
-          auto defaults = peek(stack, 1, 2).toIntListRef();
+          auto defaults = peek(stack, 1, 2).toIntVector();
           drop(stack, 2);
 
           AT_ASSERT(defaults.size() > list.size());
@@ -244,7 +244,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -325,7 +325,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
           return 0;
         },
         aliasAnalysisFromSchema()),

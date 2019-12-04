@@ -233,7 +233,7 @@ struct CAFFE2_API IValue final {
   bool isIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const &;
-  std::vector<int64_t> toIntListRef() const;
+  std::vector<int64_t> toIntVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -248,7 +248,7 @@ struct CAFFE2_API IValue final {
   bool isDoubleList() const;
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const &;
-  std::vector<double> toDoubleListRef() const;
+  std::vector<double> toDoubleVector() const;
 
   // BoolList
   bool isBoolList() const;
@@ -259,7 +259,7 @@ struct CAFFE2_API IValue final {
   bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
-  std::vector<at::Tensor> toTensorListRef() const;
+  std::vector<at::Tensor> toTensorVector() const;
 
   //GenericList
   IValue(c10::List<IValue> v);

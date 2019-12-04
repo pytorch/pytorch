@@ -78,21 +78,21 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isIntList()) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
-          for (const int64_t item : ivalue.toIntListRef()) {
+          for (const int64_t item : ivalue.toIntVector()) {
             pushInt(item);
           }
         });
   } else if (ivalue.isTensorList()) {
     pushSpecializedList(
         ivalue, PicklerClass::TENSORLIST, [=](const IValue& ivalue) {
-          for (const at::Tensor& item : ivalue.toTensorListRef()) {
+          for (const at::Tensor& item : ivalue.toTensorVector()) {
             pushIValue(item);
           }
         });
   } else if (ivalue.isDoubleList()) {
     pushSpecializedList(
         ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
-          for (double item : ivalue.toDoubleListRef()) {
+          for (double item : ivalue.toDoubleVector()) {
             pushDouble(item);
           }
         });

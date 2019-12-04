@@ -594,7 +594,7 @@ inline c10::List<int64_t> IValue::toIntList() const & {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return c10::List<int64_t>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline std::vector<int64_t> IValue::toIntListRef() const {
+inline std::vector<int64_t> IValue::toIntVector() const {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return createList<int64_t>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
@@ -606,7 +606,7 @@ inline c10::List<double> IValue::toDoubleList() const & {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline std::vector<double> IValue::toDoubleListRef() const {
+inline std::vector<double> IValue::toDoubleVector() const {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return createList<double>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
@@ -626,7 +626,7 @@ inline c10::List<at::Tensor> IValue::toTensorList() const & {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return c10::List<at::Tensor>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline std::vector<at::Tensor> IValue::toTensorListRef() const {
+inline std::vector<at::Tensor> IValue::toTensorVector() const {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return createList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
