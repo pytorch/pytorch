@@ -2775,6 +2775,12 @@ struct to_ir {
         // the elements.
         if (elem_type->isSubtypeOf(TensorType::get())) {
           for (const auto& value : values) {
+            auto maybe_type = unifyTypes(elem_type, value->type());
+            if (!maybe_type) {
+              throw ErrorReport(tree)
+                  << "Could not unify " << elem_type->python_str() << " and "
+                  << value->type()->python_str();
+            }
             elem_type = unifyTypes(elem_type, value->type()).value();
           }
         }
