@@ -54,7 +54,7 @@ class TORCH_API SGD : public Optimizer {
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
     _TORCH_OPTIM_SERIALIZE(momentum_buffers);
-    _TORCH_OPTIM_SERIALIZE(iteration);
+    _TORCH_OPTIM_SERIALIZE(iteration_);
   }
 };
 } // namespace optim
