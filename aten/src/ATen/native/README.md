@@ -345,8 +345,8 @@ manual_kernel_registration: True
 ```
 
 With this flag set, we will not generate code to automatically register the C++ operator
-implementation with the dispatcher. This is a workaround for some special cases we need
-to deal with (see VariableTypeManual.cpp) and should only be used rarely.
+implementation with the dispatcher. This is a workaround for ops that need manual
+Variable code (see VariableTypeManual.cpp) and should only be used rarely.
 
 ## Writing an implementation in C++
 

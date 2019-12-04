@@ -298,6 +298,14 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
+// Some ops in the following registration list are registered as catch-all kernels,
+// some as backend kernels for VariableTensorId. The reason for this is that some
+// ops also use dispatch (i.e. register CPU/CUDA/QuantizedCPU kernels) and those
+// need to get a separate VariableTensorId kernel instead of a catch-all kernel,
+// otherwise we won't ever call it for CPU/CUDA/QuantizedCPU tensors.
+// Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
+// skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
+// (and that don't use dispatch), we register them as catch-all kernels instead.
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
