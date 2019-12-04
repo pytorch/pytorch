@@ -647,7 +647,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(Graph* g) {
   }
   for (auto& v : values_to_quantize_.at(g)) {
     TORCH_INTERNAL_ASSERT(values_to_qparams_.at(g).count(v));
-    auto tp = values_to_qparams_.at(module._ivalue()).at(v);
+    auto tp = values_to_qparams_.at(g).at(v);
     auto qparams = std::get<0>(tp);
     auto scalar_type = std::get<1>(tp);
     insertQuantDeQuantCall(v, qparams, scalar_type);
