@@ -1240,6 +1240,18 @@ struct PythonPrintImpl {
         body_ << name << " : " << type->python_str() << "\n";
       }
     }
+
+    size_t numConstants = moduleType->numConstants();
+    for (size_t i = 0; i < numConstants; i++) {
+      const auto& name = moduleType->getConstantName(i);
+      const auto& v = moduleType->getConstant(name).value();
+
+      indent();
+      body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
+      auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      printConstant(*ss, v);
+      body_ << ss->str() << "\n";
+    }
   }
 
   void printNamedType(const c10::NamedTypePtr& type) {
