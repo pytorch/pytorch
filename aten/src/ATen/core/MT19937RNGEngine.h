@@ -37,7 +37,7 @@ constexpr uint32_t LMASK = 0x7fffffff;
  * Time to get 100000000 std::mt19937 randoms with std::uniform_real_distribution = 0.352087s
  * Time to get 100000000 std::mt19937 randoms with at::uniform_real_distribution = 0.419454s
  * 
- * std::mt19937 is faster when used in conjuction with std::uniform_real_distribution,
+ * std::mt19937 is faster when used in conjunction with std::uniform_real_distribution,
  * however we can't use std::uniform_real_distribution because of this bug:
  * http://open-std.org/JTC1/SC22/WG21/docs/lwg-active.html#2524. Plus, even if we used
  * std::uniform_real_distribution and filtered out the 1's, it is a different algorithm

@@ -208,7 +208,7 @@ def reduce_tensor(tensor):
     # On receiver side:
     #   1. Get the devPtr of the MemHandle to access the memory, reconstruct a storage
     #      of the same type using (basePtr, offset, size).
-    #   2. we can reconstruct the tensor on top of the recontructed storage
+    #   2. we can reconstruct the tensor on top of the reconstructed storage
     #   Tensor(size=0x040, offset=0x020, storage=Storage(data=basePtr+0xA100, size=0x0100))
     #
     # This strategy has a few implications:

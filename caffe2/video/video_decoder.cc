@@ -437,7 +437,7 @@ void VideoDecoder::decodeLoop(
     // the decoder is still giving us frames.
     int ipacket = 0;
     while ((!eof || gotPicture) &&
-           /* either you must decode all frames or decode upto maxFrames
+           /* either you must decode all frames or decode up to maxFrames
             * based on status of the mustDecodeAll flag */
            (mustDecodeAll ||
             ((!mustDecodeAll) && (selectiveDecodedFrames < maxFrames))) &&
