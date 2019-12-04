@@ -3067,7 +3067,7 @@ namespace detail {
   }
 
   torch::Tensor _softmax(const torch::Tensor& x) {
-    auto output = torch::zeros(x.sizes(), torch::kFloat64);
+    auto output = torch::zeros(x.sizes());
     for (int i = 0; i < x.size(0); i++) {
       for (int j = 0; j < x.size(1); j++) {
         for (int k = 0; k < x.size(2); k++) {
