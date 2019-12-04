@@ -355,7 +355,7 @@ def find_test_index(test, selected_tests, find_last_index=False):
             occurrence (first is default)
 
     Returns:
-        index of the first or last occurance of the given test
+        index of the first or last occurrence of the given test
     """
     idx = 0
     found_idx = -1

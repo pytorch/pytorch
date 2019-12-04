@@ -201,7 +201,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
-  // eventhough it is possible, though rare, for someone to mutate them
+  // even though it is possible, though rare, for someone to mutate them
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
