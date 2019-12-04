@@ -785,7 +785,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
     def test_observer_with_ignored_function(self):
-        r"""Test observers with ignored fucntion and make sure it works in
+        r"""Test observers with ignored function and make sure it works in
         graph mode
         """
         # eager mode
