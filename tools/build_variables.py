@@ -75,7 +75,6 @@ libtorch_sources = [
     "torch/csrc/distributed/rpc/script_resp.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
-    "torch/csrc/Exceptions.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
     "torch/csrc/jit/argument_spec.cpp",
@@ -271,6 +270,7 @@ def add_torch_libs():
         "torch/csrc/Device.cpp",
         "torch/csrc/Dtype.cpp",
         "torch/csrc/DynamicTypes.cpp",
+        "torch/csrc/Exceptions.cpp",
         "torch/csrc/Generator.cpp",
         "torch/csrc/Layout.cpp",
         "torch/csrc/MemoryFormat.cpp",
@@ -346,7 +346,6 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_new.cpp",
         "torch/csrc/utils/tensor_numpy.cpp",
         "torch/csrc/utils/tensor_types.cpp",
-        "torch/csrc/utils/tuple_parser.cpp",
         "test/cpp/jit/torch_python_test.cpp",
     ]
 

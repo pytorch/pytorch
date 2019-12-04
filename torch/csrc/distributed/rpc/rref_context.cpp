@@ -36,9 +36,16 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     owners_.clear();
   }
+}
+
+std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
+  std::unordered_map<std::string, std::string> info;
+  std::lock_guard<std::mutex> lock(mutex_);
+  info["num_owner_rrefs"] = c10::to_string(owners_.size());
+  return info;
 }
 
 void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
@@ -72,8 +79,12 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-  return createUserRRef<T>(
-      ownerId, genGloballyUniqueId(), genGloballyUniqueId());
+  // Explicitly creating rrefId before forkId to make sure the order is
+  // deterministic, as the argument evaluation order is system and compiler
+  // dependent.
+  const auto rrefId = genGloballyUniqueId();
+  const auto forkId = genGloballyUniqueId();
+  return createUserRRef<T>(ownerId, rrefId, forkId);
 }
 
 template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
@@ -375,7 +386,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     }
   }
   if (deletedRRef && deletedRRef->isPyObj()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     deletedRRef.reset();
   }
 }

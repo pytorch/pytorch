@@ -223,7 +223,7 @@
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -251,7 +251,7 @@
   binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
