@@ -76,7 +76,7 @@ def _interpolate(name, dim, interpolate_mode):
         else:
             return g.op("Resize",
                         input,
-                        empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                        empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
                         scales,  # scales is not needed since we are sending out_size
                         coordinate_transformation_mode_s=coordinate_transformation_mode,
                         cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
@@ -104,7 +104,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, use_scale_f
     align_corners = False if not isinstance(align_corners, bool) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
-    # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+    # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
