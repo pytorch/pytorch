@@ -160,9 +160,9 @@ class Optimizer(object):
         r"""Clears the gradients of all optimized :class:`torch.Tensor` s."""
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is not None:
-                    p.grad.detach_()
-                    p.grad.zero_()
+                if p._grad is not None:
+                    p._grad.detach_()
+                    p._grad.zero_()
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).

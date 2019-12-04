@@ -47,9 +47,9 @@ class SparseAdam(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is None:
+                if p._grad is None:
                     continue
-                grad = p.grad.data
+                grad = p._grad.data
                 if not grad.is_sparse:
                     raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
 
