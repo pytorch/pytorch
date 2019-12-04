@@ -3564,6 +3564,21 @@ graph(%Ra, %Rb):
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
+    def test_export_opnames(self):
+        with torch.jit._disable_emit_hooks():
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
+
+                @torch.jit.script_method
+                def forward(self, x, y):
+                    return 2 * x + y
+
+            foo = Foo()
+            ops = torch.jit.export_opnames(foo)
+            expected = ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant']
+            self.assertEqual(ops, expected)
+            
     def test_pytorch_jit_env_off(self):
         import subprocess
         env = os.environ.copy()
