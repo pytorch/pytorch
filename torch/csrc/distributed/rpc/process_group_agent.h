@@ -6,11 +6,17 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
+#include <atomic>
 #include <thread>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
+  ProcessGroupRpcBackendOptions() = default;
+  int numSendRecvThreads;
+};
 
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
@@ -25,11 +31,16 @@ struct SendWork {
 // SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
 // to allow us to run serialization/deserialization in the worker threads.
 struct RecvWork {
-  RecvWork(const WorkerInfo& from, MessageType type, torch::Tensor&& payload)
-      : from_(from), type_(type), payload_(payload) {}
+  RecvWork(
+      const WorkerInfo& from,
+      MessageType type,
+      int64_t id,
+      torch::Tensor&& payload)
+      : from_(from), type_(type), id_(id), payload_(payload) {}
 
   const WorkerInfo& from_;
   const MessageType type_;
+  const int64_t id_;
   torch::Tensor payload_;
 };
 
@@ -45,11 +56,15 @@ class ProcessGroupAgent : public RpcAgent {
 
   const WorkerInfo& getWorkerInfo(worker_id_t id) const override;
 
+  std::vector<WorkerInfo> getWorkerInfos() const override;
+
   void join() override;
 
   void sync() override;
 
   void start() override;
+
+  void shutdown() override;
 
  protected:
   // This method wraps the destination information and the message into a
@@ -70,6 +85,26 @@ class ProcessGroupAgent : public RpcAgent {
     std::mutex mutex_;
   };
 
+  // The FutureInfo struct stores a shared_ptr to the future, as well as
+  // additional information to manage timeouts and destination information,
+  // which is needed for termination detection.
+  struct FutureInfo {
+    std::shared_ptr<FutureMessage> future_;
+    std::chrono::milliseconds startTime_;
+    int dstRank_;
+    std::chrono::milliseconds timeout_;
+    FutureInfo(
+        const std::shared_ptr<FutureMessage>& future,
+        const std::chrono::milliseconds& startTime,
+        int dstRank,
+        const std::chrono::milliseconds timeout)
+        : future_(future),
+          startTime_(startTime),
+          dstRank_(dstRank),
+          timeout_(timeout) {}
+    FutureInfo() = delete;
+  };
+
   void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
@@ -77,6 +112,18 @@ class ProcessGroupAgent : public RpcAgent {
   void enqueueRecv(RecvWork work);
   // receiving messages
   void listenLoop();
+  // poll for timed out RPCs
+  void pollTimedOutRPCs();
+  // process timed out futures
+  const std::vector<FutureInfo> processTimedOutFutures();
+  // compute the remaining time for an RPC, given its end time.
+  const std::chrono::milliseconds getRPCRemainingTime(
+      const std::chrono::milliseconds& rpcEndTime) const;
+  // compute the time an RPC will time out with millisecond level precision.
+  // This helper function can be used to key into the futureTimeouts_ map, and
+  // it returns INFINITE_TIMEOUT to indicate that an RPC has no timeout.
+  const std::chrono::milliseconds getRPCEndTime(
+      const FutureInfo& futureInfo) const;
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -117,10 +164,23 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
+  // atomic bool indicating if this agent is running. It is set in
+  // ProcessGroupAgent::start and unset in ProcessGroupAgent::shutdown and
+  // ProcessGroupAgent::join. It controls whether several background threads
+  // should be running.
+  // We lock access to this in shutdown() and pollTimedOutRPCs() to prevent race
+  // conditions when notifying condition variables.
+  std::atomic<bool> rpcRunning_{false};
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
   std::thread listenerThread_;
+  // A thread to poll existing futures and check for timed out ones.
+  std::thread futureTimeoutThread_;
+  // Lock and shared ptr to currently pending work, set in listenloop() and
+  // interruptible in shutdown().
+  std::mutex recvWorkMutex_;
+  std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
   // A threadPool that processing both SendWork and RecvWork. There are two
   // motivations for adding a ThreadPool:
   // (1) RPC serialization/deserialization and processing can be expensive,
@@ -131,20 +191,19 @@ class ProcessGroupAgent : public RpcAgent {
   //     NB: Ideally, this should be addressed by supporting asynchronous UDF.
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
-  // Mapping of request id to (future, future timeout) pair. We store the future
-  // timeout for efficient lookups into the futureTimeouts_ map.
-  std::unordered_map<
-      int64_t,
-      std::pair<std::shared_ptr<FutureMessage>, std::chrono::milliseconds>>
-      futures_;
+  // Mapping of request id to FutureInfo struct.
+  std::unordered_map<int64_t, FutureInfo> futures_;
   // A map to keep track of when futures time out. The map is keyed by the time
-  // (millisecond level precision) the future started, and the values correspond
-  // to a vector of futures that started at that time. When futures time out,
-  // the entry in this map is cleared and the corresponding future in the
-  // futures_ map is deleted.
+  // (millisecond level precision) the future will expire. This is so that timed
+  // out futures can be efficiently cleaned up, and we can quickly exit if we
+  // find a future that has not timed out. The values correspond to a vector of
+  // future ids that started at that time. This map must be kept in sync with
+  // the above futures_ map.
   std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
+  // CV to wake up watchdog thread that watches for timed out futures.
+  std::condition_variable futureTimeoutCV_;
 };
 
 } // namespace rpc

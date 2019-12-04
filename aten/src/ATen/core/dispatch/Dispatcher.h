@@ -3,6 +3,7 @@
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <c10/util/Exception.h>
+#include <c10/util/LeftRight.h>
 #include <mutex>
 #include <list>
 
@@ -101,9 +102,6 @@ public:
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
-  template<class Return, class... Args>
-  Return callUnboxedOnly(const OperatorHandle& op, Args... args) const;
-
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
@@ -122,16 +120,11 @@ private:
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterBackendFallbackKernel_(TensorTypeId dispatchKey);
 
-  static const KernelFunction& dispatch_(const DispatchTable& dispatchTable, const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels, c10::optional<TensorTypeId> dispatch_key);
-
-  template<class Return, class... Args>
-  Return doCallUnboxed(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const;
-  template<class Return, class... Args>
-  Return doCallUnboxedOnly(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const;
+  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatch_key) const;
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
-  LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>> backendFallbackKernels_;
+  impl::KernelFunctionTable backendFallbackKernels_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -156,6 +149,15 @@ public:
     return operatorIterator_->op.options();
   }
 
+  template<class Return, class... Args>
+  Return callUnboxed(Args... args) const {
+    return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
+  }
+
+  void callBoxed(Stack* stack) const {
+    c10::Dispatcher::singleton().callBoxed(*this, stack);
+  }
+
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
@@ -171,59 +173,21 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
-    // TODO This should be a nested lambda instead of a separate function call, but that triggers an internal
-    // compiler error on GCC5. Change this once we don't need gcc 5 anymore.
-    return doCallUnboxed<Return, Args...>(dispatchTable, backendFallbackKernels_, std::forward<Args>(args)...);
-  });
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::doCallUnboxed(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
-    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
-    const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
-    return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
-  });
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
-    // TODO This should be a nested lambda instead of a separate function call, but that triggers an internal
-    // compiler error on GCC5. Change this once we don't need gcc 5 anymore.
-    return doCallUnboxedOnly<Return, Args...>(dispatchTable, backendFallbackKernels_, std::forward<Args>(args)...);
-  });
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::doCallUnboxedOnly(const DispatchTable& dispatchTable, const LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>>& backendFallbackKernels_, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
-    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
-    const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
-    return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
-  });
+  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
+  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
+  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) {
-    return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) {
-      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
-      const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
-      kernel.callBoxed(stack);
-    });
-  });
+  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
+  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  kernel.callBoxed(op, stack);
 }
 
-inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels, c10::optional<TensorTypeId> dispatchKey) {
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) const {
   if (C10_LIKELY(dispatchKey.has_value())) {
     const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
 
@@ -231,9 +195,9 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
       return *backendKernel;
     }
 
-    auto backendFallbackKernel = backendFallbackKernels.find(*dispatchKey);
-    if (backendFallbackKernel != backendFallbackKernels.end()) {
-      return backendFallbackKernel->second;
+    const auto& backendFallbackKernel = backendFallbackKernels_[*dispatchKey];
+    if (backendFallbackKernel.isValid()) {
+      return backendFallbackKernel;
     }
   }
 
@@ -258,4 +222,3 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
 }
 
 } // namespace c10
-

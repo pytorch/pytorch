@@ -325,6 +325,7 @@ def build_deps():
         cmake_cache_vars = defaultdict(lambda: None, cmake.get_cmake_cache_variables())
         f.write("cuda = {}\n".format(repr(cmake_cache_vars['CUDA_VERSION'])))
         f.write("git_version = {}\n".format(repr(sha)))
+        f.write("hip = {}\n".format(repr(cmake_cache_vars['HIP_VERSION'])))
 
     if CMAKE_ONLY:
         report('Finished running cmake. Run "ccmake build" or '
@@ -585,7 +586,7 @@ def configure_extension_build():
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++11',
+            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',

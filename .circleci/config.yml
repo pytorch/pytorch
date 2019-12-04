@@ -19,6 +19,20 @@ docker_config_defaults: &docker_config_defaults
     # This IAM user only allows read-write access to ECR
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
+
+executors:
+  windows-with-nvidia-gpu:
+    machine:
+      resource_class: windows.gpu.nvidia.medium
+      image: windows-server-2019-nvidia:stable
+      shell: bash.exe
+
+  windows-cpu-with-nvidia-cuda:
+    machine:
+      # we will change to CPU host when it's ready
+      resource_class: windows.xlarge
+      image: windows-server-2019-vs2019:stable
+      shell: bash.exe
 commands:
   # NB: This command must be run as the first command in a job. It
   # attaches the workspace at ~/workspace; this workspace is generated
@@ -409,12 +423,84 @@ jobs:
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
+
+          retrieve_test_reports() {
+            echo "retrieving test reports"
+            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+          }
+          trap "retrieve_test_reports" ERR
+
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          retrieve_test_reports
+    - store_test_results:
+        path: test-reports
+
+  pytorch_windows_build:
+    executor: windows-cpu-with-nvidia-cuda
+    environment:
+      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+      SCCACHE_BUCKET: "ossci-compiler-cache"
+      CUDA_VERSION: "10"
+      USE_CUDA: "1"
+      TORCH_CUDA_ARCH_LIST: "7.5"
+    steps:
+      - checkout
+      - run:
+          name: Install Cuda
+          command: |
+            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
+            ./cuda_10.1.243_426.00_win10.exe -s
+            rm -f ./cuda_10.1.243_426.00_win10.exe
+      - run:
+          name: Install Cudnn
+          command : |
+            cd c:/
+            choco install -y 7zip curl
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
+            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
+            7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
+            cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+      - run:
+          name: Build
+          no_output_timeout: "90m"
+          command: |
+            set -e
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            set -x
+            .jenkins/pytorch/win-build.sh
+  pytorch_windows_test:
+    executor: windows-with-nvidia-gpu
+    parameters:
+      test_name:
+        type: string
+        default: ""
+    environment:
+      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+      SCCACHE_BUCKET: "ossci-compiler-cache"
+      CUDA_VERSION: "10"
+      JOB_BASE_NAME: <<parameters.test_name>>
+    steps:
+      - checkout
+      - run:
+          name: Test
+          no_output_timeout: "30m"
+          command: |
+            set -e
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            set -x
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
+            choco install -y 7zip curl
+            .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
@@ -541,7 +627,7 @@ jobs:
   caffe2_macos_build:
     <<: *caffe2_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -568,7 +654,7 @@ jobs:
             # Install Anaconda if we need to
             if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
               rm -rf ${TMPDIR}/anaconda
-              curl -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
+              curl --retry 3 -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
               chmod +x ${TMPDIR}/conda.sh
               /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
               rm -f ${TMPDIR}/conda.sh
@@ -579,7 +665,7 @@ jobs:
             pip -q install numpy
 
             # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
@@ -636,8 +722,8 @@ jobs:
             elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
               retry apt-get update
               retry apt-get -y install expect moreutils
-              conda install -y -c eumetsat expect
-              conda install -y cmake
+              retry conda install -y -c eumetsat expect
+              retry conda install -y cmake
             fi
     - run:
         name: Update compiler to devtoolset7
@@ -747,7 +833,7 @@ jobs:
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       - attach_workspace:
           at: ~/workspace
@@ -775,7 +861,7 @@ jobs:
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -816,7 +902,7 @@ jobs:
   binary_mac_upload: &binary_mac_upload
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -840,7 +926,7 @@ jobs:
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -864,11 +950,11 @@ jobs:
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios
-  
-  binary_ios_upload: 
+
+  binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -888,10 +974,6 @@ jobs:
       - image: circleci/python:3.7.3
     steps:
       - checkout
-      - run:
-          name: Ensure config is up to date
-          command: ./ensure-consistency.py
-          working_directory: .circleci
       - run:
           name: Save commit message
           command: git log --format='%B' -n 1 HEAD > .circleci/scripts/COMMIT_MSG
@@ -1011,7 +1093,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -1025,7 +1107,7 @@ jobs:
             export IN_CIRCLECI=1
 
             # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
@@ -1051,7 +1133,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
@@ -1069,12 +1151,14 @@ jobs:
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+      - store_test_results:
+          path: test/test-reports
 
-  pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+  pytorch_macos_10_13_cuda10_0_cudnn7_py3_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda10.0-cudnn7-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -1088,24 +1172,24 @@ jobs:
 
             export IN_CIRCLECI=1
 
-            # Install CUDA 9.2
-            sudo rm -rf ~/cuda_9.2.64_mac_installer.app || true
-            curl https://s3.amazonaws.com/ossci-macos/cuda_9.2.64_mac_installer.zip -o ~/cuda_9.2.64_mac_installer.zip
-            unzip ~/cuda_9.2.64_mac_installer.zip -d ~/
-            sudo ~/cuda_9.2.64_mac_installer.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
-            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-9.2/lib/libcuda.dylib
+            # Install CUDA 10.0
+            sudo rm -rf ~/CUDAMacOSXInstaller.app || true
+            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cuda_10.0.130_mac_installer.zip -o ~/cuda_10.0.130_mac_installer.zip
+            unzip ~/cuda_10.0.130_mac_installer.zip -d ~/
+            sudo ~/CUDAMacOSXInstaller.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
+            sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-10.0/lib/libcuda.dylib
             sudo rm -rf /usr/local/cuda || true
 
-            # Install cuDNN 7.1 for CUDA 9.2
-            curl https://s3.amazonaws.com/ossci-macos/cudnn-9.2-osx-x64-v7.1.tgz -o ~/cudnn-9.2-osx-x64-v7.1.tgz
-            rm -rf ~/cudnn-9.2-osx-x64-v7.1 && mkdir ~/cudnn-9.2-osx-x64-v7.1
-            tar -xzvf ~/cudnn-9.2-osx-x64-v7.1.tgz -C ~/cudnn-9.2-osx-x64-v7.1
-            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/include/
-            sudo cp ~/cudnn-9.2-osx-x64-v7.1/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-9.2/lib/
-            sudo chmod a+r /Developer/NVIDIA/CUDA-9.2/include/cudnn.h /Developer/NVIDIA/CUDA-9.2/lib/libcudnn*
+            # Install cuDNN 7.6.5 for CUDA 10.0
+            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cudnn-10.0-osx-x64-v7.6.5.32.tgz -o ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz
+            rm -rf ~/cudnn-10.0-osx-x64-v7.6.5.32 && mkdir ~/cudnn-10.0-osx-x64-v7.6.5.32
+            tar -xzvf ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz -C ~/cudnn-10.0-osx-x64-v7.6.5.32
+            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/include/
+            sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/lib/libcudnn* /Developer/NVIDIA/CUDA-10.0/lib/
+            sudo chmod a+r /Developer/NVIDIA/CUDA-10.0/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/lib/libcudnn*
 
             # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
@@ -1289,17 +1373,17 @@ jobs:
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
       - checkout
       - run_brew_for_ios_build
       - run:
-          name: cert install
+          name: Run Fastlane
           no_output_timeout: "1h"
           command: |
-            set -e 
+            set -e
             PROJ_ROOT=/Users/distiller/project
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
@@ -1328,19 +1412,27 @@ jobs:
             export TCLLIBPATH="/usr/local/lib"
 
             # Install conda
-            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-            chmod +x ~/Downloads/conda.sh
-            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+            curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            chmod +x ~/conda.sh
+            /bin/bash ~/conda.sh -b -p ~/anaconda
             export PATH="~/anaconda/bin:${PATH}"
             source ~/anaconda/bin/activate
+
             # Install dependencies
-            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+            retry () {
+                $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
             git submodule update --init --recursive
+
             # export
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+
             # run build script
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
@@ -1350,7 +1442,7 @@ jobs:
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
-          name: Test
+          name: Run Build Test
           no_output_timeout: "30m"
           command: |
             set -e
@@ -1360,14 +1452,34 @@ jobs:
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
               exit 1
-            fi 
+            fi
             echo ${IOS_DEV_TEAM_ID}
             ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1
             fi
-
+      - run:
+          name: Run Simulator Tests
+          no_output_timeout: "2h"
+          command: |
+            set -e
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
+              echo "not SIMULATOR build, skip it."
+              exit 0
+            fi
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
+            source ~/anaconda/bin/activate
+            #install the latest version of PyTorch and TorchVision
+            pip install torch torchvision
+            #run unit test
+            cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            python trace_model.py
+            ruby setup.rb
+            cd ${PROJ_ROOT}/ios/TestApp
+            instruments -s -devices
+            fastlane scan
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1483,6 +1595,27 @@ jobs:
 #    resource_class: gpu.medium
 #    <<: *binary_linux_test
 
+  docker_build_job:
+      parameters:
+        image_name:
+          type: string
+          default: ""
+      machine:
+        image: ubuntu-1604:201903-01
+      resource_class: large
+      environment:
+        IMAGE_NAME: << parameters.image_name >>
+      steps:
+        - checkout
+        - run:
+            name: build_docker_image_<< parameters.image_name >>
+            no_output_timeout: "1h"
+            command: |
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              set -x
+              cd .circleci/docker && ./build_docker.sh
 
 ##############################################################################
 ##############################################################################
@@ -1494,6 +1627,24 @@ jobs:
 workflows:
   build:
     jobs:
+      # Warning: indentation here matters!
+
+      # Pytorch MacOS builds
+      - pytorch_windows_build:
+          requires:
+            - setup
+      - pytorch_windows_test:
+          name: pytorch_windows_test1
+          test_name: pytorch_windows_test1
+          requires:
+            - setup
+            - pytorch_windows_build
+      - pytorch_windows_test:
+          name: pytorch_windows_test2
+          test_name: pytorch_windows_test2
+          requires:
+            - setup
+            - pytorch_windows_build
       - setup
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py2_7_9_build
@@ -1863,7 +2014,7 @@ workflows:
           requires:
             - setup
             - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+      - pytorch_macos_10_13_cuda10_0_cudnn7_py3_build:
           requires:
             - setup
       - pytorch_android_gradle_build-x86_32:
@@ -1880,21 +2031,28 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
       - pytorch_ios_build:
-          name: pytorch_ios_10_2_1_x86_64_build
+          name: pytorch_ios_11_2_1_x86_64_build
           context: org-member
-          build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          build_environment: "pytorch-ios-11.2.1-x86_64_build"
           ios_arch: "x86_64"
           ios_platform: "SIMULATOR"
           requires:
             - setup
       - pytorch_ios_build:
-          name: pytorch_ios_10_2_1_arm64_build
+          name: pytorch_ios_11_2_1_arm64_build
           context: org-member
-          build_environment: "pytorch-ios-10.2.1-arm64_build"
+          build_environment: "pytorch-ios-11.2.1-arm64_build"
           ios_arch: "arm64"
           ios_platform: "OS"
           requires:
             - setup
+      # PyTorch Mobile PR builds (use linux host toolchain + mobile build options)
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_mobile_build
+          requires:
+            - setup
+          build_environment: "pytorch-linux-xenial-py3-clang5-mobile-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:405"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_6_gcc5_4_ge_config_legacy_test
           requires:
@@ -1916,28 +2074,28 @@ workflows:
           requires:
             - setup
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:336"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:345"
       - caffe2_linux_test:
           name: caffe2_onnx_py2_gcc5_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py2_gcc5_ubuntu16_04_build
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:336"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:345"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:336"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:345"
       - caffe2_linux_test:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:336"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:345"
           resource_class: large
       # Binary builds (subset, to smoke test that they'll work)
       #
@@ -2717,7 +2875,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -2729,7 +2887,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -2741,7 +2899,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -2753,7 +2911,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - smoke_linux_test:
           name: smoke_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -2765,7 +2923,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2779,7 +2937,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2793,7 +2951,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2807,7 +2965,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2821,7 +2979,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2835,7 +2993,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2849,7 +3007,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2863,7 +3021,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2877,7 +3035,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2891,7 +3049,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2905,7 +3063,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2919,7 +3077,7 @@ workflows:
             branches:
               only: postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_mac_test:
@@ -3505,7 +3663,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -3515,7 +3673,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -3525,7 +3683,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -3535,7 +3693,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3545,7 +3703,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3555,7 +3713,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3565,7 +3723,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -3575,7 +3733,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3585,7 +3743,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3595,7 +3753,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3605,7 +3763,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
@@ -3615,7 +3773,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3625,7 +3783,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3635,7 +3793,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3645,7 +3803,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
@@ -3655,7 +3813,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_mac_build:
           name: binary_macos_wheel_2_7_cpu_nightly_build
           build_environment: "wheel 2.7 cpu"
@@ -3730,8 +3888,8 @@ workflows:
               only: nightly
       # Pytorch iOS binary builds
       - binary_ios_build:
-          name: pytorch_ios_10_2_1_nightly_x86_64_build
-          build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
+          name: pytorch_ios_11_2_1_nightly_x86_64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-x86_64-build"
           context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
@@ -3741,8 +3899,8 @@ workflows:
             branches:
               only: nightly
       - binary_ios_build:
-          name: pytorch_ios_10_2_1_nightly_arm64_build
-          build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
+          name: pytorch_ios_11_2_1_nightly_arm64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-arm64-build"
           context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
@@ -3752,12 +3910,12 @@ workflows:
             branches:
               only: nightly
       - binary_ios_upload:
-          build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
+          build_environment: "libtorch-ios-11.2.1-nightly-binary-build-upload"
           context: org-member
           requires:
             - setup
-            - pytorch_ios_10_2_1_nightly_x86_64_build
-            - pytorch_ios_10_2_1_nightly_arm64_build
+            - pytorch_ios_11_2_1_nightly_x86_64_build
+            - pytorch_ios_11_2_1_nightly_arm64_build
           filters:
             branches:
               only: nightly
@@ -4444,7 +4602,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -4455,7 +4613,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -4466,7 +4624,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -4477,7 +4635,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
@@ -4488,7 +4646,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4501,7 +4659,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4514,7 +4672,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4527,7 +4685,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4540,7 +4698,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4553,7 +4711,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4566,7 +4724,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4579,7 +4737,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4592,7 +4750,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4605,7 +4763,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4618,7 +4776,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4631,7 +4789,7 @@ workflows:
             branches:
               only: nightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/conda-cuda-cxx11-ubuntu1604:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       #- binary_linux_libtorch_2.7m_cpu_test:
@@ -5469,3 +5627,69 @@ workflows:
             branches:
               only: postnightly
 
+  docker_build:
+    triggers:
+      - schedule:
+          cron: "0 15 * * 0"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - docker_build_job:
+          name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
+          image_name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda8-cudnn7-py2"
+          image_name: "pytorch-linux-xenial-cuda8-cudnn7-py2"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda8-cudnn7-py3"
+          image_name: "pytorch-linux-xenial-cuda8-cudnn7-py3"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
+          image_name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda9-cudnn7-py3"
+          image_name: "pytorch-linux-xenial-cuda9-cudnn7-py3"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py2.7.9"
+          image_name: "pytorch-linux-xenial-py2.7.9"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py2.7"
+          image_name: "pytorch-linux-xenial-py2.7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+          image_name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3-clang5-asan"
+          image_name: "pytorch-linux-xenial-py3-clang5-asan"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.5"
+          image_name: "pytorch-linux-xenial-py3.5"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-clang7"
+          image_name: "pytorch-linux-xenial-py3.6-clang7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc4.8"
+          image_name: "pytorch-linux-xenial-py3.6-gcc4.8"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc5.4"
+          image_name: "pytorch-linux-xenial-py3.6-gcc5.4"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc7.2"
+          image_name: "pytorch-linux-xenial-py3.6-gcc7.2"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.6-gcc7"
+          image_name: "pytorch-linux-xenial-py3.6-gcc7"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-pynightly"
+          image_name: "pytorch-linux-xenial-pynightly"

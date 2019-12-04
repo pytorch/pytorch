@@ -3,69 +3,13 @@
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <Python.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-// Write the message into the given ostream
-std::string serialize(const Message& message) {
-  // We cast const void* to void* here because we need to create a tensor using
-  // that memory space. If is fine as that tensor stays function-local, and will
-  // not be modified during its lifetime.
-  auto payload = const_cast<void*>( // NOLINT
-      static_cast<const void*>(message.payload().data()));
-  auto payload_size = message.payload().size();
-
-  // getting tensor table from the message
-  std::vector<torch::Tensor> tensors = message.tensors();
-  // append payload as a tensor
-  tensors.push_back(torch::from_blob(payload, payload_size, {torch::kChar}));
-  // append id and autograd metadata as a tensor
-  tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}));
-
-  // optional: estimate output size, to avoid some unnecessary resizing.
-  static constexpr size_t kBaseOverhead = 2048;
-  static constexpr size_t kPerTensor = 128;
-  size_t estimate = kBaseOverhead;
-  for (const auto& t : tensors) {
-    estimate += t.nbytes() + kPerTensor;
-  }
-
-  std::string out;
-  out.reserve(estimate);
-  torch::save(tensors, [&](const void* buf, size_t n) -> size_t {
-    out.append(static_cast<const char*>(buf), n);
-    return n;
-  });
-  return out;
-}
-
-Message deserialize(MessageType type, const void* buf, size_t size) {
-  std::vector<torch::Tensor> tensors;
-
-  torch::load(tensors, static_cast<const char*>(buf), size);
-
-  TORCH_CHECK(tensors.size() >= 2, "Failed to deserialize a message.");
-  auto idTensor = std::move(tensors.back());
-  tensors.pop_back();
-  auto payloadTensor = std::move(tensors.back());
-  tensors.pop_back();
-
-  TORCH_INTERNAL_ASSERT(1, idTensor.numel());
-  int64_t id = idTensor.storage().data<int64_t>()[0];
-
-  const char* data = static_cast<const char*>(payloadTensor.storage().data());
-  std::vector<char> payload(data, data + payloadTensor.numel());
-
-  return Message(std::move(payload), std::move(tensors), type, id);
-}
-
-} // namespace
 
 //////////////////////////  MessageCounter  /////////////////////////////////
 
@@ -83,6 +27,9 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 }
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
+
+const std::chrono::milliseconds INFINITE_TIMEOUT =
+    std::chrono::milliseconds::max();
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -175,25 +122,17 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   return allWorkerInfo_[id];
 }
 
+std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
+  return allWorkerInfo_;
+}
+
 void ProcessGroupAgent::join() {
-  // Every process i sends a SHUTDOWN message to process i + 1. This is
-  // necessary for now because:
-  // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
-  //    feed it a message or kill the thread.
-  // 2. A GLOO process cannot send message to itself. (there is an ongoing
-  //    effort to fix this problem).
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
-  int dst = (pg_->getRank() + 1) % pg_->getSize();
-  enqueueSend(
-      SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
-  threadPool_.waitWorkComplete();
-  listenerThread_.join();
-  PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
@@ -259,12 +198,38 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
+  {
+    std::lock_guard<std::mutex> futureLock{futureMutex_};
+    rpcRunning_.store(true);
+  }
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
+  futureTimeoutThread_ =
+      std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
+}
+
+void ProcessGroupAgent::shutdown() {
+  LOG(INFO) << "Shutting down ProcessGroupAgent.";
+  std::unique_lock<std::mutex> lock{futureMutex_};
+  if (!rpcRunning_.exchange(false)) {
+    return;
+  }
+  lock.unlock();
+  futureTimeoutCV_.notify_one();
+  futureTimeoutThread_.join();
+  {
+    std::unique_lock<std::mutex> lock(recvWorkMutex_);
+    if (recvWork_) {
+      recvWork_->abort();
+    }
+  }
+  threadPool_.waitWorkComplete();
+  listenerThread_.join();
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
       "Destination rank is out of bound, got ",
@@ -281,9 +246,27 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
             std::chrono::steady_clock::now().time_since_epoch());
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
-      futures_[requestId] = std::make_pair(future, futureStartTime);
+      // Set infinite timeout if specified.
+      auto timeout = rpcTimeout_.load();
+      if (timeout.count() == 0) {
+        timeout = INFINITE_TIMEOUT;
+      }
+      auto& futureInfo = futures_
+                             .emplace(
+                                 std::piecewise_construct,
+                                 std::forward_as_tuple(requestId),
+                                 std::forward_as_tuple(FutureInfo(
+                                     future, futureStartTime, to.id_, timeout)))
+                             .first->second;
+      auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
-      futureTimeouts_[futureStartTime].push_back(requestId);
+      futureTimeouts_[rpcEndTime].push_back(requestId);
+      // Signal the watchdog to monitor future timeouts if this is the first
+      // future created or if an RPC with a shorter TTL has been created.
+      if (futures_.size() == 1 ||
+          futureTimeouts_.begin()->first == rpcEndTime) {
+        futureTimeoutCV_.notify_one();
+      }
     }
     message.setId(requestId);
   } else {
@@ -291,7 +274,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
-  // to our receving queue.
+  // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     TORCH_CHECK(!message.isShutdown(), "Shutting down self not supported");
     threadPool_.run(std::bind(
@@ -300,14 +283,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload =
-              c10::guts::make_unique<std::string>(serialize(message));
+          auto payload = c10::guts::make_unique<std::string>(
+              wireSerialize(message.payload(), message.tensors()));
           const char* data = payload->data();
           size_t len = payload->length();
           std::string* delete_when_done = payload.release();
           enqueueRecv(RecvWork(
               getWorkerInfo(pg_->getRank()),
               message.type(),
+              message.id(),
               torch::from_blob(
                   (void*)data,
                   len,
@@ -335,13 +319,15 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
-        std::string serializedPayload = serialize(work.message_);
+        std::string serializedPayload =
+            wireSerialize(work.message_.payload(), work.message_.tensors());
 
         std::vector<torch::Tensor> preamble = {torch::tensor(
             {(int64_t)pg_->getRank(),
              (int64_t)serializedPayload.length(),
-             (int64_t)work.message_.type()},
-            {torch::kLong})};
+             (int64_t)work.message_.type(),
+             (int64_t)work.message_.id()},
+            {torch::kInt64})};
 
         // ProcessGroup is not thread-safe when sending with the same tag, hence
         // the lock
@@ -382,34 +368,46 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         torch::Tensor& payload = work.payload_;
-        Message message =
-            deserialize(work.type_, payload.storage().data(), payload.numel());
+        auto data = wireDeserialize(payload.storage().data(), payload.numel());
+        Message message(
+            std::move(data.first),
+            std::move(data.second),
+            work.type_,
+            work.id_);
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
-          std::chrono::milliseconds futureStartTime;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
-            std::tie(fm, futureStartTime) = futures_[id];
+            const auto& futureInfo = futures_.find(id);
+            if (futureInfo == futures_.end()) {
+              // Received a completion for a timed out future, drop the recv.
+              // RecvCounts will not be incremented here, it will be incremented
+              // by the sender who has determined the future has timed out.
+              return;
+            }
+
+            fm = futureInfo->second.future_;
+            auto rpcEndTime = getRPCEndTime(futureInfo->second);
+            futures_.erase(id);
+            // look up the corresponding future by its time out and request ID,
+            // and remove it from the timeouts map
+            auto& futuresAtTime = futureTimeouts_[rpcEndTime];
+            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+            TORCH_INTERNAL_ASSERT(
+                it != futuresAtTime.end(),
+                "Error: could not find future in futureTimeouts map, race condition.");
+            futuresAtTime.erase(it);
+            if (futuresAtTime.empty()) {
+              // remove the key from futureTimeouts_
+              futureTimeouts_.erase(rpcEndTime);
+            }
           }
           // Not holding lock on markCompleted as this could run callbacks that
           // call agent_->send
           fm->markCompleted(std::move(message));
-          {
-            std::lock_guard<std::mutex> lock{futureMutex_};
-            futures_.erase(id);
-            // look up the corresponding future by its time out and request ID,
-            // and remove it from the timeouts map
-            auto& futuresAtTime = futureTimeouts_[futureStartTime];
-            futuresAtTime.erase(
-                std::find(futuresAtTime.begin(), futuresAtTime.end(), id));
-            if (futuresAtTime.size() == 0) {
-              // remove the key from futureTimeouts_
-              futureTimeouts_.erase(futureStartTime);
-            }
-          }
           futureCV_.notify_all();
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
@@ -423,15 +421,25 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  while (true) {
+  while (rpcRunning_.load()) {
     // rank, tensor size, message type
-    std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
-    pg_->recvAnysource(preamble, pg_->getRank())->wait();
+    std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
+    auto work = pg_->recvAnysource(preamble, pg_->getRank());
+    {
+      std::lock_guard<std::mutex> guard(recvWorkMutex_);
+      recvWork_ = work;
+    }
+
+    if (!rpcRunning_.load() || !work->wait() /* aborted */) {
+      return;
+    }
+
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];
     auto size = preamble_items[1];
     MessageType type = MessageType(preamble_items[2]);
+    int64_t id = preamble_items[3];
 
     if (type == MessageType::SHUTDOWN) {
       // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
@@ -445,8 +453,104 @@ void ProcessGroupAgent::listenLoop() {
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
-    enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
+    enqueueRecv(
+        RecvWork(allWorkerInfo_[srcRank], type, id, std::move(tensors[0])));
   }
+}
+
+void ProcessGroupAgent::pollTimedOutRPCs() {
+  while (true) {
+    std::unique_lock<std::mutex> lock{futureMutex_};
+    if (!rpcRunning_.load()) {
+      return;
+    }
+    std::chrono::milliseconds sleepTime;
+    // Estimate amount of time the first future will time out in, and sleep
+    // for that long.
+    // if there are no futures or the first future's RPC timeout is set to 0
+    // (meaning no timeout), then sleep for a set "infinity" time.
+    if (futureTimeouts_.empty() ||
+        futureTimeouts_.begin()->first == INFINITE_TIMEOUT) {
+      sleepTime = INFINITE_TIMEOUT;
+    } else {
+      const auto minFutureExpirationTime = futureTimeouts_.begin()->first;
+      const auto remainingTime = getRPCRemainingTime(minFutureExpirationTime);
+      sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
+    }
+
+    if (sleepTime == INFINITE_TIMEOUT) {
+      futureTimeoutCV_.wait(lock);
+    } else {
+      futureTimeoutCV_.wait_for(lock, sleepTime);
+    }
+
+    if (!rpcRunning_.load()) {
+      return;
+    }
+
+    const auto timedOutFutures = processTimedOutFutures();
+
+    // Do not hold the lock while marking futures completed, as markCompleted()
+    // could invoke callbacks.
+    lock.unlock();
+    for (const auto& timedOutFuture : timedOutFutures) {
+      std::ostringstream ss;
+      ss << "RPC ran for more than " << timedOutFuture.timeout_.count()
+         << " milliseconds and timed out.";
+      const auto exceptionMsg = createExceptionResponse(
+          Message({}, {}, MessageType::EXCEPTION), ss.str());
+      timedOutFuture.future_->markCompleted(exceptionMsg);
+
+      const int dst = timedOutFuture.dstRank_;
+      recvCounts_.increment(dst);
+      futureCV_.notify_all();
+    }
+  }
+}
+
+const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
+    processTimedOutFutures() {
+  std::vector<FutureInfo> timedOutFutures;
+  for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
+       /* intentional no increment */) {
+    const auto& endTime = it->first;
+    const auto remainingTime = getRPCRemainingTime(endTime);
+
+    if (remainingTime.count() > 0) {
+      // Since the futureTimeouts_ map is ordered by timeout, we don't need
+      // to check the remaining futures.
+      break;
+    } else {
+      const std::vector<int64_t>& futureIDs = it->second;
+      for (const auto& futureID : futureIDs) {
+        auto futureIt = futures_.find(futureID);
+        TORCH_INTERNAL_ASSERT(
+            futureIt != futures_.end(),
+            "Race Condition - Expected future does not exist in map");
+        const auto futInfo = futureIt->second;
+        timedOutFutures.push_back(futInfo);
+        futures_.erase(futureID);
+      }
+      it = futureTimeouts_.erase(it);
+    }
+  }
+  return timedOutFutures;
+}
+
+const std::chrono::milliseconds ProcessGroupAgent::getRPCRemainingTime(
+    const std::chrono::milliseconds& rpcEndTime) const {
+  const auto remainingTime =
+      rpcEndTime -
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch());
+  return remainingTime;
+}
+
+const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
+    const FutureInfo& futureInfo) const {
+  return futureInfo.timeout_ == INFINITE_TIMEOUT
+      ? INFINITE_TIMEOUT
+      : futureInfo.startTime_ + futureInfo.timeout_;
 }
 
 } // namespace rpc
