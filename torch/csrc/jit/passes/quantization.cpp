@@ -353,7 +353,7 @@ void InsertObserversHelper::insertObserverFor(
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
-  graph_observer_map_[g].push_back({observer_name, observer});
+  graph_observer_map_[g].push_back(std::make_tuple(observer_name, observer));
 
   // Get handle of observer module
   Node* observer_instance =
