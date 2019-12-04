@@ -713,6 +713,10 @@
   variants: method
   supports_named_tensor: True
 
+- func: get_memory_format(Tensor self) -> MemoryFormat
+  variants: method
+  supports_named_tensor: True
+
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
 
 - func: convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor

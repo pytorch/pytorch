@@ -23,3 +23,5 @@ inline bool THPMemoryFormat_Check(PyObject *obj) {
 PyObject * THPMemoryFormat_New(at::MemoryFormat memory_format, const std::string& name);
 
 void THPMemoryFormat_init(PyObject *module);
+
+PyObject* THPMemoryFormat_Get(at::MemoryFormat memory_format);

@@ -126,6 +126,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
 
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  tensor.unsafeGetTensorImpl()->set_channels_last_tag(memory_format == MemoryFormat::ChannelsLast);
   return tensor;
 }
 
@@ -257,8 +258,11 @@ Tensor empty_like(
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options);
+      // Preserve tag
+      result.unsafeGetTensorImpl()->set_channels_last_tag(self.unsafeGetTensorImpl()->is_channels_last_tag());
     } else {
       result = at::empty(self.sizes(), options, self.suggest_memory_format());
+      result.unsafeGetTensorImpl()->set_channels_last_tag(self.unsafeGetTensorImpl()->is_channels_last_tag());
     }
   } else {
     result = at::empty(self.sizes(), options, memory_format);
@@ -961,6 +965,10 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+MemoryFormat get_memory_format(const Tensor& self) {
+  return self.suggest_memory_format();
+}
+
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
@@ -969,6 +977,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
       // Copy all strides
       auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
       self.copy_(src);
+      self.unsafeGetTensorImpl()->set_channels_last_tag(src.unsafeGetTensorImpl()->is_channels_last_tag());
       return self;
     } else {
       memory_format = src.suggest_memory_format();

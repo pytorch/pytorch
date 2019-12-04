@@ -8,6 +8,7 @@
 
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/variable.h>
@@ -63,6 +64,10 @@ inline PyObject* wrap(at::Tensor tensor) {
 
 inline PyObject* wrap(at::Scalar scalar) {
   return wrap(scalar_to_tensor(scalar));
+}
+
+inline PyObject* wrap(at::MemoryFormat memory_format) {
+  return THPMemoryFormat_Get(memory_format);
 }
 
 inline PyObject* wrap(at::QScheme qscheme) {

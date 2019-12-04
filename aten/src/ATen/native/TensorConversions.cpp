@@ -35,6 +35,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
       // Copy all strides
       auto r = at::empty_strided(self.sizes(), self.strides(), options);
       r.copy_(self);
+      r.unsafeGetTensorImpl()->set_channels_last_tag(self.unsafeGetTensorImpl()->is_channels_last_tag());
       return r;
     } else {
       memory_format = self.suggest_memory_format();

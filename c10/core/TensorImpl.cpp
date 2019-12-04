@@ -271,7 +271,7 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->type_set_ = src_impl->type_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
-  dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+  dest_impl->is_channels_last_tag_ = src_impl->is_channels_last_tag_;
   dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;

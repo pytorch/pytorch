@@ -67,6 +67,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
 
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  tensor.unsafeGetTensorImpl()->set_channels_last_tag(memory_format == MemoryFormat::ChannelsLast);
   return tensor;
 }
 
