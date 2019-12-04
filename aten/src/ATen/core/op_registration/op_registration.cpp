@@ -17,9 +17,9 @@ public:
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
       if (dispatch_key.has_value()) {
-        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.opHandle(), *dispatch_key, std::move(*kernel));
+        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, *dispatch_key, std::move(*kernel));
       } else {
-        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.opHandle(), std::move(*kernel));
+        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.second, std::move(*kernel));
       }
     }
   }
@@ -32,7 +32,7 @@ public:
   OperatorRegistrar& operator=(const OperatorRegistrar& rhs) = delete;
 
 private:
-  c10::SchemaRegistrationHandleRAII op_;
+  std::pair<RegistrationHandleRAII, OperatorHandle> op_;
   c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
 };
 

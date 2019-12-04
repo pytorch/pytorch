@@ -366,13 +366,13 @@ Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<
 }
 
 #ifdef BUILD_NAMEDTENSOR
-Tensor mean_cpu_gpu(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
-  return at::native::mean_cpu_gpu(self, dimnames_to_positions(self, dim), keepdim, dtype);
+Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
+  return at::mean(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& mean_out_cpu_gpu(Tensor& result, const Tensor& self, DimnameList dim,
+Tensor& mean_out(Tensor& result, const Tensor& self, DimnameList dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  return at::native::mean_out_cpu_gpu(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+  return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 #endif
 
@@ -555,8 +555,10 @@ inline Tensor & _any(Tensor & result, TensorIterator & iter) {
 
 Tensor any(const Tensor& self) {
   TORCH_CHECK(self.type().backend() == Backend::CPU ||
-    self.type().backend() == Backend::CUDA, "any only supports CPU AND CUDA "
-    "backend, got: ", toString(self.type().backend()));
+    self.type().backend() == Backend::CUDA ||
+    self.type().backend() == Backend::SparseCPU ||
+    self.type().backend() == Backend::SparseCUDA, "any only supports CPU, CUDA, "
+    "SparseCPU and SparseCUDA backend, got: ", toString(self.type().backend()));
   TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 and torch.bool dtypes");
 

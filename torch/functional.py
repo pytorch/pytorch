@@ -10,7 +10,6 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
-    'isfinite',
     'isinf',
     'lu',
     'lu_unpack',
@@ -151,7 +150,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     if unpack_pivots:
         LU_pivots_zero_idx = LU_pivots - 1
         if LU_data.dim() > 2:
-            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype).expand(shape[:-1] + (m,)).clone()
+            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype).expand(shape[:-1] + (m,)).clone(memory_format=torch.contiguous_format)
             for idx in product(*map(lambda x: list(range(x)), shape[:-2])):
                 final_order = list(range(m))
                 for k, j in enumerate(LU_pivots_zero_idx[idx]):
@@ -242,32 +241,6 @@ Examples::
     return torch._C._VariableFunctions.einsum(equation, operands)
 
 
-def isfinite(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
-
-    Arguments:
-        tensor (Tensor): A tensor to check
-
-    Returns:
-        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
-
-    Example::
-
-        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([True,  False,  True,  False,  False])
-    """
-    if not isinstance(tensor, torch.Tensor):
-        raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
-
-    # Support int input, nan and inf are concepts in floating point numbers.
-    # Numpy uses type 'Object' when the int overflows long, but we don't
-    # have a similar concept. It's safe to assume any created LongTensor doesn't
-    # overflow and it's finite.
-    if not tensor.is_floating_point():
-        return torch.ones_like(tensor, dtype=torch.bool)
-    return (tensor == tensor) & (tensor.abs() != inf)
-
-
 def isinf(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
 
@@ -285,7 +258,7 @@ def isinf(tensor):
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
     if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
-        return torch.zeros_like(tensor, dtype=torch.bool)
+        return torch.zeros_like(tensor, dtype=torch.bool, memory_format=torch.legacy_contiguous_format)
     return tensor.abs() == inf
 
 
@@ -425,6 +398,14 @@ del torch.unique_dim
 
 def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     r"""Returns the unique elements of the input tensor.
+
+    .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
+        this function also eliminates non-consecutive duplicate values.
+
+    .. note:: Currently in the CUDA implementation and the CPU implementation when dim is specified,
+        `torch.unique` always sort the tensor at the beginning regardless of the `sort` argument.
+        Sorting could be slow, so if your input tensor is already sorted, it is recommended to use
+        :func:`torch.unique_consecutive` which avoids the sorting.
 
     Arguments:
         input (Tensor): the input tensor

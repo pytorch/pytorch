@@ -22,7 +22,8 @@ from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
-                                     FunctionEvent, record_function, emit_nvtx)
+                                     FunctionEvent, FunctionEventAvg,
+                                     record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
@@ -2571,6 +2572,23 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_function_event_avg(self):
+        avg = FunctionEventAvg()
+        avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
+        avg.add(FunctionEvent(id=1, name="foo", thread=0, cpu_start=20, cpu_end=30))
+        avg.add(avg)
+        self.assertEqual(avg.key, "foo")
+
+        # aggregate stats
+        self.assertEqual(avg.count, 4)
+        self.assertEqual(avg.cpu_time_total, 30)
+        self.assertEqual(avg.self_cpu_time_total, 30)
+        self.assertEqual(avg.cuda_time_total, 0)
+
+        # average stats
+        self.assertEqual(avg.cpu_time, 7.5)
+        self.assertEqual(avg.cuda_time_total, 0)
+
     def test_profiler_shapes(self):
         print("")
         layer1 = torch.nn.Linear(20, 30)
@@ -2593,6 +2611,18 @@ class TestAutograd(TestCase):
         )
         print(prof.table())
         print(prof.key_averages(group_by_input_shape=True).table())
+
+    def test_profiler_no_cuda(self):
+        print("")
+        layer = torch.nn.Linear(20, 30)
+        x = torch.randn(128, 20)
+        with profile(use_cuda=False) as prof:
+            layer(x)
+
+        prof_str = str(prof)
+        print(prof_str)
+        self.assertTrue('cpu' in prof_str.lower())
+        self.assertTrue('cuda' not in prof_str.lower())
 
     def test_profiler_aggregation_lstm(self):
         print("")
@@ -3348,7 +3378,7 @@ def gradgradcheck_method_precision_override(test_name):
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, nondet_tol=1e-10))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
