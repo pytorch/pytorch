@@ -631,7 +631,7 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g)
   // are added after the existing modules, we'll have complexity of
   // O(N) where N is number of observer moduels with this optimization
   if (observer_modules_to_remove_.count(g)) {
-    auto observers = observer_modules_to_remove_.at(g);
+    const auto& observers = observer_modules_to_remove_.at(g);
     for (int64_t i = observers.size() - 1; i >= 0; --i) {
       auto observer_name = observers[i];
       module._ivalue()->unsafeRemoveAttr(observer_name);
@@ -652,7 +652,6 @@ void InsertQuantDeQuantHelper::quantizeTensors(Graph* g) {
     auto scalar_type = std::get<1>(tp);
     insertQuantDeQuantCall(v, qparams, scalar_type);
   }
-  // no need to clear the vector or map
 }
 
 void checkGetQParamsResult(const IValue& qparams) {
@@ -876,10 +875,6 @@ script::Module InsertQuantDeQuant(
   script::Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
   h.run(module, method_name);
-
-  // NOTE: Remove observer module does not work right now, we'll return
-  // the module with observer modules as a temporary workaround
-  // TODO: remove observer modules after we have a remove_module API
   return module;
 }
 
