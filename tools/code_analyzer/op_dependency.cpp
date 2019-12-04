@@ -154,9 +154,9 @@ typedef std::unordered_map<std::string, std::set<std::string>> GRAPH;
 typedef std::unordered_map<Value*, Value*> VALUE_MAP;
 typedef std::unordered_set<Value*> VALUE_SET;
 
-// SRC -> Inverse "tree" from all reachable destination back to SRC, e.g.:
-// (DEST-1 -> PREV_11, PREV_12 -> PREV_13, ..., PREV_1n-> SRC)
-// (DEST-2 -> PREV_21, PREV_21 -> ..., ... -> SRC)
+// SRC -> Inverse "tree" from all reachable destinations back to SRC, e.g.:
+// (DEST-1 -> PREV_11, PREV_11 -> PREV_12, ..., PREV_1n -> SRC)
+// (DEST-2 -> PREV_21, PREV_21 -> PREV_22, ..., PREV_2n -> SRC)
 typedef std::unordered_map<std::string,
                            std::unordered_map<std::string, std::string>> PATH;
 
