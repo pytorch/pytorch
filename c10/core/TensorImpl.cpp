@@ -84,9 +84,9 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    if (size(d) != 1) {
-      if (stride(d) == z) {
-        z *= size(d);
+    if (sizes_[d] != 1) {
+      if (strides_[d] == z) {
+        z *= sizes_[d];
       } else {
         is_contiguous = false;
         break;
@@ -97,12 +97,12 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 bool TensorImpl::compute_channels_last_contiguous() const {
-  if (dim() == 4) {
+  if (sizes_.size() == 4) {
     int64_t expected = 1;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) == expected) {
-          expected *= size(d);
+      if (sizes_[d] != 1) {
+        if (strides_[d] == expected) {
+          expected *= sizes_[d];
         } else {
           return false;
         }
@@ -114,20 +114,19 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
-  if (dim() == 4) {
+  if (sizes_.size() == 4) {
     int64_t min = 0;
     // special case for trivial C dimension. default to NCHW.
     if (stride(1) == 0) {
       return false;
     }
     for (auto& d : {1, 3, 2, 0}) {
-      if (stride(d) < min) {
-        return false;
-      }
-      // special case for N111, so we have NCHW as default layout;
-      // There's no way to distinguish NHWC and NCHW layout here: issue #24090
-      if (d==0 && min==1) {
-        return false;
+      if (sizes_[d] != 1) {
+        if (strides_[d] > min) {
+          min = strides_[d];
+        } else {
+          return false;
+        }
       }
       min = stride(d);
     }
@@ -138,7 +137,7 @@ bool TensorImpl::compute_strides_like_channels_last() const {
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
-    return size(0) < 2 || stride(0) == 1;
+    return sizes_[0] < 2 || strides_[0] == 1;
   }
   SmallVector<int64_t,5> perm;
   perm.resize(dim());
