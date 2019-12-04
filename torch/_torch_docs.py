@@ -2000,9 +2000,9 @@ Example::
 
     >>> a = torch.tensor([4.0, 3.0])
     >>> b = torch.tensor([2.0, 2.0])
-    >>> a.floor_divide(b)
+    >>> torch.floor_divide(a, b)
     tensor([2.0, 1.0])
-    >>> a.floor_divide(1.4)
+    >>> torch.floor_divide(a, 1.4)
     tensor([2.0, 2.0])
 """.format(**common_args))
 
