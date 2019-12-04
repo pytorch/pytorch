@@ -62,6 +62,7 @@ class TORCH_API OptimizerCloneableOptions : public OptimizerOptions {
   }
 };
 
+/// Stores parameters in the param_group and stores a pointer to the OptimizerOptions
 class TORCH_API OptimizerParamGroup {
  public:
   // NOTE: In order to store `OptimizerParamGroup` in a `std::vector`, it has to be copy-constructible.

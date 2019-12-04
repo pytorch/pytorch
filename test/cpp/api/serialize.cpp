@@ -324,20 +324,20 @@ TEST(SerializeTest, Optim_Adagrad) {
 
   auto optim_tempfile = c10::make_tempfile();
   torch::save(optim3, optim_tempfile.name);
-  // torch::load(optim3_2, optim_tempfile.name);
-  // step(optim3_2, model3);
-  //
-  // param1 = model1->named_parameters();
-  // param2 = model2->named_parameters();
-  // param3 = model3->named_parameters();
-  // for (const auto& p : param1) {
-  //   const auto& name = p.key();
-  //   // Model 1 and 3 should be the same
-  //   ASSERT_TRUE(
-  //       param1[name].norm().item<float>() == param3[name].norm().item<float>());
-  //   ASSERT_TRUE(
-  //       param1[name].norm().item<float>() != param2[name].norm().item<float>());
-  // }
+  torch::load(optim3_2, optim_tempfile.name);
+  step(optim3_2, model3);
+
+  param1 = model1->named_parameters();
+  param2 = model2->named_parameters();
+  param3 = model3->named_parameters();
+  for (const auto& p : param1) {
+    const auto& name = p.key();
+    // Model 1 and 3 should be the same
+    ASSERT_TRUE(
+        param1[name].norm().item<float>() == param3[name].norm().item<float>());
+    ASSERT_TRUE(
+        param1[name].norm().item<float>() != param2[name].norm().item<float>());
+  }
 }
 TEST(SerializeTest, SerializationShouldPreserveIteration_SGD) {
   std::vector<torch::Tensor> parameters = {
