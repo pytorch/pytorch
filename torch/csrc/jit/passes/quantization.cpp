@@ -178,6 +178,12 @@ class InsertObserversHelper {
   int uid_ = 0;
   // Set of observer forward call nodes
   std::unordered_set<Node*> observer_nodes_;
+  // Map from graph to a vector of observer name and observer modules we
+  // want to add to the module instance that has the graph
+  std::unordered_map<
+      Graph*,
+      std::vector<std::tuple<std::string, script::Module>>>
+      graph_observer_map_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -345,12 +351,13 @@ void InsertObserversHelper::insertObserverFor(
     observer_module = std::get<0>(qconfig);
   }
 
-  script::Module observer = observer_module.clone();
+  script::Module observer = observer_module.clone_instance();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
+  graph_observer_map_[g].push_back(std::make_tuple(observer_name, observer));
 
   // Get handle of observer module
   Node* observer_instance =
@@ -421,6 +428,17 @@ void InsertObserversHelper::insertObservers(
 
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+
+  if (graph_observer_map_.count(graph.get())) {
+    // instance clone of observer module and setAttr
+    for (const auto& observer_attrs : graph_observer_map_.at(graph.get())) {
+      const auto& name = std::get<0>(observer_attrs);
+      const auto& observer = std::get<1>(observer_attrs);
+      module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+    }
+    return;
+  }
+
   ConstantPropagation(graph);
   // must do constant propagation first before replacement
   replaceConvolutionWithConv2d(graph);
@@ -549,9 +567,9 @@ c10::optional<std::string> findObserverName(Value* v) {
   return c10::nullopt;
 }
 
-class QuantizeHelper {
+class InsertQuantDeQuantHelper {
  public:
-  QuantizeHelper(script::Module& m) : module_(m) {}
+  InsertQuantDeQuantHelper(script::Module& m) : module_(m) {}
   // quantization parameters and scalar type
   std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
@@ -568,7 +586,7 @@ class QuantizeHelper {
   std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
 };
 
-void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
+void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
@@ -592,7 +610,7 @@ void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   values_to_qparams_.insert({new_value, getQParams(v)});
 }
 
-void QuantizeHelper::removeObservers() {
+void InsertQuantDeQuantHelper::removeObservers() {
   for (auto& n : nodes_to_destroy_) {
     n->removeAllInputs();
   }
@@ -610,7 +628,7 @@ void QuantizeHelper::removeObservers() {
   }
 }
 
-void QuantizeHelper::quantizeTensors() {
+void InsertQuantDeQuantHelper::quantizeTensors() {
   for (auto& v : values_to_quantize_) {
     TORCH_INTERNAL_ASSERT(values_to_qparams_.count(v));
     auto tp = values_to_qparams_[v];
@@ -653,7 +671,7 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
+std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -671,7 +689,7 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   return std::make_tuple(qparams, scalar_type);
 }
 
-c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
+c10::optional<script::Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
     Value* child_instance) {
   TORCH_INTERNAL_ASSERT(
       child_instance->node()->kind() == prim::GetAttr,
@@ -700,7 +718,7 @@ void InsertQuantDeQuantImpl(
     }
   }
 
-  QuantizeHelper qh(module);
+  InsertQuantDeQuantHelper qh(module);
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
