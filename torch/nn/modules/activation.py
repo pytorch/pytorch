@@ -597,7 +597,7 @@ class Softplus(Module):
     to constrain the output of a machine to always be positive.
 
     For numerical stability the implementation reverts to the linear function
-    for inputs above a certain value.
+    for inputs above :attr:`threshold` (default ``20``).
 
     Args:
         beta: the :math:`\beta` value for the Softplus formulation. Default: 1
