@@ -89,7 +89,7 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (node->kind().is_aten() && !is_aten_enabled) {
+      if (node->kind().is_aten() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -337,10 +337,12 @@ void EncoderBase::EncodeBlock(
     }
     if (!node->kind().is_onnx()) {
       std::string domain;
-      if (node->kind().is_aten() || node->kind().is_caffe2())
+      if (node->kind().is_aten() || node->kind().is_caffe2()) {
         domain = node->kind().domainString();
-      else   //  Custom namespace and domain
+      }
+      else {  //  Custom namespace and domain
         domain = node->kind().ns().toUnqualString();
+      }
       domains_.insert(domain);
       p_n->set_domain(domain);
     }
@@ -517,7 +519,7 @@ GraphEncoder::GraphEncoder(
   EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes, 
               keep_initializers_as_inputs, add_node_names);
 
-  for (auto domain : domains_) {
+  for (const std::string& domain : domains_) {
     auto* opset = model_proto_.add_opset_import();
     opset->set_domain(domain);
     //  Check if domain version is registered. If not, set to version 1
