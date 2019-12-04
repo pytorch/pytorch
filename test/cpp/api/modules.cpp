@@ -3171,8 +3171,8 @@ namespace detail {
         key_padding_mask = seq_mask.repeat({batch_sz, seq_len}) == 1;
         key_padding_mask_tensor = key_padding_mask;
       }
-      const auto decoder_state = torch::rand({batch_sz, d_model}, torch::kFloat64);
-      const torch::Tensor K = torch::rand(dims, torch::kFloat64);
+      const auto decoder_state = torch::rand({batch_sz, d_model});
+      const torch::Tensor K = torch::rand(dims);
       const torch::Tensor V = K;
       const torch::Tensor Q = decoder_state.clone().resize_({batch_sz, 1, d_model});
       auto attn_mask = torch::randint(0, 2, {1, seq_len});
@@ -3342,38 +3342,71 @@ TEST_F(ModulesTest, MultiheadAttention) {
     /*same_embed_dim=*/false
   );
 
-  // // test_multihead_attn_add_zero_attn
-  // _multihead_attn_test_helper(
-  //   /*add_key_padding_mask=*/false,
-  //   /*add_bias_kv=*/false,
-  //   /*add_zero_attn=*/true,
-  //   /*saved_kv=*/false,
-  //   /*same_embed_dim=*/false
-  // );
+  // test_multihead_attn_add_zero_attn
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/false,
+    /*add_bias_kv=*/false,
+    /*add_zero_attn=*/true,
+    /*saved_kv=*/false,
+    /*same_embed_dim=*/false
+  );
 
-  // // test_multihead_attn_no_masking():
-  // _multihead_attn_test_helper();
+  // test_multihead_attn_no_masking():
+  _multihead_attn_test_helper();
 
-  // // test_multihead_attn_key_padding_mask
-  // _multihead_attn_test_helper(add_key_padding_mask=True);
+  // test_multihead_attn_key_padding_mask
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/true,
+    /*add_bias_kv=*/false,
+    /*add_zero_attn=*/false,
+    /*saved_kv=*/false,
+    /*same_embed_dim=*/false
+  );
 
-  // // test_multihead_attn_saved_kv
-  // _multihead_attn_test_helper(saved_kv=True);
+  // test_multihead_attn_saved_kv
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/false,
+    /*add_bias_kv=*/false,
+    /*add_zero_attn=*/false,
+    /*saved_kv=*/true,
+    /*same_embed_dim=*/false
+  );
 
-  // // test_multihead_attn_add_bias_kv_zero_attn
-  // _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
-  //                             add_zero_attn=True)
+  // test_multihead_attn_add_bias_kv_zero_attn
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/true,
+    /*add_bias_kv=*/true,
+    /*add_zero_attn=*/true,
+    /*saved_kv=*/false,
+    /*same_embed_dim=*/false
+  );
 
-  // // test_multihead_attn_all_arguments1
-  // _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True, saved_kv=True)
+  // test_multihead_attn_all_arguments1
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/true,
+    /*add_bias_kv=*/false,
+    /*add_zero_attn=*/true,
+    /*saved_kv=*/true,
+    /*same_embed_dim=*/false
+  );
 
-  // // test_multihead_attn_all_arguments2
-  // _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
-  //                             add_zero_attn=True, saved_kv=True)
+  // test_multihead_attn_all_arguments2
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/true,
+    /*add_bias_kv=*/true,
+    /*add_zero_attn=*/true,
+    /*saved_kv=*/true,
+    /*same_embed_dim=*/false
+  );
 
-  // // test_multihead_attn_all_arguments3
-  // _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
-  //                             saved_kv=True, same_embed_dim=True)
+  // test_multihead_attn_all_arguments3
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/true,
+    /*add_bias_kv=*/false,
+    /*add_zero_attn=*/true,
+    /*saved_kv=*/true,
+    /*same_embed_dim=*/true
+  );
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {

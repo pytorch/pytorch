@@ -581,7 +581,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   TORCH_CHECK(attn_output_weights.sizes() == IntArrayRef({bsz * num_heads, tgt_len, src_len}));
   if (attn_mask_.defined()) {
     attn_mask_ = attn_mask_.unsqueeze(0);
-    attn_output_weights += attn_mask;
+    attn_output_weights += attn_mask_;
   }
   if (key_padding_mask_.defined()) {
     attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
