@@ -86,7 +86,6 @@ import math
 import numpy as np
 import io
 import os
-import gc
 import pickle
 import pickletools
 import random
@@ -4878,18 +4877,15 @@ a")
         def fun():
             return 3 + 4
 
+        num_ref_counts = sys.getrefcount(fun)
+
         # caching doesn't get tripped up by same qualname
         fun_compiled_2 = torch.jit.script(fun)
         self.assertIsNot(fun_compiled, fun_compiled_2)
         self.assertEqual(fun_compiled_2(), 7)
 
-        # testing weak key ref in caching layer
-        num_cached_elements = len(torch.jit._jit_caching_layer)
-        del fun
-        # make sure gc is run so that test works deterministically
-        gc.collect()
-
-        self.assertEqual(num_cached_elements - 1, len(torch.jit._jit_caching_layer))
+        # caching doesnt increase refcounts to function (holds weak reference)
+        self.assertTrue(sys.getrefcount(fun), num_ref_counts)
 
     def test_string_ops(self):
         def foo():
@@ -7646,8 +7642,8 @@ a")
                 ret += 1
             return ret, int(tensor)
 
-        self.checkScript(test, (1,))
-        self.checkScript(test, (2,))
+        self.assertEqual(torch.jit.script(test)(1), test(1))
+        self.assertEqual(torch.jit.script(test)(2), test(2))
         no_bool_loop_outputs(torch.jit.script(test).graph)
 
         def foo():
@@ -13003,7 +12999,8 @@ a")
         self.assertTrue(num_outputs == {2, 4})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
-        tuple_comp = torch.jit.script(tuple_slice)
+        # caching and extra lower phase messes up compilation
+        tuple_comp = torch.jit.script(tuple_slice.copy())
         self.assertEqual(tuple_comp(torch.tensor(1)), (2, 3))
 
         @torch.jit.script
