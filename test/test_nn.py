@@ -3300,9 +3300,9 @@ class TestNN(NNTestCase):
                 saved_v_tensor = None
                 if saved_kv:
                     saved_k = np.random.rand(batch_sz * nheads, seq_len, d_head)
-                    saved_k_tensor = torch.from_numpy(saved_k)
+                    saved_k_tensor = torch.from_numpy(saved_k).to(torch.get_default_dtype())
                     saved_v = np.random.rand(batch_sz * nheads, seq_len, d_head)
-                    saved_v_tensor = torch.from_numpy(saved_v)
+                    saved_v_tensor = torch.from_numpy(saved_v).to(torch.get_default_dtype())
 
                 key_padding_mask = None
                 key_padding_mask_tensor = None
@@ -3311,8 +3311,8 @@ class TestNN(NNTestCase):
                     key_padding_mask = (np.repeat(seq_mask, batch_sz, axis=0) == 1)
                     key_padding_mask_tensor = torch.from_numpy(key_padding_mask)
 
-                decoder_state = np.random.rand(batch_sz, d_model).astype(np.float64)
-                K = np.random.rand(*dims).astype(np.float64)
+                decoder_state = np.random.rand(batch_sz, d_model)
+                K = np.random.rand(*dims)
                 V = K
                 Q = np.expand_dims(decoder_state, 1)
                 attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
@@ -3321,8 +3321,8 @@ class TestNN(NNTestCase):
                 attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
                 attn_mask_tensor = attn_mask_tensor.double()
 
-                decoder_state_tensor = torch.from_numpy(decoder_state).double()
-                source_hid_tensor = torch.from_numpy(K).double().transpose(0, 1)
+                decoder_state_tensor = torch.from_numpy(decoder_state).to(torch.get_default_dtype())
+                source_hid_tensor = torch.from_numpy(K).to(torch.get_default_dtype()).transpose(0, 1)
 
                 multihead_attn_module = MultiheadAttention(d_model, nheads,
                                                            add_bias_kv=add_bias_kv,
@@ -6229,6 +6229,38 @@ class TestNN(NNTestCase):
     def test_pdist_cuda_gradgrad_unimplemented(self):
         inp = torch.randn(4, 5, device='cuda', requires_grad=True)
         gradgradcheck(F.pdist, (inp,))
+
+    def test_cosine_embedding_loss_with_diff_type(self):
+        for device in device_():
+            input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
+            input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+            target = torch.tensor([1, -1], dtype=torch.int, device=device)
+            expected = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+            for dt1 in torch.testing.get_all_math_dtypes(device):
+                for dt2 in torch.testing.get_all_math_dtypes(device):
+                    for dt3 in torch.testing.get_all_math_dtypes(device):
+                        # dt3 is used as dtype for target = [1, -1], so let's skip unsigned type
+                        if dt3 == torch.uint8:
+                            continue
+                        input1 = input1.to(dt1)
+                        input2 = input2.to(dt2)
+                        target = target.to(dt3)
+                        result = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+                        self.assertEqual(result.item(), expected.item(), 0.001)
+
+    def test_kl_div_with_diff_type(self):
+        for device in device_():
+            input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+            target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
+            expected = torch.nn.functional.kl_div(input, target)
+            for input_dtype in torch.testing.get_all_math_dtypes(device):
+                for target_dtype in [torch.float32, torch.float64, torch.float16]:
+                    if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
+                        continue
+                    input = input.to(input_dtype)
+                    target = target.to(target_dtype)
+                    result = torch.nn.functional.kl_div(input, target)
+                    self.assertEqual(result.item(), expected.item(), 0.001)
 
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)
