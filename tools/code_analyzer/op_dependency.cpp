@@ -220,7 +220,7 @@ public:
     if (OutputFormat == OutputFormatType::Dot) {
       printAsDot(std::cout, opSchemaStrs, result);
     } else if (OutputFormat == OutputFormatType::YAML) {
-      printAsYAML(std::cout, opSchemaStrs, result, path);
+      printAsYAML(std::cout, opSchemaStrs, result, path.get());
     }
 
     return false;
@@ -327,15 +327,15 @@ private:
   static void scanConnectedNodes(
       Value* src,
       const VALUE_SET& blocked,
-      const std::function<void(Value*)>& CB, VALUE_MAP* debugLink) {
+      const std::function<void(Value*)>& CB, VALUE_MAP* debugPath) {
     std::deque<Value*> worklist;
     SmallPtrSet<Value*, 16> visited;
 
     auto insert = [&](Value* cur, Value* parent) -> void {
       if (!blocked.count(cur) && visited.insert(cur).second) {
         worklist.push_back(cur);
-        if (debugLink) {
-          (*debugLink).emplace(cur, parent);
+        if (debugPath) {
+          (*debugPath).emplace(cur, parent);
         }
       }
     };
@@ -400,14 +400,18 @@ private:
   // to remove #2 from the graph while maintaining the transitive dependency
   // between #1. #1 is called "key nodes" in this method.
   static void simplifyGraph(
-      GRAPH& input, SET& keyNodes, GRAPH* output, PATH* path) {
+      const GRAPH& input, SET& keyNodes, GRAPH* output, PATH* path) {
     // Starting from every key node, use BFS to traverse all nodes that are
     // transitively reachable from the node in the sparse graph.
     for (auto& key : keyNodes) {
       std::deque<std::string> queue;
       SET visited;  // has some runtime issue with std::unordered_set
       auto expand = [&](const std::string& curNode) -> void {
-        for (auto& next : input[curNode]) {
+        auto it = input.find(curNode);
+        if (it == input.end()) {
+          return;
+        }
+        for (const auto& next : it->second) {
           if (!visited.insert(next).second) {
             continue;
           }
@@ -440,7 +444,7 @@ private:
   static void scanOpSchemaStrAndFunction(
       Value* src, const VALUE_SET& blocked,
       SET* visitedOps, SET* visitedFunctions) {
-    std::shared_ptr<VALUE_MAP> debugLink =
+    std::shared_ptr<VALUE_MAP> debugPath =
         (Verbose > 2 ? std::make_shared<VALUE_MAP>() : nullptr);
     auto callback = [&](Value* V) -> void {
       if (auto schemaStr = extractOpSchema(V)) {
@@ -449,7 +453,7 @@ private:
         }
         if (Verbose > 1) {
           std::cerr << "[DEBUG][OP_SCHEMA] " << *schemaStr << std::endl;
-          printDebugPath(debugLink.get(), src, V);
+          printDebugPath(debugPath.get(), src, V);
         }
       } else if (auto F = dyn_cast<Function>(V)) {
         if (F->isIntrinsic()) {
@@ -460,11 +464,11 @@ private:
         }
         if (Verbose > 1) {
           std::cerr << "[DEBUG][FUNC] " << demangle(F->getName()) << std::endl;
-          printDebugPath(debugLink.get(), src, V);
+          printDebugPath(debugPath.get(), src, V);
         }
       }
     };
-    scanConnectedNodes(src, blocked, callback, debugLink.get());
+    scanConnectedNodes(src, blocked, callback, debugPath.get());
   }
 
   // This method looks for op schema strings and function pointers that connect
@@ -656,12 +660,13 @@ private:
         pos == std::string::npos ? schemaStr : schemaStr.substr(0, pos));
   }
 
-  static void printDebugPath(VALUE_MAP* debugLink, Value* src, Value* dest) {
-    if (!debugLink) {
+  static void printDebugPath(
+      const VALUE_MAP* debugPath, Value* src, Value* dest) {
+    if (!debugPath) {
       return;
     }
     int depth = 0;
-    for (auto N = dest; ; N = (*debugLink)[N]) {
+    for (auto N = dest; ; N = debugPath->at(N)) {
       std::cerr << "[DEBUG][PATH][" << ++depth << "]";
       printDebugValue(N);
       std::cerr << std::endl;
@@ -685,12 +690,17 @@ private:
     }
   }
 
-  static void printAsDot(std::ostream& out, SET& keys, GRAPH& graph) {
+  static void printAsDot(
+      std::ostream& out, const SET& keys, const GRAPH& graph) {
     out << "digraph {" << std::endl;
     out << "layout=\"circo\";" << std::endl;
     for (const auto& K : keys) {
       auto key = demangle(K);
-      for (const auto& value : graph[K]) {
+      auto it = graph.find(K);
+      if (it == graph.end()) {
+        continue;
+      }
+      for (const auto& value : it->second) {
         out << '"' << key << '"'
             << " -> "
             << '"' << demangle(value) << "\";"
@@ -700,25 +710,26 @@ private:
     out << "}" << std::endl;
   }
 
-  static void printAsYAML(std::ostream& out, SET& keys, GRAPH& graph,
-      std::shared_ptr<PATH> path) {
+  static void printAsYAML(
+      std::ostream& out, const SET& keys, const GRAPH& graph,
+      const PATH* path) {
     for (const auto& K : keys) {
       out << "- name: " << demangle(K) << std::endl;
-      auto& values = graph[K];
-      if (values.empty()) {
+      auto it = graph.find(K);
+      if (it == graph.end() || it->second.empty()) {
         continue;
       }
       out << "  depends:" << std::endl;
-      for (const auto& value : values) {
+      for (const auto& value : it->second) {
         out << "  - name: " << demangle(value) << std::endl;
         if (path) {
           std::vector<std::string> rpath;
           for (std::string prev = value;
                rpath.push_back(prev), prev != K;
-               prev = (*path)[K][prev]);
+               prev = path->at(K).at(prev));
           out << "    path:" << std::endl;
-          for (auto it = rpath.rbegin(); it != rpath.rend(); ++it) {
-            out << "    - " << demangle(*it) << std::endl;
+          for (auto pit = rpath.rbegin(); pit != rpath.rend(); ++pit) {
+            out << "    - " << demangle(*pit) << std::endl;
           }
         }
       }
