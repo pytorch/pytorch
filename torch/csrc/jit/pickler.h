@@ -31,7 +31,8 @@ enum class PickleOpCode : char {
   STRING = 'S',
   BINSTRING = 'T',
   SHORT_BINSTRING = 'U',
-  UNICODE = 'V',
+  // NB: Avoid using UNICODE as it is a macro in the Windows API
+  UNICODE_ = 'V',
   BINUNICODE = 'X',
   APPEND = 'a',
   BUILD = 'b',
@@ -163,6 +164,7 @@ class Pickler {
   void pushLiteralTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
+  void pushDevice(const IValue& ivalue);
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);
@@ -252,6 +254,7 @@ class Pickler {
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
+  std::unordered_map<std::string, uint32_t> memoized_devices_map_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

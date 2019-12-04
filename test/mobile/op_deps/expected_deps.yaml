@@ -1,0 +1,31 @@
+- name: aten::AA
+  depends:
+  - name: aten::AA
+  - name: aten::BB
+- name: aten::BB
+  depends:
+  - name: aten::AA
+  - name: aten::BB
+- name: aten::CC
+  depends:
+  - name: aten::AA
+  - name: aten::BB
+- name: aten::DD
+  depends:
+  - name: aten::AA
+  - name: aten::BB
+  - name: aten::EE
+  - name: aten::FF
+- name: aten::EE
+  depends:
+  - name: aten::EE
+  - name: aten::FF
+- name: aten::FF
+  depends:
+  - name: aten::EE
+  - name: aten::FF
+- name: aten::GG
+  depends:
+  - name: aten::EE
+  - name: aten::FF
+- name: aten::HH

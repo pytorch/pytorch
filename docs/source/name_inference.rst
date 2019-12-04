@@ -69,8 +69,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.cosh_`,None
    :meth:`Tensor.cpu`,:ref:`keeps_input_names-doc`
    :meth:`Tensor.cuda`,:ref:`keeps_input_names-doc`
-   ":meth:`Tensor.cumprod`, :func:`torch.cumprod`",:ref:`removes_dimensions-doc`
-   ":meth:`Tensor.cumsum`, :func:`torch.cumsum`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.cumprod`, :func:`torch.cumprod`",:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.cumsum`, :func:`torch.cumsum`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.data_ptr`,None
    ":meth:`Tensor.detach`, :func:`torch.detach`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.detach_`,None
@@ -389,7 +389,7 @@ For ``torch.mm(tensor, other)``:
     ('N', 'out')
 
 Inherently, a matrix multiplication performs a dot product over two dimensions,
-collapsing them. When two tensors are matrix-multipled, the contracted dimensions
+collapsing them. When two tensors are matrix-multiplied, the contracted dimensions
 disappear and do not show up in the output tensor.
 
 :func:`torch.mv`, :func:`torch.dot` work in a similar way: name inference does not
@@ -415,8 +415,8 @@ Examples::
 
     # Batch matrix multiply of matrices Tensor['C', 'D'] and Tensor['E', 'F'].
     # 'A', 'B' are batch dimensions.
-    >>> x = torch.randn(3, 3, 3, 3, names=('A', 'B', 'C', 'D))
-    >>> y = torch.randn(3, 3, 3, names=('B', 'E', 'F))
+    >>> x = torch.randn(3, 3, 3, 3, names=('A', 'B', 'C', 'D'))
+    >>> y = torch.randn(3, 3, 3, names=('B', 'E', 'F'))
     >>> torch.matmul(x, y).names
     ('A', 'B', 'C', 'F')
 
@@ -465,4 +465,3 @@ from name inference. For example,
     >>> x += y
     >>> x.names
     ('N', 'C')
-

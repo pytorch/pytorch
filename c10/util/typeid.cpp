@@ -13,10 +13,5 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
 }
 
 
-C10_EXPORT CollisionChecker& collisionChecker_() {
-  static CollisionChecker singleton;
-  return singleton;
-}
-
 } // namespace detail
 } // namespace caffe2
