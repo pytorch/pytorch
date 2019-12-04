@@ -412,6 +412,10 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     auto self_dim_size = self.size(dim);
     auto slice_size = selfSlice.numel();
 
+    if (slice_size == 0) {
+      return result;
+    }
+
     auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
