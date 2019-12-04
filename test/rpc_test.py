@@ -224,6 +224,15 @@ def heavy_rpc(tensor):
 def raise_func():
     raise ValueError("Expected error")
 
+global_rref = None
+
+def set_global_rref(rref):
+    global global_rref
+    global_rref = rref
+
+def clear_global_rref():
+    global global_rref
+    global_rref = None
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1115,6 +1124,59 @@ class RpcTest(RpcAgentTestFixture):
             rref2.__str__(),
             "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
         )
+
+    @dist_init
+    def test_rref_context_debug_info(self):
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
+        from torch.distributed.rpc import _get_debug_info
+        rref1 = RRef(self.rank)
+        info = _get_debug_info()
+        self.assertIn("num_owner_rrefs", info)
+        # RRef on local value is not added to context until shared across RPC
+        self.assertEqual("0", info["num_owner_rrefs"])
+
+        dst_rank = (self.rank + 1) % self.world_size
+        rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            set_global_rref,
+            args=(rref1,)
+        )
+        info = _get_debug_info()
+        self.assertIn("num_owner_rrefs", info)
+        self.assertEqual("1", info["num_owner_rrefs"])
+        rpc.rpc_sync("worker{}".format(dst_rank), clear_global_rref)
+
+
+        rref2 = rpc.remote(
+            "worker{}".format(dst_rank),
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )
+        rref3 = rpc.remote(
+            "worker{}".format(dst_rank),
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )
+        rref2.to_here()
+        rref3.to_here()
+
+        # Use a barrier to make sure that OwnerRRefs are created on this worker
+        # before checking debug info
+        dist.barrier()
+        info = _get_debug_info()
+        self.assertIn("num_owner_rrefs", info)
+        self.assertEqual("2", info["num_owner_rrefs"])
+
+        # Use another barrier to make sure that UserRRefs are only deleted after
+        # checking debug info
+        dist.barrier()
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
