@@ -5,6 +5,8 @@
 namespace c10 {
 namespace impl {
 
+C10_DEFINE_bool(disable_variable_dispatch, false, "This flag forcibly disables the Variable code paths from executing, which currently breaks profiling in the process.");
+
 namespace {
 
 /// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
@@ -23,12 +25,30 @@ static PODLocalTensorTypeSet raw_local_tensor_type_set;
 } // anonymous namespace
 
 LocalTensorTypeSet tls_local_tensor_type_set() {
+  // Hack until variable performance is fixed
+  if (FLAGS_disable_variable_dispatch) {
+    raw_local_tensor_type_set.set_excluded(
+      raw_local_tensor_type_set.excluded().add(
+        TensorTypeId::VariableTensorId));
+  }
   return raw_local_tensor_type_set;
 }
 
-// We could have also just snapshotted the entire state.  I'm not sure which is
-// better; but right now only the guard API is allowed so the two cases are
+// An RAII guard could snapshot and restore the entire state (entire TensorTypeSet) as
+// opposed to only snapshotting and restoring the state of its assigned TensorTypeId.
+// I'm not sure which is better.  If only the RAII API is used, the two choices are
 // not distinguishable.
+//
+// However, if the guard chooses to snapshot and restore the entire TensorTypeSet,
+// the interaction with the non-RAII API changes.  Consider this sequence of events:
+// - An RAII guard is declared for a particular TensorTypeId, but snapshots the entire
+//   current TensorTypeSet.
+// - A call to the non-RAII API changes the state for a different TensorTypeId.
+// - The RAII guard goes out of scope, restoring the entire TensorTypeSet it snapshotted
+//   (which restores the state for its own assigned TensorTypeId and wipes out the state
+//   for the other TensorTypeId set by the non-RAII API).
+
+// RAII API
 
 IncludeTensorTypeIdGuard::IncludeTensorTypeIdGuard(TensorTypeId x)
   : tls_(&raw_local_tensor_type_set)
@@ -57,6 +77,42 @@ ExcludeTensorTypeIdGuard::ExcludeTensorTypeIdGuard(TensorTypeId x)
 ExcludeTensorTypeIdGuard::~ExcludeTensorTypeIdGuard() {
   if (!prev_state_) {
     tls_->set_excluded(tls_->excluded().remove(id_));
+  }
+}
+
+// Non-RAII API
+// Please prefer using the RAII API. See declarations in LocalTensorTypeSet.h for details.
+
+bool tls_is_tensor_type_id_excluded(TensorTypeId x) {
+  return raw_local_tensor_type_set.excluded().has(x);
+}
+
+void tls_set_tensor_type_id_excluded(TensorTypeId x, bool desired_state) {
+  auto* tls = &raw_local_tensor_type_set;
+  bool current_state = tls->excluded().has(x);
+  if (desired_state != current_state) {
+    if (desired_state) {
+      tls->set_excluded(tls->excluded().add(x));
+    } else {
+      tls->set_excluded(tls->excluded().remove(x));
+    }
+  }
+}
+
+bool tls_is_tensor_type_id_included(TensorTypeId x) {
+  return raw_local_tensor_type_set.included().has(x);
+
+}
+
+void tls_set_tensor_type_id_included(TensorTypeId x, bool desired_state) {
+  auto* tls = &raw_local_tensor_type_set;
+  bool current_state = tls->included().has(x);
+  if (desired_state != current_state) {
+    if (desired_state) {
+      tls->set_included(tls->included().add(x));
+    } else {
+      tls->set_included(tls->included().remove(x));
+    }
   }
 }
 

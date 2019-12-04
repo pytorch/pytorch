@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 
 import time
 import json
-import benchmark_core
 import torch
 import cpp_extension # noqa
 
@@ -76,7 +75,7 @@ class TorchBenchmarkBase(object):
         @torch.jit.script
         def _jit_forward_graph(iters, place_holder):
             # type: (int, Tensor)
-            result = torch.jit.annotate(torch.Tensor, None)
+            result = torch.jit.annotate(torch.Tensor, place_holder)
             for _ in range(iters):
                 result = func(place_holder)
             return result
@@ -128,7 +127,7 @@ class PyTorchOperatorTestCase(object):
         self.framework = "PyTorch"
         self.time_series = []
 
-    def run_jit_forward(self, num_runs, print_per_iter=False):
+    def run_jit_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
         """ Run the forward path of an op with JIT mode
         """
         if self.op_bench._jit_forward is None:
@@ -148,18 +147,22 @@ class PyTorchOperatorTestCase(object):
                 }
             ))
 
-    def run_forward(self, num_runs, print_per_iter):
+    def run_forward(self, num_runs, print_per_iter, cuda_sync):
         """ Run the forward path of an op with eager mode
         """
         if print_per_iter:
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward()
+                if cuda_sync: 
+                    torch.cuda.synchronize(torch.cuda.current_device())
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward()
+            if cuda_sync: 
+                torch.cuda.synchronize(torch.cuda.current_device())
 
     def _output_mean(self):
         """ TODO (mingzhe): it is not necessary to sum up everything by myself,
@@ -179,6 +182,19 @@ class PyTorchOperatorTestCase(object):
             self.mean.backward(retain_graph=True)
 
 
-def register_pytorch_op_test_case(op_bench, test_config):
+def create_pytorch_op_test_case(op_bench, test_config):
+    """ This method is used to generate est. func_name is a global unique
+    string. For PyTorch add operator with M=8, N=2, K=1, tag = long, here
+    are the values for the members in test_case:
+    op.module_name: add
+    framework: PyTorch
+    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
+        tag='long', run_backward=False)
+    func_name: addPyTorchTestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
+                                    tag='long', run_backward=False)
+    """
     test_case = PyTorchOperatorTestCase(op_bench, test_config)
-    benchmark_core._register_test(test_case)
+    test_config = test_case.test_config
+    op = test_case.op_bench
+    func_name = "{}{}{}".format(op.module_name(), test_case.framework, str(test_config))
+    return (func_name, test_case)
