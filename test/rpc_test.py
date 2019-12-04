@@ -1144,9 +1144,8 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(2, 2), 1)
         )
 
-        if ignore_leak:
-            import torch.distributed.rpc.api as api
-            api._ignore_rref_leak = True
+        import torch.distributed.rpc.api as api
+        api._ignore_rref_leak = ignore_leak
 
         rpc.shutdown()
 

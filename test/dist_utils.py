@@ -51,7 +51,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
         # Setting _ignore_rref_leak to make sure OwnerRRefs are properly deleted
         # in tests.
         import torch.distributed.rpc.api as api
-        api._ignore_rref_leak = False
+        api._ignore_rref_leak = True
 
         self.worker_id = self.rank
 
