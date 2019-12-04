@@ -267,6 +267,14 @@ class TestNamedTensor(TestCase):
         none_named_tensor = torch.zeros(2, 3).rename_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
 
+    def test_diagonal(self):
+        named_tensor = torch.zeros(2, 3, 5, 7, names=list('ABCD'))
+        self.assertEqual(named_tensor.diagonal().names, ['C', 'D', None])
+        self.assertEqual(named_tensor.diagonal(1, 3).names, ['A', 'C', None])
+
+        self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
+                         ['A', 'C', 'E'])
+
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
         buf = io.BytesIO()
@@ -730,26 +738,27 @@ class TestNamedTensor(TestCase):
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
 
-    def test_logical_xor(self):
+    def test_logical_ops(self):
         # Implemented via TensorIterator, so just check that each version
         # (out-of-place, inplace, out=) propagates names.
         def zeros(*args, **kwargs):
             return torch.zeros(*args, dtype=torch.bool, **kwargs)
 
-        self._test_name_inference(
-            torch.logical_xor,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+        for op in ('logical_xor', 'logical_and', 'logical_or'):
+            self._test_name_inference(
+                getattr(torch, op),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            Tensor.logical_xor_,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                getattr(Tensor, op + '_'),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            lambda out, x, y: torch.logical_xor(x, y, out=out),
-            (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                lambda out, x, y: getattr(torch, op)(x, y, out=out),
+                (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
     def test_pow_special(self):
         # There are a few pow cases that don't go through TensorIterator.
