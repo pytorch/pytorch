@@ -18,6 +18,7 @@ from functools import partial, reduce
 import operator
 
 import torch
+from torch._six import string_classes
 import common_utils as common
 from torch import nn
 import torch.nn.functional as F
@@ -321,6 +322,45 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.tcpstore)
+
+
+class MyPythonStore(c10d.Store):
+    def __init__(self):
+        super(MyPythonStore, self).__init__()
+        self.store = dict()
+
+    def set(self, key, value):
+        if not isinstance(key, string_classes):
+            raise AssertionError("Expected set to be called with string key")
+        if type(value) is not bytes:
+            raise AssertionError("Expected set to be called with bytes value")
+        self.store[key] = value
+
+    def get(self, key):
+        value = self.store.get(key, b"")
+        if type(value) is not bytes:
+            raise AssertionError("Expected get to return bytes value")
+        return value
+
+    def add(self, key, value):
+        new = int(self.store.get(key, 0)) + value
+        self.set(key, bytes(str(new).encode("utf-8")))
+        return new
+
+
+class PythonStoreTest(TestCase):
+    def setUp(self):
+        super(PythonStoreTest, self).setUp()
+
+    def test_set_get(self):
+        # If we were to inherit from StoreTestBase and try to use
+        # its test_set_get function, we would exercise the Python
+        # API directly, instead of going through the C++ trampoline.
+        # We care about testing the C++ trampoline, so run the
+        # equivalent of StoreTestBase.test_set_get from C++.
+        # See `torch/csrc/distributed/c10d/init.cpp` for the definition
+        # of this test function.
+        c10d._test_python_store(MyPythonStore())
 
 
 class RendezvousTest(TestCase):
@@ -1306,6 +1346,43 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
+    def test_allgather_coalesced_checks(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        dummy_input = [torch.zeros([1], dtype=torch.float32)]
+        dummy_output_lists = [
+            [torch.zeros([1], dtype=torch.float32)] for _ in range(self.world_size)
+        ]
+
+        # One of output tensors does not match input list.
+        dummy_output_lists[0] = [torch.zeros([0], dtype=torch.float32)]
+        with self.assertRaisesRegex(ValueError,
+                                    "invalid size of output tensor at index 0"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # One of output tensors does not match input list.
+        dummy_output_lists[0] = [torch.zeros([1], dtype=torch.float64)]
+        with self.assertRaisesRegex(ValueError,
+                                    "invalid tensor type at index 0"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # Output lists have too many elements
+        dummy_output_lists = [
+            [
+                torch.zeros([1], dtype=torch.float32)
+            ] for _ in range(self.world_size + 1)
+        ]
+        with self.assertRaisesRegex(ValueError,
+                                    "output lists should be equal to world size"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # Output is not a list of lists.
+        dummy_output_lists = [torch.zeros([0], dtype=torch.float32)]
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Invalid function argument.*output_tensor_lists"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -1471,6 +1548,45 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
+
+    def test_round_robin(self):
+        num_process_groups = 2
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = c10d._round_robin_process_groups([
+            c10d.ProcessGroupGloo(
+                c10d.PrefixStore(str(i), store),
+                self.rank,
+                self.world_size)
+            for i in range(num_process_groups)
+        ])
+
+        # Run a few collectives so that we have called each process group
+        for _ in range(num_process_groups + 1):
+            tensor = torch.full([100, 100], self.rank)
+            pg.broadcast(tensor, root=0).wait()
+            self.assertEqual(torch.full([100, 100], 0), tensor)
+
+    def test_round_robin_create_destroy(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+
+        def create(num, prefix):
+            return c10d._round_robin_process_groups([
+                c10d.ProcessGroupGloo(
+                    c10d.PrefixStore("%s/%d" % (prefix, i), store),
+                    self.rank,
+                    self.world_size)
+                for i in range(num)
+            ])
+
+        # Run create/use/destroy twice
+        for i in range(2):
+            num_process_groups = 2
+            pg = create(num=num_process_groups, prefix=i)
+            for _ in range(3):
+                tensor = torch.ones([10, 10])
+                pg.allreduce(tensor).wait()
+                self.assertEqual(torch.full([10, 10], self.world_size), tensor)
+            del pg
 
 
 @requires_nccl()

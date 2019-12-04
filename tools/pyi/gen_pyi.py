@@ -275,7 +275,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
                 python_args.append('*')
                 render_kw_only_separator = False
             python_args += ["dtype: _dtype=None",
-                            "layout: layout=strided",
+                            "layout: _layout=strided",
                             "device: Union[_device, str, None]=None",
                             "requires_grad:_bool=False"]
 
