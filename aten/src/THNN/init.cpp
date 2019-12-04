@@ -90,6 +90,3 @@
 
 #include <THNN/generic/SoftShrink.c>
 #include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/Tanh.c>
-#include <TH/THGenerateFloatTypes.h>

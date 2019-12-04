@@ -571,6 +571,20 @@ bitwise_xor_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
+add_docstr_all('logical_and',
+               r"""
+logical_and() -> Tensor
+
+See :func:`torch.logical_and`
+""")
+
+add_docstr_all('logical_and_',
+               r"""
+logical_and_() -> Tensor
+
+In-place version of :meth:`~Tensor.logical_and`
+""")
+
 add_docstr_all('logical_not',
                r"""
 logical_not() -> Tensor
@@ -583,6 +597,20 @@ add_docstr_all('logical_not_',
 logical_not_() -> Tensor
 
 In-place version of :meth:`~Tensor.logical_not`
+""")
+
+add_docstr_all('logical_or',
+               r"""
+logical_or() -> Tensor
+
+See :func:`torch.logical_or`
+""")
+
+add_docstr_all('logical_or_',
+               r"""
+logical_or_() -> Tensor
+
+In-place version of :meth:`~Tensor.logical_or`
 """)
 
 add_docstr_all('logical_xor',
@@ -2130,7 +2158,7 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 
 .. warning::
 
-    :func:`torch.repeat` behaves differently from
+    :meth:`~Tensor.repeat` behaves differently from
     `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
     but is more similar to
     `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
@@ -2522,7 +2550,7 @@ add_docstr_all('argsort',
                r"""
 argsort(dim=-1, descending=False) -> LongTensor
 
-See :func: `torch.argsort`
+See :func:`torch.argsort`
 """)
 
 add_docstr_all('sparse_dim',

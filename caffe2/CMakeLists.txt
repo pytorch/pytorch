@@ -444,7 +444,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/object.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
     ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
@@ -486,6 +485,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
     if (USE_DISTRIBUTED)
@@ -755,6 +755,9 @@ ENDIF()
 
   if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    if (USE_DISTRIBUTED)
+      add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+    endif()
   endif()
 
   if (BUILD_TEST AND NOT NO_API)
@@ -848,6 +851,20 @@ if(USE_ROCM)
     USE_ROCM
     __HIP_PLATFORM_HCC__
     )
+  # NB: Massive hack.  torch/csrc/jit/fuser/codegen.cpp includes
+  # torch/csrc/jit/fuser/cuda/resource_strings.h which changes the
+  # strings depending on if you're __HIP_PLATFORM_HCC__ or not.
+  # But that file is in torch_cpu!  So, against all odds, this macro
+  # has to be set on torch_cpu too.  I also added it to torch for
+  # better luck
+  target_compile_definitions(torch_cpu PRIVATE
+    USE_ROCM
+    __HIP_PLATFORM_HCC__
+    )
+  target_compile_definitions(torch PRIVATE
+    USE_ROCM
+    __HIP_PLATFORM_HCC__
+    )
   target_include_directories(torch_hip PRIVATE
     /opt/rocm/include
     /opt/rocm/hcc/include
@@ -882,14 +899,6 @@ target_include_directories(torch_cpu PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(torch_cpu SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 torch_set_target_props(torch_cpu)
-
-
-target_link_libraries(torch PUBLIC torch_cpu)
-if(USE_CUDA)
-  target_link_libraries(torch PUBLIC torch_cuda)
-elseif(USE_ROCM)
-  target_link_libraries(torch PUBLIC torch_hip)
-endif()
 
 
 target_compile_options(torch_cpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
@@ -1008,16 +1017,31 @@ if (MSVC AND BUILD_SHARED_LIBS)
   target_compile_options(torch_cpu PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
 
-install(TARGETS torch_cpu EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-if (USE_CUDA)
-  install(TARGETS torch_cuda EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-elseif (USE_ROCM)
-  install(TARGETS torch_hip EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-endif()
-install(TARGETS torch EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+caffe2_interface_library(torch_cpu torch_cpu_library)
 
+if (USE_CUDA)
+  caffe2_interface_library(torch_cuda torch_cuda_library)
+elseif (USE_ROCM)
+  caffe2_interface_library(torch_hip torch_hip_library)
+endif()
 
 caffe2_interface_library(torch torch_library)
+
+install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+if (USE_CUDA)
+  install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+elseif (USE_ROCM)
+  install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+endif()
+install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+target_link_libraries(torch PUBLIC torch_cpu_library)
+if(USE_CUDA)
+  target_link_libraries(torch PUBLIC torch_cuda_library)
+elseif(USE_ROCM)
+  target_link_libraries(torch PUBLIC torch_hip_library)
+endif()
+
 list(APPEND Caffe2_MAIN_LIBS torch_library)
 if (USE_TBB)
   list(APPEND Caffe2_MAIN_LIBS tbb)
@@ -1051,7 +1075,7 @@ if(USE_CUDA)
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(torch_cuda PUBLIC torch_cpu ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
 
 endif()
@@ -1072,7 +1096,7 @@ if(USE_ROCM)
   hip_include_directories(${Caffe2_HIP_INCLUDE})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  target_compile_options(torch_hip PRIVATE ${HIP_CXX_FLAGS})
+  target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
   target_link_libraries(torch_hip PUBLIC c10_hip)
 
   if(NOT INTERN_BUILD_MOBILE)
@@ -1083,7 +1107,7 @@ if(USE_ROCM)
     # correct dependency from generated files.)
     target_link_libraries(torch_hip PRIVATE ATEN_CUDA_FILES_GEN_LIB)
   endif()
-  target_link_libraries(torch_hip PUBLIC torch_cpu ${Caffe2_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.4.1)
 project(pytorch_jni CXX)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(TRACE_ENABLED OFF)
@@ -101,11 +101,8 @@ else()
   # Prefer dynamic linking on the host
   target_link_libraries(pytorch_jni
       fbjni
-      -Wl,--gc-sections
-      -Wl,--whole-archive
       torch
       torch_cpu
-      -Wl,--no-whole-archive
       c10
       nnpack
       pytorch_qnnpack
