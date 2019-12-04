@@ -20,8 +20,6 @@
 namespace torch {
 namespace nested_tensor {
 
-using namespace at;
-
 struct _ListNestedTensor;
 
 struct _VariableNode {
