@@ -18,7 +18,7 @@ production; we look forward to welcoming more users of the PyTorch C++ API.
 
 .. warning::
 
-  At the moment, the C++ API should be considered "beta" stability; we may
+  At the moment, the C++ API should be considered "experimental"; we may
   make major breaking changes to the backend in order to improve the API,
   or in service of providing the Python interface to PyTorch, which is our
   most stable and best supported interface.
@@ -112,7 +112,7 @@ expanded on a continuous and active basis.
 
   Unless you have a particular reason to constrain yourself exclusively to ATen
   or the Autograd API, the C++ frontend is the recommended entry point to the
-  PyTorch C++ ecosystem. While it is still in beta as we collect user feedback
+  PyTorch C++ ecosystem. While it is still in experimental as we collect user feedback
   (from you!), it provides both more functionality and better stability
   guarantees than the ATen and Autograd APIs.
 

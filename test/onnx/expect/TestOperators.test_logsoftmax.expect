@@ -5,6 +5,7 @@ graph {
   node {
     input: "input"
     output: "1"
+    name: "LogSoftmax_0"
     op_type: "LogSoftmax"
     attribute {
       name: "axis"

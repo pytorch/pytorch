@@ -13,6 +13,10 @@ using namespace torch::test;
 
 struct SequentialTest : torch::test::SeedingFixture {};
 
+TEST_F(SequentialTest, CanContainThings) {
+  Sequential sequential(Linear(3, 4), ReLU(), BatchNorm(3));
+}
+
 TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -25,11 +29,11 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
       std::make_shared<M>(1), std::make_shared<M>(2), std::make_shared<M>(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named(modules_ordered_dict({
+  Sequential sequential_named({
     {"m1", std::make_shared<M>(1)},
     {std::string("m2"), std::make_shared<M>(2)},
     {"m3", std::make_shared<M>(3)}
-  }));
+  });
   ASSERT_EQ(sequential->size(), 3);
 }
 
@@ -56,11 +60,11 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   ASSERT_EQ(copy_count, 3);
 
   copy_count = 0;
-  Sequential sequential_named(modules_ordered_dict({
+  Sequential sequential_named({
     {"m1", M(1)},
     {std::string("m2"), M(2)},
     {"m3", M(3)}
-  }));
+  });
   ASSERT_EQ(sequential->size(), 3);
   ASSERT_EQ(copy_count, 3);
 }
@@ -82,12 +86,28 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named(modules_ordered_dict({
+  Sequential sequential_named({
     {"m1", M(1)},
     {std::string("m2"), M(2)},
     {"m3", M(3)}
-  }));
+  });
   ASSERT_EQ(sequential->size(), 3);
+}
+
+TEST_F(SequentialTest, LegacyBuilderForOrderedDictOfNamedModules) {
+  std::stringstream buffer;
+  CerrRedirect cerr_redirect(buffer.rdbuf());
+
+  Sequential sequential_named(modules_ordered_dict({
+    {"m1", Linear(3, 4)},
+    {"m2", ReLU()},
+    {"m3", BatchNorm(3)}
+  }));
+  ASSERT_EQ(sequential_named->size(), 3);
+
+  ASSERT_EQ(
+    count_substr_occurrences(buffer.str(), "`torch::nn::modules_ordered_dict` is deprecated"),
+    1);
 }
 
 TEST_F(SequentialTest, PushBackAddsAnElement) {
@@ -357,12 +377,12 @@ TEST_F(SequentialTest, IsCloneable) {
 }
 
 TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
-  Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), FeatureDropout(0.5));
+  Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 
   auto modules = sequential->children();
   ASSERT_TRUE(modules[0]->as<Linear>());
   ASSERT_TRUE(modules[1]->as<Conv2d>());
-  ASSERT_TRUE(modules[2]->as<FeatureDropout>());
+  ASSERT_TRUE(modules[2]->as<Dropout2d>());
 }
 
 TEST_F(SequentialTest, CloneToDevice_CUDA) {
@@ -389,29 +409,29 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
   ASSERT_EQ(
       c10::str(sequential),
       "torch::nn::Sequential(\n"
-      "  (0): torch::nn::Linear(in=10, out=3, with_bias=true)\n"
-      "  (1): torch::nn::Conv2d(input_channels=1, output_channels=2, kernel_size=[3, 3], stride=[1, 1])\n"
-      "  (2): torch::nn::Dropout(rate=0.5)\n"
-      "  (3): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"
+      "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
+      "  (1): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
+      "  (2): torch::nn::Dropout(p=0.5, inplace=false)\n"
+      "  (3): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (4): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
       ")");
 
-  Sequential sequential_named(modules_ordered_dict({
+  Sequential sequential_named({
       {"linear", Linear(10, 3)},
       {"conv2d", Conv2d(1, 2, 3)},
       {"dropout", Dropout(0.5)},
       {"batchnorm", BatchNorm(5)},
       {"embedding", Embedding(4, 10)},
       {"lstm", LSTM(4, 5)}
-  }));
+  });
   ASSERT_EQ(
       c10::str(sequential_named),
       "torch::nn::Sequential(\n"
-      "  (linear): torch::nn::Linear(in=10, out=3, with_bias=true)\n"
-      "  (conv2d): torch::nn::Conv2d(input_channels=1, output_channels=2, kernel_size=[3, 3], stride=[1, 1])\n"
-      "  (dropout): torch::nn::Dropout(rate=0.5)\n"
-      "  (batchnorm): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"
+      "  (linear): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
+      "  (conv2d): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
+      "  (dropout): torch::nn::Dropout(p=0.5, inplace=false)\n"
+      "  (batchnorm): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (embedding): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
       "  (lstm): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
       ")");

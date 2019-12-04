@@ -50,7 +50,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # To convert the indices to the same format used by Pytorch,
         # we first execute a maxpool with a kernel and stride of 1 on the same input.
         # This will result in a tensor of indices in which each index will have it's own value.
-        # Using this tensor as a reference, we extract the first index of each axis and substract
+        # Using this tensor as a reference, we extract the first index of each axis and subtract
         # it from each index of this axis in the indices to convert.
         # This step will result in a tensor were each dimension has values of indices within
         # the dimension it is in.
@@ -85,11 +85,7 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
-        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
-            return _unimplemented(name, "divisor_override")
-        if not stride:
-            stride = kernel_size
-        padding = tuple(tuple_fn(padding))
+        padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
             input = g.op("Pad", input,
                          pads_i=((0,) * 2 + padding) * 2,

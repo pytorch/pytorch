@@ -46,7 +46,9 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
+  HashStore.cpp
   ProcessGroup.cpp
+  ProcessGroupRoundRobin.cpp
   Store.cpp
   PrefixStore.cpp
   TCPStore.cpp
@@ -66,7 +68,7 @@ if(USE_C10D_MPI)
 endif()
 
 if(USE_C10D_GLOO)
-  list(APPEND C10D_SRCS ProcessGroupGloo.cpp)
+  list(APPEND C10D_SRCS ProcessGroupGloo.cpp GlooDeviceFactory.cpp)
   list(APPEND C10D_LIBS gloo)
   if(USE_CUDA)
     list(APPEND C10D_LIBS gloo_cuda)
@@ -117,6 +119,7 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(HashStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
@@ -125,6 +128,7 @@ copy_header(Types.hpp)
 copy_header(Utils.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
+  copy_header(GlooDeviceFactory.hpp)
 endif()
 
 if(USE_C10D_NCCL)
