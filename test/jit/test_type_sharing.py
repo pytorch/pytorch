@@ -9,6 +9,11 @@ sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase
 from common_utils import suppress_warnings
 
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
+
 class TestTypeSharing(JitTestCase):
     def assertSameType(self, m1, m2):
         if not isinstance(m1, torch.jit.ScriptModule):
@@ -403,8 +408,3 @@ class TestTypeSharing(JitTestCase):
         a = M((torch.ones(1), ))
         b = M((torch.zeros(1), ))
         self.assertDifferentType(a, b)
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")

@@ -80,7 +80,7 @@ class CheckpointFunction(torch.autograd.Function):
             raise RuntimeError("Checkpointing is not compatible with .grad(), please use .backward() if possible")
         inputs = ctx.saved_tensors
         # Stash the surrounding rng state, and mimic the state that was
-        # present at this time during forward.  Restore the surrouding state
+        # present at this time during forward.  Restore the surrounding state
         # when we're done.
         rng_devices = []
         if ctx.preserve_rng_state and ctx.had_cuda_in_fwd:

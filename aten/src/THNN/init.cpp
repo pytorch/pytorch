@@ -85,26 +85,8 @@
 #include <THNN/generic/RReLU.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/Sigmoid.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SoftPlus.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SoftShrink.c>
 #include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/Tanh.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateLongType.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialClassNLLCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricConvolutionMM.c>
-#include <TH/THGenerateBFloat16Type.h>

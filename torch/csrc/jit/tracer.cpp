@@ -1,20 +1,21 @@
 #include <torch/csrc/jit/tracer.h>
 
-#include <torch/csrc/utils/variadic.h>
-#include <torch/csrc/jit/constants.h>
-#include <ATen/core/functional.h>
 #include <ATen/Backtrace.h>
+#include <ATen/core/Dict.h>
+#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
-#include <ATen/core/Dict.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <torch/csrc/utils/variadic.h>
 
 #include <memory>
 #include <sstream>
@@ -124,7 +125,7 @@ Value* TracingState::getValue(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
-    if (ten.is_variable() && ten.requires_grad()) {
+    if (ten.requires_grad()) {
       pauseTracing();
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
@@ -285,21 +286,25 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 static void gatherParametersAndBuffers(
     const std::shared_ptr<TracingState>& state,
     Value* self_value,
-    const script::Module& self) {
+    const script::Module& self,
+    const std::string& prefix) {
   Graph& g = *self_value->owningGraph();
 
-  state->setValue(self.module_object(), self_value);
+  state->setValue(self._ivalue(), self_value);
 
   auto self_ty = self.type();
-  for (const script::NameValue& s : self.get_slots()) {
+  for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
+    auto qualname = prefix + "." + s.name;
+    Value* trace_get_attr = g.insertNode(g.create(prim::TracedAttr))
+                                ->s_(attr::scope, qualname)
+                                ->output()
+                                ->setType(s.value.type());
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
-          state, s.value, s.value.type(), g.insertGetAttr(self_value, s.name));
+          state, s.value, s.value.type(), trace_get_attr);
     } else if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
-          state,
-          g.insertGetAttr(self_value, s.name),
-          script::Module(s.value.toObject()));
+          state, trace_get_attr, script::Module(s.value.toObject()), qualname);
     }
   }
 }
@@ -311,9 +316,9 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     bool force_outplace,
     script::Module* self) {
   try {
-// Start tracing, treating 'inputs' as inputs to the trace, which can be
-// varied on subsequent invocations of the trace.  Any other variables
-// will be treated as constants.
+    // Start tracing, treating 'inputs' as inputs to the trace, which can be
+    // varied on subsequent invocations of the trace.  Any other variables
+    // will be treated as constants.
     if (isTracing()) {
       AT_ERROR("Tracing can't be nested");
     }
@@ -323,9 +328,9 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     // if we are a module, then make sure the modules parameters are in the map
     // and mapped to accesses to the self object
     if (self) {
-      Value* self_value =
-          state->graph->insertInput(0, "self")->setType(self->module_object()->type());
-      gatherParametersAndBuffers(state, self_value, *self);
+      Value* self_value = state->graph->insertInput(0, "self")->setType(
+          self->_ivalue()->type());
+      gatherParametersAndBuffers(state, self_value, *self, {"__module"});
     }
 
     for (IValue& input : inputs) {
@@ -354,8 +359,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     if (script::getInlineEverythingMode()) {
       Inline(*graph);
     }
-    LowerSimpleTuples(graph);
-    EliminateDeadCode(graph);
+    FixupTraceScopeBlocks(graph, self);
 
     return {state, out_stack};
   } catch (...) {
@@ -539,10 +543,23 @@ void addInputs(
   n->addInput(list_node->output());
 }
 
+void addInputs(
+    Node* n,
+    const char* name,
+    c10::optional<caffe2::TypeMeta> opt_dtype) {
+  if (opt_dtype.has_value()) {
+    return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
 void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize
   // TensorOptions
-  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
+  addInputs(n, name, options.dtype_opt());
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
   addInputs(n, name, options.pinned_memory());
@@ -624,8 +641,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   {
     // Make sure this scalar to tensor isn't traced!
     at::AutoNonVariableTypeMode guard;
-    size_var =
-        autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+    size_var = scalar_to_tensor(at::Scalar(var.size(dim)));
   }
   auto* value = getValueTrace(var);
   auto dim_val = graph->insertConstant(dim);

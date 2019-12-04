@@ -203,6 +203,8 @@ class Test_ListNestedTensor(TestCase):
         # the same Variable, since each torch::autograd::Variable has
         # assigned to it a unique PyObject* by construction.
 
+        # TODO: Check that unbind returns torch.Tensors when nested_dim is 1
+
         a = torch.tensor([1, 2])
         b = torch.tensor([7, 8])
         nt = torch._ListNestedTensor([a, b])

@@ -312,15 +312,16 @@ static inline ScalarType toUnderlying(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
+  TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
   #define CASE_SIGNED(ctype, name) \
     case ScalarType::name:                       \
       return std::numeric_limits<ctype>::is_signed;
 
-    switch (t) {
-      AT_FORALL_SCALAR_TYPES_AND(Half, CASE_SIGNED)
-      default:
-        AT_ERROR("Unknown ScalarType");
-    }
+  switch (t) {
+    AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
   #undef CASE_SIGNED
 }
 

@@ -55,6 +55,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
@@ -243,7 +244,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
-  return self.clone().index_put_(indices, value, accumulate);
+  return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
 }
 
 Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
@@ -311,11 +312,74 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
 }
 
 Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_copy_(dim, index, source);
+  return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
+}
+
+
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  auto numel = index.numel();
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_add_(): Expected dtype int64 for index");
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
+              "index_add_(): self and source must have the same scalar type");
+  TORCH_CHECK(dim == 0 || dim < source.dim(),
+              "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
+              "index_add_(): Number of indices should be equal to self.size(dim)");
+
+  auto index_contig = index.contiguous();
+  auto index_data = index_contig.data_ptr<int64_t>();
+
+  if (self.dim() > 1) {
+    // Equivalent to:
+    //   for (auto i = 0; i < numel; i++) {
+    //     auto selfSlice = self.select(dim, index_data[i]);
+    //     auto sourceSlice = source.select(dim, i);
+    //     selfSlice.add_(sourceSlice);
+    //   }
+    // But much faster as this reuses the iterator from add_
+    if (numel == 0) {
+      return self;
+    }
+    auto selfSlice = self.select(dim, 0);
+    auto sourceSlice = source.select(dim, 0);
+    auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
+    auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
+    auto self_dim_size = self.size(dim);
+    auto iter = TensorIterator::binary_op(selfSlice, selfSlice, sourceSlice);
+
+    for (auto i = 0; i < numel; i++) {
+      auto self_i = index_data[i];
+      TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+      auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+      auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+      iter.unsafe_replace_operand(0, self_data);
+      iter.unsafe_replace_operand(1, self_data);
+      iter.unsafe_replace_operand(2, source_data);
+      add_stub(iter.device_type(), iter, 1);
+    }
+  }
+  else {
+    TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
+
+    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&] {
+      auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+      auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      for (auto i = 0; i < numel; i++) {
+        auto self_i = index_data[i];
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
+        scalar_t *self_ip = self.data<scalar_t>() + self_i * self_stride;
+        *self_ip += *(source.data<scalar_t>() + i * source_stride);
+      }
+    });
+  }
+  return self;
 }
 
 Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_add_(dim, index, source);
+  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
@@ -325,45 +389,45 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Ten
 }
 
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  return self.clone().index_fill_(dim, index, source);
+  return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_fill_(dim, index, source);
+  return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_(dim, index, source);
+  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  return self.clone().scatter_(dim, index, source);
+  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_add_(dim, index, source);
+  return self.clone(at::MemoryFormat::Preserve).scatter_add_(dim, index, source);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_scatter_(_mask, source);
+  return _self.clone(at::MemoryFormat::Contiguous).masked_scatter_(_mask, source);
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
   Tensor result;
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
 #endif
     Tensor _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self.clone();
+    result = _self.clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -371,17 +435,17 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
 Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor result;
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
 #endif
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  result = _self.clone();
+  result = _self.clone(at::MemoryFormat::Contiguous);
   result.masked_fill_(mask, source);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
