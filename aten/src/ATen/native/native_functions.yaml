@@ -895,18 +895,18 @@
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
-- func: cummax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+- func: cummax(Tensor self, int dim, *, ScalarType? dtype=None) -> (Tensor values, Tensor indices)
   supports_named_tensor: True
   variants: function, method
 
-- func: cummax.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cummax.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> (Tensor(a!) values, Tensor indices)
   supports_named_tensor: True
 
-- func: cummax.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: cummax.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> (Tensor values, Tensor indices)
   supports_named_tensor: True
   variants: function, method
 
-- func: cummax.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cummax.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> (Tensor(a!) values, Tensor indices)
   supports_named_tensor: True
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
@@ -5222,17 +5222,6 @@
   dispatch:
     CPU: legacy::cpu::_th_cumprod_out
     CUDA: legacy::cuda::_th_cumprod_out
-
-- func: _cummax(Tensor self, int dim) -> Tensor
-  use_c10_dispatcher: full
-  dispatch:
-    CPU: legacy::cpu::_th_cummax
-    CUDA: legacy::cuda::th_cummax
-
-- func: _cummax.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_cummax_out
-    CUDA: legacy::cuda::th_cummax_out
 
 - func: _var(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
