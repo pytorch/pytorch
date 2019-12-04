@@ -1160,6 +1160,13 @@ def softsign(input):
 
 softplus = _add_docstr(torch._C._nn.softplus, r"""
 softplus(input, beta=1, threshold=20) -> Tensor
+
+Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
+
+For numerical stability the implementation reverts to the linear function
+for inputs above :attr:`threshold` (default ``20``).
+
+See :class:`~torch.nn.Softplus` for more details.
 """)
 
 
@@ -3180,7 +3187,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         attn_mask: mask that prevents attention to certain positions. This is an additive mask
             (i.e. the values will be added to the attention layer).
         use_separate_proj_weight: the function accept the proj. weights for query, key,
-            and value in differnt forms. If false, in_proj_weight will be used, which is
+            and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
