@@ -148,7 +148,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
               [](py::tuple t) { // NOLINT
                 // __setstate__
                 return PyRRef::unpickle(t);
-              }));
+              }))
+          // not releasing GIL to avoid context switch
+          .def("__str__", &PyRRef::str);
 
   // future.wait() should not be called after shutdown(), e.g.,
   // pythonRpcHandler is cleaned up in shutdown(), after

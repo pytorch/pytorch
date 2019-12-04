@@ -96,6 +96,22 @@ py::object PyRRef::localValue() {
   }
 }
 
+std::string PyRRef::str() const {
+  std::stringstream ss;
+  if (rref_->isOwner()) {
+    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+  } else {
+    ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = ";
+    if (rref_->isPyObj()) {
+      ss << std::static_pointer_cast<UserRRef<py::object>>(rref_)->forkId();
+    } else {
+      ss << std::static_pointer_cast<UserRRef<IValue>>(rref_)->forkId();
+    }
+    ss << ")";
+  }
+  return ss.str();
+}
+
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
   // TODO: use a dispatch table to pickle/unpickle an RRef, and only only

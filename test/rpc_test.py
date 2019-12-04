@@ -1100,6 +1100,22 @@ class RpcTest(RpcAgentTestFixture):
     def test_ignore_rref_leak(self):
         self._test_rref_leak(ignore_leak=True)
 
+    @dist_init
+    def test_rref_str(self):
+        rref1 = RRef(self.rank)
+        id_class = "GloballyUniqueId"
+        self.assertEqual(
+            "OwnerRRef({}({}, 0))".format(id_class, self.rank),
+            rref1.__str__()
+        )
+
+        dst_rank = (self.rank + 1) % self.world_size
+        rref2 = rpc.remote("worker{}".format(dst_rank), torch.add, args=(torch.ones(2, 2), 1))
+        self.assertEqual(
+            rref2.__str__(),
+            "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
+        )
+
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_local_shutdown(self):
