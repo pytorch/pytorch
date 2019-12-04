@@ -18,9 +18,11 @@
 //
 // For #1 and #3 it searches for connections between operator name string
 // literals / function pointers and c10 op registration/invocation API calls in
-// LLVM IR graph via "use" edges. It can print instruction level data flow and
-// show warning message if it encounters unexpected cases (e.g.: found 0 or
-// multiple op names per registration/invocation API call).
+// LLVM IR graph via "use" edges (bi-directional):
+// 1. llvm::Value has “users()” method to get other llvm::Value nodes that use
+//    the value;
+// 2. most of types derive from llvm::User which has “operands()” method to get
+//    other llvm::Value nodes being used by the value;
 //
 // [Limitation]
 // For now the search doesn't go beyond the function boundary because the
@@ -84,7 +86,9 @@ struct RegexOpt {
   std::shared_ptr<Regex> pattern;
 
   void operator=(const std::string& val) {
-    if (val.empty()) return;
+    if (val.empty()) {
+      return;
+    }
     pattern = std::make_shared<Regex>(val);
     std::string regexError;
     if (!pattern->isValid(regexError)) {
@@ -98,7 +102,7 @@ struct RegexOpt {
 static RegexOpt FunctionSchemaPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
     "op_schema_pattern",
-    cl::desc("Op schema regex pattern. "
+    cl::desc("Regular expression used to identify aten op schema strings. "
              "Example: -op_schema_pattern '^(aten|quantized)::[^ ]+'"),
     cl::location(FunctionSchemaPatternLoc),
     cl::Required,
@@ -107,7 +111,7 @@ static cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
 static RegexOpt OpRegistrationPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
     "op_register_pattern",
-    cl::desc("Op registration signature regex pattern. "
+    cl::desc("Regular expression used to identify c10 op registration API. "
              "Example: -op_register_pattern 'c10::RegisterOperators::op'"),
     cl::location(OpRegistrationPatternLoc),
     cl::Required,
@@ -116,7 +120,7 @@ static cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
 static RegexOpt OpInvocationPatternLoc;
 static cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
     "op_invoke_pattern",
-    cl::desc("Op invocation signature regex pattern. "
+    cl::desc("Regular expression used to identify c10 op invocation API. "
              "Example: -op_invoke_pattern 'c10::Dispatcher::findSchema'"),
     cl::location(OpInvocationPatternLoc),
     cl::Required,
@@ -147,10 +151,12 @@ static cl::opt<bool> DebugPath(
 
 typedef std::set<std::string> SET;
 typedef std::unordered_map<std::string, std::set<std::string>> GRAPH;
-typedef std::unordered_map<Value*, Value*> LINK;
+typedef std::unordered_map<Value*, Value*> VALUE_MAP;
 typedef std::unordered_set<Value*> VALUE_SET;
 
-// SRC -> (DEST -> PREV)
+// SRC -> Inverse "tree" from all reachable destination back to SRC, e.g.:
+// (DEST-1 -> PREV_11, PREV_12 -> PREV_13, ..., PREV_1n-> SRC)
+// (DEST-2 -> PREV_21, PREV_21 -> ..., ... -> SRC)
 typedef std::unordered_map<std::string,
                            std::unordered_map<std::string, std::string>> PATH;
 
@@ -195,38 +201,12 @@ public:
     // invoke operators, respectively.
     GRAPH deps;
     VALUE_SET opRegistrationInsts, opInvocationInsts;
-    for (Function& F : M) {
-      std::string caller = F.getName();
-      std::string callerDemangled = demangle(caller);
-      for (BasicBlock& BB : F) {
-        for (Instruction& I : BB) {
-          scanReferredFunctions(I, [&](Function* func) -> void {
-            std::string callee = func->getName();
-            std::string calleeDemangled = demangle(callee);
-            deps[caller].insert(callee);
-            if (Verbose > 1) {
-              std::cerr << "[DEBUG][FUNC_CALL] " << callerDemangled << " => "
-                        << calleeDemangled << std::endl;
-            }
-            // One registration/invocation API might call another registration/
-            // invocation API in which case we can skip processing the nested
-            // call. This is a simple trick to avoid "cannot find registered/
-            // invoked op" warning and doesn't affect correctness.
-            if (!OpRegistrationPatternLoc.pattern->match(callerDemangled) &&
-                OpRegistrationPatternLoc.pattern->match(calleeDemangled)) {
-              opRegistrationInsts.insert(&I);
-            }
-            if (!OpInvocationPatternLoc.pattern->match(callerDemangled) &&
-                OpInvocationPatternLoc.pattern->match(calleeDemangled)) {
-              opInvocationInsts.insert(&I);
-            }
-          });
-        }
-      }
-    }
+    scanAllFunctions(M, &deps, &opRegistrationInsts, &opInvocationInsts);
 
     // Scan op registration/invocation API calls to construct the link between
     // op name (a.k.a op schema string) and related functions.
+    // Dump the op-schema <-> function mappings into the same `deps` graph as
+    // they will be processed together next.
     SET opSchemaStrs;
     scanOpRegistration(opRegistrationInsts, &opSchemaStrs, &deps);
     scanOpInvocation(opInvocationInsts, &opSchemaStrs, &deps);
@@ -247,6 +227,42 @@ public:
   }
 
 private:
+  // Scan the entire IR graph to construct function -> function dependency graph
+  // as well as instructions that might register or invoke operators.
+  static void scanAllFunctions(
+      Module& M, GRAPH* deps,
+      VALUE_SET* opRegistrationInsts, VALUE_SET* opInvocationInsts) {
+    for (Function& F : M) {
+      std::string caller = F.getName();
+      std::string callerDemangled = demangle(caller);
+      for (BasicBlock& BB : F) {
+        for (Instruction& I : BB) {
+          scanReferredFunctions(I, [&](Function* func) -> void {
+            std::string callee = func->getName();
+            std::string calleeDemangled = demangle(callee);
+            (*deps)[caller].insert(callee);
+            if (Verbose > 1) {
+              std::cerr << "[DEBUG][FUNC_CALL] " << callerDemangled << " => "
+                        << calleeDemangled << std::endl;
+            }
+            // One registration/invocation API might call another registration/
+            // invocation API in which case we can skip processing the nested
+            // call. This is a simple trick to avoid "cannot find registered/
+            // invoked op" warning and doesn't affect correctness.
+            if (!OpRegistrationPatternLoc.pattern->match(callerDemangled) &&
+                OpRegistrationPatternLoc.pattern->match(calleeDemangled)) {
+              (*opRegistrationInsts).insert(&I);
+            }
+            if (!OpInvocationPatternLoc.pattern->match(callerDemangled) &&
+                OpInvocationPatternLoc.pattern->match(calleeDemangled)) {
+              (*opInvocationInsts).insert(&I);
+            }
+          });
+        }
+      }
+    }
+  }
+
   // llvm::CallGraph only searches for functions referenced by "CallSites" (i.e.
   // by call/invoke instructions). However functions can be referenced by
   // non-call/invoke instructions as well (being passed as function pointer),
@@ -293,7 +309,9 @@ private:
     }
 
     LazyCallGraph::visitReferences(worklist, visited, [&](Function& F) {
-      if (!F.isIntrinsic()) CB(&F);
+      if (!F.isIntrinsic()) {
+        CB(&F);
+      }
     });
   }
 
@@ -309,20 +327,24 @@ private:
   static void scanConnectedNodes(
       Value* src,
       const VALUE_SET& blocked,
-      const std::function<void(Value*)>& CB, LINK* debugLink) {
+      const std::function<void(Value*)>& CB, VALUE_MAP* debugLink) {
     std::deque<Value*> worklist;
     SmallPtrSet<Value*, 16> visited;
 
     auto insert = [&](Value* cur, Value* parent) -> void {
       if (!blocked.count(cur) && visited.insert(cur).second) {
         worklist.push_back(cur);
-        if (debugLink) (*debugLink).emplace(cur, parent);
+        if (debugLink) {
+          (*debugLink).emplace(cur, parent);
+        }
       }
     };
 
     auto expandOperands = [&](Value* V) -> void {
       // Stops if it doesn't have operands (!isa<User>) or it is a function.
-      if (!isa<User>(V) || isa<Function>(V)) return;
+      if (!isa<User>(V) || isa<Function>(V)) {
+        return;
+      }
       auto node = dyn_cast<User>(V);
       for (auto& O : node->operands()) {
         insert(O, node);
@@ -340,7 +362,9 @@ private:
       // of the constant. We skip users of functions as well assuming
       // interesting values (op names and function pointers) are not set via
       // other invocations of the function.
-      if (!isa<User>(V) || isa<Constant>(V) || isa<Function>(V)) return;
+      if (!isa<User>(V) || isa<Constant>(V) || isa<Function>(V)) {
+        return;
+      }
       for (auto U : V->users()) {
         insert(U, V);
       }
@@ -384,9 +408,13 @@ private:
       SET visited;  // has some runtime issue with std::unordered_set
       auto expand = [&](const std::string& curNode) -> void {
         for (auto& next : input[curNode]) {
-          if (!visited.insert(next).second) continue;
+          if (!visited.insert(next).second) {
+            continue;
+          }
           queue.push_back(next);
-          if (path) (*path)[key].emplace(next, curNode);
+          if (path) {
+            (*path)[key].emplace(next, curNode);
+          }
         }
       };
 
@@ -398,7 +426,9 @@ private:
           // Output links between key nodes.
           (*output)[key].insert(curNode);
           // Stop expanding key nodes.
-          if (!TransitiveClosure) continue;
+          if (!TransitiveClosure) {
+            continue;
+          }
         }
         expand(curNode);
       }
@@ -410,18 +440,24 @@ private:
   static void scanOpSchemaStrAndFunction(
       Value* src, const VALUE_SET& blocked,
       SET* visitedOps, SET* visitedFunctions) {
-    std::shared_ptr<LINK> debugLink =
-        (Verbose > 2 ? std::make_shared<LINK>() : nullptr);
+    std::shared_ptr<VALUE_MAP> debugLink =
+        (Verbose > 2 ? std::make_shared<VALUE_MAP>() : nullptr);
     auto callback = [&](Value* V) -> void {
       if (auto schemaStr = extractOpSchema(V)) {
-        if (visitedOps) (*visitedOps).insert(*schemaStr);
+        if (visitedOps) {
+          (*visitedOps).insert(*schemaStr);
+        }
         if (Verbose > 1) {
           std::cerr << "[DEBUG][OP_SCHEMA] " << *schemaStr << std::endl;
           printDebugPath(debugLink.get(), src, V);
         }
       } else if (auto F = dyn_cast<Function>(V)) {
-        if (F->isIntrinsic()) return;
-        if (visitedFunctions) (*visitedFunctions).insert(F->getName());
+        if (F->isIntrinsic()) {
+          return;
+        }
+        if (visitedFunctions) {
+          (*visitedFunctions).insert(F->getName());
+        }
         if (Verbose > 1) {
           std::cerr << "[DEBUG][FUNC] " << demangle(F->getName()) << std::endl;
           printDebugPath(debugLink.get(), src, V);
@@ -431,8 +467,11 @@ private:
     scanConnectedNodes(src, blocked, callback, debugLink.get());
   }
 
-  // This method looks for op schema strings and function pointers that "flow"
-  // into the same c10 op registration API call via "use" edges in IR graph.
+  // This method looks for op schema strings and function pointers that connect
+  // to the same c10 op registration API call via "use" edges (bi-directional)
+  // in IR graph - exploring both nodes being used (operands) by the node and
+  // nodes using (users) the node.
+  //
   // It assumes that the function pointers are needed (registered) for the op.
   //
   // For example, from op name "aten::add" to registration API call:
@@ -471,7 +510,9 @@ private:
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
       // We only need to process call/invoke instructions.
-      if (!I || !CallSite(I)) continue;
+      if (!I || !CallSite(I)) {
+        continue;
+      }
       if (Verbose > 2) {
         std::cerr << "[DEBUG][REG][INST] " << *I << std::endl;
       }
@@ -507,9 +548,9 @@ private:
     }
   }
 
-  // Similar as scanOpRegistration - it searches for op schema strings that flow
-  // into c10 op invocation API call and assume the parent function of the API
-  // call invokes the operator.
+  // Similar as scanOpRegistration - it searches for op schema strings that
+  // connect to c10 op invocation API call and assume the parent function of the
+  // API call invokes the operator.
   //
   // For example, from op name "aten::empty" to invocation API call:
   // [OP_SCHEMA] aten::empty
@@ -538,7 +579,9 @@ private:
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
       // We only need to process call/invoke instructions.
-      if (!I || !CallSite(I)) continue;
+      if (!I || !CallSite(I)) {
+        continue;
+      }
       if (Verbose > 2) {
         std::cerr << "[DEBUG][CALL][INST] " << *I << std::endl;
       }
@@ -579,9 +622,9 @@ private:
       // "aten::AA" => 4702103508586165345 (0x41413A3A6E657461)
       // This can be tricky as it depends on consistent endianness/size.
       // Seen this case for "std::__1::basic_string" ABI.
-      int64_t intValue = CI->getZExtValue();
+      uint64_t intValue = CI->getZExtValue();
       auto data = reinterpret_cast<const char*>(&intValue);
-      CB({data, data + sizeof(int64_t)/sizeof(char)});
+      CB({data, data + sizeof(uint64_t)/sizeof(char)});
     } else if (auto C = dyn_cast<Constant>(V)) {
       // Short string literal might be in a constant vector, e.g.:
       // store <2 x i64> <i64 8, i64 4702103508586165345>, <2 x i64>* %25
@@ -600,7 +643,9 @@ private:
         schemaStrs.push_back(str);
       }
     });
-    if (schemaStrs.empty()) return {};
+    if (schemaStrs.empty()) {
+      return {};
+    }
     if (schemaStrs.size() > 1) {
       std::cerr << "[WARNING] found " << schemaStrs.size()
                 << " op schema strings in one value!" << std::endl;
@@ -611,14 +656,18 @@ private:
         pos == std::string::npos ? schemaStr : schemaStr.substr(0, pos));
   }
 
-  static void printDebugPath(LINK* debugLink, Value* src, Value* dest) {
-    if (!debugLink) return;
+  static void printDebugPath(VALUE_MAP* debugLink, Value* src, Value* dest) {
+    if (!debugLink) {
+      return;
+    }
     int depth = 0;
     for (auto N = dest; ; N = (*debugLink)[N]) {
       std::cerr << "[DEBUG][PATH][" << ++depth << "]";
       printDebugValue(N);
       std::cerr << std::endl;
-      if (N == src) break;
+      if (N == src) {
+        break;
+      }
     }
   }
 
@@ -656,7 +705,9 @@ private:
     for (const auto& K : keys) {
       out << "- name: " << demangle(K) << std::endl;
       auto& values = graph[K];
-      if (values.empty()) continue;
+      if (values.empty()) {
+        continue;
+      }
       out << "  depends:" << std::endl;
       for (const auto& value : values) {
         out << "  - name: " << demangle(value) << std::endl;

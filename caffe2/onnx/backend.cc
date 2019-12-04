@@ -349,6 +349,7 @@ Caffe2Backend::get_special_operators() const {
               {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
+              {"Int8Reshape", &Caffe2Backend::CreateReshape},
               {"Gather", &Caffe2Backend::CreateGather},
               {"Gemm", &Caffe2Backend::CreateGemm},
               {"Pad", &Caffe2Backend::CreatePad},
