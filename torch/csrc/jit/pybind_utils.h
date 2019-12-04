@@ -1,8 +1,10 @@
 #pragma once
 
+#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -16,10 +18,9 @@
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -130,7 +131,7 @@ inline TypePtr getOrCreateNamedTupleType(
 
   if (auto type = get_python_cu()->get_type(qualName)) {
     TORCH_CHECK(
-        type->isSubtypeOf(named_type) || named_type->isSubtypeOf(type),
+        type->isSubtypeOf(named_type),
         "Can't to redefine NamedTuple: ",
         named_type->python_str());
     return type;
@@ -420,7 +421,7 @@ inline IValue toIValue(
     case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_WARN(
+        TORCH_WARN_ONCE(
             "Using sparse tensors in TorchScript is experimental. Many optimization "
             "pathways have not been thoroughly tested with sparse tensors. Please "
             "include the fact that the network is running sparse tensors in any bug "
@@ -707,7 +708,7 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_WARN(
+      TORCH_WARN_ONCE(
           "Using sparse tensors in TorchScript is experimental. Many optimization "
           "pathways have not been thoroughly tested with sparse tensors. Please "
           "include the fact that the network is running sparse tensors in any bug "
@@ -938,7 +939,7 @@ inline py::object runAndInsertCall(
       callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
   auto tracing_state = tracer::getTracingState();
   if (!tracing_state) {
-    AutoNoGIL no_gil_guard;
+    pybind11::gil_scoped_release no_gil_guard;
     // If we're not tracing, just run the callee as normal.
     callee.run(stack);
   } else {
@@ -969,7 +970,7 @@ inline py::object runAndInsertCall(
     // Actually run the callee. Pause the tracer so that we don't double-add the
     // callee nodes.
     {
-      AutoNoGIL no_gil_guard;
+      pybind11::gil_scoped_release no_gil_guard;
       ResourceGuard guard(tracer::pauseTracing());
       callee.run(stack);
     }
