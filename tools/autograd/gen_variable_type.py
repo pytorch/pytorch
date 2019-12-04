@@ -506,7 +506,7 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'einsum'):
+        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
 
     env = {
