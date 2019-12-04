@@ -331,19 +331,47 @@ void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
 Tensor gelu_cuda(const Tensor& self) {
   Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
-  GeluKernel(kCUDA, it);
+  GeluCUDAKernelImpl(it);
   return Y;
 }
 
 Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
   Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::binary_op(dX, grad, self);
-  GeluBackwardKernel(kCUDA, it);
+  GeluBackwardCUDAKernelImpl(it);
   return dX;
 }
 
-REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
-REGISTER_DISPATCH(GeluKernel, &GeluCUDAKernelImpl);
-REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardCUDAKernelImpl);
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+static Tensor threshold_out_cuda(
+    optional<Tensor> opt_result,
+    const Tensor& self,
+    Scalar threshold,
+    Scalar value,
+    const Tensor& other) {
+  Tensor result = opt_result.value_or(Tensor());
+  auto iter = TensorIterator::binary_op(result, self, other);
+  threshold_kernel(iter, threshold, value);
+  return iter.output();
+}
+
+Tensor threshold_cuda(const Tensor& self, Scalar threshold, Scalar value) {
+  return threshold_out_cuda(nullopt, self, threshold, value, self);
+}
+
+Tensor& threshold__cuda(Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out_cuda(make_optional(self), self, threshold, value, self);
+  return self;
+}
+
+Tensor& threshold_out_cuda(Tensor& result, const Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out_cuda(make_optional(result), self, threshold, value, self);
+  return result;
+}
+
+Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar threshold) {
+  return threshold_out_cuda(nullopt, self, threshold, 0, grad);
+}
 
 }}  // namespace at::native

@@ -189,7 +189,6 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 
 inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) const {
   if (C10_LIKELY(dispatchKey.has_value())) {
-
     const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
 
     if (nullptr != backendKernel) {

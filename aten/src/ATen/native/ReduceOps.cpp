@@ -556,8 +556,10 @@ inline Tensor & _any(Tensor & result, TensorIterator & iter) {
 
 Tensor any(const Tensor& self) {
   TORCH_CHECK(self.options().backend() == Backend::CPU ||
-    self.options().backend() == Backend::CUDA, "any only supports CPU AND CUDA "
-    "backend, got: ", toString(self.options().backend()));
+    self.options().backend() == Backend::CUDA ||
+    self.options().backend() == Backend::SparseCPU ||
+    self.options().backend() == Backend::SparseCUDA, "any only supports CPU, CUDA, "
+    "SparseCPU and SparseCUDA backend, got: ", toString(self.options().backend()));
   TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 and torch.bool dtypes");
 
