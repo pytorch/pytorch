@@ -3,8 +3,8 @@ producer_name: "pytorch"
 producer_version: "1.3"
 graph {
   node {
-    input: "x"
-    input: "x"
+    input: "0"
+    input: "0"
     output: "1"
     name: "Mul_0"
     op_type: "Mul"
@@ -34,7 +34,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1
