@@ -567,9 +567,9 @@ c10::optional<std::string> findObserverName(Value* v) {
   return c10::nullopt;
 }
 
-class QuantizeHelper {
+class InsertQuantDeQuantHelper {
  public:
-  QuantizeHelper(script::Module& m) : module_(m) {}
+  InsertQuantDeQuantHelper(script::Module& m) : module_(m) {}
   // quantization parameters and scalar type
   std::tuple<IValue, IValue> getQParams(Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
@@ -586,7 +586,7 @@ class QuantizeHelper {
   std::unordered_map<Value*, std::tuple<IValue, IValue> > values_to_qparams_;
 };
 
-void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
+void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
@@ -610,7 +610,7 @@ void QuantizeHelper::collectObserverNodesAndValueToQuantize(Value* v) {
   values_to_qparams_.insert({new_value, getQParams(v)});
 }
 
-void QuantizeHelper::removeObservers() {
+void InsertQuantDeQuantHelper::removeObservers() {
   for (auto& n : nodes_to_destroy_) {
     n->removeAllInputs();
   }
@@ -628,7 +628,7 @@ void QuantizeHelper::removeObservers() {
   }
 }
 
-void QuantizeHelper::quantizeTensors() {
+void InsertQuantDeQuantHelper::quantizeTensors() {
   for (auto& v : values_to_quantize_) {
     TORCH_INTERNAL_ASSERT(values_to_qparams_.count(v));
     auto tp = values_to_qparams_[v];
@@ -671,7 +671,7 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
+std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -689,7 +689,7 @@ std::tuple<IValue, IValue> QuantizeHelper::getQParams(Value* v) {
   return std::make_tuple(qparams, scalar_type);
 }
 
-c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
+c10::optional<script::Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
     Value* child_instance) {
   TORCH_INTERNAL_ASSERT(
       child_instance->node()->kind() == prim::GetAttr,
@@ -718,7 +718,7 @@ void InsertQuantDeQuantImpl(
     }
   }
 
-  QuantizeHelper qh(module);
+  InsertQuantDeQuantHelper qh(module);
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
