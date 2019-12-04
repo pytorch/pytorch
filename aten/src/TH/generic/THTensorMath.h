@@ -109,8 +109,6 @@ TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
-TH_API void THTensor_(cinv)(THTensor *self, THTensor *src);
-
 TH_API void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(rshift)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value);
