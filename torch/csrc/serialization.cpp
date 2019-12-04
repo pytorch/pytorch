@@ -25,7 +25,9 @@ ssize_t doPartialRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
   // because it is more memory efficient.
   // TODO: Stop calling PyObject_HasAttrString() in a loop on our read loop
   auto has_readinto = PyObject_HasAttrString(fildes, "readinto") == 1;
+  std::cout << "HAS READING? " << has_readinto << "\n";
   if (has_readinto) {
+    std::cout << "reading into...\n";
     return doPartialPythonReadInto(fildes, buf, nbytes);
   }
   return doPartialPythonReadBuffered(fildes, buf, nbytes);
@@ -94,8 +96,10 @@ static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbyt
 
   char* method = "write";
   if (is_read) {
+    std::cout << "Getting read method\n";
     method = "readinto";
   }
+  std::cout << "Calling method " <<  method << "\n";
   THPObjectPtr r(PyObject_CallMethod(fildes, method, "O", memview.get()));
   if (r) {
     return PyLong_AsSsize_t(r.get());

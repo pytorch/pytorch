@@ -441,10 +441,13 @@ void initJITBindings(PyObject* module) {
    public:
     BufferAdapter(const py::object& buffer) : buffer_(buffer) {
       // Jump to the end of the buffer to get its size
-      auto current = buffer.attr("tell")();
-      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
-      size_ = py::cast<size_t>(buffer.attr("tell")());
-      buffer.attr("seek")(current);
+      // auto current = buffer.attr("tell")();
+      // buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+      // size_ = py::cast<size_t>(buffer.attr("tell")());
+      // buffer.attr("seek")(current);
+      size_ =
+          py::cast<size_t>(py::module::import("torch.serialization._file_utils")
+                               .attr("find_size_size")(buffer));
     }
 
     size_t size() const override {

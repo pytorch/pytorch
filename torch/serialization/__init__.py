@@ -20,7 +20,7 @@ from torch.serialization._tensor_utils import location_tag, default_restore_loca
 DEFAULT_PROTOCOL = 2
 
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -172,7 +172,9 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         pickle_load_args['encoding'] = 'utf-8'
 
     with _file_utils.open_file_like(f, 'rb') as opened_file:
-        if _file_utils.is_zipfile(opened_file):
+        print(_file_utils.is_zipfile(opened_file))
+        if True:
+        # if _file_utils.is_zipfile(opened_file):
             with _file_utils.open_zipfile_reader(f) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
