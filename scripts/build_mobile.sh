@@ -52,7 +52,7 @@ if [ "${VERBOSE:-}" == '1' ]; then
 fi
 
 # Use-specified CMake arguments go last to allow overridding defaults
-CMAKE_ARGS+=($@)
+CMAKE_ARGS+=("$@")
 
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
