@@ -69,7 +69,7 @@
 
 namespace torch {
 namespace jit {
-c10::OperatorOptions aliasAnalysisFromSchema() {
+inline c10::OperatorOptions aliasAnalysisFromSchema() {
   c10::OperatorOptions result;
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
   return result;
