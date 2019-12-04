@@ -375,3 +375,4 @@ Utilities
 .. autofunction:: result_type
 .. autofunction:: can_cast
 .. autofunction:: promote_types
+.. autofunction:: export_opnames

@@ -78,5 +78,8 @@ using ExportModuleExtraFilesHook =
     std::function<script::ExtraFilesMap(const script::Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
 
+// Returns a list of names of all operators in the module and its submodules.
+TORCH_API std::vector<std::string> export_opnames(const script::Module& m);
+
 } // namespace jit
 } // namespace torch
