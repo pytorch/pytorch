@@ -197,7 +197,7 @@ private:
         seen_default_arg = true;
       } else {
         TORCH_INTERNAL_ASSERT(
-            seen_default_arg && !arg.kwarg_only(),
+            !seen_default_arg || arg.kwarg_only(),
             "Non-default positional argument follows default argument. Parameter ",
             arg.name(),
             " in ",
