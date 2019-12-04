@@ -607,12 +607,12 @@ class FunctionEventAvg(FormattedTimesMixin):
             not group_by_input_shapes or
             other.input_shapes == self.input_shapes
         )
-        assert isinstance(other, FunctionEvent)
+        assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
-        self.cpu_time_total += other.cpu_time
-        self.cuda_time_total += other.cuda_time
+        self.cpu_time_total += other.cpu_time_total
+        self.cuda_time_total += other.cuda_time_total
         self.self_cpu_time_total += other.self_cpu_time_total
-        self.count += 1
+        self.count += other.count
         return self
 
     def __iadd__(self, other):
