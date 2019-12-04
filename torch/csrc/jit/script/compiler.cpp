@@ -18,7 +18,6 @@
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
-#include "torch/csrc/jit/passes/constant_propagation.h"
 
 #include <torch/csrc/jit/constants.h>
 

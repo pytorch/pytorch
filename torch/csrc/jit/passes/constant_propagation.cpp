@@ -79,7 +79,7 @@ struct ConstantPropagator {
     } else {
       aliasDb_ = nullptr;
     }
-  };
+  }
 
   void pushIValue(Value* v, Stack& stack) {
     if (tuples.count(v)) {
