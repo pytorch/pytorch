@@ -25,6 +25,7 @@ import caffe2.python._import_c_extension as C
 logger = logging.getLogger(__name__)
 
 Blobs = C.blobs
+ResetBlob = C.reset_blob
 CreateBlob = C.create_blob
 CurrentWorkspace = C.current_workspace
 DeserializeBlob = C.deserialize_blob

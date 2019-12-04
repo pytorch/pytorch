@@ -315,7 +315,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       throw std::runtime_error("invalid device: " + str);
     }
   } else if (type_ == ParameterType::STRING) {
-    if (str != "None" || str != "") {
+    if (str != "None" && str != "") {
       throw std::runtime_error("invalid default string: " + str);
     }
   }
@@ -667,9 +667,11 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  auto tensor = scalar_to_tensor(scalar);
+  at::AutoNonVariableTypeMode guard;
+
+  at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return autograd::make_variable(tensor);
+  return tensor;
 }
 
 at::Scalar PythonArgs::scalar_slow(int i) {

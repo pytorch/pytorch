@@ -50,7 +50,7 @@ typedef struct mz_zip_archive mz_zip_archive;
 //    the reader can still read files that were compressed.
 // 2. It provides a getRecordOffset function which returns the offset into the
 //    raw file where file data lives. If the file was written with PyTorchStreamWriter
-//    it is guarenteed to be 64 byte aligned.
+//    it is guaranteed to be 64 byte aligned.
 
 // PyTorchReader/Writer handle checking the version number on the archive format
 // and ensure that all files are written to a archive_name directory so they
@@ -106,6 +106,7 @@ class CAFFE2_API PyTorchStreamReader final {
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
   size_t getRecordOffset(const std::string& name);
   bool hasRecord(const std::string& name);
+  std::vector<std::string> getAllRecords();
 
   ~PyTorchStreamReader();
   uint64_t version() const {
@@ -156,6 +157,7 @@ class CAFFE2_API PyTorchStreamWriter final {
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
   std::string archive_name_plus_slash_;
+  std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
   bool finalized_ = false;

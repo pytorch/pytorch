@@ -12,6 +12,7 @@ class CustomClassHolder : public c10::intrusive_ptr_target {};
 struct Function;
 namespace script {
 struct CompilationUnit;
+struct Module;
 }
 } // namespace jit
 } // namespace torch
@@ -325,6 +326,9 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
   c10::intrusive_ptr<ivalue::Object> toObject() const & ;
   const ivalue::Object& toObjectRef() const;
+
+  torch::jit::script::Module toModule() const;
+  bool isModule() const;
 
   // None
   bool isNone() const {

@@ -19,22 +19,21 @@ import warnings
 import threading
 from torch._six import raise_from
 from subprocess import Popen, PIPE
-from multiprocessing.util import register_after_fork as _register_after_fork
 from ._utils import _get_device_index
+import torch._C
 
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
-_in_bad_fork = False  # this global is also used in torch.manual_seed
-_original_pid = False
+_is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _cudart = None
 
 
 def find_cuda_windows_lib():
     # Override the default search process
     # Fixes https://github.com/pytorch/pytorch/issues/20202
-    # The libary selection will be done in these directories one by one
+    # The library selection will be done in these directories one by one
     # 1. [Package Root]\Lib
     #    That's where our libraries are in, which should be loaded first.
     # 2. [Python Root]\Library\bin
@@ -137,8 +136,13 @@ def _check_capability():
             warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 
+def is_initialized():
+    r"""Returns whether PyTorch's CUDA state has been initialized."""
+    return _initialized and not _is_in_bad_fork()
+
+
 def _lazy_call(callable):
-    if _initialized:
+    if is_initialized():
         callable()
     else:
         # Don't store the actual traceback to avoid memory cycle
@@ -149,11 +153,6 @@ _lazy_call(_check_capability)
 
 class DeferredCudaCallError(Exception):
     pass
-
-
-def is_initialized():
-    r"""Returns whether PyTorch's CUDA state has been initialized."""
-    return _initialized
 
 
 def init():
@@ -170,8 +169,8 @@ def init():
 
 
 def _lazy_init():
-    global _initialized, _cudart, _original_pid, _queued_calls
-    if _initialized or hasattr(_tls, 'is_initializing'):
+    global _initialized, _cudart, _queued_calls
+    if is_initialized() or hasattr(_tls, 'is_initializing'):
         return
     with _initialization_lock:
         # We be double-checked locking, boys!  This is OK because
@@ -179,12 +178,12 @@ def _lazy_init():
         # is for when a thread blocked on some other thread which was
         # doing the initialization; when they get the lock, they will
         # find there is nothing left to do.
-        if _initialized:
+        if is_initialized():
             return
         # It is important to prevent other threads from entering _lazy_init
         # immediately, while we are still guaranteed to have the GIL, because some
         # of the C calls we make below will release the GIL
-        if _in_bad_fork:
+        if _is_in_bad_fork():
             from sys import version_info
             if version_info < (3, 4):
                 msg = ("To use CUDA with multiprocessing, you must use Python "
@@ -199,7 +198,6 @@ def _lazy_init():
         _cudart = _load_cudart()
         _cudart.cudaGetErrorName.restype = ctypes.c_char_p
         _cudart.cudaGetErrorString.restype = ctypes.c_char_p
-        _original_pid = os.getpid()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
         # However, we must not let any *other* threads in!
@@ -215,17 +213,6 @@ def _lazy_init():
         finally:
             delattr(_tls, 'is_initializing')
         _initialized = True
-
-
-def _after_fork(arg):
-    global _initialized, _in_bad_fork
-    if _initialized and _original_pid != os.getpid():
-        _initialized = False
-        _in_bad_fork = True
-        _CudaBase.__new__ = _lazy_new
-        torch._C._cuda_set_run_yet_variable_to_false()
-
-_register_after_fork(_after_fork, _after_fork)
 
 
 def cudart():
@@ -335,8 +322,7 @@ def get_device_capability(device=None):
 
 
 def get_device_properties(device):
-    if not _initialized:
-        init()  # will define _get_device_properties and _CudaDeviceProperties
+    _lazy_init()  # will define _get_device_properties and _CudaDeviceProperties
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
@@ -489,8 +475,8 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
 @staticmethod
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
-    # We need this method only for lazy init, so we can remove it
-    del _CudaBase.__new__
+    # We may need to call lazy init again if we are a forked child
+    # del _CudaBase.__new__
     return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
@@ -555,7 +541,7 @@ torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(BoolStorage)
 torch._storage_classes.add(BFloat16Storage)
 
-from . import sparse  # noqa: F401
-from . import profiler  # noqa: F401
-from . import nvtx  # noqa: F401
-from .streams import Stream, Event  # noqa: F401
+from . import sparse
+from . import profiler
+from . import nvtx
+from .streams import Stream, Event

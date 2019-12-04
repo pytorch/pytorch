@@ -9,8 +9,26 @@ namespace at {
 namespace native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+namespace {
+  template <typename scalar_t>
+  inline void fill_fast(Tensor& self, Scalar value_scalar) {
+    auto value = value_scalar.to<scalar_t>();
+    scalar_t * dptr = static_cast<scalar_t *>(self.data_ptr());
+    *dptr = value;
+  }
+} // namspace
 
 Tensor& fill_out(Tensor& self, Scalar value) {
+  // When filling a number to 1-element CPU tensor, we want to skip
+  // everything but manipulate data ptr directly.
+  // Ideally this fast pass should be implemented in TensorIterator,
+  // but we also want to skip compute_types which in not avoidable
+  // in TensorIterator for now.
+  if (self.device() == at::kCPU && self.numel() == 1 && !value.isComplex()) {
+     AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
+        fill_fast<scalar_t>(self, value);});
+     return self;
+  }
   auto iter = TensorIterator::nullary_op(self);
   fill_stub(iter.device_type(), iter, value);
   return self;
@@ -74,6 +92,10 @@ Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
   }
 
   return self;
+}
+
+Tensor& zero_(Tensor &self) {
+  return self.fill_(0);
 }
 
 } // namespace native

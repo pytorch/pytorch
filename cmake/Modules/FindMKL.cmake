@@ -367,7 +367,8 @@ ENDIF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
 
 # Standard termination
 IF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
-  MESSAGE(FATAL_ERROR "MKL library not found. Please specify library location")
+  MESSAGE(FATAL_ERROR "MKL library not found. Please specify library location \
+    by appending the root directory of the MKL installation to the environment variable CMAKE_PREFIX_PATH.")
 ENDIF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
 IF(NOT MKL_FIND_QUIETLY)
   IF(MKL_FOUND)
