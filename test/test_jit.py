@@ -46,6 +46,7 @@ from torch.quantization._quantize_script import script_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
+from torch.quantization import default_qconfig
 
 from torch.quantization import quantize
 from common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
@@ -1150,6 +1151,28 @@ graph(%x : Tensor,
         dtypes = set([obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
                       if x.startswith('_observer_')])
         assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
+
+    def test_insert_observers_shared_class_type(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 5, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 5, 3).float()
+
+            def forward(self, x):
+                return self.conv2(self.conv1(x))
+
+        m = torch.jit.script(M())
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        # conv1 and conv2 shares the same type, we need to
+        # make sure we didn't quantize the type twice
+        assert len([x for x, _ in m.conv1._modules._c.items()
+                    if x.startswith('_observer_')]) == 3, \
+            'Expected to have 3 observer submodules'
+        assert len([x for x, _ in m.conv2._modules._c.items()
+                    if x.startswith('_observer_')]) == 3, \
+            'Expected to have 3 observer submodules'
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
