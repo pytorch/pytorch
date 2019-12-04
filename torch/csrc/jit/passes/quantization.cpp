@@ -178,8 +178,12 @@ class InsertObserversHelper {
   int uid_ = 0;
   // Set of observer forward call nodes
   std::unordered_set<Node*> observer_nodes_;
-  // Map from type of the module to the vector of observer modules we added to the class
-  std::unordered_map<Graph*, std::vector<std::tuple<std::string, script::Module>>> graph_observer_map_;
+  // Map from graph to a vector of observer name and observer modules we
+  // want to add to the module instance that has the graph
+  std::unordered_map<
+      Graph*,
+      std::vector<std::tuple<std::string, script::Module>>>
+      graph_observer_map_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
