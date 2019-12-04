@@ -21,15 +21,14 @@ namespace torch {
 namespace nested_tensor {
 
 using namespace at;
-using namespace torch::autograd;
 
 struct _ListNestedTensor;
 
 struct _VariableNode {
   _VariableNode() {}
-  _VariableNode(Variable variable) : _variable(variable) {}
+  _VariableNode(torch::autograd::Variable variable) : _variable(variable) {}
 
-  Variable _variable;
+  torch::autograd::Variable _variable;
 };
 
 THP_API PyObject* _ListNestedTensorVariableClass;
@@ -64,7 +63,7 @@ static inline int64_t _numel(const _NestedNode& meta_node) {
   }
 }
 
-static inline Variable _get_first_variable(PyObject* tensors) {
+static inline torch::autograd::Variable _get_first_variable(PyObject* tensors) {
   if (THPVariable_Check(tensors)) {
     return THPVariable_Unpack(tensors);
   } else {
@@ -73,7 +72,7 @@ static inline Variable _get_first_variable(PyObject* tensors) {
 }
 
 static inline bool _verify_variables(
-    const Variable& first_variable,
+    const torch::autograd::Variable& first_variable,
     PyObject* tensors) {
   // The attributes must match across all constiuents
   //
@@ -90,7 +89,7 @@ static inline bool _verify_variables(
   //     requires_grad
   //     is_pinned()
   if (THPVariable_Check(tensors)) {
-    Variable variable_ = THPVariable_Unpack(tensors);
+    torch::autograd::Variable variable_ = THPVariable_Unpack(tensors);
     bool valid = true;
     // TODO: Add more checks?
     valid = valid && (variable_.dim() == first_variable.dim());
@@ -120,7 +119,7 @@ static inline bool _verify_variables(
 
 static inline _NestedNode _get_structure(PyObject* tensors) {
   if (THPVariable_Check(tensors)) {
-    Variable variable = THPVariable_Unpack(tensors);
+    torch::autograd::Variable variable = THPVariable_Unpack(tensors);
     return _NestedNode(_VariableNode(variable));
   } else {
     std::vector<_NestedNode> meta_nodes;
@@ -139,7 +138,7 @@ static inline _NestedNode _get_structure(PyObject* tensors) {
   }
 }
 
-static inline Variable _get_first_variable(_NestedNode nested_node) {
+static inline torch::autograd::Variable _get_first_variable(_NestedNode nested_node) {
   const _NestedNode* start = &nested_node;
   while (start->_children.size()) {
     start = &start->_children[0];
@@ -218,7 +217,7 @@ static inline void apply2(
   }
 }
 
-static inline Variable _NestedNode_to_tensor(const _NestedNode& nested_node) {
+static inline torch::autograd::Variable _NestedNode_to_tensor(const _NestedNode& nested_node) {
   if (nested_node._children.size() == 0) {
     return nested_node._variable_node._variable;
   } else {
@@ -310,7 +309,7 @@ struct TORCH_API _ListNestedTensor {
   }
   std::string __str__();
   std::string __repr__();
-  Variable to_tensor() {
+  torch::autograd::Variable to_tensor() {
     return _NestedNode_to_tensor(_structure);
   }
   int64_t nested_dim() {
@@ -364,7 +363,7 @@ struct TORCH_API _ListNestedTensor {
 
  private:
   const _NestedNode _structure;
-  const Variable _first_variable;
+  const torch::autograd::Variable _first_variable;
 };
 
 struct TORCH_API _ListNestedTensorVariable {
