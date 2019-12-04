@@ -211,7 +211,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
     // get norm of axis
     for (ptrdiff_t i = tx; i < size; i += step) {
       const AccT val = scalar_cast<AccT>(row[i]);
-      buffer[tx] = THCMax<AccT>(buffer[tx], THCNumerics<AccT>::abs(val));
+      buffer[tx] = THCMax<AccT>(buffer[tx], static_cast<AccT>(std::abs(val)));
     }
     // add (reduce)
     for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
@@ -228,7 +228,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
       const AccT val = scalar_cast<AccT>(row[i]);
       buffer[tx] = THCNumerics<AccT>::add(
         buffer[tx],
-        THCNumerics<AccT>::pow(THCNumerics<AccT>::abs(val), value)
+        THCNumerics<AccT>::pow(static_cast<AccT>(std::abs(val)), value)
       );
     }
     // add (reduce)
@@ -273,9 +273,9 @@ struct TensorNormOp {
 
   __host__ __device__ T operator()(const T x) const {
     switch (StaticExp) {
-      case 1: return THCNumerics<T>::abs(x);
+      case 1: return static_cast<T>(std::abs(x));
       case 2: return THCNumerics<T>::mul(x, x);
-      default: return THCNumerics<T>::pow(THCNumerics<T>::abs(x), exponent);
+      default: return THCNumerics<T>::pow(static_cast<T>(std::abs(x)), exponent);
     }
   }
 
@@ -298,13 +298,13 @@ struct ThrustTensorDistOp {
       return scalar_cast<AccT>(1);
     }
     if (THCNumerics<AccT>::eq(exponent, scalar_cast<AccT, float>(1))) {
-      return THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y));
+      return static_cast<AccT>(std::abs(THCNumerics<AccT>::sub(x, y)));
     } else if (THCNumerics<AccT>::eq(exponent, scalar_cast<AccT, float>(2))) {
       return THCNumerics<AccT>::pow(
         THCNumerics<AccT>::sub(x, y), exponent);
     } else {
       return THCNumerics<AccT>::pow(
-        THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)),
+        static_cast<AccT>(std::abs(THCNumerics<AccT>::sub(x, y))),
         exponent);
     }
   }

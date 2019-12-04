@@ -30,15 +30,15 @@ ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
 )");
 
 static std::string valueName(const Value* n) {
-  return "n" + std::to_string(n->unique());
+  return "n" + c10::to_string(n->unique());
 }
 
 static std::string scalarValue(const int64_t v) {
-  return std::to_string(v);
+  return c10::to_string(v);
 }
 
 static std::string scalarValue(const bool v) {
-  return std::to_string(v);
+  return c10::to_string(v);
 }
 
 // Note: The NAN, NEG_INFINITY and POS_INFINITY strings map to device-specific
@@ -115,6 +115,9 @@ static std::string typeCastedValueName(
     // cast here, which may end up being a no-op if the tensor's scalar type
     // is `double`.
     return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+  } else if (t->kind() == TypeKind::NoneType) {
+    // Support None value for optional arguments like memory format
+    return vn;
   } else if (auto scalar_type = t->expect<TensorType>()->scalarType()) {
     if (*scalar_type != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
@@ -267,10 +270,10 @@ static std::string encodeRHS(const Node* n) {
       // PyTorch converts (scalar) argument types to result before applying the
       // operator e.g. 1.4-torch.tensor(3) = -2
       env.s(
-          std::to_string(i),
+          c10::to_string(i),
           typeCastedValueName(in->type(), *outtype, valueName(in)));
       // Uncasted operands only used for comparison operators
-      env.s(std::to_string(i) + "_nocast", valueName(in));
+      env.s(c10::to_string(i) + "_nocast", valueName(in));
       i++;
     }
 
@@ -336,7 +339,7 @@ std::string generateKernel(
             1); // + 1 because the first argument is the linearIndex
       std::string tensor =
           "t" +
-          std::to_string(
+          c10::to_string(
               formals.size()); // can't be unique() because Param may be an output
       const auto nDim = desc.nDim();
       emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
@@ -357,7 +360,7 @@ std::string generateKernel(
             1); // + 1 because the first argument is the linearIndex
     std::string scalar =
         "s" +
-        std::to_string(
+        c10::to_string(
             formals.size()); // can't be unique() because Param may be an output
     env.d(
         "formal_index",

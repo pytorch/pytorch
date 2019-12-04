@@ -8,6 +8,11 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase
 
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
+
 class TestLogging(JitTestCase):
     def test_bump_numeric_counter(self):
         class ModuleThatLogs(torch.jit.ScriptModule):
@@ -106,8 +111,3 @@ class TestLogging(JitTestCase):
             self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")

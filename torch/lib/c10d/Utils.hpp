@@ -203,6 +203,20 @@ inline void assertCPU(
   }
 }
 
+inline void assertSameDevice(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() < 2) {
+    return;
+  }
+  const auto& device = tensors[0].device();
+  for (int i = 1; i < tensors.size(); ++i) {
+    if (tensors[i].device() != device) {
+      fn("tensors should be on the same device");
+    }
+  }
+}
+
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors,

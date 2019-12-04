@@ -89,6 +89,6 @@ extern "C" typedef struct NVRTC {
 #undef CREATE_MEMBER
 } NVRTC;
 
-extern "C" AT_CUDA_API NVRTC* load_nvrtc();
+extern "C" TORCH_CUDA_API NVRTC* load_nvrtc();
 
 }} // at::cuda

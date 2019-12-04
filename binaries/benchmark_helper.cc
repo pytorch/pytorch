@@ -47,11 +47,6 @@ defined(TARGET_IPHONE_SIMULATOR)
 #include <malloc.h>
 #endif
 
-using std::map;
-using std::shared_ptr;
-using std::string;
-using std::unique_ptr;
-using std::vector;
 
 void observerConfig() {
   caffe2::ClearGlobalNetObservers();
@@ -230,7 +225,7 @@ void fillInputBlob(
     if (blob == nullptr) {
       blob = workspace->CreateBlob(tensor_kv.first);
     }
-    // todo: support gpu and make this function a tempalte
+    // todo: support gpu and make this function a template
     int protos_size = tensor_kv.second.protos_size();
     if (protos_size == 1 && iteration > 0) {
       // Do not override the input data if there is only one input data,

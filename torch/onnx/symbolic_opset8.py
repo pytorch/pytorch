@@ -245,8 +245,8 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 0)
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 0)
 
@@ -256,8 +256,8 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 1)
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 1)
 
@@ -272,7 +272,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
         return _constant_fill(g, sizes, dtype, const_value)
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, fill_value)

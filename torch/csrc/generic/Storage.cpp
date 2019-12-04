@@ -235,30 +235,30 @@ static PyMappingMethods THPStorage_(mappingmethods) = {
 // TODO: implement equality
 PyTypeObject THPStorageType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C." THPStorageBaseStr,         /* tp_name */
-  sizeof(THPStorage),                    /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPStorage_(dealloc),      /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  "torch._C." THPStorageBaseStr,               /* tp_name */
+  sizeof(THPStorage),                          /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  (destructor)THPStorage_(dealloc),            /* tp_dealloc */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
   nullptr,                                     /* tp_repr */
   nullptr,                                     /* tp_as_number */
   nullptr,                                     /* tp_as_sequence */
-  &THPStorage_(mappingmethods),          /* tp_as_mapping */
+  &THPStorage_(mappingmethods),                /* tp_as_mapping */
   nullptr,                                     /* tp_hash  */
   nullptr,                                     /* tp_call */
   nullptr,                                     /* tp_str */
   nullptr,                                     /* tp_getattro */
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  nullptr,                                  /* tp_doc */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
   nullptr,   /* will be assigned in init */    /* tp_methods */
@@ -268,10 +268,10 @@ PyTypeObject THPStorageType = {
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPStorage_(pynew),                    /* tp_new */
+  THPStorage_(pynew),                          /* tp_new */
 };
 
 static struct PyMemberDef THPStorage_(members)[] = {
@@ -318,6 +318,15 @@ void THPStorage_(initCopyMethods)()
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPDoubleStorageType, h, &THWStorage_(copyDouble));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBoolStorageType, h, &THWStorage_(copyBool));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBFloat16StorageType, h, &THWStorage_(copyBFloat16));
+#ifdef THQUINT8
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQUInt8StorageType, h, &THWStorage_(copyQUInt8));
+#endif
+#ifdef THQINT8
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt8StorageType, h, &THWStorage_(copyQInt8));
+#endif
+#ifdef THQINT32
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt32StorageType, h, &THWStorage_(copyQInt32));
+#endif
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, h, &THWStorage_(copyCudaByte));

@@ -414,13 +414,14 @@ def run(paths):
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bfloat16'] = func.get('cpu_bfloat16', False)
+                declaration['cuda_bfloat16'] = func.get('cuda_bfloat16', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
-                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'no')
-                assert declaration['use_c10_dispatcher'] in ['no', 'unboxed_only', 'full']
+                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'unboxed_only')
+                assert declaration['use_c10_dispatcher'] in ['unboxed_only', 'full']
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
