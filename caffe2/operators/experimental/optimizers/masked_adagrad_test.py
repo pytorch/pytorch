@@ -110,17 +110,27 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
         has_mask_input=st.booleans(),
         has_mask_out=st.booleans(),
         block_size=st.integers(1, 4),
+        row_wise=st.booleans(),
     )
     def test_masked_sparse_adagrad(
-        self, inputs, lr, epsilon, has_mask_input, has_mask_out, block_size
+        self,
+        inputs,
+        lr,
+        epsilon,
+        has_mask_input,
+        has_mask_out,
+        block_size,
+        row_wise,
     ):
         param, moment, grad = inputs
+        num_rows = param.shape[0]
+        if row_wise:
+            moment = np.resize(moment, num_rows)
         moment = np.abs(moment)
         lr = np.array([lr], dtype=np.float32)
         param_ref = np.copy(param)
         moment_ref = np.copy(moment)
 
-        num_rows = param.shape[0]
         indices = np.random.randint(num_rows, size=grad.shape[0])
 
         workspace.ResetWorkspace()
@@ -157,7 +167,9 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
 
         net = core.Net("test_net")
 
-        net.SparseAdagrad(
+        prefix = "RowWise" if row_wise else ""
+        ref_op = core.CreateOperator(
+            prefix + "SparseAdagrad",
             ["param_ref", "moment_ref", "indices", "grad", "lr"],
             ["param_ref", "moment_ref"],
             epsilon=epsilon,
@@ -170,7 +182,8 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
             if has_mask_out:
                 outputs += ["mask_out"]
 
-        net.MaskedSparseAdagrad(
+        op = core.CreateOperator(
+            "Masked" + prefix + "SparseAdagrad",
             inputs,
             outputs,
             epsilon=epsilon,
@@ -178,6 +191,7 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
             delays=[] if has_mask_input else delays,
             prune_ratios=[] if has_mask_input else prune_ratios,
         )
+        net.Proto().op.extend([ref_op, op])
 
         workspace.FeedBlob("mask_changed", np.array([0]).astype(np.bool))
         workspace.FeedBlob("iter", np.array([0]).astype(np.int64))
@@ -193,7 +207,8 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
             moment = workspace.FetchBlob("moment")
 
             param_ref = param_ref.reshape(num_rows, -1)
-            moment_ref = moment_ref.reshape(num_rows, -1)
+            if not row_wise:
+                moment_ref = moment_ref.reshape(num_rows, -1)
 
             for i in range(grad.shape[0]):
                 row = indices[i]
@@ -204,10 +219,13 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
                     m = mask[row][byte] & (1 << bit)
                     if not m:
                         param_ref[row, j] = 0
-                        moment_ref[row, j] = 0
+                        if not row_wise:
+                            moment_ref[row, j] = 0
 
             np.testing.assert_array_equal(param_ref, param.reshape(num_rows, -1))
-            np.testing.assert_array_equal(moment_ref, moment.reshape(num_rows, -1))
+            np.testing.assert_array_equal(
+                moment_ref, moment if row_wise else moment.reshape(num_rows, -1)
+            )
 
             # Test2: mask_changed == true
             workspace.FeedBlob("param_ref", param_ref)
@@ -226,13 +244,16 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
                     m = mask[i][byte] & (1 << bit)
                     if not m:
                         param_ref[i, j] = 0
-                        moment_ref[i, j] = 0
+                        if not row_wise:
+                            moment_ref[i, j] = 0
 
             param = workspace.FetchBlob("param")
             moment = workspace.FetchBlob("moment")
 
             np.testing.assert_array_equal(param_ref, param.reshape(num_rows, -1))
-            np.testing.assert_array_equal(moment_ref, moment.reshape(num_rows, -1))
+            np.testing.assert_array_equal(
+                moment_ref, moment if row_wise else moment.reshape(num_rows, -1)
+            )
         else:
             # Test1: in the first iteration, there shouldn't be any masking
             workspace.RunNet(net)
@@ -260,7 +281,8 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
                 moment = workspace.FetchBlob("moment")
 
                 param_ref = mask * param_ref.reshape(num_rows, row_size)
-                moment_ref = mask * moment_ref.reshape(num_rows, row_size)
+                if not row_wise:
+                    moment_ref = mask * moment_ref.reshape(num_rows, row_size)
 
                 np.testing.assert_array_equal(param_ref.flatten(), param.flatten())
                 np.testing.assert_array_equal(moment_ref.flatten(), moment.flatten())
@@ -276,7 +298,8 @@ class TestMaskedAdagrad(hu.HypothesisTestCase):
             moment = workspace.FetchBlob("moment")
 
             param_ref = mask * param_ref.reshape(num_rows, row_size)
-            moment_ref = mask * moment_ref.reshape(num_rows, row_size)
+            if not row_wise:
+                moment_ref = mask * moment_ref.reshape(num_rows, row_size)
 
             np.testing.assert_array_equal(param_ref.flatten(), param.flatten())
             np.testing.assert_array_equal(moment_ref.flatten(), moment.flatten())
