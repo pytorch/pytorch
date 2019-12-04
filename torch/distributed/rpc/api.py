@@ -58,27 +58,28 @@ def _require_initialized(func):
         return func(*args, **kwargs)
     return wrapper
 
+
 # States used by `def _wait_all_workers()`.
 _ALL_WORKER_NAMES = None
-_DONE_WORKER_NAMES = set()
-_TERMINATION_SIGNAL = threading.Event()
+_INTENDED_WORKER_NAMES = set()
+_PROCEED_SIGNAL = threading.Event()
 
-def _on_master_follower_report_done(worker_name):
+
+def _on_leader_follower_report_intent(worker_name):
     assert (
         worker_name in _ALL_WORKER_NAMES
-    ), "{worker_name} is not expected by master.".format(worker_name=worker_name)
+    ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
     assert (
-        worker_name not in _DONE_WORKER_NAMES
+        worker_name not in _INTENDED_WORKER_NAMES
     ), "{worker_name} reported done twice. ".format(worker_name=worker_name)
-    _DONE_WORKER_NAMES.add(worker_name)
-    if _ALL_WORKER_NAMES != _DONE_WORKER_NAMES:
-        return
-    _set_termination_signal()
+    _INTENDED_WORKER_NAMES.add(worker_name)
+    if _ALL_WORKER_NAMES == _INTENDED_WORKER_NAMES:
+        _set_proceed_signal()
 
 
-def _set_termination_signal():
-    assert not _TERMINATION_SIGNAL.is_set(), "Termination signal got set twice."
-    _TERMINATION_SIGNAL.set()
+def _set_proceed_signal():
+    assert not _PROCEED_SIGNAL.is_set(), "Termination signal got set twice."
+    _PROCEED_SIGNAL.set()
 
 
 def _wait_all_workers():
@@ -95,38 +96,35 @@ def _wait_all_workers():
     assert _ALL_WORKER_NAMES is not None, (
         "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
     )
-    master_worker_name = sorted(_ALL_WORKER_NAMES)[0]
+    leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
 
     self_worker_name = _agent.get_worker_info().name
-    assert self_worker_name not in _DONE_WORKER_NAMES, (
+    assert self_worker_name not in _INTENDED_WORKER_NAMES, (
         "Can not call _wait_all_workers() twice."
     )
 
-    is_master_worker = master_worker_name == self_worker_name
+    is_leader_worker = leader_worker_name == self_worker_name
 
-    # All follower report done to the master.
-    if is_master_worker:
-        _on_master_follower_report_done(self_worker_name)
+    # Phase 1: Followers send intents.
+    # All followers report intents to the leader.
+    if is_leader_worker:
+        _on_leader_follower_report_intent(self_worker_name)
     else:
         rpc_async(
-            master_worker_name,
-            _on_master_follower_report_done,
+            leader_worker_name,
+            _on_leader_follower_report_intent,
             args=(self_worker_name,),
         )
 
-    _TERMINATION_SIGNAL.wait()
+    _PROCEED_SIGNAL.wait()
 
-    # Master's termination signal is the first to be unblocked,
-    # after receiving all followers' done reports.
-    if is_master_worker:
-        # The master sends out termination commands to all followers.
-        futs = []
-        for follower_worker_name in _ALL_WORKER_NAMES - {master_worker_name}:
-            fut = rpc_async(follower_worker_name, _set_termination_signal, args=())
-            futs.append(fut)
-        for fut in futs:
-            ret = fut.wait()
-            assert ret is None, "Sending termination signal failed. {ret}".format(ret=ret)
+    # Phase 2: Leader asks followers to proceed.
+    # Leader's signal is the first to be unblocked,
+    # after receiving all followers' intents.
+    if is_leader_worker:
+        # The leader sends out proceeed signals to all followers.
+        for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
+            rpc_async(follower_worker_name, _set_proceed_signal, args=())
 
 
 def shutdown(graceful=True):
