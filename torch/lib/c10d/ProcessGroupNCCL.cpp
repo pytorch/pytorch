@@ -213,8 +213,14 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 // Same as calling synchronize().
-void ProcessGroupNCCL::WorkNCCL::wait() {
+bool ProcessGroupNCCL::WorkNCCL::wait() {
   synchronize();
+  // Always return true, because abort API is not implemented.
+  return true;
+}
+
+void ProcessGroupNCCL::WorkNCCL::abort() {
+  TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -703,6 +709,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           }
         }
       });
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllgatherOptions& /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(

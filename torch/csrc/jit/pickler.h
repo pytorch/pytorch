@@ -31,7 +31,8 @@ enum class PickleOpCode : char {
   STRING = 'S',
   BINSTRING = 'T',
   SHORT_BINSTRING = 'U',
-  UNICODE = 'V',
+  // NB: Avoid using UNICODE as it is a macro in the Windows API
+  UNICODE_ = 'V',
   BINUNICODE = 'X',
   APPEND = 'a',
   BUILD = 'b',
@@ -163,6 +164,7 @@ class Pickler {
   void pushLiteralTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
+  void pushDevice(const IValue& ivalue);
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);
@@ -201,12 +203,14 @@ class Pickler {
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
+  static constexpr size_t kBufferSize = 256;
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
     if (bufferPos_ + sizeof(T) > buffer_.size()) {
       flushNonEmpty();
     }
+    static_assert(sizeof(T) <= kBufferSize, "Buffer size assumption");
     memcpy(buffer_.data() + bufferPos_, begin, sizeof(T));
     bufferPos_ += sizeof(T);
   }
@@ -216,7 +220,7 @@ class Pickler {
   std::function<void(const char*, size_t)> writer_;
 
   // Buffer to avoid calling a writer_ on a per-byte basis.
-  std::array<char, 256> buffer_;
+  std::array<char, kBufferSize> buffer_;
   size_t bufferPos_{0};
 
   // Stack of opcodes/data
@@ -250,6 +254,7 @@ class Pickler {
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
+  std::unordered_map<std::string, uint32_t> memoized_devices_map_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

@@ -830,10 +830,14 @@ class AsyncErrorOp final : public Operator<CPUContext> {
           if (throw_) {
             throw std::logic_error(error_msg_);
           } else {
-            event().SetFinished(error_msg_.c_str());
+            if (!cancel_.test_and_set()) {
+              event().SetFinished(error_msg_.c_str());
+            }
           }
         } catch (...) {
-          event().SetFinishedWithException(error_msg_.c_str());
+          if (!cancel_.test_and_set()) {
+            event().SetFinishedWithException(error_msg_.c_str());
+          }
         }
       });
       return true;
@@ -842,6 +846,10 @@ class AsyncErrorOp final : public Operator<CPUContext> {
 
   bool HasAsyncPart() const override {
     return true;
+  }
+
+  void CancelAsyncCallback() override {
+    cancel_.test_and_set();
   }
 
   ~AsyncErrorOp() override {
@@ -856,6 +864,7 @@ class AsyncErrorOp final : public Operator<CPUContext> {
   bool fail_in_sync_;
   int sleep_time_s_;
   std::string error_msg_;
+  std::atomic_flag cancel_ = ATOMIC_FLAG_INIT;
 };
 
 REGISTER_CPU_OPERATOR(AsyncErrorOp, AsyncErrorOp);

@@ -283,11 +283,11 @@ class TestConcatDataset(TestCase):
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
     if HAS_FAULTHANDLER:
-        faulthandler.enable()
+        faulthandler.enable(sys.__stderr__)
         if not IS_WINDOWS:
             # windows does not have faulthandler.register
             # chain=False prevents the default behavior of killing the process
-            faulthandler.register(signal.SIGUSR1, chain=False)
+            faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
 
 
 set_faulthander_if_available()
@@ -1807,6 +1807,31 @@ class TestIndividualWorkerQueue(TestCase):
         for batch_size in (8, 16, 32, 64):
             for num_workers in range(1, 6):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
+
+
+class SetAffinityDataset(torch.utils.data.IterableDataset):
+
+    def __iter__(self):
+        torch.randperm(1)
+        after = os.sched_getaffinity(0)
+        return iter(after)
+
+
+def worker_set_affinity(_):
+    os.sched_setaffinity(0, [2])
+
+
+@unittest.skipIf(
+    not hasattr(os, 'sched_setaffinity'),
+    "os.sched_setaffinity is not available")
+class TestSetAffinity(TestCase):
+    def test_set_affinity_in_worker_init(self):
+        dataset = SetAffinityDataset()
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset, num_workers=2, worker_init_fn=worker_set_affinity)
+        for sample in dataloader:
+            self.assertEqual(sample, [2])
 
 
 if __name__ == '__main__':

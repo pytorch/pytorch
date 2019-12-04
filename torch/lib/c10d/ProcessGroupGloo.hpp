@@ -96,7 +96,9 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
@@ -111,7 +113,9 @@ class ProcessGroupGloo : public ProcessGroup {
 
     int sourceRank() const override;
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
@@ -173,6 +177,11 @@ class ProcessGroupGloo : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& output_lists,
+      std::vector<at::Tensor>& input_list,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> gather(

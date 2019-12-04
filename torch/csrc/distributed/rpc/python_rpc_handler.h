@@ -39,6 +39,24 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Deserialize a string into a py::object
   py::object deserialize(const SerializedPyObj& serializedObj);
 
+  // Check if obj is RemoteException, then throw it
+  void handleException(const py::object& obj);
+
+  // Explicitly clean up py::objects to avoid segment faults when
+  // py::objects with CPython are cleaned up later at program exit
+  // See similar issues reported https://github.com/pybind/pybind11/issues/1598
+  // and https://github.com/pybind/pybind11/issues/1493
+  // Our local tests also caught this segment faults if py::objects are cleaned
+  // up at program exit. The explanation is: CPython cleans up most critical
+  // utilities before cleaning up PythonRpcHandler singleton, so when
+  // PythonRpcHandler signleton cleans up py::objects and call dec_ref(), it
+  // will crash.
+  // The solution is to clean up py::objects earlier when Rpc agent join().
+  // Be note that py::objects can not be cleaned up when Rpc agent is destroyed
+  // as well, as Rpc agent is global variable and it will have same issue as
+  // PythonRpcHandler.
+  void cleanup();
+
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
@@ -56,6 +74,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to `torch.distributed.rpc.internal.serialize`.
   py::object pySerialize_;
+
+  // Ref to 'torch.distributed.rpc.internal._handle_exception'
+  py::object pyHandleException_;
 };
 
 } // namespace rpc

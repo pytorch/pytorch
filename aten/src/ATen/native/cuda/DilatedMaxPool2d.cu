@@ -8,7 +8,8 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
-
+#include <ATen/native/cuda/LaunchUtils.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at {
 namespace native {
@@ -18,9 +19,21 @@ __device__ inline int min(int a, int b) {
   return a <= b ? a : b;
 }
 
+#define CUDA_MAX_THREADS 1024 // this is safe, in reality 256 is our limit
+
+#define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
+
+static __device__ inline int p_start(int size, int pad, int kernel, int dilation, int stride) {
+  return (size + pad < ((kernel - 1) * dilation + 1)) ? 0 : (size + pad - ((kernel - 1) * dilation + 1)) / stride + 1;
+}
+
+static __device__ inline int p_end(int size, int pad, int pooled_size, int stride) {
+  return min((size + pad) / stride + 1, pooled_size);
+}
+
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
-__global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
+__global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
     const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
@@ -57,15 +70,91 @@ __global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
   }
 }
 
-static const int BACKWARD_THREADS = 256;
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
+__global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
+                                   const int channels, const int height,
+                                   const int width, const int pooled_height, const int pooled_width,
+                                   const int kernel_h, const int kernel_w, const int stride_h,
+                                   const int stride_w, const int pad_h, const int pad_w,
+                                   const int dilation_h, const int dilation_w,
+                                   const int in_stride_c, const int in_stride_h, const int in_stride_w,
+                                   scalar_t* top_data, int64_t* top_mask) {
+  extern __shared__ int smem[];
+  int *out_mask_cached = smem;
+  scalar_t *out_cached = reinterpret_cast<scalar_t*>(&out_mask_cached[channels*blockDim.y*blockDim.z]);
+
+  // flattening cta for pre-computation & smem initialization;
+  int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+  int block_size = blockDim.x * blockDim.y * blockDim.z;
+
+  // use shared memory to store temporary output value. This is simply to
+  // reduce register usage.
+  for (int i = thread_id; i < channels*blockDim.y*blockDim.z; i+= block_size) {
+    out_cached[i] = at::numeric_limits<scalar_t>::lower_bound();
+    out_mask_cached[i] = 0;
+  }
+
+  __syncthreads();
+
+  top_data = top_data + blockIdx.x * pooled_height * pooled_width * channels;
+  top_mask = top_mask + blockIdx.x * pooled_height * pooled_width * channels;
+  bottom_data = bottom_data + blockIdx.x * channels * height * width;
+
+  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
+  out_mask_cached = &out_mask_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
+
+  int oH = (pooled_height + gridDim.z-1) / gridDim.z;
+  int oW = (pooled_width + gridDim.y-1) / gridDim.y;
+  int ostartH = threadIdx.z + blockIdx.z*oH;
+  int oendH = ::min(ostartH+oH, pooled_height);
+  int ostartW = threadIdx.y + blockIdx.y*oW;
+  int oendW = ::min(ostartW+oW, pooled_width);
+
+  for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
+    for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
+      int hstart = oh * stride_h - pad_h;
+      int wstart = ow * stride_w - pad_w;
+      int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
+      int wend = min(wstart + (kernel_w - 1) * dilation_w + 1, width);
+      while(hstart < 0)
+        hstart += dilation_h;
+      while(wstart < 0)
+        wstart += dilation_w;
+      for (int ih = hstart; ih < hend; ih++) {
+        for (int iw = wstart; iw < wend; iw++) {
+          const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
+          for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
+            scalar_t val = ptr_input[c];
+            if ((scalar_cast<accscalar_t>(val) > out_cached[c]) || THCNumerics<scalar_t>::isnan(val)) {
+              out_cached[c] = scalar_cast<accscalar_t>(val);
+              out_mask_cached[c] = ih * width + iw;
+            }
+          }
+        }
+      }
+      scalar_t *ptr_output_data = top_data + (oh * pooled_width + ow) * channels;
+      int64_t *ptr_output_mask = top_mask + (oh * pooled_width + ow) * channels;
+      for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
+        ptr_output_data[c] = out_cached[c];
+        ptr_output_mask[c] = out_mask_cached[c];
+        out_cached[c] = at::numeric_limits<scalar_t>::lower_bound();
+        out_mask_cached[c] = 0;
+      }
+    }
+  }
+}
+
+
+static const int BLOCK_THREADS = 256;
 
 template <typename scalar_t, typename accscalar_t>
 #if defined (__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 4)
+C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
-C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 8)
+C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
-__global__ void MaxPoolBackward(const int nthreads, const scalar_t* top_diff,
+__global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_diff,
     const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
@@ -75,34 +164,10 @@ __global__ void MaxPoolBackward(const int nthreads, const scalar_t* top_diff,
     CUDA_KERNEL_LOOP(index, height*width) {
     int h = index/width;
     int w = index - h * width;
-//get some templating performance benefits without actually templating
-    int phstart, phend, pwstart, pwend;
-    if (stride_h == 1) {
-       phstart =
-        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1))  + 1;
-       phend = min((h + pad_h)  + 1, pooled_height);
-    } else if (stride_h == 2) {
-       phstart =
-        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1)) / 2  + 1;
-       phend = min((h + pad_h) / 2  + 1, pooled_height);
-    } else {
-       phstart =
-        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1)) / stride_h  + 1;
-       phend = min((h + pad_h) / stride_h  + 1, pooled_height);
-    }
-    if (stride_w == 1) {
-        pwstart =
-        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) + 1;
-        pwend = min((w + pad_w) + 1, pooled_width);
-    } else if (stride_w == 2) {
-        pwstart =
-        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) / 2 + 1;
-        pwend = min((w + pad_w) / 2 + 1, pooled_width);
-    } else {
-        pwstart =
-        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) / stride_w + 1;
-        pwend = min((w + pad_w) / stride_w + 1, pooled_width);
-    }
+    int phstart = p_start(h, pad_h, kernel_h, dilation_h, stride_h);
+    int phend = p_end(h, pad_h, pooled_height, stride_h);
+    int pwstart = p_start(w, pad_w, kernel_w, dilation_w, stride_w);
+    int pwend = p_end(w, pad_w, pooled_width, stride_w);
     for (int n = blockIdx.y; n < num; n += gridDim.y)
        for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
 
@@ -110,7 +175,6 @@ __global__ void MaxPoolBackward(const int nthreads, const scalar_t* top_diff,
         int offset = (n * channels + c) * pooled_height * pooled_width;
         top_diff += offset;
         top_mask += offset;
-//get some templating performance benefits without actually templating
         if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
@@ -126,6 +190,75 @@ __global__ void MaxPoolBackward(const int nthreads, const scalar_t* top_diff,
         }
         bottom_diff[(n*channels+c)*height*width+index] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
       }
+  }
+}
+
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
+__global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
+                                    const int64_t* top_mask, const int num, const int channels,
+                                    const int height, const int width, const int pooled_height,
+                                    const int pooled_width, const int kernel_h, const int kernel_w,
+                                    const int stride_h, const int stride_w, const int pad_h, const int pad_w,
+                                    const int dilation_h, const int dilation_w,
+                                    const int out_stride_c, const int out_stride_h, const int out_stride_w,
+                                    const int in_stride_c, const int in_stride_h, const int in_stride_w,
+                                    scalar_t* bottom_diff) {
+  extern __shared__ int smem[];
+  scalar_t *out_cached = reinterpret_cast<scalar_t*>(smem);
+
+  int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+  int block_size = blockDim.x * blockDim.y * blockDim.z;
+
+  for (int i = thread_id; i < channels*blockDim.y*blockDim.z; i+= block_size) {
+    out_cached[i] = scalar_t(0.0);
+  }
+  __syncthreads();
+  out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * channels];
+
+  bottom_diff = bottom_diff + blockIdx.x * height * width * channels;
+  top_mask = top_mask + blockIdx.x * pooled_height * pooled_width * channels;
+  top_diff = top_diff + blockIdx.x * pooled_height * pooled_width * channels;
+
+  int iH = (height + gridDim.z-1) / gridDim.z;
+  int iW = (width + gridDim.y-1) / gridDim.y;
+  int istartH = threadIdx.z + blockIdx.z*iH;
+  int iendH = ::min(istartH+iH, height);
+  int istartW = threadIdx.y + blockIdx.y*iW;
+  int iendW = ::min(istartW+iW, width);
+
+  for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
+    for (int iw = istartW; iw < iendW; iw+=blockDim.y) {
+      int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
+      int phend = p_end(ih, pad_h, pooled_height, stride_h);
+      int pwstart = p_start(iw, pad_w, kernel_w, dilation_w, stride_w);
+      int pwend = p_end(iw, pad_w, pooled_width, stride_w);
+      if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
+        for(int oh = phstart; oh < phend; ++oh) {
+          for(int ow = pwstart; ow < pwend; ++ow) {
+            const int64_t* ptr_top_mask = top_mask + oh * out_stride_h + ow * out_stride_w;
+            for (int c = threadIdx.x; c < channels; c += blockDim.x) {
+              if (ptr_top_mask[c] == ih * width + iw) {
+                out_cached[c] += scalar_cast<scalar_t>(top_diff[oh * out_stride_h + ow * out_stride_w + c]);
+              }
+            }
+          }
+        }
+        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
+        for (int c = threadIdx.x; c < channels; c += blockDim.x) {
+          ptr_bottom_diff[c] = out_cached[c];
+          out_cached[c] = scalar_t(0.0);
+        }
+      } else {
+        const int64_t* ptr_top_mask = top_mask + phstart * out_stride_h + pwstart * out_stride_w;
+        scalar_t *ptr_bottom_diff = bottom_diff + (ih * width + iw) * channels;
+        for (int c = threadIdx.x; c < channels; c += blockDim.x) {
+          if (ptr_top_mask[c] == ih * width + iw) {
+            ptr_bottom_diff[c] = scalar_cast<scalar_t>(top_diff[phstart * out_stride_h + pwstart * out_stride_w + c]);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -170,8 +303,14 @@ void max_pool2d_with_indices_out_cuda_template(
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
+  const auto memory_format = input_.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(input_.ndimension() == 4,
+      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  } else {
+    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
+  }
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
@@ -188,14 +327,19 @@ void max_pool2d_with_indices_out_cuda_template(
     inputHeight, inputWidth,
     outputHeight, outputWidth);
 
-  Tensor input = input_.contiguous();
+  Tensor input = input_.contiguous(memory_format);
+
+  const int64_t in_stride_c = input.stride(-3);
+  const int64_t in_stride_h = input.stride(-2);
+  const int64_t in_stride_w = input.stride(-1);
 
   output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
   indices.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
 
+  output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  indices.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+
   const int count = safe_downcast<int, int64_t>(output.numel());
-  const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
-                                   BACKWARD_THREADS);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
     "max_pool2d_with_indices_out_cuda_frame",
@@ -206,11 +350,52 @@ void max_pool2d_with_indices_out_cuda_template(
       scalar_t *input_data = input.data_ptr<scalar_t>();
       int64_t *indices_data = indices.data_ptr<int64_t>();
 
-      MaxPoolForward<scalar_t, scalar_t>
-        <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-          count, input_data,
-          nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-          kH, kW, dH, dW, padH, padW, dilationH, dilationW, output_data, indices_data); }
+      switch (memory_format) {
+        case MemoryFormat::ChannelsLast: {
+          const int max_threads = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+          int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+          int block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+          int block_y = std::min<int>(
+              maxThreadsDim[1], std::min<int>(lastPow2(outputWidth), max_threads / block_x));
+          int block_z = std::min<int>(
+              maxThreadsDim[2], std::min<int>(lastPow2(outputHeight), max_threads / block_x / block_y));
+          block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+          const dim3 block(block_x, block_y, block_z);
+          int grid_x = nbatch;
+          int grid_y = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
+          int grid_z = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
+          const dim3 grid(grid_x, grid_y, grid_z);
+
+          max_pool_forward_nhwc<scalar_t, scalar_t>
+          <<<grid, block, nInputPlane * block_y * block_z * (sizeof(int) + sizeof(scalar_t)), at::cuda::getCurrentCUDAStream()>>>(
+              input_data,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  in_stride_c, in_stride_h, in_stride_w,
+                  output_data, indices_data);
+          break;
+        }
+        case MemoryFormat::Contiguous: {
+          const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+                                           BLOCK_THREADS);
+          max_pool_forward_nchw<scalar_t, scalar_t>
+              <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+              count, input_data,
+                  nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  output_data, indices_data);
+          break;
+        }
+        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      }
+    }
   );
 
   TORCH_CHECK(cudaGetLastError() == cudaSuccess,
@@ -265,15 +450,24 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
-  const Tensor input = input_.contiguous();
+  const auto memory_format = input_.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(input_.ndimension() == 4,
+      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  } else {
+    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
+      "non-empty 3D or 4D (batch mode) tensor expected for input");
+  }
+  const Tensor input = input_.contiguous(memory_format);
 
   const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
+
+  const int64_t in_stride_c = input.stride(-3);
+  const int64_t in_stride_h = input.stride(-2);
+  const int64_t in_stride_w = input.stride(-1);
 
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
@@ -289,20 +483,16 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     outputHeight, outputWidth,
     /*cuda=*/ true);
 
-  const Tensor gradOutput = gradOutput_.contiguous();
+  const Tensor gradOutput = gradOutput_.contiguous(memory_format);
+
+  const int64_t out_stride_c = gradOutput.stride(-3);
+  const int64_t out_stride_h = gradOutput.stride(-2);
+  const int64_t out_stride_w = gradOutput.stride(-1);
+
   gradInput.resize_as_(input);
+  gradInput.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   int64_t count = input.numel();
-  dim3 grid;
-  int imgcount = inputWidth * inputHeight;
-  const int blocks = (imgcount + BACKWARD_THREADS - 1) / BACKWARD_THREADS;
-  grid.x = blocks;
-  grid.y = nbatch;
-  grid.z = nInputPlane;
-  uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-  uint64_t maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
-  if (maxGridY < grid.y) grid.y = maxGridY;
-  if (maxGridZ < grid.z) grid.z = maxGridZ;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
     "max_pool2d_with_indices_out_cuda_frame",
@@ -313,15 +503,66 @@ void max_pool2d_with_indices_backward_out_cuda_template(
       scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
       int64_t *indices_data = indices.data_ptr<int64_t>();
 
-      MaxPoolBackward<scalar_t, accscalar_t>
-        <<<grid, BACKWARD_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-          count,
-          gradOutput_data,
-          indices_data,
-          nbatch,
-          nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-          kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-          gradInput_data);
+      switch (memory_format) {
+        case MemoryFormat::ChannelsLast: {
+          const int max_threads = std::min<int>(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+          int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+          int block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+          int block_y = std::min<int>(
+              maxThreadsDim[1], std::min<int>(lastPow2(inputWidth), max_threads / block_x));
+          int block_z = std::min<int>(
+              maxThreadsDim[2], std::min<int>(lastPow2(inputHeight), max_threads / block_x / block_y));
+          block_x = std::min<int>(
+              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+          const dim3 block(block_x, block_y, block_z);
+          int grid_x = nbatch;
+          int grid_y = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
+          int grid_z = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
+          const dim3 grid(grid_x, grid_y, grid_z);
+
+          max_pool_backward_nhwc<scalar_t, accscalar_t>
+          <<<grid, block, nInputPlane * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>>(
+              count,
+                  gradOutput_data,
+                  indices_data,
+                  nbatch,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  out_stride_c, out_stride_h, out_stride_w,
+                  in_stride_c, in_stride_h, in_stride_w,
+                  gradInput_data);
+          break;
+        }
+        case MemoryFormat::Contiguous: {
+          int imgcount = inputWidth * inputHeight;
+          dim3 grid;
+          const int blocks = (imgcount + BLOCK_THREADS - 1) / BLOCK_THREADS;
+          grid.x = blocks;
+          grid.y = nbatch;
+          uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+          if (maxGridY < grid.y) grid.y = maxGridY;
+          grid.z = nInputPlane;
+          uint64_t maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
+          if (maxGridZ < grid.z) grid.z = maxGridZ;
+
+          max_pool_backward_nchw<scalar_t, accscalar_t>
+          <<<grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+              count,
+                  gradOutput_data,
+                  indices_data,
+                  nbatch,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  kH, kW, dH, dW, padH, padW, dilationH, dilationW,
+                  gradInput_data);
+          break;
+        }
+        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      }
     }
   );
 
@@ -410,7 +651,7 @@ Tensor max_pool2d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_pool2d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput_,
