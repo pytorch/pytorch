@@ -10,11 +10,11 @@ import caffe2.python.onnx.backend as c2
 
 class TestQuantizedOps(unittest.TestCase):
     def generic_test(self, model, sample_inputs, input_names=None, permute=False):
+        torch.backends.quantized.engine = "qnnpack"
         pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
         model.qconfig = torch.quantization.default_qconfig
         q_model = torch.quantization.prepare(model, inplace=False)
         q_model = torch.quantization.convert(q_model, inplace=False)
-
         if permute:
             # Permute input to caffe2 to be NHWC layout
             X_nhwc = np.ascontiguousarray(sample_inputs[0].transpose([0, 2, 3, 1]))
@@ -151,7 +151,50 @@ class TestQuantizedOps(unittest.TestCase):
                 return self.dequant(res)
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
-        self.generic_test(QUpsampleModule(), (x,), input_names=["x"], permute=True)
+        self.generic_test(QUpsampleModule(), (x,), input_names=["x"])
+
+    def test_avg_pool2d(self):
+        class QAvgPool2dModule(torch.nn.Module):
+            def __init__(self):
+                super(QAvgPool2dModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = torch.nn.functional.avg_pool2d(self.quant1(x), kernel_size=2, stride=1, padding=0)
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 8, 8).astype("float32")
+        self.generic_test(QAvgPool2dModule(), (x,), input_names=["x"])
+
+    def test_reshape(self):
+        class QReshapeModule(torch.nn.Module):
+            def __init__(self):
+                super(QReshapeModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = self.quant1(x).reshape((1, 2, 1, 12))
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        self.generic_test(QReshapeModule(), (x,), input_names=["x"])
+
+    def test_slice(self):
+        class QSliceModule(torch.nn.Module):
+            def __init__(self):
+                super(QSliceModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                qx = self.quant1(x)
+                res = qx[:, 1:2]
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        self.generic_test(QSliceModule(), (x,), input_names=["x"])
 
 if __name__ == '__main__':
     unittest.main()
