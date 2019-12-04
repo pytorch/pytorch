@@ -41,6 +41,13 @@ RRefContext::~RRefContext() {
   }
 }
 
+std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
+  std::unordered_map<std::string, std::string> info;
+  std::lock_guard<std::mutex> lock(mutex_);
+  info["num_owner_rrefs"] = c10::to_string(owners_.size());
+  return info;
+}
+
 void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
   if (!forks_.empty()) {
     std::stringstream ss;
