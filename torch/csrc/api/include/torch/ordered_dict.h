@@ -128,13 +128,13 @@ class OrderedDict {
   // Modifiers
 
   /// Inserts a new `(key, value)` pair into the `OrderedDict`. Throws an
-  /// exception if the key is already present. If insertion is succesful,
+  /// exception if the key is already present. If insertion is successful,
   /// immediately returns a reference to the inserted value.
   template <typename K, typename V>
   Value& insert(K&& key, V&& value);
 
   /// Inserts a new `(key, value)` pair into the `OrderedDict`. Throws an
-  /// exception if the key is already present. If insertion is succesful,
+  /// exception if the key is already present. If insertion is successful,
   /// immediately returns a reference to the inserted value.
   Value& insert(Key key, Value&& value);
 

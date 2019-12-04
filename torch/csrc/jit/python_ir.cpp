@@ -253,7 +253,7 @@ void initPythonIRBindings(PyObject* module_) {
             for (auto& kv : export_map) {
               auto t = kv.second;
               size_t copy_bytes = t.element_size() * t.numel();
-              // TODO: this is an unecessary copy. In theory we can directly
+              // TODO: this is an unnecessary copy. In theory we can directly
               // return the map from identifier to Tensor, but we need some API
               // in Python to get raw `bytes` containing the raw tensor data.
               python_serialized_export_map[kv.first] =
@@ -698,6 +698,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
+  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
+      .def_static("get", &DeviceObjType::get);
   py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
       .def_static("get", &NoneType::get);
 
