@@ -2767,17 +2767,15 @@ struct to_ir {
         if (type_hint && type_hint->kind() == TypeKind::ListType) {
           elem_type = type_hint->expect<ListType>()->getElementType();
         } else if (!values.empty()) {
-          elem_type = values.at(0)->type();
+          std::stringstream ss;
+          auto types = fmap(values, [](const Value* v) { return v->type(); });
+          auto maybe_elem_type = unifyTypeList(std::move(types), ss);
+          if (!maybe_elem_type) {
+            throw ErrorReport(tree) << ss.str();
+          }
+          elem_type = maybe_elem_type.value();
         }
 
-        // Tensors are special because they have dymnamic properties. So any
-        // list containing tensors should be typed with the unified typeof all
-        // the elements.
-        if (elem_type->isSubtypeOf(TensorType::get())) {
-          for (const auto& value : values) {
-            elem_type = unifyTypes(elem_type, value->type()).value();
-          }
-        }
         for (auto v : values) {
           std::stringstream ss;
           if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
