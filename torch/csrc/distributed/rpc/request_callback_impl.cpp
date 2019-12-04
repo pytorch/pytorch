@@ -181,10 +181,11 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       // Make a FutureMessage that is completed when the original RPC completes.
       auto result = std::make_shared<FutureMessage>();
       wrappedRpcResponseFuture->addCallback(
-          [result, fromWorkerId, messageId](const rpc::Message& receivedResp) {
+          [result, fromWorkerId, messageId, wrappedRpcResponseFuture](
+              const rpc::Message&) {
             auto message = getMessageWithAutograd(
                 fromWorkerId,
-                std::move(const_cast<Message&>(receivedResp)),
+                std::move(*wrappedRpcResponseFuture).moveMessage(),
                 MessageType::FORWARD_AUTOGRAD_RESP);
             message.setId(messageId);
             result->markCompleted(std::move(message));
