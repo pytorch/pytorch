@@ -7123,7 +7123,7 @@ Repeat elements of a tensor.
 
 .. warning::
 
-    This is different from :func:`torch.repeat` but similar to `numpy.repeat`.
+    This is different from :meth:`torch.Tensor.repeat` but similar to ``numpy.repeat``.
 
 Args:
     {input}
