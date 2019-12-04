@@ -76,7 +76,7 @@ inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() const & {
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
-  return toIntrusivePtr<ivalue::Object>();
+  return moveToIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
