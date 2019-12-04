@@ -393,7 +393,7 @@ int main(int argc, char** argv) {
     testAllreduce(file.path, at::DeviceType::CPU);
   }
 
-#ifdef USE_CUDA
+#ifdef USE_ROCM
   {
     TemporaryFile file;
     testAllreduce(file.path, at::DeviceType::CUDA);
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
     testBroadcast(file.path, at::DeviceType::CPU);
   }
 
-#ifdef USE_CUDA
+#ifdef USE_ROCM
   {
     TemporaryFile file;
     testBroadcast(file.path, at::DeviceType::CUDA);

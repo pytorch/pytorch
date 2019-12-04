@@ -1,6 +1,6 @@
 #include <torch/csrc/autograd/profiler.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <nvToolsExt.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
+#include <roctx.h>
 
 #include <sstream>
 
@@ -8,10 +8,10 @@ namespace torch { namespace autograd { namespace profiler {
 
 namespace {
 
-static inline void cudaCheck(cudaError_t result, const char * file, int line) {
-  if(result != cudaSuccess) {
+static inline void cudaCheck(hipError_t result, const char * file, int line) {
+  if(result != hipSuccess) {
     std::stringstream ss;
-    ss << file << ":" << line << ": " << cudaGetErrorString(result);
+    ss << file << ":" << line << ": " << hipGetErrorString(result);
     throw std::runtime_error(ss.str());
   }
 }
@@ -19,30 +19,30 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) override {
-    TORCH_CUDA_CHECK(cudaGetDevice(device));
-    TORCH_CUDA_CHECK(cudaEventCreate(event));
-    auto stream = at::cuda::getCurrentCUDAStream();
+    TORCH_CUDA_CHECK(hipGetDevice(device));
+    TORCH_CUDA_CHECK(hipEventCreate(event));
+    auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
     *cpu_ns = getTime();
-    TORCH_CUDA_CHECK(cudaEventRecord(*event, stream));
+    TORCH_CUDA_CHECK(hipEventRecord(*event, stream));
   }
   float elapsed(CUDAEventStub event, CUDAEventStub event2) override {
-    TORCH_CUDA_CHECK(cudaEventSynchronize(event));
-    TORCH_CUDA_CHECK(cudaEventSynchronize(event2));
+    TORCH_CUDA_CHECK(hipEventSynchronize(event));
+    TORCH_CUDA_CHECK(hipEventSynchronize(event2));
     float ms;
-    TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event, event2));
+    TORCH_CUDA_CHECK(hipEventElapsedTime(&ms, event, event2));
     return ms*1000.0;
   }
-  void nvtxMarkA(const char* name) override {
-    ::nvtxMark(name);
+  void roctxMarkA(const char* name) override {
+    ::roctxMark(name);
   }
-  void nvtxRangePushA(const char* name) override {
-    ::nvtxRangePushA(name);
+  void roctxRangePushA(const char* name) override {
+    ::roctxRangePushA(name);
   }
-  void nvtxRangePop() override {
-    ::nvtxRangePop();
+  void roctxRangePop() override {
+    ::roctxRangePop();
   }
   void onEachDevice(std::function<void(int)> op) override {
-    at::cuda::OptionalCUDAGuard device_guard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
     int count = at::cuda::device_count();
     for(int i = 0; i < count; i++) {
       device_guard.set_index(i);
@@ -50,7 +50,7 @@ struct CUDAMethods : public CUDAStubs {
     }
   }
   void synchronize() override {
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
   }
   bool enabled() override {
     return true;

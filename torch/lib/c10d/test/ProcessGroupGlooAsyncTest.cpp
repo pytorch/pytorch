@@ -1,5 +1,5 @@
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPMultiStreamGuard.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -8,7 +8,7 @@
 
 using namespace c10d::test;
 
-using at::cuda::CUDAStream;
+using at::hip::HIPStreamMasqueradingAsCUDA;
 using c10d::ProcessGroup;
 
 template <typename T, typename... Args>
@@ -84,11 +84,11 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    at::cuda::OptionalCUDAGuard deviceGuard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA deviceGuard;
     streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_.push_back(at::cuda::getStreamFromPool());
+      streams_.push_back(at::hip::getStreamFromPoolMasqueradingAsCUDA());
     }
   }
 
@@ -116,7 +116,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
   const int numDevices_;
   THCState* state_;
   std::vector<at::Tensor> inputs_;
-  std::vector<CUDAStream> streams_;
+  std::vector<HIPStreamMasqueradingAsCUDA> streams_;
 };
 
 class AsyncAllreduceTest : public AsyncInputIsOutputTest {
@@ -129,7 +129,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::cuda::OptionalCUDAGuard deviceGuard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
@@ -155,7 +155,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::cuda::OptionalCUDAGuard deviceGuard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);

@@ -11,7 +11,7 @@
 #include "torch/csrc/autograd/utils/error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/jit/tracer.h"
-#ifdef USE_CUDA
+#ifdef USE_ROCM
 #include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/Event.h"
 #endif
@@ -566,13 +566,13 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
-#ifdef USE_CUDA
+#ifdef USE_ROCM
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
   }
   void* data = self_.storage().data_ptr().get();
-  c10::cuda::CUDACachingAllocator::recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
+  c10::hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data, at::hip::HIPStreamMasqueradingAsCUDA::unpack(((THCPStream*)arg)->cdata));
   Py_RETURN_NONE;
 #else
   throw std::runtime_error("PyTorch compiled without CUDA support");

@@ -5,10 +5,10 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 
 #include <structmember.h>
-#include <cuda_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 
 PyObject *THCPEventClass = nullptr;
 
@@ -33,9 +33,9 @@ static PyObject * THCPEvent_pynew(
 
   THCPEvent* self = (THCPEvent *)ptr.get();
   unsigned int flags =
-    (blocking ? cudaEventBlockingSync : cudaEventDefault) |
-    (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
-    (interprocess ? cudaEventInterprocess : cudaEventDefault);
+    (blocking ? hipEventBlockingSync : hipEventDefault) |
+    (enable_timing ? hipEventDefault : hipEventDisableTiming) |
+    (interprocess ? hipEventInterprocess : hipEventDefault);
 
   new (&self->cuda_event) at::cuda::CUDAEvent(flags);
 
@@ -56,9 +56,9 @@ static PyObject * THCPEvent_from_ipc_handle(
   at::Device device = r.device(0);
   std::string handle_string = r.string(1);
 
-  TORCH_CHECK(handle_string.size() == sizeof(cudaIpcEventHandle_t),
-    "cudaIpcEventHandle_t expects byte-like object of size ",
-    sizeof(cudaIpcEventHandle_t), ", but got ", handle_string.size());
+  TORCH_CHECK(handle_string.size() == sizeof(hipIpcEventHandle_t),
+    "hipIpcEventHandle_t expects byte-like object of size ",
+    sizeof(hipIpcEventHandle_t), ", but got ", handle_string.size());
   TORCH_CHECK(device.type() == at::kCUDA, "Event can only be created on "
     "CUDA devices, but got device type ", device.type())
 
@@ -68,7 +68,7 @@ static PyObject * THCPEvent_from_ipc_handle(
   }
   THCPEvent* self = (THCPEvent *)ptr.get();
 
-  cudaIpcEventHandle_t handle;
+  hipIpcEventHandle_t handle;
   std::memcpy(&handle, handle_string.c_str(), handle_string.size());
   new (&self->cuda_event) at::cuda::CUDAEvent(device.index(), &handle);
 
@@ -132,7 +132,7 @@ static PyObject * THCPEvent_synchronize(THCPEvent *self, PyObject *noargs) {
 
 static PyObject * THCPEvent_ipc_handle(THCPEvent *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
-  cudaIpcEventHandle_t handle;
+  hipIpcEventHandle_t handle;
   self->cuda_event.ipc_handle(&handle);
   return PyBytes_FromStringAndSize((const char *)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS

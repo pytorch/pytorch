@@ -213,7 +213,7 @@ void Engine::set_device(int device) {
   // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
-  // error, because it will still query cudaGetDevice).
+  // error, because it will still query hipGetDevice).
   //
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.

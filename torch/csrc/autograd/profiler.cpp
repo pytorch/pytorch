@@ -44,7 +44,7 @@ void mark(std::string name, bool include_cuda /* = true */) {
     return;
   }
   if (state == ProfilerState::NVTX) {
-    cuda_stubs->nvtxMarkA(name.c_str());
+    cuda_stubs->roctxMarkA(name.c_str());
   } else {
     getEventList().record(
         EventKind::Mark,
@@ -86,9 +86,9 @@ void pushRangeImpl(
         }
         s << "]";
       }
-      cuda_stubs->nvtxRangePushA(s.str().c_str());
+      cuda_stubs->roctxRangePushA(s.str().c_str());
     } else {
-      cuda_stubs->nvtxRangePushA(name.str());
+      cuda_stubs->roctxRangePushA(name.str());
     }
   } else {
     getEventList().record(
@@ -109,7 +109,7 @@ void popRange() {
     return;
   }
   if (state == ProfilerState::NVTX) {
-    cuda_stubs->nvtxRangePop();
+    cuda_stubs->roctxRangePop();
   } else {
     getEventList().record(
         EventKind::PopRange,

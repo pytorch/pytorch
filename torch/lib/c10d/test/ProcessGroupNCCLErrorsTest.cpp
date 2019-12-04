@@ -91,7 +91,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
     TemporaryFile file;
     store_ = std::make_shared<::c10d::FileStore>(file.path, 1);
 
-    at::cuda::OptionalCUDAGuard deviceGuard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA deviceGuard;
     tensors_.resize(numDevices);
     for (auto i = 0; i < numDevices; ++i) {
       deviceGuard.set_index(i);

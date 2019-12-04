@@ -14,8 +14,8 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
-#ifdef USE_CUDA
-#include <THC/THCTensorRandom.h>
+#ifdef USE_ROCM
+#include <THH/THHTensorRandom.h>
 #include <ATen/CUDAGenerator.h>
 #endif
 
@@ -54,7 +54,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
-#ifdef USE_CUDA
+#ifdef USE_ROCM
   if (device.type() == at::kCPU) {
     self->cdata = new CPUGenerator();
   } else if (device.type() == at::kCUDA){
@@ -82,7 +82,7 @@ static PyObject * THPGenerator_getState(THPGenerator *self, PyObject *noargs)
   if (self->cdata->device().type() == at::kCPU) {
     THByteTensor_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
   } else {
-#ifdef USE_CUDA
+#ifdef USE_ROCM
     TORCH_INTERNAL_ASSERT(self->cdata->device().type() == at::kCUDA);
     THCRandom_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
 #else 
@@ -108,7 +108,7 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
   if (self->cdata->device().type() == at::kCPU) {
     THByteTensor_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
   } else {
-#ifdef USE_CUDA
+#ifdef USE_ROCM
     TORCH_INTERNAL_ASSERT(self->cdata->device().type() == at::kCUDA);
     THCRandom_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
 #else 

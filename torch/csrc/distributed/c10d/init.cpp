@@ -536,7 +536,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
-#ifdef USE_CUDA
+#ifdef USE_ROCM
   module.def(
       "_dist_bucket_tensors",
       &::c10d::bucketTensors,

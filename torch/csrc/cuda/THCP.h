@@ -3,9 +3,9 @@
 
 #include <torch/csrc/python_headers.h>
 #include <TH/TH.h>
-#include <THC/THC.h>
+#include <THH/THH.h>
 #include <TH/THHalf.h>
-#include <THC/THCTensor.hpp>
+#include <THH/THHTensor.hpp>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/serialization.h>

@@ -9,9 +9,9 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_compat.h>
 
-#ifdef USE_CUDA
-#include <THC/THC.h>
-#include <c10/cuda/CUDAStream.h>
+#ifdef USE_ROCM
+#include <THH/THH.h>
+#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
@@ -187,8 +187,8 @@ bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
 
 // NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
-#ifdef USE_CUDA
-std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
+#ifdef USE_ROCM
+std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
 
 #endif

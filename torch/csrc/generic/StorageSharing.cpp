@@ -1,7 +1,7 @@
-#ifdef USE_CUDA
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <c10/cuda/CUDAGuard.h>
+#ifdef USE_ROCM
+#include <hip/hip_runtime.h>
+#include <hip/hip_runtime.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #endif
 
 #include <random>
@@ -238,13 +238,13 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self, PyObject *noargs)
   Py_INCREF(Py_None);
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
-    void *base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
+    void *base_ptr = c10::hip::HIPCachingAllocator::getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
     ptrdiff_t offset_bytes = (char*)storage->data<scalar_t>() - (char*)base_ptr;
 
-    cudaIpcMemHandle_t handle;
-    THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
+    hipIpcMemHandle_t handle;
+    THCudaCheck(hipIpcGetMemHandle(&handle, base_ptr));
 
-    _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
+    _handle = PyBytes_FromStringAndSize((char *)&handle, HIP_IPC_HANDLE_SIZE);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
 
     // Put Storage Data behind new ref counting context
@@ -257,17 +257,17 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self, PyObject *noargs)
     _ref_counter_offset = PyLong_FromLong(sent_data->offset());
 
 
-    cudaIpcEventHandle_t ipc_event_handle;
+    hipIpcEventHandle_t ipc_event_handle;
 
 #ifndef __HIP_PLATFORM_HCC__
     if (sent_data->event_sync_required_) {
-      THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+      THCudaCheck(hipIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
     }
 #else
     // ipc_event_handle unused in storage receiver, we can leave it uninitialized.
 #endif
 
-    _event_handle = PyBytes_FromStringAndSize((char *)&ipc_event_handle, CUDA_IPC_HANDLE_SIZE);
+    _event_handle = PyBytes_FromStringAndSize((char *)&ipc_event_handle, HIP_IPC_HANDLE_SIZE);
     _event_sync_required = PyBool_FromLong(sent_data->event_sync_required_);
 
   }
@@ -276,7 +276,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self, PyObject *noargs)
     return nullptr;
   }
   PyTuple_SET_ITEM(tuple.get(), 0, device.release());
-  // cudaIpcMemHandle_t(of basePtr)
+  // hipIpcMemHandle_t(of basePtr)
   PyTuple_SET_ITEM(tuple.get(), 1, _handle.release());
   // Size(in bytes) of the real storage, note this is not the size of basePtr memory block.
   PyTuple_SET_ITEM(tuple.get(), 2, size_bytes.release());
@@ -338,7 +338,7 @@ static std::string THPStorage_(bytesAsHandleString)(PyObject *handle) {
     return nullptr;
   }
   THPUtils_assert(
-      handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
+      handle_size == HIP_IPC_HANDLE_SIZE, "incorrect handle size");
   return std::string(buffer, handle_size);
 }
 
@@ -371,26 +371,26 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   ptrdiff_t storage_offset_bytes = (ptrdiff_t)THPUtils_unpackLong(_offset_bytes);
 
   int64_t device = THPUtils_unpackLong(_device);
-  at::cuda::CUDAGuard device_guard(device);
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard(device);
 
 #ifndef __HIP_PLATFORM_HCC__
   if (PyObject_IsTrue(_event_sync_required)) {
     // Ensure that producer prepared all tensor's data
     std::string s_ipc_event_handle =
         THPStorage_(bytesAsHandleString)(_event_handle);
-    auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
+    auto ipc_event_handle = reinterpret_cast<const hipIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
-    cudaEvent_t event;
-    cudaIpcOpenEventHandle(&event, *ipc_event_handle);
+    hipEvent_t event;
+    hipIpcOpenEventHandle(&event, *ipc_event_handle);
     AT_CUDA_CHECK(
-        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+        hipStreamWaitEvent(c10::hip::getCurrentHIPStreamMasqueradingAsCUDA(device), event, 0));
   }
 #else
   // Already synchronized inside producer stream
 #endif
 
   std::string s_handle = THPStorage_(bytesAsHandleString)(_handle);
-  std::shared_ptr<void> basePtr = c10::cuda::CUDACachingAllocator::getIpcDevPtr(s_handle);
+  std::shared_ptr<void> basePtr = c10::hip::HIPCachingAllocator::getIpcDevPtr(s_handle);
 
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset
@@ -414,9 +414,9 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
         // does not support the creation of untriggered events and performance
         // impact of having thousands of shared events is unknown.
 
-        // TODO: Instead of cudaStreamSynchronize it is possible to add Stream
+        // TODO: Instead of hipStreamSynchronize it is possible to add Stream
         // Callback and release counter inside of it (need to check performance impact)
-        cudaStreamSynchronize(c10::cuda::getCurrentCUDAStream(device));
+        hipStreamSynchronize(c10::hip::getCurrentHIPStreamMasqueradingAsCUDA(device));
 
         // We don't want to break existing code, so resource deletion is best
         // effort basis. Exception expected if producer process terminated

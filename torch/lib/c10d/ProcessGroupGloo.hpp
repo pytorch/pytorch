@@ -15,9 +15,9 @@
 
 #include <torch/csrc/utils/hash.h>
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAStream.h>
+#ifdef USE_ROCM
+#include <ATen/hip/HIPEvent.h>
+#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #endif
 
 #include <c10d/ProcessGroup.hpp>

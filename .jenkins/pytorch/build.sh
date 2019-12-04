@@ -5,6 +5,8 @@
 # need to set it yourself.
 # Example value: py3.6-devtoolset7-rocmrpm-centos7.5
 # to build using python3, devtoolset7, ROCm CentOS RPMs
+# And "venv" to BUILD_ENVIRONMENT string to use python3 venv,
+# for example, py3.6-venv-devtoolset7-rocmrpm-centos7.5.
 # Print a message and exit if environment variable is not set
 ${BUILD_ENVIRONMENT:?"Environment variable BUILD_ENVIRONMENT must be set"}
 
@@ -56,7 +58,7 @@ echo "CMake version:"
 cmake --version
 
 # TODO: Don't run this...
-pip_install -r requirements.txt || true
+# pip_install -r requirements.txt || true
 
 # TODO: Don't install this here
 if ! which conda; then
@@ -139,8 +141,24 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
-  python tools/amd_build/build_amd.py
-  python setup.py install --user
+  if [[ "$BUILD_ENVIRONMENT" == *py3*venv* ]]; then
+    echo "Using python3 virtual environment"
+    LANG=en_US.UTF-8 python3 -m venv build
+    source build/bin/activate
+    pip3 install -r requirements.txt || true
+    LANG=en_US.UTF-8 python3 tools/amd_build/build_amd.py
+    LANG=en_US.UTF-8 USE_CUDA=0 python3 setup.py install --user
+  elif [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
+    echo "Using python3 systemn environment - sudo required"
+    pip3 install -r requirements.txt || true
+    LANG=en_US.UTF-8 python3 tools/amd_build/build_amd.py
+    LANG=en_US.UTF-8 USE_CUDA=0 python3 setup.py install --user
+  else
+    echo "Using python2 system environment - sudo required"
+    pip2 install -r requirements.txt || true
+    python2 tools/amd_build/build_amd.py
+    USE_CUDA=0 python2 setup.py install --user
+  fi
 
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
   bash tools/amd_build/unwrap_clang.sh
@@ -174,6 +192,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
+echo "DEBUG: call setup.py"
 
 # check that setup.py would fail with bad arguments
 echo "The next three invocations are expected to fail with invalid command error messages."
@@ -228,8 +247,8 @@ else
   if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
     mkdir -p c10/build
     pushd c10/build
-    cmake ..
-    make -j
+    cmake -DCMAKE_VERBOSE_MAKEFILE=1 ..
+    make VERBOSE=1 -j
     popd
     assert_git_not_dirty
   fi

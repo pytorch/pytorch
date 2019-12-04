@@ -1,12 +1,12 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <THC/THC.h>
-#include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/hip/HIPContext.h>
+#include <THH/THH.h>
+#include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
 #include <c10/util/Optional.h>
 
-#include <nccl.h>
+#include <rccl.h>
 
 #include <cstddef>
 #include <vector>
@@ -29,7 +29,7 @@ static inline void NCCL_CHECK(ncclResult_t status) {
 
 struct AutoNcclGroup {
   AutoNcclGroup() {
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
+    (c10::hip::HIPCachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupStart());
 #endif
@@ -38,7 +38,7 @@ struct AutoNcclGroup {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupEnd());
 #endif
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
+    (c10::hip::HIPCachingAllocator::getFreeMutex())->unlock();
   }
 };
 
@@ -53,7 +53,7 @@ TORCH_CUDA_API ncclDataType_t get_data_type(const at::Tensor& t);
 } // namespace detail
 
 using comm_list = std::vector<ncclComm_t>;
-using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
+using stream_list = std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>>;
 
 TORCH_CUDA_API std::uint64_t version();
 

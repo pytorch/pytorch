@@ -9,9 +9,9 @@
 #include <torch/csrc/cuda/nccl.h>
 #include <ATen/core/functional.h>
 
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 
-#include <nccl.h>
+#include <rccl.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -60,9 +60,9 @@ static void destroy_nccl_comm(PyObject* capsule) {
   END_HANDLE_TH_ERRORS_RET()
 }
 
-static std::vector<c10::optional<at::cuda::CUDAStream>> unpack_streams(PyObject* obj, size_t size) {
+static std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>> unpack_streams(PyObject* obj, size_t size) {
   if (obj == Py_None) {
-    return std::vector<c10::optional<at::cuda::CUDAStream>>(size, c10::nullopt);
+    return std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>>(size, c10::nullopt);
   }
   auto streams = THPUtils_PySequence_to_CUDAStreamList(obj);
   if (streams.size() != size) {
@@ -150,7 +150,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   std::vector<at::Tensor> outputs = extract_tensors(_outputs);
-  std::vector<c10::optional<at::cuda::CUDAStream>> streams = unpack_streams(_streams, inputs.size());
+  std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>> streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
   with_no_gil([&] {
@@ -194,12 +194,12 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
     auto comms = user_comms.empty() ? get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     AutoNcclGroup nccl_group_guard;
-    at::cuda::OptionalCUDAGuard device_guard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
       auto stream = !streams[i]
-          ? at::cuda::getCurrentCUDAStream(device).stream()
+          ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
           : streams[i]->stream();
       NCCL_CHECK(ncclAllReduce(
           inputs[i].data_ptr(),
@@ -273,12 +273,12 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
     auto comms = user_comms.empty() ? get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     AutoNcclGroup nccl_group_guard;
-    at::cuda::OptionalCUDAGuard device_guard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
       auto stream = !streams[i]
-          ? at::cuda::getCurrentCUDAStream(device).stream()
+          ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
           : streams[i]->stream();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
       NCCL_CHECK(ncclAllGather(
@@ -335,12 +335,12 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
     auto comms = user_comms.empty() ? get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     AutoNcclGroup nccl_group_guard;
-    at::cuda::OptionalCUDAGuard device_guard;
+    at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
       auto stream = !streams[i]
-          ? at::cuda::getCurrentCUDAStream(device).stream()
+          ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
           : streams[i]->stream();
       NCCL_CHECK(ncclReduceScatter(
           inputs[i].data_ptr(),

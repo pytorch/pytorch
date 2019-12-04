@@ -10,10 +10,10 @@
 #include <c10d/ProcessGroup.hpp>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPEvent.h>
+#include <ATen/hip/HIPMultiStreamGuard.h>
+#include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 
 #include <cstddef>
 #include <memory>
@@ -148,12 +148,12 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
   // Creating a separate CUDA stream to allow memory copy
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
-  std::vector<at::cuda::CUDAStream> workerStreams;
+  std::vector<at::hip::HIPStreamMasqueradingAsCUDA> workerStreams;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
-    at::cuda::CUDAGuard guard(devices[devIdx]);
+    at::hip::HIPGuardMasqueradingAsCUDA guard(devices[devIdx]);
     events[devIdx].record();
     workerStreams.push_back(
-        at::cuda::getStreamFromPool(false, devices[devIdx]));
+        at::hip::getStreamFromPoolMasqueradingAsCUDA(false, devices[devIdx]));
     // Let worker streams to wait for default streams to make sure worker
     // streams do not touch `gradsBatch` until all pending ops to create
     // `gradBatch` finish.
@@ -163,7 +163,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     // streams. Hence, they must record worker streams to prevent being
     // freed before their worker stream ops finish.
     for (at::Tensor& grad : gradsBatch[devIdx]) {
-      c10::cuda::CUDACachingAllocator::recordStream(
+      c10::hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(
           grad.storage().data(), workerStreams.back());
     }
   }
@@ -173,7 +173,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
 
   std::vector<at::Tensor> gradsBatchCoalesced;
   for (size_t devIdx = 0; devIdx < devices.size(); ++devIdx) {
-    at::cuda::CUDAGuard guard(devices[devIdx]);
+    at::hip::HIPGuardMasqueradingAsCUDA guard(devices[devIdx]);
     gradsBatchCoalesced.push_back(
         torch::utils::flatten_dense_tensors(gradsBatch[devIdx]));
   }
@@ -202,17 +202,17 @@ void syncReduction(
   // Creating a separate CUDA stream to allow memory copy
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
-  at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
+  at::hip::HIPStreamMasqueradingAsCUDA workerStream = at::hip::getStreamFromPoolMasqueradingAsCUDA();
 
   // Input `gradsBatch` are created on the current stream and used on the worker
   // stream. Hence, they must record worker streams to prevent being freed
   // before their worker stream ops finish.
   for (at::Tensor& grad : gradsBatch) {
-    c10::cuda::CUDACachingAllocator::recordStream(
+    c10::hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(
         grad.storage().data(), workerStream);
   }
 
-  at::cuda::CUDAStreamGuard cudaGuard(workerStream);
+  at::hip::HIPStreamGuardMasqueradingAsCUDA cudaGuard(workerStream);
 
   // Let the worker stream wait on the reduction stream
   reductionWork->wait();

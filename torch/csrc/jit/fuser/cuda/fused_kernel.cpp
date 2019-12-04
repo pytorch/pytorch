@@ -2,14 +2,14 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/hip/HIPContext.h>
+#include <ATen/hip/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/CUDAGenerator.h>
-#include <THC/THC.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <THH/THH.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <torch/csrc/jit/resource_guard.h>
 
-#include <cuda_runtime.h>
+#include <hip/hip_runtime.h>
 
 #include <algorithm>
 #include <cmath>
@@ -29,11 +29,11 @@ const at::cuda::NVRTC& nvrtc() {
 }
 
 static void getMajorMinor(
-    const cudaDeviceProp* const prop,
+    const hipDeviceProp_t* const prop,
     int& major,
     int& minor) {
   int nvrtc_major, nvrtc_minor;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+  AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
   AT_ASSERT(nvrtc_major >= 6);
@@ -84,18 +84,18 @@ FusedKernelCUDA::FusedKernelCUDA(
           has_random),
       device_(device) {
   // Initializes driver's API context (if necessary)
-  CUcontext pctx = 0;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  hipCtx_t pctx = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
+        *(c10::hip::HIPCachingAllocator::getFreeMutex()));
+    hipFree(0);
   }
 
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
-  const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(device_);
+  const auto prior_device = at::hip::current_device();
+  at::hip::set_device(device_);
 
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
@@ -104,8 +104,8 @@ FusedKernelCUDA::FusedKernelCUDA(
   getMajorMinor(prop_, major, minor);
 
   // Creates the NVRTC program
-  nvrtcProgram program;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
+  hiprtcProgram program;
+  AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -117,43 +117,43 @@ FusedKernelCUDA::FusedKernelCUDA(
       "--std=c++11", compute.c_str(), "-default-device"};
 #endif
   const auto result =
-      nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
-  if (result != NVRTC_SUCCESS) {
+      nvrtc().hiprtcCompileProgram(program, args.size(), args.data());
+  if (result != HIPRTC_SUCCESS) {
     size_t logsize;
-    nvrtc().nvrtcGetProgramLogSize(program, &logsize);
+    nvrtc().hiprtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
-    nvrtc().nvrtcGetProgramLog(program, log.data());
+    nvrtc().hiprtcGetProgramLog(program, log.data());
     std::stringstream cu;
     cu << log.data();
     throw std::runtime_error(cu.str());
   }
   ResourceGuard holdProgram(
-      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
+      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
+  AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcGetCodeSize(program, &ptx_size));
   ptx_.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx_.data()));
+  AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcGetCode(program, ptx_.data()));
 
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module_, ptx_.data()));
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipModuleLoadData(&module_, ptx_.data()));
   AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
+      nvrtc().hipModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
 #ifdef __HIP_PLATFORM_HCC__
   // XXX HIP function signature is not compatible yet
   uint32_t max_blocks;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &max_blocks, function_, 128, 0));
   maxBlocks_ = max_blocks;
 #else
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
 #endif
 maxBlocks_ *= prop_->multiProcessorCount;
 
   // Resets device (end of hacked at::DeviceGuard)
-  at::cuda::set_device(prior_device);
+  at::hip::set_device(prior_device);
 }
 
 static int ceilDiv(const int a, const int b) {
@@ -163,10 +163,10 @@ static int ceilDiv(const int a, const int b) {
 void FusedKernelCUDA::launch_raw(
     const uint32_t numel,
     std::vector<void*>& arguments) const {
-  at::cuda::CUDAGuard{device_};
+  at::hip::HIPGuardMasqueradingAsCUDA{device_};
   // Hacked at::DeviceGuard (see note above)
-  const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(device_);
+  const auto prior_device = at::hip::current_device();
+  at::hip::set_device(device_);
 
   const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
@@ -187,8 +187,8 @@ void FusedKernelCUDA::launch_raw(
   }
 
   // Launches kernel on current stream (device was set by executor)
-  auto stream = at::cuda::getCurrentCUDAStream();
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipModuleLaunchKernel(
       function_,
       nBlocks,
       1,
@@ -202,11 +202,11 @@ void FusedKernelCUDA::launch_raw(
       nullptr));
 
   // Resets device (see at::DeviceGuard notes above)
-  at::cuda::set_device(prior_device);
+  at::hip::set_device(prior_device);
 }
 
 FusedKernelCUDA::~FusedKernelCUDA() {
-  nvrtc().cuModuleUnload(module_);
+  nvrtc().hipModuleUnload(module_);
 }
 
 static std::shared_ptr<FusedKernel> createFusionKernel(

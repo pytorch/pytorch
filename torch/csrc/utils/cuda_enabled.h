@@ -4,7 +4,7 @@ namespace torch {
 namespace utils {
 
 static inline bool cuda_enabled() {
-#ifdef USE_CUDA
+#ifdef USE_ROCM
   return true;
 #else
   return false;

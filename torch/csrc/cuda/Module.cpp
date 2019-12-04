@@ -5,12 +5,12 @@
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <ATen/hip/HIPContext.h>
 #include <ATen/CUDAGenerator.h>
-#include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/hip/HIPFunctions.h>
+#include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
 #ifdef USE_NCCL
-#include <nccl.h>
+#include <rccl.h>
 #endif
 
 #include <torch/csrc/cuda/THCP.h>
@@ -56,7 +56,7 @@ static void poison_fork() {
 
 void THCPModule_setDevice(int device)
 {
-  THCudaCheck(cudaSetDevice(device));
+  THCudaCheck(hipSetDevice(device));
 }
 
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
@@ -77,7 +77,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   int device;
   torch::utils::cuda_lazy_init();
-  THCudaCheck(cudaGetDevice(&device));
+  THCudaCheck(hipGetDevice(&device));
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
@@ -103,7 +103,7 @@ PyObject * THCPModule_getCurrentStream_wrap(
     THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
   return PyLong_FromUnsignedLongLong(
-    at::cuda::getCurrentCUDAStream(device).pack());
+    at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).pack());
   END_HANDLE_TH_ERRORS
 }
 
@@ -114,7 +114,7 @@ PyObject * THCPModule_getDefaultStream_wrap(
     THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
   int64_t device = THPUtils_unpackLong(device_index);
   return PyLong_FromUnsignedLongLong(
-    at::cuda::getDefaultCUDAStream(device).pack());
+    at::hip::getDefaultHIPStreamMasqueradingAsCUDA(device).pack());
   END_HANDLE_TH_ERRORS
 }
 
@@ -126,13 +126,13 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
   if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
     throw python_error();
   }
-  auto stream = at::cuda::CUDAStream::unpack(bits);
+  auto stream = at::hip::HIPStreamMasqueradingAsCUDA::unpack(bits);
   int device;
-  THCudaCheck(cudaGetDevice(&device));
+  THCudaCheck(hipGetDevice(&device));
   if (device != stream.device_index()) {
     THCPModule_setDevice(stream.device_index());
   }
-  at::cuda::setCurrentCUDAStream(stream);
+  at::hip::setCurrentHIPStreamMasqueradingAsCUDA(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -140,8 +140,8 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 {
   int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
+  hipError_t err = hipGetDeviceCount(&count);
+  if (err == hipErrorInsufficientDriver) {
     return PyBool_FromLong(0);
   }
   return PyBool_FromLong(1);
@@ -150,11 +150,11 @@ PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_getDriverVersion(PyObject *self, PyObject *noargs)
 {
   int driverVersion = -1;
-  cudaError_t err = cudaDriverGetVersion(&driverVersion);
-  if (err != cudaSuccess) {
+  hipError_t err = hipDriverGetVersion(&driverVersion);
+  if (err != hipSuccess) {
     PyErr_Format(PyExc_RuntimeError,
-                    "Error calling cudaDriverGetVersion: %d %s",
-                    err, cudaGetErrorString(err));
+                    "Error calling hipDriverGetVersion: %d %s",
+                    err, hipGetErrorString(err));
     return nullptr;
   }
   return PyLong_FromLong((int64_t) driverVersion);
@@ -162,7 +162,7 @@ PyObject * THCPModule_getDriverVersion(PyObject *self, PyObject *noargs)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
-  return PyLong_FromLong((long) CUDA_VERSION);
+  return PyLong_FromLong((long) HIP_VERSION);
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
@@ -176,7 +176,7 @@ PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  THCudaCheck(cudaDeviceSynchronize());
+  THCudaCheck(hipDeviceSynchronize());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -207,7 +207,7 @@ static PyGILState_STATE cudaMutexGILState;
 
 PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
 {
-  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
+  auto mutex = c10::hip::HIPCachingAllocator::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
   // run while we have the cudaMutex, but not the GIL, they might try to e.g.
@@ -228,7 +228,7 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
 
 PyObject * THCPModule_cudaUnlockMutex(PyObject *module, PyObject *noargs)
 {
-  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
+  auto mutex = c10::hip::HIPCachingAllocator::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
@@ -250,7 +250,7 @@ PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
 PyObject * THCPModule_emptyCache(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  c10::hip::HIPCachingAllocator::emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -261,10 +261,10 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const int device = (int) THPUtils_unpackLong(arg);
 
-  using c10::cuda::CUDACachingAllocator::StatType;
-  using c10::cuda::CUDACachingAllocator::Stat;
-  using c10::cuda::CUDACachingAllocator::StatArray;
-  using c10::cuda::CUDACachingAllocator::DeviceStats;
+  using c10::hip::HIPCachingAllocator::StatType;
+  using c10::hip::HIPCachingAllocator::Stat;
+  using c10::hip::HIPCachingAllocator::StatArray;
+  using c10::hip::HIPCachingAllocator::DeviceStats;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -287,7 +287,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
     return dict;
   };
 
-  const DeviceStats stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device);
+  const DeviceStats stats = c10::hip::HIPCachingAllocator::getDeviceStats(device);
 
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
@@ -310,7 +310,7 @@ PyObject * THCPModule_resetAccumulatedMemoryStats(PyObject *_unused, PyObject *a
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_accumulated_memory_stats");
   const int device = (int) THPUtils_unpackLong(arg);
-  c10::cuda::CUDACachingAllocator::resetAccumulatedStats(device);
+  c10::hip::HIPCachingAllocator::resetAccumulatedStats(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -320,7 +320,7 @@ PyObject * THCPModule_resetPeakMemoryStats(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
   const int device = (int) THPUtils_unpackLong(arg);
-  c10::cuda::CUDACachingAllocator::resetPeakStats(device);
+  c10::hip::HIPCachingAllocator::resetPeakStats(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -329,8 +329,8 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
 
-  using c10::cuda::CUDACachingAllocator::SegmentInfo;
-  using c10::cuda::CUDACachingAllocator::BlockInfo;
+  using c10::hip::HIPCachingAllocator::SegmentInfo;
+  using c10::hip::HIPCachingAllocator::BlockInfo;
 
   const auto segmentInfoToDict = [](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
@@ -353,7 +353,7 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
     return segmentDict;
   };
 
-  const std::vector<SegmentInfo>& snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  const std::vector<SegmentInfo>& snapshot = c10::hip::HIPCachingAllocator::snapshot();
   py::list result;
 
   for (const auto& segmentInfo : snapshot) {
@@ -371,22 +371,22 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
 static void bindCudaDeviceProperties(PyObject* module) {
   // Add class and method to torch.cuda
   auto m = py::handle(module).cast<py::module>();
-  py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
-    .def_readonly("name", &cudaDeviceProp::name)
-    .def_readonly("major", &cudaDeviceProp::major)
-    .def_readonly("minor", &cudaDeviceProp::minor)
-    .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
-    .def_readonly("is_integrated", &cudaDeviceProp::integrated)
-    .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
-    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
-    .def("__repr__", [](const cudaDeviceProp &prop) {
+  py::class_<hipDeviceProp_t>(m, "_CudaDeviceProperties")
+    .def_readonly("name", &hipDeviceProp_t::name)
+    .def_readonly("major", &hipDeviceProp_t::major)
+    .def_readonly("minor", &hipDeviceProp_t::minor)
+    .def_readonly("is_multi_gpu_board", &hipDeviceProp_t::isMultiGpuBoard)
+    .def_readonly("is_integrated", &hipDeviceProp_t::integrated)
+    .def_readonly("multi_processor_count", &hipDeviceProp_t::multiProcessorCount)
+    .def_readonly("total_memory", &hipDeviceProp_t::totalGlobalMem)
+    .def("__repr__", [](const hipDeviceProp_t &prop) {
       std::ostringstream stream;
       stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
              << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
              << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
       return stream.str();
     });
-  m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
+  m.def("_get_device_properties", [](int device) -> hipDeviceProp_t * {
     return at::cuda::getDeviceProperties(device);
   }, py::return_value_policy::reference);
 }
@@ -430,7 +430,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   if (!_state_cdata) throw python_error();
   set_module_attr("_state_cdata", _state_cdata.get());
 
-  auto num_gpus = c10::cuda::device_count();
+  auto num_gpus = c10::hip::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for(int i = 0; i < num_gpus; i++) {
     auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
@@ -460,7 +460,7 @@ void THCPModule_useNccl()
 PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  rocblas_handle handle = at::cuda::getCurrentCUDABlasHandle();
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
 }

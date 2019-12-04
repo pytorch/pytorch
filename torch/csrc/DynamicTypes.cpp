@@ -19,8 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
-#ifdef USE_CUDA
-#include <THC/THC.h>
+#ifdef USE_ROCM
+#include <THH/THH.h>
 #endif
 
 namespace torch {

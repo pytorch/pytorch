@@ -6,7 +6,7 @@
 // See Note [TH abstraction violation]
 //    - Used to get at allocator from storage
 #include <TH/THTensor.hpp>
-#include <THC/THCTensor.hpp>
+#include <THH/THHTensor.hpp>
 #include <torch/csrc/cuda/THCP.h>
 
 #include <torch/csrc/cuda/override_macros.h>
@@ -17,10 +17,10 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
-#include <THC/THCGenerateAllTypes.h>
+#include <THH/THHGenerateAllTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
-#include <THC/THCGenerateBoolType.h>
+#include <THH/THHGenerateBoolType.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THH/THHGenerateBFloat16Type.h>
