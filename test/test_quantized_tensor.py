@@ -181,6 +181,12 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(qr.q_zero_point(), qlast.q_zero_point())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
 
+        # permuting larger tensors
+        x = torch.randn(64, 64)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, torch.qint32)
+        # should work
+        qx.permute([1, 0])
+
     def test_qtensor_per_channel_permute(self):
         r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
         scales = torch.rand(10) * 0.02 + 0.01

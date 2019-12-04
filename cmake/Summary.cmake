@@ -44,6 +44,7 @@ function (caffe2_print_configuration_summary)
   message(STATUS "  BUILD_CAFFE2_OPS      : ${BUILD_CAFFE2_OPS}")
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
+  message(STATUS "  BUILD_JNI             : ${BUILD_JNI}")
 
   message(STATUS "  INTERN_BUILD_MOBILE   : ${INTERN_BUILD_MOBILE}")
 
@@ -129,7 +130,9 @@ function (caffe2_print_configuration_summary)
     message(STATUS "    USE_GLOO            : ${USE_GLOO}")
   endif()
   message(STATUS "  BUILD_NAMEDTENSOR   : ${BUILD_NAMEDTENSOR}")
-
+  if(NOT "${SELECTED_OP_LIST}" STREQUAL "")
+    message(STATUS "  SELECTED_OP_LIST    : ${SELECTED_OP_LIST}")
+  endif()
   message(STATUS "  Public Dependencies  : ${Caffe2_PUBLIC_DEPENDENCY_LIBS}")
   message(STATUS "  Private Dependencies : ${Caffe2_DEPENDENCY_LIBS}")
 endfunction()

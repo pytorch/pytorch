@@ -502,6 +502,7 @@ _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
 _(aten, bitwise_not) \
+_(aten, bitwise_xor) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -649,9 +650,9 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
-_(aten, thnn_conv3d) \
-_(aten, thnn_conv3d_backward) \
-_(aten, thnn_conv3d_forward) \
+_(aten, slow_conv3d) \
+_(aten, slow_conv3d_backward) \
+_(aten, slow_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \

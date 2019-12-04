@@ -11,7 +11,7 @@ constexpr int GRADIENT_NUM_DESCRIPTORS = 3;
 constexpr int BOTTOM_DESC_ID = 0;
 constexpr int TOP_DESC_ID = 1;
 constexpr int TOP_GRADIENT_DESC_ID = 2;
-}  // namespace
+} // namespace
 
 class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
  public:
@@ -37,7 +37,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
 
     auto* Y = Output(0, X.sizes(), at::dtype<T>());
     auto* Y_data = Y->template mutable_data<T>();
-    if (N == 0) {
+    if (N == 0 || D == 0) {
       return true;
     }
     if (dims_ != X.sizes()) {
@@ -75,7 +75,6 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   vector<int64_t> dims_;
 };
 
-
 class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
  public:
   template <class... Args>
@@ -102,7 +101,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
     CHECK_EQ(Y.sizes(), dY.sizes());
     auto* dX = Output(0, Y.sizes(), at::dtype<T>());
     auto* dX_data = dX->template mutable_data<T>();
-    if (N == 0) {
+    if (N == 0 || D == 0) {
       return true;
     }
     if (dims_ != Y.sizes()) {
@@ -145,5 +144,5 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
 namespace {
 REGISTER_CUDNN_OPERATOR(Softmax, CuDNNSoftmaxOp);
 REGISTER_CUDNN_OPERATOR(SoftmaxGradient, CuDNNSoftmaxGradientOp);
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

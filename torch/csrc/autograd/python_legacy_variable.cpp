@@ -50,8 +50,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto options = TensorOptions(scalar_type)
         .device(computeDeviceType(type_id))
-        .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
-        .is_variable(true);
+        .layout(layout_from_backend(tensorTypeIdToBackend(type_id)));
     var = at::empty({0}, options);
   } else if (THPVariable_Check(data)) {
     var = ((THPVariable*)data)->cdata.detach();
@@ -75,7 +74,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   var.set_requires_grad(requires_grad);
 
   if (name) {
-    var.set_name(name);
+    impl::set_name(var, name);
   }
 
   if (jit::tracer::isTracing() && data && data != Py_None && THPVariable_Check(data)) {

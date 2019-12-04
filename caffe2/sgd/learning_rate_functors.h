@@ -1,8 +1,15 @@
 #ifndef CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
 #define CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
+#define _USE_MATH_DEFINES
 
+#include <cmath>
 #include <list>
 #include <map>
+
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif // _MSC_VER
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -287,6 +294,52 @@ class CyclicalLearningRate : public LearningRateFunctor<T> {
   T decay_;
 };
 
+// Cosine: return a learning rate with a cosine schedule
+// lower bound min_lr, upper bound max_lr.
+// See https://arxiv.org/pdf/1608.03983.pdf
+template <typename T>
+class CosineLearningRate : public LearningRateFunctor<T> {
+ public:
+  CosineLearningRate(
+      const T min_lr,
+      const T max_lr,
+      const int64_t period,
+      const T t_mult,
+      const T lr_shrink)
+      : min_lr_(min_lr),
+        max_lr_(max_lr),
+        period_(period),
+        t_mult_(t_mult),
+        lr_shrink_(lr_shrink) {}
+  T operator()(const int64_t iter) const override {
+    T i, t_i, t_curr;
+    if (t_mult_ != 1.0) {
+      // the period is changed every time
+      i = floor(
+          log(1 - double(iter) / double(period_) * (1.0 - t_mult_)) /
+          log(t_mult_));
+      t_i = pow(t_mult_, i) * period_;
+      t_curr = iter - (1.0 - pow(t_mult_, i)) / (1.0 - t_mult_) * period_;
+    } else {
+      // fixed period
+      i = floor(double(iter) / double(period_));
+      t_i = period_;
+      t_curr = iter - t_i * i;
+    }
+    T lr_shrink = pow(lr_shrink_, i);
+    T min_lr = min_lr_ * lr_shrink;
+    T max_lr = max_lr_ * lr_shrink;
+    T final_lr =
+        min_lr + 0.5 * (max_lr - min_lr) * (1 + cos(M_PI * t_curr / t_i));
+    return final_lr;
+  }
+  T min_lr_;
+  T max_lr_;
+  int64_t period_;
+  T t_mult_;
+  T lr_shrink_;
+};
+
 // constantThenLinearWarmup: first use a constant multiplier
 // and then ramp up to the global lr
 template <typename T>
@@ -314,6 +367,47 @@ class ConstantThenLinearWarmupLearningRate : public LearningRateFunctor<T> {
   int64_t linear_warmup_num_iter_;
   ConstantWarmupLearningRate<T> constant_warmup_lr_;
   LinearWarmupLearningRate<T> linear_warmup_lr_;
+};
+
+// CompositeCosineLearningRate: first use a constant multiplier
+// and then ramp up to the global lr, and then use a cosine learning rate
+template <typename T>
+class CompositeCosineLearningRate : public LearningRateFunctor<T> {
+ public:
+  CompositeCosineLearningRate(
+      const T start_warmup_multiplier,
+      const int64_t constant_warmup_num_iter,
+      const int64_t linear_warmup_num_iter,
+      const T cosine_min_lr,
+      const T cosine_max_lr,
+      const int64_t cosine_period,
+      const T consine_t_mult,
+      const T cosine_lr_shrink)
+      : constant_warmup_num_iter_(constant_warmup_num_iter),
+        linear_warmup_num_iter_(linear_warmup_num_iter),
+        constant_then_linear_warmup_lr_(
+            start_warmup_multiplier,
+            constant_warmup_num_iter,
+            linear_warmup_num_iter),
+        cosine_lr_(
+            cosine_min_lr,
+            cosine_max_lr,
+            cosine_period,
+            consine_t_mult,
+            cosine_lr_shrink) {}
+
+  T operator()(const int64_t iter) const override {
+    if (iter < constant_warmup_num_iter_ + linear_warmup_num_iter_) {
+      return constant_then_linear_warmup_lr_(iter);
+    }
+    return cosine_lr_(
+        iter - constant_warmup_num_iter_ - linear_warmup_num_iter_);
+  }
+
+  int64_t constant_warmup_num_iter_;
+  int64_t linear_warmup_num_iter_;
+  ConstantThenLinearWarmupLearningRate<T> constant_then_linear_warmup_lr_;
+  CosineLearningRate<T> cosine_lr_;
 };
 
 // CompositeCyclicalLearningRate: first use a constant multiplier
