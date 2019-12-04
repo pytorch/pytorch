@@ -3054,7 +3054,7 @@ namespace detail {
 
   namespace F = torch::nn::functional;
 
-  torch::Tensor _batchmatmul(torch::Tensor a, torch::Tensor b) {
+  torch::Tensor _batchmatmul(const torch::Tensor& a, const torch::Tensor& b) {
     assert(a.size(0) == b.size(0));
     assert(a.size(1) == b.size(1));
     auto retval = torch::zeros({a.size(0), a.size(1), a.size(2), b.size(3)}, torch::kFloat32);
@@ -3081,9 +3081,9 @@ namespace detail {
   }
 
   std::tuple<torch::Tensor, torch::Tensor> _scaled_dot_attn_ref(
-    torch::Tensor Q, torch::Tensor K, torch::Tensor V,
-    at::IntArrayRef dims, torch::Tensor unseen_mask = {},
-    torch::Tensor key_padding_mask = {}) {
+    const torch::Tensor& Q, const torch::Tensor& K, const torch::Tensor& V,
+    at::IntArrayRef dims, const torch::Tensor& unseen_mask = {},
+    const torch::Tensor& key_padding_mask = {}) {
     auto QKT = _batchmatmul(
       Q,
       K.permute({0, 1, 3, 2}) / std::sqrt(dims[3])
@@ -3128,8 +3128,8 @@ namespace detail {
   }
 
   torch::Tensor _fc(torch::Tensor X, torch::Tensor X_weight, torch::Tensor X_bias) {
-    auto X_fc_b = X_bias;//.detach().numpy()
-    auto X_fc_w = X_weight;//.detach().numpy()
+    auto X_fc_b = X_bias;
+    auto X_fc_w = X_weight;
     return torch::matmul(X, torch::t(X_fc_w)) + X_fc_b;
   }
 
@@ -3179,7 +3179,6 @@ namespace detail {
       const torch::Tensor attn_mask_tensor = attn_mask;
       attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
       attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, double(0.0));
-      // attn_mask_tensor = attn_mask_tensor.double();
 
       const torch::Tensor decoder_state_tensor = decoder_state;
       const torch::Tensor source_hid_tensor = K.transpose(0, 1);
@@ -3201,7 +3200,6 @@ namespace detail {
         bias_v = {};
       }
 
-      // _batch_size = decoder_state_tensor.shape[0];
       torch::Tensor _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1);
       torch::Tensor _V = source_hid_tensor;
       torch::Tensor _K = source_hid_tensor;

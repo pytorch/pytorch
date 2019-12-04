@@ -369,9 +369,6 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& static_v = {}) {
   namespace F = torch::nn::functional;
 
-  const bool qkv_same = torch::equal(query, key) && torch::equal(key, value);
-  const bool kv_same = torch::equal(key, value);
-
   const auto query_sizes = query.sizes();
   const auto& tgt_len = query_sizes[0];
   const auto& bsz = query_sizes[1];
@@ -386,14 +383,14 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
 
   Tensor q, k, v;
   if (!use_separate_proj_weight) {
-    if (qkv_same) {
+    if (torch::equal(query, key) and torch::equal(key, value)) {
       // self-attention
       const auto chunks =
         F::linear(query, in_proj_weight, in_proj_bias).chunk(3, /*dim=*/-1);
       q = chunks[0];
       k = chunks[1];
       v = chunks[2];
-    } else if (kv_same) {
+    } else if (torch::equal(key, value)) {
       // encoder-decoder attention
       // This is inline in_proj function with in_proj_weight and in_proj_bias
       auto _b = in_proj_bias;
@@ -423,12 +420,13 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
         v = chunks[1];
       }
     } else {
+      // This is inline in_proj function with in_proj_weight and in_proj_bias
       auto _b = in_proj_bias;
       auto _start = 0;
       auto _end = embed_dim;
-      auto _w = in_proj_weight.slice(0, _start, _end);
+      auto _w = in_proj_weight.slice(/*dim=*/0, _start, _end);
       if (_b.defined()) {
-        _b = _b.slice(0, _start, _end);
+        _b = _b.slice(/*dim=*/0, _start, _end);
       }
       q = F::linear(query, _w, _b);
 
@@ -436,9 +434,9 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       _b = in_proj_bias;
       _start = embed_dim;
       _end = embed_dim * 2;
-      _w = in_proj_weight.slice(0, _start, _end);
+      _w = in_proj_weight.slice(/*dim=*/0, _start, _end);
       if (_b.defined()) {
-        _b = _b.slice(0, _start, _end);
+        _b = _b.slice(/*dim=*/0, _start, _end);
       }
       k = F::linear(key, _w, _b);
 
@@ -446,28 +444,25 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       _b = in_proj_bias;
       _start = embed_dim * 2;
       // _end = {};
-      _w = in_proj_weight.slice(0, _start);
+      _w = in_proj_weight.slice(/*dim=*/0, _start);
       if (_b.defined()) {
         _b = _b.slice(0, _start);
       }
       v = F::linear(value, _w, _b);
     }
   } else {
-    // q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
     auto q_proj_weight_non_opt = q_proj_weight;
     auto sizes = q_proj_weight_non_opt.sizes();
     auto len1 = sizes[0];
     auto len2 = sizes[1];
     TORCH_CHECK(len1 == embed_dim && len2 == query.size(-1));
 
-    // k_proj_weight_non_opt = torch.jit._unwrap_optional(k_proj_weight)
     auto k_proj_weight_non_opt = k_proj_weight;
     sizes = k_proj_weight_non_opt.sizes();
     len1 = sizes[0];
     len2 = sizes[1];
     TORCH_CHECK(len1 == embed_dim && len2 == key.size(-1));
 
-    // v_proj_weight_non_opt = torch.jit._unwrap_optional(v_proj_weight)
     auto v_proj_weight_non_opt = v_proj_weight;
     sizes = v_proj_weight_non_opt.sizes();
     len1 = sizes[0];
@@ -475,9 +470,9 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     TORCH_CHECK(len1 == embed_dim && len2 == value.size(-1));
 
     if (in_proj_bias.defined()) {
-      q = F::linear(query, q_proj_weight_non_opt, in_proj_bias.slice(0, 0, embed_dim));
-      k = F::linear(key, k_proj_weight_non_opt, in_proj_bias.slice(0, embed_dim, (embed_dim * 2)));
-      v = F::linear(value, v_proj_weight_non_opt, in_proj_bias.slice(0, (embed_dim * 2)));
+      q = F::linear(query, q_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, 0, embed_dim));
+      k = F::linear(key, k_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, embed_dim, (embed_dim * 2)));
+      v = F::linear(value, v_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, (embed_dim * 2)));
     } else {
       q = F::linear(query, q_proj_weight_non_opt, in_proj_bias);
       k = F::linear(key, k_proj_weight_non_opt, in_proj_bias);
