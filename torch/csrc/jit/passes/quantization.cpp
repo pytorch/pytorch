@@ -178,6 +178,12 @@ class InsertObserversHelper {
   int uid_ = 0;
   // Set of observer forward call nodes
   std::unordered_set<Node*> observer_nodes_;
+  // Map from graph to a vector of observer name and observer modules we
+  // want to add to the module instance that has the graph
+  std::unordered_map<
+      Graph*,
+      std::vector<std::tuple<std::string, script::Module>>>
+      graph_observer_map_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -345,12 +351,13 @@ void InsertObserversHelper::insertObserverFor(
     observer_module = std::get<0>(qconfig);
   }
 
-  script::Module observer = observer_module.clone();
+  script::Module observer = observer_module.clone_instance();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
+  graph_observer_map_[g].push_back(std::make_tuple(observer_name, observer));
 
   // Get handle of observer module
   Node* observer_instance =
@@ -421,6 +428,17 @@ void InsertObserversHelper::insertObservers(
 
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+
+  if (graph_observer_map_.count(graph.get())) {
+    // instance clone of observer module and setAttr
+    for (const auto& observer_attrs : graph_observer_map_.at(graph.get())) {
+      const auto& name = std::get<0>(observer_attrs);
+      const auto& observer = std::get<1>(observer_attrs);
+      module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+    }
+    return;
+  }
+
   ConstantPropagation(graph);
   // must do constant propagation first before replacement
   replaceConvolutionWithConv2d(graph);
