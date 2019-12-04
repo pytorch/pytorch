@@ -337,14 +337,14 @@ struct ConstantPropagator {
   }
 
   bool supportedNode(Node* n) {
-    bool handled_mutation;
+    bool no_mutation;
     if (aliasDb_) {
-      handled_mutation = !aliasDb_->hasWriters(n);
+      no_mutation = !aliasDb_->hasWriters(n);
     } else {
-      handled_mutation =
+      no_mutation =
           noMutableValues(n->inputs()) && noMutableValues(n->outputs());
     }
-    return handled_mutation && !n->kind().is_onnx() &&
+    return no_mutation && !n->kind().is_onnx() &&
         skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
         !n->hasSideEffects() && n->blocks().size() == 0;
   }
