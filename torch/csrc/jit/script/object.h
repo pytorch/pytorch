@@ -80,7 +80,7 @@ struct TORCH_API Object {
   }
 
   bool hasattr(const std::string& name) const {
-    return _ivalue()->type()->findAttributeSlot(name).has_value() \
+    return _ivalue()->type()->findAttributeSlot(name).has_value()
       || _ivalue()->type()->hasConstant(name);
   }
 
