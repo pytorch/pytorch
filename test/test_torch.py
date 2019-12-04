@@ -5863,9 +5863,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(output3, output2)
 
     def test_tensor_grad_warnings(self):
-        with warnings.catch_warnings(record=True) as w:
-            dummy = torch.empty(1)
+        dummy = torch.empty(1)
 
+        with warnings.catch_warnings(record=True) as w:
             # Accessing .grad when requires_grad = False
             foo = dummy.grad
             self.assertEqual(len(w), 1)
