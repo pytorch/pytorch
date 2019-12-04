@@ -2781,7 +2781,7 @@ struct to_ir {
                   << "Could not unify " << elem_type->python_str() << " and "
                   << value->type()->python_str();
             }
-            elem_type = unifyTypes(elem_type, value->type()).value();
+            elem_type = maybe_type.value();
           }
         }
         for (auto v : values) {
