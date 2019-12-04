@@ -511,7 +511,9 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
   // co-variant rules for tuples
   return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
-    return a->isSubtypeOfExt(b, why_not);
+    auto unshaped_a = unshapedType(a);
+    auto unshaped_b = unshapedType(b);
+    return unshaped_a->isSubtypeOfExt(unshaped_b, why_not);
   });
 }
 
