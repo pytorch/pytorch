@@ -576,24 +576,28 @@ class InsertQuantDeQuantHelper {
       script::Module& module,
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
-  void removeObservers(script::Module& module);
-  bool registerQParams(script::Module& module, Value* v);
-  void quantizeTensors(script::Module& module, Value* self);
+  void removeObservers(script::Module& module, Graph* g);
+  bool registerQParams(script::Module& module,
+                       const std::tuple<IValue, IValue>& qparams_and_scalar_type,
+                       const std::string& prefix);
+  void quantizeTensors(script::Module& module, Graph* g, Value* self);
 
  private:
-  std::unordered_map<script::ModulePtr, std::vector<std::string>> observer_modules_to_remove_;
-  std::unordered_map<script::ModulePtr, std::vector<Node*>> nodes_to_destroy_;
-  std::unordered_map<script::ModulePtr, std::vector<Value*>> values_to_quantize_;
-  std::unordered_map<script::ModulePtr, std::unordered_map<Value*, std::tuple<IValue, IValue>>> values_to_qparams_;
+  // TODO: we don't need to call this for each graph
+  std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
+  std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
+  std::unordered_map<Graph*, std::vector<Value*>> values_to_quantize_;
+  std::unordered_map<Graph*, std::unordered_map<Value*, std::tuple<IValue, IValue>>> values_to_qparams_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
     script::Module& module, Value* v) {
+  auto* g = v->owningGraph();
   auto observer_name = findObserverName(v);
   if (!observer_name) {
     return;
   }
-  observer_modules_to_remove_[module._ivalue()].push_back(observer_name.value());
+  observer_modules_to_remove_[g].push_back(observer_name.value());
 
   Node* observer = v->node();
   TORCH_INTERNAL_ASSERT(
@@ -603,40 +607,44 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
       observer->inputs()[0]->node()->s(attr::name) == observer_name);
 
   // Observer forward call node
-  nodes_to_destroy_[module._ivalue()].push_back(observer);
+  nodes_to_destroy_[g].push_back(observer);
   // GetAttr node for observer module
-  nodes_to_destroy_[module._ivalue()].push_back(observer->inputs()[0]->node());
+  nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
   Value* new_value = observer->input(1);
   v->replaceAllUsesWith(new_value);
-  values_to_quantize_[module._ivalue()].push_back(new_value);
-  values_to_qparams_[module._ivalue()].insert({new_value, getQParams(module, v)});
+  values_to_quantize_[g].push_back(new_value);
+  values_to_qparams_[g].insert({new_value, getQParams(module, v)});
 }
 
-void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
-  if (nodes_to_destroy_.count(module._ivalue())) {
-    for (auto& n : nodes_to_destroy_.at(module._ivalue())) {
+void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
+  if (nodes_to_destroy_.count(g)) {
+    for (auto& n : nodes_to_destroy_.at(g)) {
       n->removeAllInputs();
     }
-    for (auto& n : nodes_to_destroy_.at(module._ivalue())) {
+    for (auto& n : nodes_to_destroy_.at(g)) {
       n->destroy();
     }
+    nodes_to_destroy_.at(g).clear();
   }
   // Remove observer modules from last one to first one in order to
   // reduce the time complexity, assuming all the observer modules
   // are added after the existing modules, we'll have complexity of
   // O(N) where N is number of observer moduels with this optimization
-  if (observer_modules_to_remove_.count(module._ivalue())) {
-    auto observers = observer_modules_to_remove_.at(module._ivalue());
+  if (observer_modules_to_remove_.count(g)) {
+    auto observers = observer_modules_to_remove_.at(g);
     for (int64_t i = observers.size() - 1; i >= 0; --i) {
       auto observer_name = observers[i];
       module._ivalue()->unsafeRemoveAttr(observer_name);
       module.type()->unsafeRemoveAttribute(observer_name);
     }
+    observer_modules_to_remove_.at(g).clear();
   }
 }
 
-bool InsertQuantDeQuantHelper::registerQParams(script::Module& module, Value* v) {
-    auto qparams_and_scalar_type = values_to_qparams_.at(module._ivalue()).at(v);
+bool InsertQuantDeQuantHelper::registerQParams(
+    script::Module& module,
+    const std::tuple<IValue, IValue>& qparams_and_scalar_type,
+    const std::string& prefix) {
     auto qparams = std::get<0>(qparams_and_scalar_type);
     auto scalar_type = std::get<1>(qparams_and_scalar_type);
     // Register attributes for quantization parameters
@@ -645,7 +653,6 @@ bool InsertQuantDeQuantHelper::registerQParams(script::Module& module, Value* v)
     at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
     // TODO: get this info from qscheme
     bool is_per_channel = scale.numel() > 1;
-    std::string prefix = v->debugName();
     if (is_per_channel) {
       module.register_attribute(prefix + "_scale", TensorType::get(), scale);
       module.register_attribute(prefix + "_zero_point", TensorType::get(), zero_point);
@@ -658,12 +665,13 @@ bool InsertQuantDeQuantHelper::registerQParams(script::Module& module, Value* v)
     return is_per_channel;
 }
 
-void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Value* self) {
-  if (!values_to_quantize_.count(module._ivalue())) {
+void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g, Value* self) {
+  if (!values_to_quantize_.count(g)) {
     return;
   }
-  for (auto& v : values_to_quantize_.at(module._ivalue())) {
-    auto is_per_channel = registerQParams(module, v);
+  for (auto& v : values_to_quantize_.at(g)) {
+    auto qparams_and_scalar_type = values_to_qparams_.at(g).at(v);
+    auto is_per_channel = registerQParams(module, qparams_and_scalar_type, v->debugName());
     insertQuantDeQuantCall(self, v, is_per_channel);
   }
   // no need to clear the vector or map
@@ -787,9 +795,15 @@ void InsertQuantDeQuantHelper::run(
   for (Value* v : input_values) {
     collectObserverNodesAndValueToQuantize(module, v);
   }
-  removeObservers(module);
+  GRAPH_DUMP("Before Remove Observers:",
+             graph);
+  removeObservers(module, graph.get());
+  GRAPH_DUMP("Before Quantize Tensors:",
+             graph);
   Value* self = graph->inputs()[0];
-  quantizeTensors(module, self);
+  quantizeTensors(module, graph.get(), self);
+  GRAPH_DUMP("After Quantize Tensors:",
+             graph);
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
