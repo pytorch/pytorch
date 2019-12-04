@@ -1419,7 +1419,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   else()
     set(CUDA_HOST_SHARED_FLAGS)
   endif()
-  
+
   macro(_filter_blacklisted_host_flags CUDA_FLAGS)
     string(REGEX REPLACE "[ \t]+" ";" ${CUDA_FLAGS} "${${CUDA_FLAGS}}")
     foreach(_blacklisted ${CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST})
@@ -1475,14 +1475,14 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   # Process the C++11 flag.  If the host sets the flag, we need to add it to nvcc and
   # remove it from the host. This is because -Xcompile -std=c++ will choke nvcc (it uses
   # the C preprocessor).  In order to get this to work correctly, we need to use nvcc's
-  # specific c++11 flag.
+  # specific c++14 flag.
   if( "${_cuda_host_flags}" MATCHES "-std=c\\+\\+11")
-    # Add the c++11 flag to nvcc if it isn't already present.  Note that we only look at
+    # Add the c++14 flag to nvcc if it isn't already present.  Note that we only look at
     # the main flag instead of the configuration specific flags.
-    if( NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11" )
-      list(APPEND nvcc_flags --std c++11)
+    if( NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+14" )
+      list(APPEND nvcc_flags --std c++14)
     endif()
-    string(REGEX REPLACE "[-]+std=c\\+\\+11" "" _cuda_host_flags "${_cuda_host_flags}")
+    string(REGEX REPLACE "[-]+std=c\\+\\+14" "" _cuda_host_flags "${_cuda_host_flags}")
   endif()
 
   if(_cuda_build_shared_libs)
