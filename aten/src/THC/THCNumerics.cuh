@@ -197,7 +197,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ bool ne(at::Half a, at::Half b) { return a != b; }
 
   static inline __host__ __device__ at::Half exp(at::Half a) { return std::exp(a); }
-  static inline __host__ __device__ at::Half exp10(at::Half a) { return ::exp10(a); }
   static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
   static inline __host__ __device__ at::Half cosh(at::Half a) { return ::cosh(a); }
@@ -235,8 +234,6 @@ struct THCNumerics<at::Half> {
 };
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)
-//             note that the functions exp10 and erfinv
-//             are not in the std namespace
 template <>
 struct THCNumerics<float> {
   static inline __host__ __device__ float min() { return at::numeric_limits<float>::lowest(); }
@@ -253,7 +250,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
-  static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
   static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
@@ -286,7 +282,6 @@ struct THCNumerics<at::BFloat16> {
   static inline __host__ __device__ bool ne(at::BFloat16 a, at::BFloat16 b) { return a != b; }
 
   static inline __host__ __device__  at::BFloat16 exp  (at::BFloat16 a) { return   expf(a); }
-  static inline __host__ __device__  at::BFloat16 exp10(at::BFloat16 a) { return exp10f(a); }
   static inline __host__ __device__  at::BFloat16 cos  (at::BFloat16 a) { return   cosf(a); }
   static inline __host__ __device__  at::BFloat16 sqrt (at::BFloat16 a) { return  sqrtf(a); }
   static inline __host__ __device__  at::BFloat16 cosh (at::BFloat16 a) { return  coshf(a); }
@@ -324,8 +319,6 @@ struct THCNumerics<at::BFloat16> {
 };
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)
-//             note that the functions exp10 and erfinv
-//             are not in the std namespace
 template <>
 struct THCNumerics<double> {
   static inline __host__ __device__ double min() { return at::numeric_limits<double>::lowest(); }
@@ -342,7 +335,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
-  static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
   static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
