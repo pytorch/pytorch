@@ -1116,9 +1116,6 @@ class RpcTest(RpcAgentTestFixture):
         )
         n = self.rank + 1
         dst_rank = n % self.world_size
-        # this RPC may timeout, if the dest worker has terminated before sending
-        # the response. A local shutdown does not guarantee that all outstanding
-        #  RPCs will be completed, so we catch timeout errors here.
         rpc.rpc_sync(
             "worker{}".format(dst_rank),
             torch.add,
