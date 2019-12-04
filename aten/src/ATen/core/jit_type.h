@@ -1223,7 +1223,10 @@ template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
     if (!isCustomClassRegistered<T>()) {
-      throw c10::Error("Type could not be converted to any of the known types.", "");
+      throw c10::Error(
+          "Type " + std::string(c10::util::get_fully_qualified_type_name<T>()) +
+              " could not be converted to any of the known types.",
+          "");
     }
     auto res = getCustomClassType<T>();
     return std::dynamic_pointer_cast<Type>(res.type_);
