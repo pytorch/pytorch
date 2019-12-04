@@ -19,9 +19,9 @@
 // For #1 and #3 it searches for connections between operator name string
 // literals / function pointers and c10 op registration/invocation API calls in
 // LLVM IR graph via "use" edges (bi-directional):
-// 1. llvm::Value has “users()” method to get other llvm::Value nodes that use
+// 1. llvm::Value has "users()" method to get other llvm::Value nodes that use
 //    the value;
-// 2. most of types derive from llvm::User which has “operands()” method to get
+// 2. most of types derive from llvm::User which has "operands()" method to get
 //    other llvm::Value nodes being used by the value;
 //
 // [Limitation]
