@@ -40,6 +40,7 @@ class MaskedAdagradOp final : public Operator<CPUContext> {
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
 
+template <bool ROWWISE = false>
 class MaskedSparseAdagradOp final : public Operator<CPUContext> {
  public:
   MaskedSparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
@@ -77,13 +78,25 @@ class MaskedSparseAdagradOp final : public Operator<CPUContext> {
 
     // Enforce:
     // input(embedding/momentum) == outputs(embedding/momentum)
-    CAFFE_ENFORCE_EQ(
-        Input(PARAM).numel(),
-        Input(MOMENT_1).numel(),
-        "Input Param size: ",
-        Input(PARAM).numel(),
-        " Input Moment size: ",
-        Input(MOMENT_1).numel());
+    if (ROWWISE) {
+      CAFFE_ENFORCE_EQ(
+          Input(PARAM).numel() / row_size,
+          Input(MOMENT_1).numel(),
+          "Input Param size: ",
+          Input(PARAM).numel(),
+          " Block size: ",
+          row_size,
+          " Input Moment size: ",
+          Input(MOMENT_1).numel());
+    } else {
+      CAFFE_ENFORCE_EQ(
+          Input(PARAM).numel(),
+          Input(MOMENT_1).numel(),
+          "Input Param size: ",
+          Input(PARAM).numel(),
+          " Input Moment size: ",
+          Input(MOMENT_1).numel());
+    }
 
     // input(grad) is compatible with size of indexes
     CAFFE_ENFORCE_EQ(
@@ -97,7 +110,7 @@ class MaskedSparseAdagradOp final : public Operator<CPUContext> {
     bool mask_changed = false;
     bool write_lock_acquired = false;
     if (delays_.empty()) {
-      mask_changed = Input(MASK_CHANGED).data<bool>()[0];
+      mask_changed = Input(MASK_CHANGED).template data<bool>()[0];
     } else {
       // If delay is present, prune_rate also should be there
       CAFFE_ENFORCE(!prune_ratios_.empty());
@@ -125,11 +138,11 @@ class MaskedSparseAdagradOp final : public Operator<CPUContext> {
     const uint8_t* bitmask = nullptr;
     if (delays_.empty()) {
       // If delays argument is empty, get from MASK input
-      bitmask = Input(MASK).data<uint8_t>();
+      bitmask = Input(MASK).template data<uint8_t>();
     } else if (OutputSize() > MASK_OUT) {
       // If MASK_OUT is present, the blob stores bitmask
       if (Output(MASK_OUT)->numel()) {
-        bitmask = Output(MASK_OUT)->data<uint8_t>();
+        bitmask = Output(MASK_OUT)->template data<uint8_t>();
       }
     } else {
       // Otherwise, the operator keeps the mask internally.
@@ -149,7 +162,9 @@ class MaskedSparseAdagradOp final : public Operator<CPUContext> {
           int bit = j_block % 8;
           bool mask = bitmask[i * bitmask_bytes_per_row + byte] & (1 << bit);
           if (!mask) {
-            momentOut[i * row_size + j] = 0;
+            if (!ROWWISE) {
+              momentOut[i * row_size + j] = 0;
+            }
             paramOut[i * row_size + j] = 0;
           }
         }
@@ -185,27 +200,78 @@ class MaskedSparseAdagradOp final : public Operator<CPUContext> {
           Input(PARAM).numel());
 
       // TODO: performance can be optimized using intrinsics later.
-      for (int j = 0; j < row_size; ++j) {
-        // Get mask
-        bool mask = true;
-        if (bitmask) {
-          int j_block = j / block_size_;
-          int byte = j_block / 8;
-          int bit = j_block % 8;
-          mask = bitmask[idx * bitmask_bytes_per_row + byte] & (1 << bit);
+      if (ROWWISE) {
+        float sum = 0;
+#ifdef MASKED_ADAGRAD_MASK_GRAD
+        int nnz = 0;
+#endif
+        for (int j = 0; j < row_size; ++j) {
+#ifdef MASKED_ADAGRAD_MASK_GRAD
+          // Get mask
+          bool mask = true;
+          if (bitmask) {
+            int j_block = j / block_size_;
+            int byte = j_block / 8;
+            int bit = j_block % 8;
+            mask = bitmask[idx * bitmask_bytes_per_row + byte] & (1 << bit);
+          }
+          if (mask) {
+            ++nnz;
+            sum += gradIn[offsetI + j] * gradIn[offsetI + j];
+          }
+#else
+          sum += gradIn[offsetI + j] * gradIn[offsetI + j];
+#endif
         }
+#ifdef MASKED_ADAGRAD_MASK_GRAD
+        if (nnz) {
+          sum /= nnz;
+        }
+#else
+        sum /= row_size;
+#endif
 
-        // Actual Adagrad update
-        float gi = gradIn[offsetI + j];
-        if (mask) {
-          float hi = momentOut[offsetIdx + j] =
-              momentIn[offsetIdx + j] + gi * gi;
-          paramOut[offsetIdx + j] =
-              paramIn[offsetIdx + j] + lr[0] / (std::sqrt(hi) + epsilon_) * gi;
-        } else {
-          momentOut[offsetIdx + j] = 0;
-          paramOut[offsetIdx + j] = 0;
+        float hi = momentOut[idx] = momentIn[idx] + sum;
+        float float_step = lr[0] / (std::sqrt(hi) + epsilon_);
+
+        for (int j = 0; j < row_size; ++j) {
+          bool mask = true;
+          if (bitmask) {
+            int j_block = j / block_size_;
+            int byte = j_block / 8;
+            int bit = j_block % 8;
+            mask = bitmask[idx * bitmask_bytes_per_row + byte] & (1 << bit);
+          }
+          if (mask) {
+            float gi = gradIn[offsetI + j];
+            paramOut[offsetIdx + j] = paramIn[offsetIdx + j] + gi * float_step;
+          } else {
+            paramOut[offsetIdx + j] = 0;
+          }
         }
+      } else {
+        for (int j = 0; j < row_size; ++j) {
+          // Get mask
+          bool mask = true;
+          if (bitmask) {
+            int j_block = j / block_size_;
+            int byte = j_block / 8;
+            int bit = j_block % 8;
+            mask = bitmask[idx * bitmask_bytes_per_row + byte] & (1 << bit);
+          }
+
+          // Actual Adagrad update
+          if (mask) {
+            float gi = gradIn[offsetI + j];
+            float hi = momentOut[offsetIdx + j] =
+                momentIn[offsetIdx + j] + gi * gi;
+            paramOut[offsetIdx + j] = paramIn[offsetIdx + j] +
+                lr[0] / (std::sqrt(hi) + epsilon_) * gi;
+          } else {
+            momentOut[offsetIdx + j] = 0;
+            paramOut[offsetIdx + j] = 0;
+          }
+        } // !ROWWISE
       }
     }
 
@@ -258,7 +324,7 @@ class MaskedSparseAdagradOp final : public Operator<CPUContext> {
 
     if (OutputSize() > MASK_OUT) {
       Output(MASK_OUT)->Resize(num_rows, bitmask_bytes_per_row);
-      bitmask = Output(MASK_OUT)->mutable_data<uint8_t>();
+      bitmask = Output(MASK_OUT)->template mutable_data<uint8_t>();
     } else {
       if (!bitmask_) {
         bitmask_.reset(new uint8_t[num_rows * bitmask_bytes_per_row]);
@@ -297,7 +363,8 @@ class MaskedSparseAdagradOp final : public Operator<CPUContext> {
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, MASK_OUT);
 };
 
-std::shared_mutex MaskedSparseAdagradOp::lock_;
+template <bool ROWWISE>
+std::shared_mutex MaskedSparseAdagradOp<ROWWISE>::lock_;
 
 REGISTER_CPU_OPERATOR(MaskedAdagrad, MaskedAdagradOp);
 OPERATOR_SCHEMA(MaskedAdagrad)
@@ -334,7 +401,9 @@ and returns (new_param, new_moment).
         "Default 1. If it is in (0, 1), the gradient square sum "
         "is decayed by this factor.");
 
-REGISTER_CPU_OPERATOR(MaskedSparseAdagrad, MaskedSparseAdagradOp);
+REGISTER_CPU_OPERATOR(
+    MaskedSparseAdagrad,
+    MaskedSparseAdagradOp<false /*ROWWISE*/>);
 OPERATOR_SCHEMA(MaskedSparseAdagrad)
     .NumInputs(6, 8)
     .NumOutputs(2, 3)
@@ -361,6 +430,72 @@ a mask for 50% sparsity at iteration 1000, a mask for 70% sparsity at iteration
 2000, and so on. Whenever we change the prune_ratios, we apply the updated mask
 to the entire param and moment. Otherwise, we apply the mask only the rows
 accessed via indices.
+
+)DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment", "Moment history")
+    .Input(2, "indices", "Sparse indices")
+    .Input(3, "grad", "Gradient computed")
+    .Input(4, "lr", "learning rate")
+    .Input(5, "mask", "Bit mask in uint8_t. Ignored when delay is provided")
+    .Input(
+        6,
+        "mask_changed",
+        "1 boolean value to indicate whether mask has changed")
+    .Input(
+        7,
+        "iter",
+        "Optional input to feed iteration count in int32_t. "
+        "Only effective with delays and prune_ratios arguments are present")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment_1", "Updated moment")
+    .Output(
+        2,
+        "mask_out",
+        "Optional output to observe bit mask (in uint8_t) generated "
+        "internally. Only effective with delays and prune_ratios arguments "
+        "are present.")
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("block_size", "Default 1")
+    .Arg(
+        "delays",
+        "Optional arg to internally generate mask and control when we change "
+        "prune ratios. Must be provided with prune_rates argument."
+        "If present mask and mask_changed inputs are ignored")
+    .Arg("prune_ratios", "Optional arg to control prune rates");
+
+REGISTER_CPU_OPERATOR(
+    MaskedRowWiseSparseAdagrad,
+    MaskedSparseAdagradOp<true /*ROWWISE*/>);
+OPERATOR_SCHEMA(MaskedRowWiseSparseAdagrad)
+    .NumInputs(6, 9)
+    .NumOutputs(2, 3)
+    .EnforceInplace({{0, 0}, {1, 1}})
+    .SetDoc(R"DOC(
+
+Masked version of RowWiseSparseAdagrad.
+There are two modes of using MaskedRowWiseSparseAdagrad.
+
+The first mode is we feed mask and mask_changed inputs.
+When mask_changed is 1, we apply mask to the entire param and moment, instead
+of just the rows corresponding to indices. If we don't apply mask_changed when
+we input a new mask, we will have a problem that rows never touched will stay
+unpruned. This mode is more flexible because it allows providing arbitrary
+mask that could be generated by running sophisticated offline methods.
+
+The second mode is we provide delays and prune_ratios arguments, and let the
+operator generate masks internally. This allows a quick experimentation using
+simple (iterative) magnitude-based pruning. If delays and prune_ratios
+arguments are present, mask and mask_changed inputs will be ignored. delays and
+prune_ratios arguments should have the same lengths. For example, if delays =
+[1000, 2000, 3000] and prune_ratios = [0.5, 0.7, 0.9], the operator will create
+a mask for 50% sparsity at iteration 1000, a mask for 70% sparsity at iteration
+2000, and so on. Whenever we change the prune_ratios, we apply the updated mask
+to the entire param and moment. Otherwise, we apply the mask only the rows
+accessed via indices.
+If iter input is present, it will be used as the iteration count. If not, the
+operator will keep internal counter that will be incremented for each operator
+invocation.
 
 )DOC")
     .Input(0, "param", "Parameters to be updated")
