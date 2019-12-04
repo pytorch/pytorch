@@ -693,7 +693,18 @@ Tensor _embedding_bag_sparse_backward(
   // for more details.
 
   Tensor grad = grad_;
-  Tensor index_grad = grad_.index_select(0, offset2bag);
+  Tensor index_grad = at::empty({0}, grad.options());
+  // TODO: The selection conditions between `index` and
+  // `index_select(0, ...)` here are based on benchmark numbers in
+  // https://github.com/pytorch/pytorch/pull/30639#issuecomment-561439016
+  // Note https://github.com/pytorch/pytorch/pull/30598 is working on
+  // improving the perf of `index_select`. Once that PR is landed we
+  // should re-run the benchmark to see if we should switch back.
+  if (grad.device().is_cpu() && (!grad.is_contiguous() || grad.size(1) > 64)) {
+    index_grad = grad.index(offset2bag);
+  } else {
+    index_grad = grad.index_select(0, offset2bag);
+  }
   index_grad = apply_bag_size_backward(offsets, indices, mode, index_grad,
                                        offset2bag, bag_size_);
   if (per_sample_weights.defined()) {
