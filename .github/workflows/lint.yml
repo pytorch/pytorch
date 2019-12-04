@@ -56,6 +56,7 @@ jobs:
         run: |
           set -eux
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch
             # We are on a PR, so actions/checkout leaves us on a merge commit.
             # Check out the actual tip of the branch.
             git checkout ${{ github.event.pull_request.head.sha }}
@@ -92,6 +93,7 @@ jobs:
         run: |
           set -eux
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch
             # We are on a PR, so actions/checkout leaves us on a merge commit.
             # Check out the actual tip of the branch.
             git checkout ${{ github.event.pull_request.head.sha }}
@@ -131,6 +133,7 @@ jobs:
         run: |
           set -eux
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch
             # We are on a PR, so actions/checkout leaves us on a merge commit.
             # Check out the actual tip of the branch.
             git checkout ${{ github.event.pull_request.head.sha }}

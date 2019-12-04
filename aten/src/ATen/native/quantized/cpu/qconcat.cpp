@@ -9,10 +9,11 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qcat_nhwc_stub);
 DEFINE_DISPATCH(qcat_relu_nhwc_stub);
+
+namespace {
 
 bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
   TORCH_CHECK(qxs.size() > 0);
