@@ -104,7 +104,7 @@ struct CaptureList {
       //  This is to avoid any implicit mutation to TensorList happened
       //  between forward & backward.
       capture_types_.emplace_back(CAPTURE_LIST);
-      c10::ArrayRef<at::Tensor> tensors = val.toTensorListRef();
+      auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
       for (const at::Tensor& tensor : tensors) {
@@ -185,7 +185,7 @@ struct UnpackInstructions {
         } break;
         case PUSH_LIST: {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
-          stack.emplace_back(c10::impl::toList(std::move(lst)));
+          stack.emplace_back(lst);
         } break;
       }
     }
@@ -241,7 +241,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (const at::Tensor& tensor : v.toTensorListRef()) {
+        for (const at::Tensor& tensor : v.toTensorList()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -265,7 +265,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
-      for (const at::Tensor& tensor : value.toTensorListRef()) {
+      for (const at::Tensor& tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
     } else {
@@ -287,7 +287,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   void addInputIValue(const IValue& v) {
     if (v.isTensorList()) {
-      c10::ArrayRef<at::Tensor> tensors = v.toTensorListRef();
+      auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
       for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
@@ -740,10 +740,10 @@ void runOptimization(std::shared_ptr<Graph>& graph) {
   // Basic graph preprocessing to eliminate noise.
   EliminateDeadCode(graph);
   EliminateCommonSubexpression(graph);
-  ConstantPooling(graph);
 
   PeepholeOptimize(graph);
   ConstantPropagation(graph);
+  ConstantPooling(graph);
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.

@@ -1231,6 +1231,13 @@ struct getTypePtr_ final {
 };
 
 template <>
+struct getTypePtr_<at::IValue> final {
+  static TypePtr call() {
+    return AnyType::get();
+  }
+};
+
+template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
@@ -1640,5 +1647,24 @@ struct CAFFE2_API InterfaceType : public NamedType {
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
 };
+
+
+
+
+inline bool IValue::isDoubleList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(FloatType::get());
+}
+
+inline bool IValue::isTensorList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(TensorType::get());
+}
+
+inline bool IValue::isIntList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(IntType::get());
+}
+
+inline bool IValue::isBoolList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(BoolType::get());
+}
 
 } // namespace c10

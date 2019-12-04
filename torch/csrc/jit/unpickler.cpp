@@ -243,6 +243,14 @@ static std::vector<int64_t> tupleToIntList(const IValue& v) {
   });
 }
 
+// note we cannot use toIntList, toDoubleList because during unpickling the
+// lists are not yet tagged
+template <typename T>
+static std::vector<T> convertList(const IValue& v) {
+  return fmap(
+      v.toGenericListRef(), [](const IValue& elem) { return elem.to<T>(); });
+}
+
 PickleOpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
@@ -593,11 +601,8 @@ void Unpickler::rebuildTensor(bool quantized) {
               {0}, storage_tensor.options(), q_scale, q_zero_point);
         } break;
         case at::kPerChannelAffine: {
-          const auto& scales_list = qparams.at(1).toDoubleList();
-          std::vector<double> scales(scales_list.begin(), scales_list.end());
-          const auto& zero_points_list = qparams.at(2).toIntList();
-          std::vector<int64_t> zero_points(
-              zero_points_list.begin(), zero_points_list.end());
+          std::vector<double> scales = convertList<double>(qparams.at(1));
+          std::vector<int64_t> zero_points = convertList<int64_t>(qparams.at(2));
           int64_t axis = qparams.at(3).toInt();
           result = _empty_per_channel_affine_quantized(
               {0},
