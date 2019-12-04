@@ -5803,8 +5803,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
-NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
-prevent overflow during calculation.
+.. note::
+    When running on CUDA, ``row * col`` must be less than :math:`2^{59}` to
+    prevent overflow during calculation.
 """ + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
@@ -5916,8 +5917,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
-NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
-prevent overflow during calculation.
+.. note::
+    When running on CUDA, ``row * col`` must be less than :math:`2^{59}` to
+    prevent overflow during calculation.
 """ + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
