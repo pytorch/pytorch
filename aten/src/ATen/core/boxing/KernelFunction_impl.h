@@ -22,7 +22,7 @@ inline KernelFunction::KernelFunction()
 , signature_hash_(c10::nullopt)
 {}
 
-inline KernelFunction::KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+inline KernelFunction::KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<c10::util::type_index> signature_hash)
 : functorFactory_(std::move(functorFactory))
 , functor_(std::move(functor))
 , boxed_kernel_func_(boxed_kernel_func)

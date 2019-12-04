@@ -24,6 +24,8 @@ public:
   // This is the public API for how boxed kernels are defined
   using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
 
+  KernelFunction();
+
   bool isValid() const;
 
   /**
@@ -200,7 +202,7 @@ public:
 
 private:
 
-  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
+  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, c10::optional<c10::util::type_index> signature_hash);
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
