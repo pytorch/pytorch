@@ -8,19 +8,27 @@
  * Note [compute_scales_value]
  * Note [area_pixel_compute_scale]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * Computing the scales for upsample/interpolate has changed
- * in 1.4.0 when scale_factors is provided.
- * Before 1.4.0, when the scale_factors provided by the user,
- * they were used to calculate the output size. The input size
- * and the computed output_size were then used to infer new values for
- * the scales which were used in the interpolation.
- * In 1.4.0, the behavior is changed and now follows opencv logic, and
- * the scales provided by the user (if provided) are the ones used in
- * the interpolation calculations.
+ * Interpolate with scale_factors can have different behaviors
+ * depending on the value of use_scale_factor:
  *
- * If the scales are not available, it is computed from the input size and
- * the output size like previously;
- * We view each pixel as an area, idx + 0.5 as its center index.
+ * - With use_scale_factor = False (current default behavior):
+ * the scale_factors provided by the user, are used to calculate
+ * the output size. The input size and the computed output_size
+ * are then used to infer new values for the scales which are
+ * used in the interpolation.
+ *
+ * - With use_scale_factor = True (which will be the default
+ * behavior starting 1.5.0):
+ * the behavior follows opencv logic, and the scales provided by
+ * the user are the ones used in the interpolation calculations.
+ *
+ * If the scales are not available or if they are available but
+ * use_scale_factor is set to False (default behavior), the scales
+ * are computed from the input and the output size;
+ *
+ *
+ * When the scales are infered from the input and output sizes,
+ * we view each pixel as an area, idx + 0.5 as its center index.
  * Here is an example formula in 1D case.
  * if align_corners: center of two corner pixel areas are preserved,
  *     (0.5, 0.5) -> (0.5, 0.5),

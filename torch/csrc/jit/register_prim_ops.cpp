@@ -3355,6 +3355,12 @@ std::vector<int64_t> _output_size(
   return ret;
 }
 
+// return true if v is a real float
+// and false if it is an integer
+bool _is_float_value(float v) {
+  return std::floor(v) != v;
+}
+
 // reference: interpolate in torch/nn/functional.py
 // size can be none, int or intlist
 // scale_factors can be none, float, or floatlist
@@ -3363,7 +3369,8 @@ at::Tensor interpolate(
     const IValue& size,
     const IValue& scale_factors,
     const std::string& mode,
-    c10::optional<bool> align_corners) {
+    c10::optional<bool> align_corners,
+    c10::optional<bool> use_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error(
@@ -3385,20 +3392,60 @@ at::Tensor interpolate(
   float scale_factors_1 = -1.0f;
   float scale_factors_2 = -1.0f;
   float scale_factors_3 = -1.0f;
-  if (scale_factors.isDouble()) {
-    scale_factors_1 = static_cast<float>(scale_factors.toDouble());
-    scale_factors_2 = static_cast<float>(scale_factors.toDouble());
-    scale_factors_3 = static_cast<float>(scale_factors.toDouble());
-  } else if (scale_factors.isDoubleList()) {
-    auto scale_factors_list_ref = scale_factors.toDoubleListRef();
-    std::vector<double> scale_factors_vec(scale_factors_list_ref.begin(), scale_factors_list_ref.end());
-    auto scale_factors_list = c10::impl::toList(scale_factors_vec);
-    scale_factors_1 = static_cast<float>(scale_factors_list[0]);
-    if (scale_factors_list.size() >= 2){
-      scale_factors_2 = static_cast<float>(scale_factors_list[1]);
-      if (scale_factors_list.size() >= 3){
-        scale_factors_3 = static_cast<float>(scale_factors_list[2]);
+
+  if(!scale_factors.isNone() && use_scale_factor == c10::nullopt) {
+    use_scale_factor = false;
+    bool warn_use_scale_factor = false;
+
+    if (scale_factors.isDouble()) {
+      if(_is_float_value(static_cast<float>(scale_factors.toDouble()))){
+        warn_use_scale_factor = true;
+      }
+    } else if (scale_factors.isDoubleList()) {
+      auto scale_factors_list_ref = scale_factors.toDoubleListRef();
+      std::vector<double> scale_factors_vec(scale_factors_list_ref.begin(), scale_factors_list_ref.end());
+      auto scale_factors_list = c10::impl::toList(scale_factors_vec);
+
+      if(_is_float_value(static_cast<float>(scale_factors_list[0]))){
+        warn_use_scale_factor = true;
+      }
+      else if (scale_factors_list.size() >= 2 &&
+               _is_float_value(static_cast<float>(scale_factors_list[1]))) {
+                 warn_use_scale_factor = true;
+      }
+      else if (scale_factors_list.size() >= 3 &&
+          _is_float_value(static_cast<float>(scale_factors_list[2]))) {
+            warn_use_scale_factor = true;
+      }
+    }
+
+    if(warn_use_scale_factor) {
+      AT_WARN(
+        "The default behavior for interpolate/upsample with float scale_factor will change "
+        "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
+        "instead of relying on the computed output size. "
+        "If you wish to keep the old behavior, please set use_scale_factor=False. "
+        "See the documentation of nn.Upsample for details.");
+    }
+  }
+
+  if(use_scale_factor)
+  {
+    if (scale_factors.isDouble()) {
+      scale_factors_1 = static_cast<float>(scale_factors.toDouble());
+      scale_factors_2 = static_cast<float>(scale_factors.toDouble());
+      scale_factors_3 = static_cast<float>(scale_factors.toDouble());
+    } else if (scale_factors.isDoubleList()) {
+      auto scale_factors_list_ref = scale_factors.toDoubleListRef();
+      std::vector<double> scale_factors_vec(scale_factors_list_ref.begin(), scale_factors_list_ref.end());
+      auto scale_factors_list = c10::impl::toList(scale_factors_vec);
+      scale_factors_1 = static_cast<float>(scale_factors_list[0]);
+      if (scale_factors_list.size() >= 2){
+        scale_factors_2 = static_cast<float>(scale_factors_list[1]);
+        if (scale_factors_list.size() >= 3){
+          scale_factors_3 = static_cast<float>(scale_factors_list[2]);
         }
+      }
     }
   }
 
@@ -3467,9 +3514,10 @@ Operation interpolate_op(const Node* n) {
     IValue scale_factors;
     std::string mode;
     IValue align_corners;
-    pop(stack, input, size, scale_factors, mode, align_corners);
+    IValue use_scale_factor;
+    pop(stack, input, size, scale_factors, mode, align_corners, use_scale_factor);
     at::Tensor res = interpolate(
-        input, size, scale_factors, mode, align_corners.toOptional<bool>());
+        input, size, scale_factors, mode, align_corners.toOptional<bool>(), use_scale_factor.toOptional<bool>());
     push(stack, std::move(res));
     return 0;
   };
@@ -3504,7 +3552,7 @@ int upsample_nearest_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res =
-      interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
+      interpolate(input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
@@ -3518,7 +3566,7 @@ int upsample_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int, mode, align_corners);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res = interpolate(
-      input, size, scale_factor_double, mode, align_corners.toOptional<bool>());
+      input, size, scale_factor_double, mode, align_corners.toOptional<bool>(), c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
@@ -3530,26 +3578,26 @@ int upsample_bilinear_op(Stack& stack) {
   pop(stack, input, size, scale_factor_int);
   IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
   at::Tensor res =
-      interpolate(input, size, scale_factor_double, "bilinear", true);
+      interpolate(input, size, scale_factor_double, "bilinear", true, c10::nullopt);
   push(stack, std::move(res));
   return 0;
 }
 
 RegisterOperators reg3({
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
 

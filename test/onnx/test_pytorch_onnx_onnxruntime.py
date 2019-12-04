@@ -699,10 +699,14 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.nn.functional.interpolate(x, mode=mode, size=size_array[0]), \
                         torch.nn.functional.interpolate(x, mode=mode, size=size_array)
                 if align_corners:
-                    return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale, align_corners=True), \
-                        torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array, align_corners=True)
-                return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale), \
-                    torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array)
+                    return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale,
+                                                           align_corners=True, use_scale_factor=True), \
+                        torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array,
+                                                        align_corners=True, use_scale_factor=True)
+                return torch.nn.functional.interpolate(x, mode=mode,
+                                                       scale_factor=scale, use_scale_factor=True), \
+                    torch.nn.functional.interpolate(x, mode=mode,
+                                                    scale_factor=scale_array, use_scale_factor=True)
 
         self.run_test(MyModel(), x)
 
@@ -738,10 +742,14 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.nn.functional.interpolate(x, mode=self.mode, size=self.size), \
                         torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
                 if self.align_corners:
-                    return torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale), \
-                        torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale_array)
-                return torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale), \
-                    torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale_array)
+                    return torch.nn.functional.interpolate(x, mode=self.mode,
+                                                           scale_factor=self.scale, use_scale_factor=True), \
+                        torch.nn.functional.interpolate(x, mode=self.mode,
+                                                        scale_factor=self.scale_array, use_scale_factor=True)
+                return torch.nn.functional.interpolate(x, mode=self.mode,
+                                                       scale_factor=self.scale, use_scale_factor=True), \
+                    torch.nn.functional.interpolate(x, mode=self.mode,
+                                                    scale_factor=self.scale_array, use_scale_factor=True)
 
         model = MyModel(mode, use_size, is_upsample, align_corners)
         self.run_test(model, x)
@@ -776,6 +784,7 @@ class TestONNXRuntime(unittest.TestCase):
                 # test with align_corners if supported
                 if mode != 'nearest':
                     self._interpolate(xi, mode_i, True, is_upsample, True)
+                    self._interpolate_script(xi, mode_i, True, is_upsample, True)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
                 if self.opset_version >= 9:
@@ -783,7 +792,8 @@ class TestONNXRuntime(unittest.TestCase):
                     self._interpolate(xi, mode_i, False, is_upsample)
                     # test with align_corners if supported
                     if mode != 'nearest':
-                        self._interpolate(xi, mode_i, True, is_upsample, True)
+                        self._interpolate(xi, mode_i, False, is_upsample, True)
+                        self._interpolate_script(xi, mode_i, False, is_upsample, True)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
 
     def test_interpolate_upsample(self):

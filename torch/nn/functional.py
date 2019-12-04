@@ -2417,7 +2417,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, use_scale_factor=None):
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -2450,19 +2450,17 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
+        use_scale_factor (bool, optional): When scale_factor is passed as a parameter, it can be
+            directly used in the output computation, or can be used to compute the output size which
+            will later be used to infer new scales values.
+            If set to ``True``, scale_factors are used in the interpolation.
+            If set to ``False``, the output_size is computed and new scales are infered for the interpolation.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
         negative values or values greater than 255 for images.
         Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
         when displaying the image.
-
-        Interpolate's behavior with scale_factor is changed in version 1.4.0 to align
-        with other frameworks and libraries (like opencv).
-        Previously scale_factor was used to calculate the output size, which was then
-        used to infer new values for the scales which were used in the interpolation.
-        Interpolate was modified to use scale_factor directly as the scales in the
-        interpolation, when they specified.
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2472,6 +2470,14 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         0.3.1. Since then, the default behavior is ``align_corners = False``.
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
+
+        When scale_factor are specified, if use_scale_factor=False,
+        scale_factor is used to compute the output_size which will then
+        be used to infer new scales for the interpolation. This is the current
+        default behavior when use_scale_factor is not specified.
+        The default behavior for use_scale_factor will change to True
+        in 1.5.0, and scale_factor will be used in the interpolation
+        calculation.
 
     .. include:: cuda_deterministic_backward.rst
     """
@@ -2487,10 +2493,16 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             raise ValueError('scale_factor shape must match input shape. '
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
         if scale_factor is not None:
-            warnings.warn("Interpolate's behavior with scale_factor is changed to align with other frameworks/libraries, "
-                          "and now uses scale_factor directly, instead of relying on the computed output size. "
-                          "If you wish to recover the old behavior, please calculate the output size "
-                          "and use interpolate with the parameter size instead.".format(mode))
+            if use_scale_factor is None:
+                is_float_scale_factor = any(not scale.is_integer() for scale in _ntuple(dim)(scale_factor))
+                if is_float_scale_factor:
+                    warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
+                                  "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                                  "instead of relying on the computed output size. "
+                                  "If you wish to keep the old behavior, please set use_scale_factor=False. "
+                                  "See the documentation of nn.Upsample for details. "
+                                  "Note that if you are exporting your model to ONNX using use_scale_factor=True "
+                                  "is preferred. ")
 
     def _output_size(dim):
         _check_size_scale_factor(dim)
@@ -2501,10 +2513,17 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
         # make scale_factor a tensor in tracing so constant doesn't get baked in
         if torch._C._get_tracing_state():
-            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
+            return [(torch.floor((input.size(i + 2).float() * torch.scalar_tensor(scale_factors[i],
                      dtype=torch.float32)).float())) for i in range(dim)]
         else:
             return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+
+    def _scale_factors(dim):
+        scale_factor_len = dim - 2
+        scale_factor_list = _ntuple(scale_factor_len)(-1)
+        if scale_factor is not None and use_scale_factor:
+            scale_factor_list = _ntuple(scale_factor_len)(scale_factor)
+        return scale_factor_list
 
     if mode in ('nearest', 'area'):
         if align_corners is not None:
@@ -2518,14 +2537,13 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                           "See the documentation of nn.Upsample for details.".format(mode))
             align_corners = False
 
+    scale_factor_list = _scale_factors(input.dim())
+
     if input.dim() == 3 and mode == 'nearest':
-        scale_factor_list = _ntuple(1)(-1) if scale_factor is None else _ntuple(1)(scale_factor)
         return torch._C._nn.upsample_nearest1d(input, _output_size(1), scale_factor_list[0])
     elif input.dim() == 4 and mode == 'nearest':
-        scale_factor_list = _ntuple(2)(-1) if scale_factor is None else _ntuple(2)(scale_factor)
         return torch._C._nn.upsample_nearest2d(input, _output_size(2), scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 5 and mode == 'nearest':
-        scale_factor_list = _ntuple(3)(-1) if scale_factor is None else _ntuple(3)(scale_factor)
         return torch._C._nn.upsample_nearest3d(input, _output_size(3), scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 3 and mode == 'area':
         return adaptive_avg_pool1d(input, _output_size(1))
@@ -2534,7 +2552,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 5 and mode == 'area':
         return adaptive_avg_pool3d(input, _output_size(3))
     elif input.dim() == 3 and mode == 'linear':
-        scale_factor_list = _ntuple(1)(-1) if scale_factor is None else _ntuple(1)(scale_factor)
         return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners, scale_factor_list[0])
     elif input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
@@ -2543,7 +2560,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 4 and mode == 'linear':
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
-        scale_factor_list = _ntuple(2)(-1) if scale_factor is None else _ntuple(2)(scale_factor)
         return torch._C._nn.upsample_bilinear2d(input, _output_size(2), align_corners, scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
@@ -2552,10 +2568,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-        scale_factor_list = _ntuple(3)(-1) if scale_factor is None else _ntuple(3)(scale_factor)
         return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners, scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 4 and mode == 'bicubic':
-        scale_factor_list = _ntuple(2)(-1) if scale_factor is None else _ntuple(2)(scale_factor)
         return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners, scale_factor_list[0], scale_factor_list[1])
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
