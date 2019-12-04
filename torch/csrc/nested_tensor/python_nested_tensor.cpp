@@ -4,6 +4,8 @@
 #include <torch/csrc/nested_tensor/python_nested_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
+#include <torch/csrc/jit/interpreter.h>
 
 namespace torch {
 namespace nested_tensor {
@@ -99,7 +101,7 @@ PyObject* _ListNestedTensorVariable_unbind(PyObject* self_) {
     throw python_error();
   }
   for (size_t i = 0; i < children.size(); i++) {
-    if (children[i]._children.size() == 0) {
+    if (children[i].is_leaf) {
       if (PyList_SetItem(
               return_list,
               i,
@@ -219,7 +221,7 @@ static PyObject* _ListNestedTensorVariable_device(
 
 // TODO: This could be multithreaded by inlining invokeScriptFunctionFromPython
 // and accumulating all AutoNoGIL code.
-static _NestedNode apply_jit_function(
+static _FutureNestedNode apply_jit_function(
     const _NestedNode nested_node,
     Function& fn) {
   if (nested_node._children.size() == 0) {
@@ -232,37 +234,53 @@ static _NestedNode apply_jit_function(
     auto kwargs = py::dict();
     auto tracing_state = tracer::getTracingState();
     c10::optional<IValue> no_opt = c10::nullopt;
-    if (!tracing_state) {
+    TORCH_CHECK(!tracing_state, "doesnt support tracing");
+    // if (!tracing_state) {
       auto stack = createStackForSchema(
           fn.getSchema(),
           std::move(args),
           std::move(kwargs),
           std::move(no_opt));
       py::gil_scoped_release release;
-      fn.run(stack);
+      auto result = InterpreterState(Code(fn.graph())).runAsync(stack);
       py::gil_scoped_acquire acquire;
-      TORCH_CHECK(
-          stack.size() > 0,
-          "Expected values in the stack after execution but found none");
-      py::object result = toPyObject(std::move(stack.back()));
-      auto result_node =  _NestedNode(result.cast<Variable>());
-      return result_node;
+      return result;
+      // TORCH_CHECK(
+      //     stack.size() > 0,
+      //     "Expected values in the stack after execution but found none");
+      // py::object result = toPyObject(std::move(stack.back()));
+      // auto result_node =  _NestedNode(result.cast<Variable>());
+      // return result_node;
 
-    } else {
-      py::object result = runAndInsertCall(
-          fn,
-          args,
-          kwargs,
-          no_opt,
-          [&](Graph& graph, const script::MatchedSchema& match) {
-            return graph.insertFunctionCall(&fn, match);
-          });
-      return _NestedNode(result.cast<Variable>());
-    }
+    // } else {
+    //   py::object result = runAndInsertCall(
+    //       fn,
+    //       args,
+    //       kwargs,
+    //       no_opt,
+    //       [&](Graph& graph, const script::MatchedSchema& match) {
+    //         return graph.insertFunctionCall(&fn, match);
+    //       });
+    //   return _FutureNestedNode(result.cast<Variable>());
+    // }
   } else {
-    std::vector<_NestedNode> result;
+    std::vector<_FutureNestedNode> result;
     for (size_t i = 0; i < nested_node._children.size(); i++) {
       result.push_back(apply_jit_function(nested_node._children[i], fn));
+    }
+    return _FutureNestedNode(result);
+  }
+}
+
+static _NestedNode get_future(_FutureNestedNode future_nested_node) {
+  if (future_nested_node._children.size() == 0) {
+    future_nested_node._future_variable->wait();
+    py::object result = toPyObject(future_nested_node._future_variable->value());
+    return _NestedNode(result.cast<Variable>());
+  } else {
+    std::vector<_NestedNode> result;
+    for (size_t i = 0; i < future_nested_node._children.size(); i++) {
+      result.push_back(get_future(future_nested_node._children[i]));
     }
     return _NestedNode(result);
   }
@@ -278,8 +296,9 @@ static PyObject* jit_apply_function(PyObject* module, PyObject* args) {
   pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
   auto sfn = torch::jit::script::as_function(ofn).value();
   Function& callee = *sfn.function_;
+  _FutureNestedNode future_nested_node = apply_jit_function(nt.get_structure(), callee);
   return _ListNestedTensorVariable_Wrap(
-      _ListNestedTensor(apply_jit_function(nt.get_structure(), callee)));
+      _ListNestedTensor(get_future(future_nested_node)));
 }
 
 static std::string _NestedNode___str__(const _NestedNode& nested_node) {

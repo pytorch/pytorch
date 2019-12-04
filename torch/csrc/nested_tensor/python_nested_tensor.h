@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Exceptions.h>
@@ -22,6 +23,7 @@ namespace nested_tensor {
 
 using namespace at;
 using namespace torch::autograd;
+using namespace c10::ivalue;
 
 struct _ListNestedTensor;
 
@@ -37,11 +39,25 @@ THP_API PyObject* _ListNestedTensorVariableClass;
 // The implicit contract is that, if there are no children, variable_node is
 // defined.
 struct _NestedNode {
-  _NestedNode() {}
-  _NestedNode(const std::vector<_NestedNode> children) : _children(children) {}
-  _NestedNode(_VariableNode variable_node) : _variable_node(variable_node) {}
+  _NestedNode() : is_leaf(true) {}
+  _NestedNode(const std::vector<_NestedNode> children)
+      : _children(children), is_leaf(false) {}
+  _NestedNode(_VariableNode variable_node)
+      : _variable_node(variable_node), is_leaf(true) {}
   const std::vector<_NestedNode> _children;
   _VariableNode _variable_node;
+  const bool is_leaf;
+};
+
+struct _FutureNestedNode {
+  _FutureNestedNode() : is_leaf(true) {}
+  _FutureNestedNode(const std::vector<_FutureNestedNode> children)
+      : _children(children), is_leaf(false) {}
+  _FutureNestedNode(c10::intrusive_ptr<Future> future)
+      : _future_variable(future), is_leaf(true) {}
+  const std::vector<_FutureNestedNode> _children;
+  c10::intrusive_ptr<Future> _future_variable;
+  const bool is_leaf;
 };
 
 static inline size_t _num_tensor(const _NestedNode& meta_node) {
