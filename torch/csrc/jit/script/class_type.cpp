@@ -113,7 +113,7 @@ size_t ClassType::addConstant(
 }
 
 c10::optional<IValue> ClassType::getConstant(const std::string& name) const {
-  AT_ASSERT(constantNames_.size() == constantValues_.size());
+  TORCH_CHECK(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
     if (name == c) {
