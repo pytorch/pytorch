@@ -457,7 +457,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
   } else {
     TORCH_CHECK(result.dim() <= 1, "result.dim() (", result.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
-    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_select", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "index_select", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
       for (auto i = 0; i < numel; i++) {
