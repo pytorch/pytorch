@@ -1364,7 +1364,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function doesn't rearrange data and assumes tensor is a memory
    * contiguous
    */
+   // NOW ALSO TAGS!!!!!!!!
   virtual void empty_tensor_restride(MemoryFormat memory_format) {
+    set_channels_last_tag(false);
     #ifdef DEBUG
         TORCH_INTERNAL_ASSERT(compute_numel() == numel_,
         "If you are seeing this error, that means empty_tensor_restride was "
@@ -1389,6 +1391,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        set_channels_last_tag(true);
         break;
       }
       case MemoryFormat::Preserve:
@@ -1402,12 +1405,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
-  bool is_strides_like_channels_last() const {
-    return is_channels_last_;
+  bool is_channels_last_tag() const {
+    return is_channels_last_tag_;
   }
 
   bool is_non_overlapping_and_dense() const {
     return is_non_overlapping_and_dense_;
+  }
+
+  void set_channels_last_tag(bool new_val) {
+    is_channels_last_tag_ = new_val && compute_strides_like_channels_last();
   }
 
 private:
@@ -1492,6 +1499,8 @@ private:
 
   bool compute_non_overlapping_and_dense() const;
 
+
+
 protected:
   /**
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
@@ -1507,7 +1516,7 @@ protected:
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
     is_channels_last_contiguous_ = compute_channels_last_contiguous();
-    is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
+    // is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
     is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
   }
 
@@ -1639,10 +1648,12 @@ protected:
   // order is NCHW and C-strides < W-strides < H-strides < N-strides
   // (If size of any dimension is equal to 1, this dimension strides value
   // is not taken into account).
-  bool is_channels_last_ = false;
+  bool is_channels_last_tag_ = false; // THIS IS NOW TAG, Tensor must be marked as channels last to
 
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
+
+  // This boolean stored for performance optimization, might go away soon.
   bool is_channels_last_contiguous_ = false;
 
   // Dense tensor is the tensor that store values in a contiguous block of memory.

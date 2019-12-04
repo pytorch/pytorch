@@ -333,11 +333,8 @@ void max_pool2d_with_indices_out_cuda_template(
   const int64_t in_stride_h = input.stride(-2);
   const int64_t in_stride_w = input.stride(-1);
 
-  output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
-  indices.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
-
-  output.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-  indices.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  output.resize_({nbatch, nInputPlane, outputHeight, outputWidth}, memory_format);
+  indices.resize_({nbatch, nInputPlane, outputHeight, outputWidth}, memory_format);
 
   const int count = safe_downcast<int, int64_t>(output.numel());
 

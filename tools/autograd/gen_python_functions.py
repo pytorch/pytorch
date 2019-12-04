@@ -184,7 +184,8 @@ SUPPORTED_RETURN_TYPES = {
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
     'IntArrayRef',
-    'ScalarType'
+    'ScalarType',
+    'MemoryFormat'
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\

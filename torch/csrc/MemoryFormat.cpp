@@ -22,6 +22,31 @@ PyObject *THPMemoryFormat_New(at::MemoryFormat memory_format, const std::string&
   return self.release();
 }
 
+PyObject* THPMemoryFormat_Get(at::MemoryFormat memory_format) {
+  switch (memory_format) {
+    case at::MemoryFormat::Preserve: {
+      static PyObject* py_memory_format =
+          THPMemoryFormat_New(memory_format, "torch.preserve_format");
+      Py_INCREF(py_memory_format);
+      return py_memory_format;
+    }
+    case at::MemoryFormat::Contiguous: {
+      static PyObject* py_memory_format =
+          THPMemoryFormat_New(memory_format, "torch.contiguous_format");
+      Py_INCREF(py_memory_format);
+      return py_memory_format;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      static PyObject* py_memory_format =
+          THPMemoryFormat_New(memory_format, "torch.channels_last");
+      Py_INCREF(py_memory_format);
+      return py_memory_format;
+    }
+    default:
+      AT_ERROR("Unknown memory format");
+  }
+}
+
 PyObject *THPMemoryFormat_repr(THPMemoryFormat *self)
 {
   return THPUtils_packString(self->name);

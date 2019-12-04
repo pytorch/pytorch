@@ -463,7 +463,7 @@ namespace {
         // preserve channels_last stride on output tensor;
         if (!output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
           // TODO: modify this after resize_ added `memory_format` tag
-          output.resize_({sizeB, sizeC, osizeH, osizeW}).as_strided_({sizeB, sizeC, osizeH, osizeW}, {sizeC*osizeH*osizeW, 1, osizeW*sizeC, sizeC});
+          output.resize_({sizeB, sizeC, osizeH, osizeW}, MemoryFormat::ChannelsLast);
         }
 
         const int max_threads = std::min<int>(
@@ -638,7 +638,7 @@ namespace {
         const dim3 block(block_x, block_y, block_z);
         int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
         int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
-        
+
         // Do NOT clip grid_x, striding on Batch dimension is not in the kernel,
         // although it could be easily implemented given current kernel.
         int grid_x = sizeB*kernel_stride_C;

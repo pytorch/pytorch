@@ -301,6 +301,7 @@ void TensorIterator::allocate_outputs() {
         op.tensor = at::empty(tensor_shape, op.options());
         op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
             MemoryFormat::ChannelsLast);
+        op.tensor.unsafeGetTensorImpl()->set_channels_last_tag(true);
         // As we are allocating output after permutations is done, we need to
         // make sure that operand's strides are matching element size and
         // dimensions permutations which are stored in _perm

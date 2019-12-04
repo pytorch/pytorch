@@ -14,9 +14,7 @@ namespace utils {
 
 #define _ADD_MEMORY_FORMAT(format, name)                                       \
   {                                                                            \
-    std::string module_name = "torch.";                                        \
-    PyObject* memory_format = THPMemoryFormat_New(format, module_name + name); \
-    Py_INCREF(memory_format);                                                  \
+    PyObject* memory_format = THPMemoryFormat_Get(format);                 \
     if (PyModule_AddObject(torch_module, name, memory_format) != 0) {          \
       throw python_error();                                                    \
     }                                                                          \
