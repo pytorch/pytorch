@@ -186,12 +186,12 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
     // Can't divide an uncoalesced integral tensor accurately. e.g. for a sparse int tensor with value 6
     // represented as values=[3, 3], integer division by 2 would give values=[1, 1] => 2 instead
     // of 6 / 2 => 3
-    if (!r.is_coalesced() && isIntegralType(r.scalar_type(), true)) {
+    if (!r.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
       coalesce_(r);
     }
     r._values().div_(value);
   } else {
-    if (!t.is_coalesced() && isIntegralType(r.scalar_type(), true)) {
+    if (!t.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
       coalesce_(t);
     }
     r.resize_as_(t);
