@@ -12,7 +12,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
                   int dW, int dH,
                   int padW, int padH,
                   int dilationW, int dilationH)
-{ 
+{
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
   TORCH_CHECK(false, "SpatialDepthwiseConvolution_updateOutput not suppported with BFloat16");
   #else
@@ -107,7 +107,7 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
                   int dW, int dH,
                   int padW, int padH,
                   int dilationW, int dilationH)
-{ 
+{
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
   TORCH_CHECK(false, "SpatialDepthwiseConvolution_updateGradInput not suppported with BFloat16");
   #else
@@ -215,7 +215,7 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
                   int dW, int dH,
                   int padW, int padH,
                   int dilationW, int dilationH)
-{ 
+{
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
   TORCH_CHECK(false, "SpatialDepthwiseConvolution_accGradParameters not suppported with BFloat16");
   #else

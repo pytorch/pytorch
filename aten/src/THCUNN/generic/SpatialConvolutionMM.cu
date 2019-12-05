@@ -277,7 +277,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH) {
-  
+
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
   TORCH_CHECK(false, "SpatialConvolutionMM_updateGradInput not suppported with BFloat16");
   #else
@@ -391,7 +391,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int dW, int dH,
            int padW, int padH,
            accreal scale_) {
-  
+
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
   TORCH_CHECK(false, "SpatialConvolutionMM_updateGradParameters not suppported with BFloat16");
   #else
