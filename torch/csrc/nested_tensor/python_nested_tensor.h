@@ -41,6 +41,7 @@ struct _NestedNode {
   _NestedNode(_VariableNode variable_node)
       : _variable_node(variable_node), is_leaf(true) {}
   const std::vector<_NestedNode> _children;
+  // TODO: Make this const?
   _VariableNode _variable_node;
   const bool is_leaf;
 };
