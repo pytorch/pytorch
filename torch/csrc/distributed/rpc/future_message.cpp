@@ -53,14 +53,14 @@ bool FutureMessage::completed() const {
   return completed_;
 }
 
-void FutureMessage::addCallback(FutureMessage::Callback callback) {
+void FutureMessage::addCallback(const FutureMessage::Callback& callback) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (completed()) {
     lock.unlock();
     callback(message_);
     return;
   }
-  callbacks_.push_back(std::move(callback));
+  callbacks_.push_back(callback);
 }
 
 } // namespace rpc

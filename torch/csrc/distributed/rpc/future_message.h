@@ -25,7 +25,7 @@ struct TORCH_API FutureMessage final {
   bool completed() const;
 
   // If completed() the callback will be invoked in-place.
-  void addCallback(Callback callback);
+  void addCallback(const Callback& callback);
 
  private:
   mutable std::mutex mutex_;
