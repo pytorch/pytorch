@@ -922,9 +922,11 @@ class TestClassType(JitTestCase):
                 self.w = w
 
             def forward(self, x):
+                # Make sure class constant is accessible in method
                 print(self.w)
                 return x
 
+        # Test serialization/deserialization of class constant
         for c in (2, 1.0, None, True, 'str', (2, 3), [5.9, 7.3]):
             m = torch.jit.script(M(c))
             buffer = io.BytesIO()
@@ -933,5 +935,6 @@ class TestClassType(JitTestCase):
             buffer.seek(0)
             m_loaded = torch.jit.load(buffer)
             input = torch.rand(2, 3)
-            output = m_loaded(input)
-            self.assertEqual(input, output)
+            self.assertEqual(m(input), m_loaded(input))
+            # Make sure class constant is accessible from module
+            self.assertEqual(m.w, m_loaded.w)
