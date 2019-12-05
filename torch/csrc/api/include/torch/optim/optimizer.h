@@ -36,7 +36,6 @@ class TORCH_API OptimizerParamState {
   virtual std::unique_ptr<OptimizerParamState> clone() const;
   virtual void serialize(torch::serialize::InputArchive& archive) {}
   virtual void serialize(torch::serialize::OutputArchive& archive) {}
-public:
   virtual ~OptimizerParamState() = default;
 };
 
@@ -50,9 +49,9 @@ class TORCH_API OptimizerCloneableParamState : public OptimizerParamState {
 class TORCH_API OptimizerOptions {
  public:
   virtual std::unique_ptr<OptimizerOptions> clone() const;
-  virtual ~OptimizerOptions() = default;
   virtual void serialize(torch::serialize::InputArchive& archive) {}
   virtual void serialize(torch::serialize::OutputArchive& archive) {}
+  virtual ~OptimizerOptions() = default;
 };
 
 template <typename Derived>
@@ -104,6 +103,7 @@ class TORCH_API OptimizerBase {
     }
   }
 
+  /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const OptimizerParamGroup& param_group);
 
   virtual ~OptimizerBase() = default;
@@ -126,14 +126,19 @@ class TORCH_API OptimizerBase {
   /// Returns the number of parameters referenced by the optimizer.
   virtual size_t size() const noexcept;
 
-  //todo-description
   OptimizerOptions& defaults() noexcept;
 
-  //todo-description
+  /// Provides a reference to the param_groups this optimizer holds.
   std::vector<OptimizerParamGroup>& param_groups() noexcept;
 
-  //todo-description
-  //ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state() noexcept;
+  /// Provides a const reference to the param_groups this optimizer holds.
+  const std::vector<OptimizerParamGroup>& param_groups() const noexcept;
+
+  /// Provides a reference to the state this optimizer holds
+  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state() noexcept;
+
+  /// Provides a const reference to the state this optimizer holds
+  const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state() const noexcept;
 
   /// Serializes the optimizer state into the given `archive`.
   virtual void save(serialize::OutputArchive& archive) const;
@@ -141,11 +146,11 @@ class TORCH_API OptimizerBase {
   /// Deserializes the optimizer state from the given `archive`.
   virtual void load(serialize::InputArchive& archive);
 
-  std::vector<OptimizerParamGroup> param_groups_;
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
-  std::unique_ptr<OptimizerOptions> defaults_;
  protected:
-  OptimizerBase() = default;
+   std::vector<OptimizerParamGroup> param_groups_;
+   ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
+   std::unique_ptr<OptimizerOptions> defaults_;
+   OptimizerBase() = default;
 
   /// Accesses a buffer at the given index.
   /// Additionally, zeros out the buffers when this is called on the index
