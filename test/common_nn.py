@@ -657,6 +657,19 @@ def smoothl1loss_no_reduce_scalar_test():
         pickle=False)
 
 
+def multilabelmarginloss_0d_no_reduce_test():
+    t = torch.zeros(()).long()
+    return dict(
+        fullname='MultiLabelMarginLoss_0d_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduction='none')),
+        input_fn=lambda: torch.randn(()),
+        reference_fn=lambda i, *_:
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        pickle=False)
+
 def multilabelmarginloss_1d_no_reduce_test():
     t = Variable(torch.rand(10).mul(10).floor().long())
     return dict(
@@ -907,6 +920,7 @@ new_module_tests = [
     nlllossNd_no_reduce_ignore_index_test(),
     smoothl1loss_no_reduce_test(),
     smoothl1loss_no_reduce_scalar_test(),
+    multilabelmarginloss_0d_no_reduce_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
     multilabelmarginloss_no_reduce_test(),
@@ -2592,6 +2606,9 @@ def smoothl1loss_reference(input, target, reduction='mean'):
 
 
 def _multilabelmarginloss_reference(input, target):
+    if input.dim() == 0:
+        return 0
+
     targets = []
     for target_index in target:
         if target_index < 0:
@@ -2608,7 +2625,11 @@ def _multilabelmarginloss_reference(input, target):
 
 
 def multilabelmarginloss_reference(input, target, reduction='mean'):
-    if input.dim() == 1:
+    if input.dim() == 0:
+        dim = 1
+        output = torch.empty_like(input)
+        output.fill_(_multilabelmarginloss_reference(input, target))
+    elif input.dim() == 1:
         n = 1
         dim = input.size(0)
         output = input.new(n).zero_()

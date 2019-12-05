@@ -14,12 +14,13 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
-  THCTensor_(resizeAs)(state, istarget, input);
+  THCTensor_(resizeAs)(state, istarget, target);
 
-  if(input->dim() == 1)
+  if(input->dim() <= 1)
   {
-    int dim = input->size(0);
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size(0) == dim), 3,
+    int dim = input->dim() == 0 ? 1 : input->size(0);
+    int target_size = target->dim() == 0 ? 1 : target->size(0);
+    THArgCheck(!target->is_empty() && (target->dim() <= 1) && (target_size == dim), 3,
         "inconsistent target size");
     THCTensor_(resize1d)(state, output, 1);
 
@@ -67,18 +68,18 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     }
     else
     {
-    THCTensor_(resize1d)(state, output, input->size(0));
+      THCTensor_(resize1d)(state, output, input->size(0));
 
-    cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
-      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
-        THCTensor_(data)(state, output),
-        THCTensor_(data)(state, input),
-        THCIndexTensor_(data)(state, target),
-        THCTensor_(data)(state, istarget),
-        nframe, dim,
-        false
-        );
-    THCudaCheck(cudaGetLastError());
+      cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
+        <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+          THCTensor_(data)(state, output),
+          THCTensor_(data)(state, input),
+          THCIndexTensor_(data)(state, target),
+          THCTensor_(data)(state, istarget),
+          nframe, dim,
+          false
+          );
+      THCudaCheck(cudaGetLastError());
     }
   }
   else
@@ -104,13 +105,13 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if(gradInput->dim() == 1)
+  if(gradInput->dim() <= 1)
   {
-    int dim = gradInput->size(0);
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size(0) == dim), 3,
+    int dim = gradInput->dim() == 0 ? 1 : gradInput->size(0);
+    int target_size = target->dim() == 0 ? 1 : target->size(0);
+    THArgCheck(!target->is_empty() && (target->dim() <= 1) && (target_size == dim), 3,
                "inconsistent target size");
-    THArgCheck(!istarget->is_empty() && (istarget->dim() == 1) && (istarget->size(0) == dim), 3,
-               "inconsistent isTarget size");
+    TORCH_CHECK(target->sizes() == istarget->sizes(), "inconsistent isTarget size");
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
 
@@ -121,7 +122,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
-        1, gradInput->size(0),
+        1, dim,
         reduction == at::Reduction::Mean,
         reduction != at::Reduction::None);
 
