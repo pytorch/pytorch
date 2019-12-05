@@ -119,7 +119,7 @@ static int64_t floordiv(int64_t a, int64_t b) {
     // simple case, both have same sign
     return a / b;
   } else {
-    // in python division rounds down, it doesnt not truncate like in c++
+    // in python division rounds down, it doesn't not truncate like in c++
     auto r = lldiv(a, b);
     return (r.rem) ? r.quot - 1 : r.quot;
   }
@@ -932,7 +932,7 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         "prim::AutogradAnyNonZero(...) -> int",
+         "prim::AutogradAnyNonZero(...) -> bool",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {
@@ -945,7 +945,9 @@ RegisterOperators reg(
                  }
                } else if (v.isTensorList()) {
                  for (const at::Tensor& t : v.toTensorListRef()) {
-                   result = true;
+                   if (t.defined()) {
+                     result = true;
+                   }
                  }
                  if (result) {
                    break;

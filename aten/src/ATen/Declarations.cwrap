@@ -624,6 +624,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -638,6 +639,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -652,6 +654,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -666,6 +669,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -680,6 +684,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -694,6 +699,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -708,6 +714,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -722,6 +729,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -813,22 +821,6 @@
           broadcast: other fallback
         - THTensor* other
         - real p
-]]
-[[
-  name: _th_reciprocal
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: cinv
-      return: argument 0
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
 ]]
 [[
   name: _th_histc
@@ -972,6 +964,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -986,6 +979,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -999,6 +993,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
