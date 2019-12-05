@@ -52,6 +52,9 @@ static_assert(
             c10::guts::infer_function_traits_t<Functor>::func_type>(),
     "");
 
+#if !defined(__GNUC__)
+// GCC doesn't like the type name tests at compile time
+
 namespace test_top_level_name {
 static_assert(
     string_view::npos != get_fully_qualified_type_name<Dummy>().find("Dummy"),
@@ -77,14 +80,11 @@ static_assert(
         get_fully_qualified_type_name<Outer<Inner>>().find(
             "test_type_template_parameter::Outer"),
     "");
-#if !defined(__GNUC__)
-// for some reason, GCC doesn't like this test at compile time
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Outer<Inner>>().find(
             "test_type_template_parameter::Inner"),
     "");
-#endif
 } // namespace test_type_template_parameter
 
 namespace test_nontype_template_parameter {
@@ -107,13 +107,10 @@ static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<typename Type<int>::type>().find("int"),
     "");
-#if !defined(__GNUC__)
-// for some reason, GCC doesn't like this test at compile time
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<typename Type<int>::type>().find("*"),
     "");
-#endif
 
 // but with remove_pointer applied, there is no '*' in the type name anymore
 static_assert(
@@ -146,5 +143,7 @@ static_assert(
         get_fully_qualified_type_name<void(Dummy)>().find(
             "test_function_arguments_and_returns::Dummy"),
     "");
+
+#endif
 } // namespace test_function_arguments_and_returns
 } // namespace
