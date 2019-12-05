@@ -36,7 +36,8 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     if (!match.success()) {
       TORCH_CHECK(false, "We need to infer the type of constant to convert the python value to IValue, but failed to infer type of ", py::str(val), "\n:", match.reason());
     }
-    // Validation and conversion is done in python
+    // Validation and conversion to make sure `val` is a valid constant
+    // is done in python, see `torch/jit/_recursive.py`
     cls->addConstant(name, toIValue(val, match.type()));
   }
 
