@@ -70,13 +70,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_hardtanh(Tensor self, Scalar min_val, Scalar max_val)
-  cname: HardTanh
-  has_inplace: True
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_leaky_relu(Tensor self, Scalar negative_slope)
   cname: LeakyReLU
   has_inplace: True
