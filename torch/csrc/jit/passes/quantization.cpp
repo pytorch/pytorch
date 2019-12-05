@@ -644,7 +644,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g,
   }
   for (auto& v : values_to_quantize_.at(g)) {
     TORCH_INTERNAL_ASSERT(values_to_qparams_.at(g).count(v));
-    auto qparams_and_scalar_type = values_to_qparams_.at(module._ivalue()).at(v);
+    auto qparams_and_scalar_type = values_to_qparams_.at(g).at(v);
     auto qparams = std::get<0>(qparams_and_scalar_type);
     auto scalar_type = std::get<1>(qparams_and_scalar_type);
     // Register attributes for quantization parameters
