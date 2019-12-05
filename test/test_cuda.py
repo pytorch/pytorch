@@ -2078,72 +2078,83 @@ t2.start()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_amp_fp16(self):
-        # from autocast_lists import torch_fp16_ops# , nn_fp16_ops, tensor_fp16_ops
+    def test_amp_out_of_place(self):
         dtype = torch.float32
 
         # Some general-purpose arguments to serve the functions below.
-        conv_args = [(torch.empty((8, 8, *(8,)*dims), dtype=dtype, device="cuda"),
-                      torch.empty((8, *(8,)*(dims + 1)), dtype=dtype, device="cuda"))
-                      for dims in (1, 2, 3)]
-        bias = (torch.empty((8,), dtype=dtype, device="cuda"),)
-        pointwise = (torch.empty(128, dtype=dtype, device="cuda"),)
-        element = (torch.empty(1, dtype=dtype, device="cuda"),)
+        conv_args = [(torch.randn((8, 8, *(8,) * dims), dtype=dtype, device="cuda"),
+                     torch.randn((8, *(8,) * (dims + 1)), dtype=dtype, device="cuda"))
+                     for dims in (1, 2, 3)]
+        bias = (torch.randn((8,), dtype=dtype, device="cuda"),)
+        pointwise = (torch.randn(128, dtype=dtype, device="cuda"),)
+        element = (torch.randn(1, dtype=dtype, device="cuda"),)
+        mat1 = (torch.randn((8, 8), dtype=dtype, device="cuda"),)
+        mat2 = (torch.randn((8, 8), dtype=dtype, device="cuda"),)
+        mat3 = (torch.randn((8, 8), dtype=dtype, device="cuda"),)
 
         # fp16-list functions whose Python-Aten interface appears in python_torch_functions_dispatch.h,
         torch_fp16_ops = [
-          ("_convolution"        , conv_args[1] + bias + ((1,1), (0,0), (1,1), False, (0,0), 1, False, False, True)),
-          ("_convolution_nogroup", conv_args[1] + bias + ((1,1), (0,0), (1,1), False, (0,0))),
-          ("conv1d"              , conv_args[0]),
-          ("conv2d"              , conv_args[1]),
-          ("conv3d"              , conv_args[2]),
-          ("conv_tbc"            , conv_args[0] + bias),
-          ("conv_transpose1d"    , conv_args[0]),
-          ("conv_transpose2d"    , conv_args[1]),
-          ("conv_transpose3d"    , conv_args[2]),
-          ("convolution"         , conv_args[1] + bias + ((1,1), (0,0), (1,1), False, (0,0), 1)),
-          ("cudnn_convolution"   , conv_args[1] + bias + ((0,0), (1,1), (1,1), 1, False, False)),
-          ("cudnn_convolution_transpose", conv_args[1] + bias + ((0,0), (0,0), (1,1), (1,1), 1, False, False)),
-          ("prelu"               , pointwise + element)
+            ("_convolution", conv_args[1] + bias + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1, False, False, True)),
+            ("_convolution_nogroup", conv_args[1] + bias + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
+            ("conv1d", conv_args[0]),
+            ("conv2d", conv_args[1]),
+            ("conv3d", conv_args[2]),
+            ("conv_tbc", conv_args[0] + bias),
+            ("conv_transpose1d", conv_args[0]),
+            ("conv_transpose2d", conv_args[1]),
+            ("conv_transpose3d", conv_args[2]),
+            ("convolution", conv_args[1] + bias + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
+            ("cudnn_convolution", conv_args[1] + bias + ((0, 0), (1, 1), (1, 1), 1, False, False)),
+            ("cudnn_convolution_transpose", conv_args[1] + bias + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, False)),
+            ("prelu", pointwise + element),
+            ("addmm", mat1 + mat2 + mat3)
+            ("addmm_out", mat1 + mat2 + mat3)
         ]
 
-        nn_fp16_methods = [
+        nn_fp16_ops = [
         ]
 
         with torch.cuda.amp.autocast():
             for op, special_args in torch_fp16_ops:
                 output = getattr(torch, op)(*special_args)
                 self.assertTrue(output.dtype == torch.float16,
-                                "autocast for torch.{} produced {} output, should produce torch.float16".format(
-                                op, output.dtype))
+                                "autocast for torch.{} produced {} output, should produce torch.float16"
+                                .format(op, output.dtype))
+                if hasattr(torch.Tensor, op):
+                    # getattr(x, "op") is equivalent to x.op, so getattr(x, "op") gives back a bound method
+                    # with x implicitly passed as self.  We only need to add special_args[1:].
+                    getattr(special_args[0], op)(*special_args[1:])
 
         tensor_specific_fp16_methods = [
-          "__matmul__" ,
+            "__matmul__",
+            "addmm_",
         ]
+
+        tensor_specific_fp32_methods = [
+            "__ipow__",
+            "__pow__",
+            "__rpow__",
+        ]
+
+        with torch.cuda.amp.autocast():
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_amp_fp32(self):
         dtype = torch.float16
 
-        torch_fp32_methods = [
+        torch_fp32_ops = [
         ]
 
-        nn_fp32_methods = [
+        nn_fp32_ops = [
         ]
 
-        tensor_specific_fp32_methods = [
-          "__ipow__",
-          "__pow__" ,
-          "__rpow__",
-        ]
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_amp_promotion(self):
         # These ops take multiple arguments but don't route through TensorIterator's type
-        # promotion.  Autocast handles promotion for these explicitly, and we should make
-        # sure it does the right thing.
+        # promotion.  Autocast handles promotion for these explicitly, and we should test it.
         # TODO:  If any ops below are modified to perform built-in type promotion,
         # yell at mcarilli to move them to the expect_builtin_promotion list, and remove
         # their registration as promote ops in ATen/core/autocast/register_autocast_ops.cpp.
@@ -2169,28 +2180,39 @@ t2.start()
         ]
 
         tensor_specific_expect_builtin_promotion_methods = [
-          "__add__"     ,
-          "__div__"     ,
-          "__eq__"      ,
-          "__ge__"      ,
-          "__gt__"      ,
-          "__iadd__"    ,
-          "__idiv__"    ,
-          "__imul__"    ,
-          "__isub__"    ,
-          "__itruediv__",
-          "__le__"      ,
-          "__lt__"      ,
-          "__mul__"     ,
-          "__ne__"      ,
-          "__radd__"    ,
-          "__rdiv__"    ,
-          "__rmul__"    ,
-          "__rsub__"    ,
-          "__rtruediv__",
-          "__sub__"     ,
-          "__truediv__" ,
+            "__add__",
+            "__div__",
+            "__eq__",
+            "__ge__",
+            "__gt__",
+            "__iadd__",
+            "__idiv__",
+            "__imul__",
+            "__isub__",
+            "__itruediv__",
+            "__le__",
+            "__lt__",
+            "__mul__",
+            "__ne__",
+            "__radd__",
+            "__rdiv__",
+            "__rmul__",
+            "__rsub__",
+            "__rtruediv__",
+            "__sub__",
+            "__truediv__",
         ]
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_sequence(self):
+        # These ops take a sequence of arbitrarily-many tensors.  The sequence gets special-cased promotion logic
+        # in register_autocast_ops.cpp, so it also gets a dedicated test.
+        torch_need_autocast_sequence_cast_ops = [
+            "cat",
+            "stack",
+        ]
+
 
 if __name__ == '__main__':
     run_tests()
