@@ -56,13 +56,14 @@ std::unordered_set<Symbol> tuple_ops = {
 };
 
 struct ConstantPropagator {
-  // Runs constant propagation with an aliasing db and checks if inputs
-  // might be mutated in the graph
+  // Runs constant propagation with an aliasing db and checks if inputs or
+  // outputs might be mutated in the graph
   static ConstantPropagator WithAliasDb(std::shared_ptr<Graph> graph) {
     return ConstantPropagator(graph, true);
   }
 
-  // Runs constant propagation only on ops with non-aliasing inputs
+  // Runs constant propagation only on ops that clearly do not have aliased
+  // inputs or outputs without computing aliasing information
   static ConstantPropagator NoAliasDb(std::shared_ptr<Graph> graph) {
     return ConstantPropagator(graph, false);
   }
