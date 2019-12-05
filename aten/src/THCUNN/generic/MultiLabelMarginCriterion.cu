@@ -40,7 +40,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   {
     int dim = input->dim() == 0 ? 1 : input->size(0);
     int target_size = target->dim() == 0 ? 1 : target->size(0);
-    THCTensor_(resize1d)(state, output, 1);
+    THCTensor_(resize0d)(state, output);
 
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
@@ -66,7 +66,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     if (reduction != at::Reduction::None)
     {
       THCTensor *output_tmp = THCTensor_(newWithSize1d)(state, input->size(0));
-      THCTensor_(resize1d)(state, output, 1);
+      THCTensor_(resize0d)(state, output);
 
       cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
         <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
