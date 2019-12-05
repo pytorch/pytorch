@@ -589,11 +589,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
-void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
-  AT_ERROR("Tracing float lists currently not supported!");
-}
-
-void addInputs(Node* n, const char* name, const std::vector<double>& value) {
+void addInputs(Node* n, const char* name, ArrayRef<double> value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
