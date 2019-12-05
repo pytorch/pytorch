@@ -5,15 +5,18 @@ functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
 
-import torch
-import multiprocessing as python_multiprocessing
-import torch.multiprocessing as multiprocessing
-from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler
-from . import _utils
-from torch._utils import ExceptionWrapper
 import threading
 import itertools
+import warnings
+
+import multiprocessing as python_multiprocessing
+import torch
+import torch.multiprocessing as multiprocessing
+from torch._utils import ExceptionWrapper
 from torch._six import queue, string_classes
+
+from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler
+from . import _utils
 
 
 get_worker_info = _utils.worker.get_worker_info
@@ -228,6 +231,7 @@ class DataLoader(object):
 
         self.collate_fn = collate_fn
         self.__initialized = True
+        self._IterableDataset_len_called = None  # See NOTE [ IterableDataset and __len__ ]
 
     @property
     def multiprocessing_context(self):
@@ -292,15 +296,22 @@ class DataLoader(object):
 
     def __len__(self):
         if self._dataset_kind == _DatasetKind.Iterable:
-            # Note that this could be inaccurate when one naively does
-            # multi-processing data loading, since the samples will be duplicated.
+            # NOTE [ IterableDataset and __len__ ]
+            #
+            # For `IterableDataset`, `__len__` could be inaccurate when one naively
+            # does multi-processing data loading, since the samples will be duplicated.
             # However, no real use case should be actually using that behavior, so
-            # it should count as a user error. We should generally trust dataset
+            # it should count as a user error. We should generally trust user
             # code to do the proper thing (e.g., configure each replica differently
             # in `__iter__`), and give us the correct `__len__` if they choose to
             # implement it (this will still throw if the dataset does not implement
             # a `__len__`).
-            return len(self.dataset)
+            #
+            # To provide a further warning, we track if `__len__` was called on the
+            # `DataLoader`, save the returned value in `self._len_called`, and warn
+            # if the iterator ends up yielding more than this number of samples.
+            length = self._IterableDataset_len_called = len(self.dataset)
+            return length
         else:
             return len(self._index_sampler)
 
@@ -309,6 +320,7 @@ class _BaseDataLoaderIter(object):
     def __init__(self, loader):
         self._dataset = loader.dataset
         self._dataset_kind = loader._dataset_kind
+        self._IterableDataset_len_called = loader._IterableDataset_len_called
         self._auto_collation = loader._auto_collation
         self._drop_last = loader.drop_last
         self._index_sampler = loader._index_sampler
@@ -318,6 +330,7 @@ class _BaseDataLoaderIter(object):
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
         self._base_seed = torch.empty((), dtype=torch.int64).random_().item()
+        self._num_yielded = 0
 
     def __iter__(self):
         return self
@@ -325,8 +338,26 @@ class _BaseDataLoaderIter(object):
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
 
-    def __next__(self):
+    def _next_data(self):
         raise NotImplementedError
+
+    def __next__(self):
+        data = self._next_data()
+        self._num_yielded += 1
+        if self._dataset_kind == _DatasetKind.Iterable and \
+                self._IterableDataset_len_called is not None and \
+                self._num_yielded > self._IterableDataset_len_called:
+            warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
+                        "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
+                                                              self._num_yielded)
+            if self._num_workers > 0:
+                warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
+                             "IterableDataset replica at each worker. Please see "
+                             "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
+            warnings.warn(warn_msg)
+        return data
+
+    next = __next__  # Python 2 compatibility
 
     def __len__(self):
         return len(self._index_sampler)
@@ -349,14 +380,12 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind, self._dataset, self._auto_collation, self._collate_fn, self._drop_last)
 
-    def __next__(self):
+    def _next_data(self):
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
             data = _utils.pin_memory.pin_memory(data)
         return data
-
-    next = __next__  # Python 2 compatibility
 
 
 class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
@@ -780,7 +809,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 if success:
                     return data
 
-    def __next__(self):
+    def _next_data(self):
         while True:
             # If the worker responsible for `self._rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
@@ -825,8 +854,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             else:
                 del self._task_info[idx]
                 return self._process_data(data)
-
-    next = __next__  # Python 2 compatibility
 
     def _try_put_index(self):
         assert self._tasks_outstanding < 2 * self._num_workers
