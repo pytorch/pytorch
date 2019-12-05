@@ -174,23 +174,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      auto wrappedRpcResponseFuture = processRpc(
+      auto wrappedRpcResponse = processRpc(
           rpcWithAutograd.wrappedRpc(), wrappedMessageType, messageId);
-      auto fromWorkerId = rpcWithAutograd.fromWorkerId();
+      wrappedRpcResponse->waitNoThrow(); // TODO: make async
 
-      // Make a FutureMessage that is completed when the original RPC completes.
-      auto result = std::make_shared<FutureMessage>();
-      wrappedRpcResponseFuture->addCallback(
-          [result, fromWorkerId, messageId, wrappedRpcResponseFuture](
-              const rpc::Message&) {
-            auto message = getMessageWithAutograd(
-                fromWorkerId,
-                std::move(*wrappedRpcResponseFuture).moveMessage(),
-                MessageType::FORWARD_AUTOGRAD_RESP);
-            message.setId(messageId);
-            result->markCompleted(std::move(message));
-          });
-      return result;
+      return wrap(getMessageWithAutograd(
+          rpcWithAutograd.fromWorkerId(),
+          std::move(*wrappedRpcResponse).moveMessage(),
+          MessageType::FORWARD_AUTOGRAD_RESP));
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
@@ -210,25 +201,18 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       sendFunction->setGrads(gradientsCall.getGrads());
 
       // Now execute the autograd graph using the "distributed engine."
-      auto future = DistEngine::getInstance().executeSendFunctionAsync(
+      DistEngine::getInstance().executeSendFunction(
           autogradContext, sendFunction);
 
-      // Return a FutureMessage that is set when done.
-      auto result = std::make_shared<FutureMessage>();
-      future->addCallback([result, messageId](const rpc::Message& receiveResp) {
-        auto msg = (PropagateGradientsResp()).toMessage();
-        msg.setId(messageId);
-        result->markCompleted(std::move(msg));
-      });
-      return result;
-    }
+      return wrap(std::move(PropagateGradientsResp()).toMessage());
+    };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
       auto cleanupContextId = cleanupContextReq.getContextId();
-      // release the context if it still exists on this thread. We need to check
-      // if it exists since it may have been deleted by an in-flight RPC.
-      // This can create nested RPCs if there are other nodes that get notified
-      // to clean up their context.
+      // release the context if it still exists on this thread. We need to
+      // check if it exists since it may have been deleted by an in-flight
+      // RPC. This can create nested RPCs if there are other nodes that get
+      // notified to clean up their context.
       DistAutogradContainer::getInstance().releaseContextIfPresent(
           cleanupContextId);
       return wrap(std::move(CleanupAutogradContextResp()).toMessage());

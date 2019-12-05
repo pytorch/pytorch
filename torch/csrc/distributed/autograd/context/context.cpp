@@ -108,17 +108,6 @@ void DistAutogradContext::addOutstandingRpc(
   outStandingRpcs_.push_back(futureMessage);
 }
 
-void DistAutogradContext::clearAndWaitForOutstandingRpcs() {
-  // Copy futures under lock, but wait for them outside the lock.
-  std::unique_lock<std::mutex> lock(lock_);
-  auto outStandingRpcs = std::move(outStandingRpcs_);
-  lock.unlock();
-
-  for (const auto& outStandingRpc : outStandingRpcs) {
-    outStandingRpc->wait();
-  }
-}
-
 std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
     clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);

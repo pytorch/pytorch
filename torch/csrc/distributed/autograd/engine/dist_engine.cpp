@@ -199,7 +199,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   }
 }
 
-std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
+void DistEngine::executeSendFunction(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& sendFunction) {
   std::unique_lock<std::mutex> lock(initializedContextIdsLock_);
@@ -213,8 +213,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     // Mark the autograd context id as initialized and unlock.
     initializedContextIds_.insert(autogradContext->contextId());
     lock.unlock();
-    auto contextId = autogradContext->contextId();
-    ClearContextIdGuard guard(contextId);
+    ClearContextIdGuard guard(autogradContext->contextId());
 
     // Enqueue the current send function.
     auto graphTask = autogradContext->retrieveGraphTask();
@@ -223,20 +222,17 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
 
     // Run the autograd engine.
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
-    guard.cancel();
 
-    // Return future waiting for all of the outstanding rpcs to complete.
-    auto future = autogradContext->clearAndWaitForOutstandingRpcsAsync();
-    future->addCallback([contextId](const rpc::Message&) {
-      ClearContextIdGuard guard2(contextId);
-    });
-    return future;
+    // Wait for all of the outstanding rpcs to complete.
+    // TODO: we currently implicitly rely this stack frame not going away
+    // before the rpcs complete (e.g. if we return the future and call
+    // wait from the caller, tests will fail).
+    autogradContext->clearAndWaitForOutstandingRpcsAsync()->waitNoThrow();
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
         graphTask, sendFunction, torch::autograd::InputBuffer(0)));
-    return std::make_shared<rpc::FutureMessage>();
   }
 }
 
@@ -274,7 +270,7 @@ void DistEngine::execute(const variable_list& roots) {
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
-  autogradContext->clearAndWaitForOutstandingRpcs();
+  autogradContext->clearAndWaitForOutstandingRpcsAsync()->waitNoThrow();
 }
 
 void DistEngine::clearInitializedContextId(int64_t contextId) {

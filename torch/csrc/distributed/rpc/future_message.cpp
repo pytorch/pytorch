@@ -19,7 +19,14 @@ const Message& FutureMessage::wait() {
   return message_;
 }
 
+const Message& FutureMessage::waitNoThrow() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  finished_cv_.wait(lock, [this] { return completed_.load(); });
+  return message_;
+}
+
 Message&& FutureMessage::moveMessage() && {
+  std::unique_lock<std::mutex> lock(mutex_);
   return std::move(message_);
 }
 
@@ -27,8 +34,8 @@ void FutureMessage::markCompleted(Message message) {
   {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(!completed());
-    completed_ = true;
     message_ = std::move(message);
+    completed_ = true;
     std::vector<Callback> cbs = std::move(callbacks_);
     lock.unlock();
     for (auto& callback : cbs) {
@@ -53,7 +60,7 @@ void FutureMessage::addCallback(FutureMessage::Callback callback) {
     callback(message_);
     return;
   }
-  callbacks_.emplace_back(std::move(callback));
+  callbacks_.push_back(std::move(callback));
 }
 
 } // namespace rpc

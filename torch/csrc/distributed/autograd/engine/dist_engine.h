@@ -41,7 +41,7 @@ class TORCH_API DistEngine {
   // This method is used to kick off the autograd computation on a node when it
   // receives gradients from the corresponding 'recv' method on another node.
   // The gradients are accumulated in the provided autograd context.
-  std::shared_ptr<rpc::FutureMessage> executeSendFunctionAsync(
+  void executeSendFunction(
       const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& sendFunction);
 
@@ -109,18 +109,11 @@ class ClearContextIdGuard {
   explicit ClearContextIdGuard(int64_t contextId) : contextId_(contextId) {}
 
   ~ClearContextIdGuard() {
-    if (valid_) {
-      DistEngine::getInstance().clearInitializedContextId(contextId_);
-    }
-  }
-
-  void cancel() {
-    valid_ = false;
+    DistEngine::getInstance().clearInitializedContextId(contextId_);
   }
 
  private:
   int64_t contextId_;
-  bool valid_{true};
 };
 
 } // namespace autograd
