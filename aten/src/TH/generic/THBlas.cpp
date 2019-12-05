@@ -33,8 +33,6 @@ static inline ffloat sdot_(const int *n, const float *x, const int *incx, const 
 #else
 TH_EXTERNC ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
 #endif
-TH_EXTERNC void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
-TH_EXTERNC void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
 TH_EXTERNC void dger_(int *m, int *n, double *alpha, double *x, int *incx, double *y, int *incy, double *a, int *lda);
 TH_EXTERNC void sger_(int *m, int *n, float *alpha, float *x, int *incx, float *y, int *incy, float *a, int *lda);
 TH_EXTERNC void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, double *a, int *lda, double *b, int *ldb, double *beta, double *c, int *ldc);
@@ -214,27 +212,6 @@ void THBlas_(gemv)(
   if(n == 1)
     lda = m;
 
-#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX) &&
-      (incx > 0) && (incx <= INT_MAX) &&
-      (incy > 0) && (incy <= INT_MAX) )
-  {
-    THArgCheck(lda >= THMax(1, m), 6,
-      "lda should be at least max(1, m=%d), but have %d", m, lda);
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_lda = (int)lda;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
-
-#if defined(TH_REAL_IS_DOUBLE)
-    dgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-#else
-    sgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-#endif
-    return;
-  }
-#endif
   {
     int64_t i, j;
 
