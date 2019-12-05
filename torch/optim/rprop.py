@@ -16,9 +16,11 @@ class Rprop(Optimizer):
             maximal allowed step sizes (default: (1e-6, 50))
     """
 
-    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50)):
+    def __init__(self, params, lr=1e-2, weight_decay=0, etas=(0.5, 1.2), step_sizes=(1e-6, 50)):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
+        if not 0.0 <= weight_decay:
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
