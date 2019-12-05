@@ -52,7 +52,9 @@ ContextPtr addRecvRpcBackward(
     auto grad_fn = std::make_shared<RecvRpcBackward>(
         autogradMetadata, autogradContext, fromWorkerId);
     for (auto& tensor : tensors) {
-      torch::autograd::set_history(tensor, grad_fn);
+      if (tensor.requires_grad()) {
+        torch::autograd::set_history(tensor, grad_fn);
+      }
     }
 
     // Now update the autograd context with the necessary information.
@@ -94,8 +96,16 @@ Message getMessageWithAutograd(
 
   if (tensorsRequireGrad) {
     // Record autograd information for 'send'.
+    auto tensors = rpcWithAutograd->tensors();
+    std::vector<torch::Tensor> tensor_with_grad;
+    std::copy_if(
+        tensors.begin(),
+        tensors.end(),
+        std::back_inserter(tensor_with_grad),
+        [](const torch::Tensor& t) { return t.requires_grad(); });
+
     addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd->tensors(), dstId);
+        autogradContext, autogradMetadata, tensor_with_grad, dstId);
   }
 
   return std::move(*rpcWithAutograd).toMessage();
