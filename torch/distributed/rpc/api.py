@@ -71,7 +71,7 @@ def _on_leader_follower_report_intent(worker_name):
     ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
     assert (
         worker_name not in _INTENDED_WORKER_NAMES
-    ), "{worker_name} reported done twice. ".format(worker_name=worker_name)
+    ), "{worker_name} reported intent twice. ".format(worker_name=worker_name)
     _INTENDED_WORKER_NAMES.add(worker_name)
     if _ALL_WORKER_NAMES == _INTENDED_WORKER_NAMES:
         _set_proceed_signal()
@@ -100,7 +100,7 @@ def _wait_all_workers():
 
     self_worker_name = _agent.get_worker_info().name
     assert self_worker_name not in _INTENDED_WORKER_NAMES, (
-        "Can not call _wait_all_workers() twice."
+        "Can not call `_wait_all_workers()` twice."
     )
 
     is_leader_worker = leader_worker_name == self_worker_name
@@ -110,7 +110,7 @@ def _wait_all_workers():
     if is_leader_worker:
         _on_leader_follower_report_intent(self_worker_name)
     else:
-        rpc_async(
+        rpc_sync(
             leader_worker_name,
             _on_leader_follower_report_intent,
             args=(self_worker_name,),
@@ -166,6 +166,7 @@ def shutdown(graceful=True):
 
     if graceful:
         _wait_all_workers()
+        _agent.join()
     _destroy_rref_context(_ignore_rref_leak)
     _agent.shutdown()
     # clean up python rpc handler in shutdown(), see comments in
