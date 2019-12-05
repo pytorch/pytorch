@@ -637,7 +637,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch):
                 or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
             ):
-                return templ.format(get_hip_file_path(m.group(1)))
+                return templ.format("aten/src/" + get_hip_file_path(m.group(1)))
             return m.group(0)
         return repl
     output_source = RE_QUOTE_HEADER.sub(mk_repl('#include "{0}"'), output_source)
