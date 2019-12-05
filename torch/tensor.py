@@ -737,10 +737,13 @@ class Tensor(torch._C._TensorBase):
         :func:`backward` will accumulate (add) gradients into it.
         """
         if not self.requires_grad:
-            warnings.warn("Accessing .grad on a Tensor that does not require gradients always returns None.")
-        if not hasattr(self, "retains_grad") and not self.is_leaf:
+            if self._grad is None:
+                warnings.warn("This Tensor does not require gradients, so its .grad field will remain None after calling autograd.backward().")
+            else:
+                warnings.warn("This Tensor does not require gradients, so its .grad field won't be updated during autograd.backward().")
+        elif not hasattr(self, "retains_grad") and not self.is_leaf:
             warnings.warn("Accessing .grad on a Tensor that is not a leaf Tensor: its .grad attribute won't "
-                          "be populated. See .retain_grad() if you want the gradient to be saved.")
+                          "be populated during autograd.backward(). See .retain_grad() if you want the gradient to be saved.")
         return self._grad
 
     @grad.setter
