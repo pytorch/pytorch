@@ -32,15 +32,15 @@ export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 
 run_tests() {
-    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *_test ]]; then
         $SCRIPT_HELPERS_DIR/test_python_nn.bat && \
         $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat && \
         $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat && \
         $SCRIPT_HELPERS_DIR/test_libtorch.bat
     else
-        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *_test1 ]]; then
             $SCRIPT_HELPERS_DIR/test_python_nn.bat
-        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+        elif [[ "${JOB_BASE_NAME}" == *_test2 ]]; then
             $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat && \
             $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat && \
             $SCRIPT_HELPERS_DIR/test_libtorch.bat
