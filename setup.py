@@ -245,7 +245,7 @@ if IS_WINDOWS:
     cmake_python_library = "{}/libs/python{}.lib".format(
         distutils.sysconfig.get_config_var("prefix"),
         distutils.sysconfig.get_config_var("VERSION"))
-    # Fix virtualenv builds 
+    # Fix virtualenv builds
     # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
@@ -846,6 +846,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
+                'include/fbgemm/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
