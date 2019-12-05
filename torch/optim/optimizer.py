@@ -201,11 +201,39 @@ class Optimizer(object):
 
         return loss
 
-    def get_update(self, p, **kwargs):
+    def get_update(self, par, **kwargs):
+        """
+        Compute the update for a parameter from its gradients.
+
+        Args:
+            par (Parameter): the parameter to compute the update for.
+            **kwargs: arguments for the parameter group of the parameter
+
+        Returns:
+            The update step for the given parameter.
+
+        .. note::
+            Unless otherwise specified, this function should not modify the
+            parameter or its ``.grad`` field.
+        """
         msg = "{} does not implement an update for dense gradients"
         raise NotImplementedError(msg.format(self.__class__.__name__))
 
-    def get_sparse_update(self, p, **kwargs):
+    def get_sparse_update(self, par, **kwargs):
+        """
+        Compute the update for a parameter from its sparse gradients.
+
+        Args:
+            par (Parameter): the parameter to compute the update for.
+            **kwargs: arguments for the parameter group of the parameter
+
+        Returns:
+            The update step for the given parameter.
+
+        .. note::
+            Unless otherwise specified, this function should not modify the
+            parameter or its ``.grad`` field.
+        """
         msg = "{} does not implement an update for sparse gradients"
         raise NotImplementedError(msg.format(self.__class__.__name__))
 

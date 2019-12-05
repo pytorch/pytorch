@@ -52,12 +52,12 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['sum'].share_memory_()
 
-    def get_update(self, p, lr_decay=0, weight_decay=0, eps=1e-10, **_):
-        grad = p.grad
-        state = self.state[p]
+    def get_update(self, par, lr_decay=0, weight_decay=0, eps=1e-10, **_):
+        grad = par.grad
+        state = self.state[par]
 
         if weight_decay > 0:
-            grad = grad.add(weight_decay, p)
+            grad = grad.add(weight_decay, par)
 
         c = 1 + state['step'] * lr_decay
         state['step'] += 1
@@ -65,12 +65,12 @@ class Adagrad(Optimizer):
         std = state['sum'].sqrt().add_(eps)
         return grad.div_(std) / c
 
-    def get_sparse_update(self, p, lr_decay=0, weight_decay=0, eps=1e-10, **_):
+    def get_sparse_update(self, par, lr_decay=0, weight_decay=0, eps=1e-10, **_):
         if weight_decay > 0:
             raise RuntimeError("weight_decay option is not compatible with sparse gradients")
 
-        grad = p.grad.coalesce()  # the update is non-linear so indices must be unique
-        state = self.state[p]
+        grad = par.grad.coalesce()  # the update is non-linear so indices must be unique
+        state = self.state[par]
 
         grad_indices = grad._indices()
         grad_values = grad._values()

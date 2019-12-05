@@ -125,12 +125,12 @@ class Adamax(Optimizer):
                 state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                 state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, p, betas=(.9, .999), eps=1e-8, weight_decay=0, **_):
-        grad = p.grad
-        state = self.state[p]
+    def get_update(self, par, betas=(.9, .999), eps=1e-8, weight_decay=0, **_):
+        grad = par.grad
+        state = self.state[par]
 
         if weight_decay > 0:
-            grad = grad.add(weight_decay, p)
+            grad = grad.add(weight_decay, par)
 
         beta1, beta2 = betas
         state['step'] += 1
