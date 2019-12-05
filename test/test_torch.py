@@ -6297,6 +6297,34 @@ class TestTorchDeviceType(TestCase):
         # self.assertEqual((), torch.normal(zero_d, one_d).shape)
         # self.assertEqual((), torch.normal(1, one_d).shape)
 
+        # convolutions.  Yes, we are testing nn.functional here; seems justified
+        # given its similar to the other tests
+        w = torch.randn(2, 1, 3, 3, device=device).div_(2).requires_grad_()
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.conv2d(zero_d, w, groups=1))
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.conv2d(zero_d, w, groups=2))
+
+        # nll_loss -- verify input can't be 0-dimensional.
+        self.assertRaises(ValueError, lambda: torch.nn.functional.nll_loss(zero_d, zero_d, reduction='none'))
+        self.assertRaises(ValueError, lambda: torch.nn.functional.nll_loss(zero_d, one_d, reduction='none'))
+        # verify output is 0-dimensional when reduction != 'none'
+        for (input, target) in ((torch.randn(1, 1, device=device), torch.tensor([0], device=device)),
+                                (torch.randn(1, 1, 1, 1, device=device), torch.tensor([[[0]]], device=device))):
+            self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='mean').shape)
+            self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='sum').shape)
+
+        # multilabel_margin_loss
+        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
+            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device), torch.tensor([[0]], device=device)):
+                if (input.dim() <= 1 and target.dim() <= 1) or (input.dim() == 2 and target.dim() == 2):
+                    output_shape = (target.shape[0],) if target.dim() == 2 else ()
+                    self.assertEqual(output_shape, torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
+                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean').shape)
+                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum').shape)
+                else:
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
@@ -13415,6 +13443,32 @@ class TestTorchDeviceType(TestCase):
         res_csub = a.clone()
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
+
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_min_max_binary_op_nan(self, device, dtype):
+        a = torch.rand(1000, dtype=dtype, device=device)
+        b = torch.rand(1000, dtype=dtype, device=device)
+
+        # 0:250: a -- nan, b -- not nan
+        a[:250] = float('nan')
+        # 250:500: a -- not nan, b -- nan
+        b[250:500] = float('nan')
+        # 500:750: a and b both nan
+        a[500:750] = float('nan')
+        b[500:750] = float('nan')
+        # 750:1000: neither nan
+
+        ma = torch.max(a, b)
+        mi = torch.min(a, b)
+
+        for i in range(750):
+            self.assertTrue(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
+            self.assertTrue(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
+
+        for i in range(750, 1000):
+            self.assertFalse(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
+            self.assertFalse(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
 
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
