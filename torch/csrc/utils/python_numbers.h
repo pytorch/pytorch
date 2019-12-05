@@ -107,7 +107,7 @@ inline bool THPUtils_unpackBool(PyObject* obj) {
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
 #ifdef USE_NUMPY
-  if (torch::utils::is_numpy_scalar(obj) && ! PyBool_Check(obj)) {
+  if (torch::utils::is_numpy_scalar(obj)) {
     return true;
   }
 #endif

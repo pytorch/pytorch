@@ -231,12 +231,12 @@ ScalarType numpy_dtype_to_aten(int dtype) {
 }
 
 bool is_numpy_int(PyObject* obj) {
-  return PyArray_IsIntegerScalar(obj) && ! PyBool_Check(obj);
+  return PyArray_IsIntegerScalar(obj);
 }
 
 bool is_numpy_scalar(PyObject* obj) {
-  return (PyArray_IsIntegerScalar(obj) ||
-          PyArray_IsScalar(obj, Floating));
+  return is_numpy_int(obj) ||
+          PyArray_IsScalar(obj, Floating);
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
