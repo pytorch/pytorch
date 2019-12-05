@@ -110,9 +110,17 @@ std::vector<OptimizerParamGroup>& OptimizerBase::param_groups() noexcept {
   return param_groups_;
 }
 
-// ska::flat_hash_map<at::TensorImpl*, std::unique_ptr<OptimizerParamState>>& state() noexcept {
-//   return state_;
-// }
+const std::vector<OptimizerParamGroup>& OptimizerBase::param_groups() const noexcept {
+  return param_groups_;
+}
+
+ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& OptimizerBase::state() noexcept {
+  return state_;
+}
+
+const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& OptimizerBase::state() const noexcept {
+  return state_;
+}
 
 Tensor& OptimizerBase::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   if (buffers.size() <= index) {
