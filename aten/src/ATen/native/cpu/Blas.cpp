@@ -1,6 +1,6 @@
 
-TH_EXTERNC void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
-TH_EXTERNC void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
+extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
+extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
 TH_API void THBlas_(gemv)(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
 
 void THBlas_(gemv)(
@@ -75,24 +75,6 @@ void THBlas_(gemv)(
 
 static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
 {
-  if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
-    THError("matrix and vector expected, got %dD, %dD",
-      mat->dim(), THTensor_nDimension(vec));
-
-  if( mat->size(1) != THTensor_sizeLegacyNoScalars(vec, 0) ) {
-    THDescBuff bm = THTensor_(sizeDesc)(mat);
-    THDescBuff bv = THTensor_(sizeDesc)(vec);
-    THError("size mismatch, %s, %s", bm.str, bv.str);
-  }
-
-  if(THTensor_nDimension(t) != 1)
-    THError("vector expected, got t: %dD", t->dim());
-
-  if(THTensor_sizeLegacyNoScalars(t, 0) != mat->size(0)) {
-    THDescBuff bt = THTensor_(sizeDesc)(t);
-    THDescBuff bm = THTensor_(sizeDesc)(mat);
-    THError("size mismatch, t: %s, mat: %s", bt.str, bm.str);
-  }
 
   if(r_ != t)
   {
@@ -144,16 +126,4 @@ static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTen
   }
 
   #undef LDA_COND
-}
-
-void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha) {
-  {
-#ifdef BUILD_NAMEDTENSOR
-    at::NoNamesGuard guard;
-#endif
-    THTensor_(addmvImpl)(r_, t, mat, vec, beta, alpha);
-  }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
-#endif
 }

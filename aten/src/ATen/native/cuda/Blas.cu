@@ -10,25 +10,6 @@ void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double 
 
 static void THCTensor_(addmvImpl)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
-  if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
-    THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
-       mat->dim(), THTensor_nDimension(vec));
-
-
-  auto vec_size = THTensor_sizeLegacyNoScalars(vec, 0);
-  auto vec_stride = THTensor_strideLegacyNoScalars(vec, 0);
-
-  if( mat->size(1) != THTensor_sizeLegacyNoScalars(vec, 0) )
-    THError("size mismatch");
-
-  if(t->dim() != 1)
-    THError("size mismatch");
-
-  if(THTensor_sizeLegacyNoScalars(t, 0) != mat->size(0))
-    THError("size mismatch");
-
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   if(r_ != t)
   {
@@ -112,17 +93,5 @@ static void THCTensor_(addmvImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
 #endif
 #else
   ERROR_ONLY_FP_TYPES("addmv");
-#endif
-}
-
-void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha) {
-  {
-#ifdef BUILD_NAMEDTENSOR
-    at::NoNamesGuard guard;
-#endif
-    THCTensor_(addmvImpl)(state, r_, t, mat, vec, beta, alpha);
-  }
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
 #endif
 }
