@@ -918,7 +918,7 @@ static bool tryExtractingConvBNParameters(
   r.bn_b = bn.attr("bias").toTensor();
 
   r.conv_w = conv.attr("weight").toTensor();
-  if (conv.hasattr("bias")) {
+  if (hastensor(conv, "bias")) {
     r.conv_b = conv.attr("bias").toTensor();
   } else {
     r.conv_b = at::zeros_like(r.bn_rm);
@@ -1014,9 +1014,20 @@ graph(%self, %x):
 
       auto new_w_b = computeUpdatedConvWeightAndBias(params);
       conv_submodule.setattr("weight", std::get<0>(new_w_b));
-      if (conv_submodule.hasattr("bias")) {
+      if (hastensor(conv_submodule, "bias")) {
         conv_submodule.setattr("bias", std::get<1>(new_w_b));
       } else {
+        // conv module has an existing non-Tensor bias
+        if (conv_submodule.hasattr("bias")) {
+          if (conv_submodule._ivalue()->type()->hasConstant("bias")) {
+            GRAPH_UPDATE("Removing bias constant from conv module");
+            conv_submodule.type()->unsafeRemoveConstant("bias");
+          } else {
+            GRAPH_UPDATE("Removing existing non-Tensor bias attribute from conv module");
+            conv_submodule._ivalue()->unsafeRemoveAttr("bias");
+            conv_submodule.type()->unsafeRemoveAttribute("bias");
+          }
+        }
         conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
       }
     }
