@@ -13,7 +13,7 @@ class Report:
         # text is something like
         # ERROR SUMMARY: 1 error
         # or
-        # ERROR SUMMARY: 2 error
+        # ERROR SUMMARY: 2 errors
         self.text = text
         self.num_errors = int(text.strip().split()[2])
         self.errors = errors
