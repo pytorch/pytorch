@@ -267,7 +267,5 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
 #include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
 #include <THC/THCGenerateFloatTypes.h>
 
-#ifdef __HIP_PLATFORM_HCC__
 #include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
 #include <THC/THCGenerateBFloat16Type.h>
-#endif
