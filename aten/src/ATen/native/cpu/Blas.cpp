@@ -1,3 +1,78 @@
+
+TH_EXTERNC void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
+TH_EXTERNC void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
+TH_API void THBlas_(gemv)(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+
+void THBlas_(gemv)(
+  char trans,
+  int64_t m,
+  int64_t n,
+  scalar_t alpha,
+  scalar_t *a,
+  int64_t lda,
+  scalar_t *x,
+  int64_t incx,
+  scalar_t beta,
+  scalar_t *y,
+  int64_t incy)
+{
+  if(n == 1)
+    lda = m;
+
+#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX) &&
+      (incx > 0) && (incx <= INT_MAX) &&
+      (incy > 0) && (incy <= INT_MAX) )
+  {
+    THArgCheck(lda >= THMax(1, m), 6,
+      "lda should be at least max(1, m=%d), but have %d", m, lda);
+    int i_m = (int)m;
+    int i_n = (int)n;
+    int i_lda = (int)lda;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+
+#if defined(TH_REAL_IS_DOUBLE)
+    dgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
+#else
+    sgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
+#endif
+    return;
+  }
+#endif
+  {
+    int64_t i, j;
+
+    if( (trans == 'T') || (trans == 't') )
+    {
+      for(i = 0; i < n; i++)
+      {
+        scalar_t sum = 0;
+        scalar_t *row_ = a+lda*i;
+        for(j = 0; j < m; j++)
+          sum += x[j*incx]*row_[j];
+          if (beta == 0)
+            y[i*incy] = alpha*sum;
+          else
+            y[i*incy] = beta*y[i*incy] + alpha*sum;
+      }
+    }
+    else
+    {
+      if(beta != 1)
+        THBlas_(scal)(m, beta, y, incy);
+
+      for(j = 0; j < n; j++)
+      {
+        scalar_t *column_ = a+lda*j;
+        scalar_t z = alpha*x[j*incx];
+        for(i = 0; i < m; i++)
+          y[i*incy] += z*column_[i];
+      }
+    }
+  }
+}
+
 static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
 {
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )

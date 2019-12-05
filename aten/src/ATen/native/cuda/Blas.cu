@@ -1,3 +1,17 @@
+THC_API void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy);
+THC_API void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double alpha, double *a, int64_t lda, double *x, int64_t incx, double beta, double *y, int64_t incy);
+
+
+void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy)
+{
+  at::cuda::blas::gemv<float>(at::cuda::getCurrentCUDAStream().stream(), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
+}
+
+void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double alpha, double *a, int64_t lda, double *x, int64_t incx, double beta, double *y, int64_t incy)
+{
+  at::cuda::blas::gemv<double>(at::cuda::getCurrentCUDAStream().stream(), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
+}
+
 static void THCTensor_(addmvImpl)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
