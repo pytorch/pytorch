@@ -46,6 +46,7 @@ from torch.quantization._quantize_script import script_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
+from torch.quantization import default_qconfig
 
 from torch.quantization import quantize
 from common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
@@ -313,6 +314,10 @@ class Observer(torch.nn.Module):
     @torch.jit.export
     def calculate_qparams(self):
         return torch.tensor([2.0]), torch.tensor([3])
+
+    @torch.jit.export
+    def get_qparams(self):
+        return self.calculate_qparams()
 
 class WeightObserver(Observer):
     def __init__(self):
@@ -1011,7 +1016,7 @@ graph(%x : Tensor,
                    .check('Tensor = aten::conv2d') \
                    .check('Observer = prim::GetAttr[name="_observer_') \
                    .check_next('prim::CallMethod[name="forward"](%_observer_') \
-                   .run(str(m._c.getattr("conv")._get_method('conv2d_forward').graph))
+                   .run(str(m._c.getattr("conv")._get_method('_conv_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_child_qconfig(self):
@@ -1064,8 +1069,8 @@ graph(%x : Tensor,
         check_not_observed(get_forward_graph(m._c))
         # check conv.forward is observed
         check_not_observed(get_forward_graph(m._c.getattr('conv')))
-        # check conv.conv2d_forward is observed
-        check_observed(get_module_method(m, 'conv', 'conv2d_forward').graph)
+        # check conv._conv_forward is observed
+        check_observed(get_module_method(m, 'conv', '_conv_forward').graph)
         # check sub is not observed
         check_not_observed(get_module_method(m, 'sub', 'forward'))
         # check forward of sub.linear is observed
@@ -1147,6 +1152,28 @@ graph(%x : Tensor,
                       if x.startswith('_observer_')])
         assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
 
+    def test_insert_observers_shared_class_type(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 5, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 5, 3).float()
+
+            def forward(self, x):
+                return self.conv2(self.conv1(x))
+
+        m = torch.jit.script(M())
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        # conv1 and conv2 shares the same type, we need to
+        # make sure we didn't quantize the type twice
+        assert len([x for x, _ in m.conv1._modules._c.items()
+                    if x.startswith('_observer_')]) == 3, \
+            'Expected to have 3 observer submodules'
+        assert len([x for x, _ in m.conv2._modules._c.items()
+                    if x.startswith('_observer_')]) == 3, \
+            'Expected to have 3 observer submodules'
+
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1186,7 +1213,34 @@ graph(%x : Tensor,
                        .check(quant_func) \
                        .check_next("aten::dequantize") \
                        .check("return") \
-                       .run(str(get_module_method(m, 'conv', 'conv2d_forward').graph))
+                       .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
+
+    def test_insert_quant_dequant_multi_uses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, w0, w1, w2):
+                a = F.conv2d(x, w0)
+                b = F.conv2d(a, w1)
+                c = F.conv2d(a, w2)
+                return b + c
+
+        m = torch.jit.script(M())
+        observer = torch.jit.script(Observer())
+        qconfig_dict = {
+            '':
+            QConfig(
+                activation=observer._c,
+                weight=observer._c)
+        }
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
+
+        # we just check we have one dequant on every op input, even input
+        # is sharded as multi uses
+        FileCheck().check_count("aten::dequantize", 8, exactly=True) \
+                   .run(str(get_forward_graph(m._c)))
 
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
@@ -1576,6 +1630,31 @@ graph(%input, %weight):
                 loaded_mod = torch.jit.load(buffer)
                 loaded_res = loaded_mod(data)
                 self.assertEqual(ref_res, loaded_res)
+
+    def test_dedup_module_uses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(x)
+                x -= 0.5
+                return self.relu(x)
+
+        data = torch.randn((2, 2))
+        m = torch.jit.script(M())
+        ref_res = m(data)
+        assert len([x for x, _ in m._modules._c.items()
+                    if x.startswith('relu')]) == 1, \
+            "Expected to have 1 relu modules after dedup module uses"
+        torch._C._jit_pass_dedup_module_uses(m._c)
+        m = torch.jit._recursive.wrap_cpp_module(m._c)
+        res = m(data)
+        assert len([x for x, _ in m._modules._c.items()
+                    if x.startswith('relu')]) == 2, \
+            "Expected to have 2 relu modules after dedup module uses"
+        self.assertEqual(res, ref_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -3662,6 +3741,25 @@ class TestScript(JitTestCase):
         jit_trace = torch.jit.trace(fct_loop, x)
         out_trace = jit_trace(x)
 
+    def test_bailout_loop_counter_transition(self):
+        with enable_profiling_mode():
+            NUM_ITERATIONS = 10
+            @torch.jit.script
+            def fct_loop(z, size):
+                # type: (int, int) -> Tuple[Tensor, List[int]]
+                counters = torch.jit.annotate(List[int], [])
+                y = torch.ones(2)
+                for i in range(size):
+                    counters.append(i)
+                    y = torch.cat((y, torch.ones(z)), 0)
+                return y, counters
+
+            inputs = [1, 2, 3, 4]
+            expected = list(range(NUM_ITERATIONS))
+            for inp in inputs:
+                results = fct_loop(inp, NUM_ITERATIONS)
+                self.assertEqual(results[1], expected)
+
     def test_set_attribute_through_optional(self):
         class A(torch.nn.Module):
             __annotations__ = {"x": Optional[torch.Tensor]}
@@ -4833,6 +4931,28 @@ a")
                 return a
         ''')
         FileCheck().check("aa").check("a\\n\\tb\\n").run(str(cu.foo.graph))
+
+    def test_function_compilation_caching(self):
+        def fun():
+            return 1 + 2
+
+        fun_compiled = torch.jit.script(fun)
+        # python wrapper around the script function is a different pointer,
+        # but the underlying script function graph is the same
+        self.assertIs(fun_compiled.graph, torch.jit.script(fun).graph)
+
+        def fun():
+            return 3 + 4
+
+        num_ref_counts = sys.getrefcount(fun)
+
+        # caching doesn't get tripped up by same qualname
+        fun_compiled_2 = torch.jit.script(fun)
+        self.assertIsNot(fun_compiled, fun_compiled_2)
+        self.assertEqual(fun_compiled_2(), 7)
+
+        # caching doesnt increase refcounts to function (holds weak reference)
+        self.assertTrue(sys.getrefcount(fun), num_ref_counts)
 
     def test_string_ops(self):
         def foo():
@@ -7589,8 +7709,8 @@ a")
                 ret += 1
             return ret, int(tensor)
 
-        self.checkScript(test, (1,))
-        self.checkScript(test, (2,))
+        self.assertEqual(torch.jit.script(test)(1), test(1))
+        self.assertEqual(torch.jit.script(test)(2), test(2))
         no_bool_loop_outputs(torch.jit.script(test).graph)
 
         def foo():
@@ -12939,15 +13059,15 @@ a")
             return e
 
         self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
-        tuple_graph = torch.jit.script(tuple_slice).graph
+        scripted_fn = torch.jit.script(tuple_slice)
+        self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
+        tuple_graph = scripted_fn.graph
         slices = tuple_graph.findAllNodes("prim::TupleSlice")
         num_outputs = set(map(lambda x: len(x.output().type().elements()), slices))
         # one tuple slice should have an output with 2 elements, other 4
         self.assertTrue(num_outputs == {2, 4})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
-        tuple_comp = torch.jit.script(tuple_slice)
-        self.assertEqual(tuple_comp(torch.tensor(1)), (2, 3))
 
         @torch.jit.script
         def test_indexing_end_out_of_bounds():
@@ -15742,7 +15862,9 @@ a")
                 ('bool_list', [True, True, False, True], List[bool]),
                 ('float_list', [1., 2., 3., 4.], List[float]),
                 ('str_list', ['hello', 'bye'], List[str]),
-                ('none', None, Optional[int]),)
+                ('none', None, Optional[int]),
+                ('a_device', torch.device('cpu'), torch.device),
+                ('another_device', torch.device('cuda:1'), torch.device))
 
     def test_attribute_serialization(self):
         tester = self

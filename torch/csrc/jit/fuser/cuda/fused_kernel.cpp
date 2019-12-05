@@ -114,15 +114,15 @@ FusedKernelCUDA::FusedKernelCUDA(
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
-      "--std=c++11", compute.c_str(), "-default-device"};
+      "--std=c++14", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result != NVRTC_SUCCESS) {
     size_t logsize;
-    nvrtc().nvrtcGetProgramLogSize(program, &logsize);
+    AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
-    nvrtc().nvrtcGetProgramLog(program, log.data());
+    AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
     cu << log.data();
     throw std::runtime_error(cu.str());
