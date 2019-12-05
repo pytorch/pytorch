@@ -62,16 +62,16 @@ class Adagrad(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                if p._grad is None:
+                if p.grad is None:
                     continue
 
-                grad = p._grad.data
+                grad = p.grad.data
                 state = self.state[p]
 
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    if p._grad.data.is_sparse:
+                    if p.grad.data.is_sparse:
                         raise RuntimeError("weight_decay option is not compatible with sparse gradients")
                     grad = grad.add(group['weight_decay'], p.data)
 

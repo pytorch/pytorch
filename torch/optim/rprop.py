@@ -38,9 +38,9 @@ class Rprop(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                if p._grad is None:
+                if p.grad is None:
                     continue
-                grad = p._grad.data
+                grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError('Rprop does not support sparse gradients')
                 state = self.state[p]
