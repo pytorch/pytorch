@@ -81,8 +81,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (tensor.type().backend() != Backend::CPU) {
-    throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString().c_str());
+  if (tensor.options().backend() != Backend::CPU) {
+    throw TypeError("NumPy conversion for %s is not supported", tensor.toString().c_str());
   }
   if (tensor.requires_grad()) {
     throw std::runtime_error(
@@ -168,8 +168,8 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
       sizes,
       strides,
       [obj](void* data) {
-          AutoGIL gil;
-          Py_DECREF(obj);
+        pybind11::gil_scoped_acquire gil;
+        Py_DECREF(obj);
       },
       at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array)))
   );
@@ -320,8 +320,8 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       sizes,
       strides,
       [obj](void* data) {
-          AutoGIL gil;
-          Py_DECREF(obj);
+        pybind11::gil_scoped_acquire gil;
+        Py_DECREF(obj);
       },
       at::device(kCUDA).dtype(dtype)
   );

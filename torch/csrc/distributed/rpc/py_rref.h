@@ -20,6 +20,7 @@ class PyRRef {
   WorkerInfo owner() const;
   py::object toHere();
   py::object localValue();
+  std::string str() const;
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
 
