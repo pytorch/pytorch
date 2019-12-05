@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <c10/util/Logging.h>
 
 namespace torch {
 namespace distributed {
@@ -63,7 +64,12 @@ py::object PythonRpcHandler::loadPythonUDFResult(
 
 py::object PythonRpcHandler::runPythonUDF(
     const SerializedPyObj& serializedObj) {
+  auto start = std::chrono::high_resolution_clock::now();
   pybind11::gil_scoped_acquire ag;
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::high_resolution_clock::now() - start);
+  LOG(INFO) << "runPythonUDF: Took " << dur.count() << " us to acquire GIL.";
+  // TODO: add this to metrics after https://github.com/pytorch/pytorch/pull/30833/ lands.
   return pyRunFunction_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
 }
