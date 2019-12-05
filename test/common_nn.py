@@ -2702,20 +2702,19 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
     if target.dim() == 0:
         target = target.unsqueeze(0)
 
-    else:
-        n = input.size(0)
-        dim = input.size(1)
-        output = input.new(n)
-        for x in range(0, n):
-            output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
+    n = input.size(0)
+    dim = input.size(1)
+    output = input.new(n)
+    for x in range(0, n):
+        output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
 
-        if reduction == 'mean':
-            return output.mean() / dim
-        elif reduction == 'sum':
-            return output.sum() / dim
-        elif target_dim == 0:
-            return output.squeeze(0) / dim
-        return output / dim
+    if reduction == 'mean':
+        return output.mean() / dim
+    elif reduction == 'sum':
+        return output.sum() / dim
+    elif target_dim == 0:
+        return output.squeeze(0) / dim
+    return output / dim
 
 
 def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='mean'):
