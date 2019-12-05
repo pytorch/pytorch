@@ -217,38 +217,41 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
-/*std::tuple<Tensor, Tensor>*/ void cummax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  //check if dtype is defined and set it accordingly
-  auto result = at::empty(self.sizes(), self.options());
-  auto max_indices = at::zeros(self.sizes(), self.options());
+std::tuple<Tensor&, Tensor&> cummax_out(Tensor& cummax, Tensor& cummax_indices, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
+  TORCH_CHECK(
+      !dtype.has_value() || (cummax.scalar_type() == dtype.value()),
+      "provided dtype must match dtype of result in cumprod. Got ",
+      toString(cummax.scalar_type()),
+      " and ",
+      toString(dtype.value()),
+      ".");
+  {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+  auto result_ = self.narrow(dim, 0, 1);
+  auto cummax_indices_ = self.narrow(dim, 0, 1).fill_(0);
   //update result and max_indices for the first values along the dimension dim
   for(int64_t i=1; i<self.size(dim); i++) {
     //compare self[i] and result[i-1] values and update result and max_indices
+    auto res_at_i = max(at::cat(self.narrow(dim, i, 1), result_.narrow(dim, i-1, 1), dim), dim);
+    result_ = at::cat(result_, std::get<0>(res_at_i), dim);
+    auto max_indices_at_i = i * std::get<1>(res_at_i);
+    cummax_indices_ = at::cat(cummax_indices_, max(cummax_indices_.narrow(dim, i-1, 1), max_indices_at_i, dim), dim);
   }
-  return std::tuple<Tensor &,Tensor &>{result, max_indices};
+  cummax=result_;
+  cummax_indices=cummax_indices_;
+  }
+  return std::tuple<Tensor &,Tensor &>{cummax, cummax_indices};
 }
 
-// Tensor& cummax_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-//   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-//   TORCH_CHECK(
-//       !dtype.has_value() || (result.scalar_type() == dtype.value()),
-//       "provided dtype must match dtype of result in cumprod. Got ",
-//       toString(result.scalar_type()),
-//       " and ",
-//       toString(dtype.value()),
-//       ".");
-//   {
-// #ifdef BUILD_NAMEDTENSOR
-//     NoNamesGuard guard;
-// #endif
-//     at::_cummax_out(result, self.toType(result.scalar_type()), dim);
-//   }
-// #ifdef BUILD_NAMEDTENSOR
-//   namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
-// #endif
-//   return result;
-// }
-
+std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  auto cummax = at::empty(self.sizes(), self.options());
+  auto cummax_indices = at::empty(self.sizes(), self.options());
+  cummax_out(cummax, cummax_indices);
+  return std::tuple<Tensor &,Tensor &>{cummax, cummax_indices};
+}
 // ALL REDUCE #################################################################
 
 static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
