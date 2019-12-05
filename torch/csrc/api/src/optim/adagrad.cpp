@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/serialize/archive.h>
 #include <torch/utils.h>
+#include <torch/optim/serialize.h>
 
 #include <ATen/ATen.h>
 
@@ -14,39 +15,30 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
-  c10::IValue ivalue;
-  archive.read("learning_rate", ivalue);
-  this->learning_rate(ivalue.toDouble());
-  archive.read("lr_decay", ivalue);
-  this->lr_decay(ivalue.toDouble());
-  archive.read("weight_decay", ivalue);
-  this->weight_decay(ivalue.toDouble());
-  archive.read("initial_accumulator_value", ivalue);
-  this->initial_accumulator_value(ivalue.toDouble());
-  archive.read("eps", ivalue);
-  this->eps(ivalue.toDouble());
+void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, learning_rate);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, lr_decay);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, weight_decay);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, initial_accumulator_value);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, eps);
 }
 
-void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
-  archive.write("learning_rate", IValue(this->learning_rate()));
-  archive.write("lr_decay", IValue(this->lr_decay()));
-  archive.write("weight_decay", IValue(this->weight_decay()));
-  archive.write("initial_accumulator_value", IValue(this->initial_accumulator_value()));
-  archive.write("eps", IValue(this->eps()));
+void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, learning_rate);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, lr_decay);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, initial_accumulator_value);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
 }
 
 void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
-    c10::IValue step_, sum_;
-    archive.read("step", step_);
-    archive.read("sum", sum_);
-    this->step(step_.toInt());
-    this->sum(sum_.toTensor());
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, step);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, sum);
 }
 
 void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) const {
-    archive.write("step", IValue(this->step()));
-    archive.write("sum", IValue(this->sum()));
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(int64_t, step);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(Tensor, sum);
 }
 
 /// Adapted from

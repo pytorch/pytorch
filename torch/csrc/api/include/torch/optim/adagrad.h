@@ -3,6 +3,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
+#include <torch/serialize/archive.h>
 #include <torch/types.h>
 
 #include <utility>
