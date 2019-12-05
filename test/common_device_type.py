@@ -351,25 +351,23 @@ class skipCUDAIf(skipIf):
 
 class expectedFailure(object):
 
-    def __init__(self, dep, device_type=None):
-        self.dep = dep
+    def __init__(self, device_type):
         self.device_type = device_type
 
     def __call__(self, fn):
 
         @wraps(fn)
-        def dep_fn(slf, device, *args, **kwargs):
+        def efail_fn(slf, device, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
-                if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep):
-                    try:
-                        fn(slf, device, *args, **kwargs)
-                    except Exception:
-                        return
-                    else:
-                        slf.fail('expected test to fail, but it passed')
+                try:
+                    fn(slf, device, *args, **kwargs)
+                except Exception:
+                    return
+                else:
+                    slf.fail('expected test to fail, but it passed')
 
             return fn(slf, device, *args, **kwargs)
-        return dep_fn
+        return efail_fn
 
 
 class onlyOn(object):
