@@ -6325,6 +6325,13 @@ class TestTorchDeviceType(TestCase):
                     self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
                     self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
 
+        # multi_margin_loss
+        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
+            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device)):
+                self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
+                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
+                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
