@@ -28,6 +28,7 @@ import re
 import sys
 import textwrap
 import warnings
+import weakref
 
 from collections import OrderedDict
 
@@ -239,6 +240,11 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     # TODO: Pretty sure this approach loses ConstSequential status and such
     return torch.jit._recursive.wrap_cpp_module(cpp_module)
 
+def export_opnames(m):
+    r"""
+        Returns a list of operator names of a script module and its submodules
+    """
+    return torch._C.export_opnames(m._c)
 
 def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
@@ -1270,12 +1276,16 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
     else:
         _check_directly_compile_overloaded(obj)
+        maybe_already_compiled_fn = _try_get_jit_cached_key(obj)
+        if maybe_already_compiled_fn:
+            return maybe_already_compiled_fn
         ast = get_jit_def(obj)
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        _set_jit_cache(obj, fn)
         return fn
 
 def interface(obj):
@@ -1966,6 +1976,28 @@ _builtin_ops = [
 ]
 
 
+
+# Caching: we currently cache compilation of free functions.
+# To cache free functions we hold a weak ref to the function object and
+# map to the compiled fn's qualified name.
+# In the future we could consider caching more types of objects so that
+# aliasing is preserved across separate compilations of the same object.
+
+_jit_caching_layer = weakref.WeakKeyDictionary()
+
+def _try_get_jit_cached_key(key):
+    qual_name = _jit_caching_layer.get(key, None)
+    if qual_name:
+        return _python_cu.find_function(qual_name)
+    else:
+        return None
+
+def _set_jit_cache(key, value):
+    # only free functions currently supported
+    assert isinstance(value, torch.jit.ScriptFunction)
+    _jit_caching_layer[key] = value.qualified_name
+
+
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
     global _builtin_table
@@ -2081,21 +2113,23 @@ set_module(Error, "torch.jit")
 Error.__name__ = "Error"
 Error.__qualname__ = "Error"
 
-def _get_named_tuple_properties(obj, need_types=True):
+
+def _get_named_tuple_names(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
     fields = list(obj._fields)
+    obj_name = type(obj).__name__
+    return obj_name, fields
+
+def _get_named_tuple_properties(obj):
+    obj_name, fields = _get_named_tuple_names(obj)
     annotations = []
     has_annotations = hasattr(obj, '__annotations__')
-    obj_name = type(obj).__name__
-    if need_types:
-        for field in fields:
-            if has_annotations and field in obj.__annotations__:
-                annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
-            else:
-                annotations.append(torch._C.TensorType.get())
-        return obj_name, fields, annotations
-    else:
-        return obj_name, fields
+    for field in fields:
+        if has_annotations and field in obj.__annotations__:
+            annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
+        else:
+            annotations.append(torch._C.TensorType.get())
+    return obj_name, fields, annotations
 
 
 def _create_named_tuple(t, unqual_name, field_names):

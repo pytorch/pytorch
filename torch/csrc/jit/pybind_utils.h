@@ -115,23 +115,29 @@ inline TypePtr getOrCreateNamedTupleType(
   c10::NamedTypePtr named_type;
   py::object props;
   if (element_types.has_value()) {
+    // if element_types is inferred (i.e. inner element types are inferred in tracing),
+    // we only need to get names from the python type in order to create NamedTupleType
     props = py::module::import("torch.jit")
-                .attr("_get_named_tuple_properties")(obj, /*need_types=*/false);
+                .attr("_get_named_tuple_names")(obj);
     std::tie(unqualName, fields) = py::cast<
         std::tuple<std::string, decltype(fields)>>(props);
     named_type = TupleType::createNamed(qualName, fields, element_types.value());
   } else {
+    // if no element_types, which means we did not infer the inner types, we need to
+    // refer the python type for field types to create NamedTupleType
     std::vector<TypePtr> annotations;
     props = py::module::import("torch.jit")
-                .attr("_get_named_tuple_properties")(obj, /*need_types=*/true);
+                .attr("_get_named_tuple_properties")(obj);
     std::tie(unqualName, fields, annotations) = py::cast<
         std::tuple<std::string, decltype(fields), decltype(annotations)>>(props);
     named_type = TupleType::createNamed(qualName, fields, annotations);
   }
 
   if (auto type = get_python_cu()->get_type(qualName)) {
+    // we check on whether one type is a subtype of the other
+    // to ensure that we don't redefine the named tuple type again
     TORCH_CHECK(
-        type->isSubtypeOf(named_type),
+        type->isSubtypeOf(named_type) || named_type->isSubtypeOf(type),
         "Can't to redefine NamedTuple: ",
         named_type->python_str());
     return type;
