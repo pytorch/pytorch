@@ -54,7 +54,8 @@ void testModuleConstant() {
                        IntType::get(),
                        v,
                        false);
-
+  ASSERT_TRUE(m.hasattr(attr_name));
+  ASSERT_TRUE(m.hasattr(const_name));
   ASSERT_EQ(m.attr(attr_name).toInt(), 2);
   ASSERT_EQ(m.attr(const_name).toInt(), 3);
 }
