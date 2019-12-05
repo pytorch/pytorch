@@ -303,6 +303,8 @@ class TestFakeQuantizePerChannel(TestCase):
         Y_prime.backward(dout)
         dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
                                                               fq_module.zero_point, axis, quant_min, quant_max)
+        print('dX = ', dX.cpu().numpy())
+        print('X grad = ', X.grad.cpu().detach().numpy())
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def test_fq_serializable(self):
