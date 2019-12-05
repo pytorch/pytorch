@@ -230,7 +230,7 @@ template<class T>
 template<class... Args>
 void List<T>::emplace_back(Args&&... args) const {
   // TODO Use list_element_from?
-  impl_->list.emplace_back(std::forward<Args>(args)...);
+  impl_->list.push_back(T(std::forward<Args>(args)...));
 }
 
 template<class T>
