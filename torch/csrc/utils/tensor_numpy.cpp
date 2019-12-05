@@ -81,8 +81,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (tensor.type().backend() != Backend::CPU) {
-    throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString().c_str());
+  if (tensor.options().backend() != Backend::CPU) {
+    throw TypeError("NumPy conversion for %s is not supported", tensor.toString().c_str());
   }
   if (tensor.requires_grad()) {
     throw std::runtime_error(
