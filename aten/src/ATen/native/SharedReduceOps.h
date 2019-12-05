@@ -9,8 +9,8 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #elif defined(__HIPCC__)
-#include <THH/THHDeviceUtils.cuh>
-#include <ATen/native/hip/DeviceSqrt.cuh>
+#include <aten/src/THH/THHDeviceUtils.cuh>
+#include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/tuple.h>
