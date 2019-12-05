@@ -56,7 +56,7 @@ def is_ignored_only(output):
         return False
     count_ignored_errors = 0
     for e in report.errors:
-        if 'libcublas' in ''.join(e.stack) or 'libcudnn' in ''.join(e.stack):
+        if 'libcublas' in ''.join(e.stack) or 'libcudnn' in ''.join(e.stack) or 'libcufft' in ''.join(e.stack):
             count_ignored_errors += 1
     return count_ignored_errors == report.num_errors
 
