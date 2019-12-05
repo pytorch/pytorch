@@ -43,7 +43,13 @@ class Unpickler {
         read_record_(std::move(read_record)),
         device_(std::move(device)) {}
 
-  IValue parse_ivalue();
+  // consume the pickle stream, producing an IValue from the contents.
+  // Type Tags: the pickler will restore the type tags on
+  // List and Dict objects when possible. If the resulting IValue
+  // is an object, the tags are restored based on the definition of the object.
+  // If known_type is non-null, then the type tags are restored from its value.
+  // Otherwise, Dict and List objects will end up with Any as their tag.
+  IValue parse_ivalue(const c10::TypePtr& known_type = nullptr);
 
  private:
   // No arguments ensures that a template arugment must be specified
