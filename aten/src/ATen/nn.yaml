@@ -121,7 +121,13 @@
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'BFloat16']
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
 - name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding, IntArrayRef[2] dilation)
   cname: SpatialDepthwiseConvolution
   buffers: []
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
