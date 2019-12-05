@@ -23,6 +23,7 @@ class FloatFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
+        - clamp
         - mul
         - add_relu
         - add_scalar
@@ -71,6 +72,13 @@ class FloatFunctional(torch.nn.Module):
         r = self.activation_post_process(r)
         return r
 
+    r"""Operation equivalent to ``torch.clamp(Tensor, float, float)``"""
+    def clamp(self, x, min_, max_):
+        # type: (Tensor, float, float) -> Tensor
+        r = torch.clamp(x, min_, max_)
+        r = self.activation_post_process(r)
+        return r
+
     r"""Operation equivalent to ``relu(torch.add(x,y))``"""
     def add_relu(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
@@ -101,6 +109,7 @@ class QFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
+        - clamp
         - mul
         - add_relu
         - add_scalar
@@ -155,6 +164,11 @@ class QFunctional(torch.nn.Module):
         # type: (List[Tensor], int) -> Tensor
         return ops.quantized.cat(x, scale=self.scale,
                                  zero_point=self.zero_point, dim=dim)
+
+    r"""Operation equivalent to ``torch.ops.quantized.clamp``"""
+    def clamp(self, x, min_, max_):
+        # type: (Tensor, float, float) -> Tensor
+        return ops.quantized.clamp(x, min_, max_)
 
     r"""Operation equivalent to ``torch.ops.quantized.add_relu``"""
     def add_relu(self, x, y):
