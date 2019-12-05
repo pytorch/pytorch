@@ -240,7 +240,6 @@ class ScriptModuleSerializer {
           qualifier,
           PythonPrint(
               constant_table_, class_deps_, /*enforce_importable=*/true));
-      pp->LEGACY_printOpVersion();
     }
     pp->printNamedType(class_type);
   }
