@@ -34,8 +34,8 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
  * \param method_name the method we want to insert observers for
  * \param qconfig_dict the qconfig dictionary that specifies how
  * each module is going to be quantized
- * \param inplace whether we want to do inplace modification to the input module or
- * clone the module
+ * \param inplace whether we want to do inplace modification to the input module
+ * or clone the module
  */
 TORCH_API script::Module InsertObservers(
     script::Module& module,
@@ -97,13 +97,14 @@ TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
  * the quantized weight with
  *  "_quantized_weight".
  */
-TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
+TORCH_API void FoldQuantizeCallIntoBuffer(
+    script::Module& module,
+    const std::string& method_name);
 
 /** \brief Insert prepack and unpack function in graph
- *  We want add pack/unpack functions for quantized weight because later we want to
- *  fold the packed weight as an attribute of the module, in order
- *  to reduce the cost of packing the weight on the fly in quantized
- *  models.
+ *  We want add pack/unpack functions for quantized weight because later we want
+ * to fold the packed weight as an attribute of the module, in order to reduce
+ * the cost of packing the weight on the fly in quantized models.
  *
  *  Each quantized op has it's corresponding prepack/unpack function,
  *  right now, we only need to do prepack/unpack for quantized::linear
@@ -137,5 +138,14 @@ TORCH_API void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const script::Module& linear_params_module,
     const script::Module& conv_params_module);
+
+/** Recursivly deduplicate multiple uses of the same module by
+ *  creating an instance clone for each use of the module, which means
+ *  the type will be the same as before and all the attributes will be
+ *  copied, then we'll change the use of the original module to the use
+ *  of cloned module in the Graph.
+ */
+TORCH_API void DedupModuleUses(script::Module& module);
+
 } // namespace jit
 } // namespace torch

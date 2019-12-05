@@ -3168,7 +3168,7 @@ namespace detail {
       torch::Tensor key_padding_mask_tensor;
       if (add_key_padding_mask) {
         const auto seq_mask = torch::randint(0, 2, {1, seq_len});
-        key_padding_mask = seq_mask.repeat({batch_sz, seq_len}) == 1;
+        key_padding_mask = seq_mask.repeat({batch_sz, 1}) == 1;
         key_padding_mask_tensor = key_padding_mask;
       }
       const auto decoder_state = torch::rand({batch_sz, d_model});
@@ -3255,7 +3255,7 @@ namespace detail {
           .static_v(saved_v_tensor)
         );
       }
-      // result = result.squeeze(0).detach().numpy();
+      result = result.squeeze(0).detach();
       torch::Tensor q_proj_weight;
       torch::Tensor k_proj_weight;
       torch::Tensor v_proj_weight;
@@ -3276,13 +3276,13 @@ namespace detail {
       );
       torch::Tensor K_split;
       if (saved_k.defined()) {
-        K_split = saved_k.permute({dims[0], nheads, dims[1], d_head});
+        K_split = saved_k.reshape({dims[0], nheads, dims[1], d_head});
       } else {
         K_split = _split_heads_ref(K_fc, dims, nheads, d_head);
       }
       torch::Tensor V_split;
       if (saved_v.defined()) {
-        V_split = saved_v.permute({dims[0], nheads, dims[1], d_head});
+        V_split = saved_v.reshape({dims[0], nheads, dims[1], d_head});
       } else {
         V_split = _split_heads_ref(V_fc, dims, nheads, d_head);
       }
