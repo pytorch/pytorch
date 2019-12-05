@@ -194,10 +194,10 @@ void ConvertSequenceDependencies(Block* block) {
   }
 }
 
-static void fuseSequenceSplitConcat(Block *b) {
+static void FuseSequenceSplitConcat(Block *b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseSequenceSplitConcat(child_block);
+      FuseSequenceSplitConcat(child_block);
     }
     if (it->kind() == onnx::ConcatFromSequence &&
         it->input()->node()->kind() == onnx::SplitToSequence) {
@@ -234,7 +234,7 @@ static void fuseSequenceSplitConcat(Block *b) {
 void FixupONNXLoops(std::shared_ptr<Graph>& graph) {
   FixupONNXLoops(graph->block());
   ConvertSequenceDependencies(graph->block());
-  fuseSequenceSplitConcat(graph->block());
+  FuseSequenceSplitConcat(graph->block());
   EliminateDeadCode(graph->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
