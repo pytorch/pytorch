@@ -11,8 +11,23 @@
 // - Move to `c10` namespace.
 // - Rename namespace `detail` to `detail_`, to not conflict with existing
 //   c10 implementations in `detail` namespace.
-// - `struct in_place_t` is renamed to `struct variant_in_place_t`, to not
-//   conflict with `struct in_place_t` in c10/util/Optional.h.
+// - In two functions, the template name reference `I` is changed to
+//   `detail_::best_match<Arg, Ts...>::value` to work around gcc 7.3.1 bug.
+//   However, this workaround also limits the use cases of `c10::variant`.
+//   Please see NOTE [gcc 7.3.1 bug workaround] for details.
+// - The following code is moved to `c10/util/in_place.h`:
+//   ```
+//   struct in_place_t { explicit in_place_t() = default; };
+//
+//   template <std::size_t I>
+//   struct in_place_index_t { explicit in_place_index_t() = default; };
+//
+//   template <typename T>
+//   struct in_place_type_t { explicit in_place_type_t() = default; };
+//
+//   constexpr in_place_t in_place{};
+//   ```
+//   so that they can also be used in `c10/util/Optional.h`.
 
 #ifndef C10_UTIL_VARIANT_H_
 #define C10_UTIL_VARIANT_H_
@@ -318,22 +333,14 @@ namespace std {
 #ifndef MPARK_IN_PLACE_HPP
 #define MPARK_IN_PLACE_HPP
 
+#include <c10/util/in_place.h>
+
 #include <cstddef>
 
 
 namespace c10 {
 
-  struct variant_in_place_t { explicit variant_in_place_t() = default; };
-
-  template <std::size_t I>
-  struct in_place_index_t { explicit in_place_index_t() = default; };
-
-  template <typename T>
-  struct in_place_type_t { explicit in_place_type_t() = default; };
-
 #ifdef MPARK_VARIABLE_TEMPLATES
-  constexpr variant_in_place_t in_place{};
-
   template <std::size_t I> constexpr in_place_index_t<I> in_place_index{};
 
   template <typename T> constexpr in_place_type_t<T> in_place_type{};
@@ -1647,7 +1654,7 @@ namespace c10 {
 #pragma warning(disable : 4244)
 #endif
       template <typename... Args>
-      inline explicit constexpr alt(variant_in_place_t, Args &&... args)
+      inline explicit constexpr alt(in_place_t, Args &&... args)
           : value(lib::forward<Args>(args)...) {}
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -1672,7 +1679,7 @@ namespace c10 {
     template <typename... Args>                                            \
     inline explicit constexpr recursive_union(in_place_index_t<0>,         \
                                               Args &&... args)             \
-        : head_(variant_in_place_t{}, lib::forward<Args>(args)...) {}              \
+        : head_(in_place_t{}, lib::forward<Args>(args)...) {}              \
                                                                            \
     template <std::size_t I, typename... Args>                             \
     inline explicit constexpr recursive_union(in_place_index_t<I>,         \
@@ -1837,7 +1844,7 @@ namespace c10 {
       template <std::size_t I, typename T, typename... Args>
       inline static T &construct_alt(alt<I, T> &a, Args &&... args) {
         auto *result = ::new (static_cast<void *>(lib::addressof(a)))
-            alt<I, T>(variant_in_place_t{}, lib::forward<Args>(args)...);
+            alt<I, T>(in_place_t{}, lib::forward<Args>(args)...);
         return result->value;
       }
 
@@ -2240,6 +2247,24 @@ namespace c10 {
     variant(const variant &) = default;
     variant(variant &&) = default;
 
+    // NOTE [gcc 7.3.1 bug workaround]
+    //
+    // The original line `typename T = lib::type_pack_element_t<I, Ts...>`
+    // throws the following compiler error on gcc 7.3.1:
+    // ```
+    // ../c10/util/variant.h:2250:9: internal compiler error:
+    // unexpected expression ‘I’ of kind template_parm_index
+    //          typename T = lib::type_pack_element_t<I, Ts...>,
+    //          ^~~~~~~~
+    // ```
+    // As a workaround, `I` is changed to `detail_::best_match<Arg, Ts...>::value`,
+    // which is the default value for `I` in this template. Note that this workaround
+    // effectively disallows setting `I` to any other non-default value, and we add a
+    // `static_assert` in the function body to check for this.
+    //
+    // See the following issues for more context:
+    // - https://github.com/mpark/variant/issues/43
+    // - https://github.com/eggs-cpp/variant/issues/31
     template <
         typename Arg,
         typename Decayed = lib::decay_t<Arg>,
@@ -2247,11 +2272,16 @@ namespace c10 {
         lib::enable_if_t<!detail_::is_in_place_index<Decayed>::value, int> = 0,
         lib::enable_if_t<!detail_::is_in_place_type<Decayed>::value, int> = 0,
         std::size_t I = detail_::best_match<Arg, Ts...>::value,
-        typename T = lib::type_pack_element_t<I, Ts...>,
+        typename T = lib::type_pack_element_t<detail_::best_match<Arg, Ts...>::value, Ts...>,
         lib::enable_if_t<std::is_constructible<T, Arg>::value, int> = 0>
     inline constexpr variant(Arg &&arg) noexcept(
         std::is_nothrow_constructible<T, Arg>::value)
-        : impl_(in_place_index_t<I>{}, lib::forward<Arg>(arg)) {}
+        : impl_(in_place_index_t<I>{}, lib::forward<Arg>(arg)) {
+          static_assert(
+            I == detail_::best_match<Arg, Ts...>::value,
+            "Setting template parameter `I` to a custom non-default value is not supported. "
+            "Please file a feature request if you see this.");
+        }
 
     template <
         std::size_t I,
@@ -2318,17 +2348,22 @@ namespace c10 {
     variant &operator=(const variant &) = default;
     variant &operator=(variant &&) = default;
 
+    // NOTE: See NOTE [gcc 7.3.1 bug workaround] for the changes made to this function.
     template <typename Arg,
               lib::enable_if_t<!std::is_same<lib::decay_t<Arg>, variant>::value,
                                int> = 0,
               std::size_t I = detail_::best_match<Arg, Ts...>::value,
-              typename T = lib::type_pack_element_t<I, Ts...>,
+              typename T = lib::type_pack_element_t<detail_::best_match<Arg, Ts...>::value, Ts...>,
               lib::enable_if_t<(std::is_assignable<T &, Arg>::value &&
                                 std::is_constructible<T, Arg>::value),
                                int> = 0>
     inline variant &operator=(Arg &&arg) noexcept(
         (std::is_nothrow_assignable<T &, Arg>::value &&
          std::is_nothrow_constructible<T, Arg>::value)) {
+      static_assert(
+        I == detail_::best_match<Arg, Ts...>::value,
+        "Setting template parameter `I` to a custom non-default value is not supported. "
+        "Please file a feature request if you see this.");
       impl_.template assign<I>(lib::forward<Arg>(arg));
       return *this;
     }

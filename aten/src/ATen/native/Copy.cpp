@@ -95,7 +95,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
     AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-             self.type(), " and src type = ", src.type());
+             self.toString(), " and src type = ", src.toString());
   }
 
   if (self.is_same(src)) {
@@ -139,7 +139,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     device_type = kCUDA;
   }
 
-  if (device_type == kCPU && copy_transpose_valid(self, src)) {
+  // TODO: if we need to, we can also enable this path for quantized tensor
+  if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
     copy_same_type_transpose_(self, src);
     return self;
   }
@@ -150,14 +151,14 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_broadcast_outnames(self, src);
+  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
 #endif
     copy_impl(self, src, non_blocking);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(self, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
 #endif
   return self;
 }

@@ -63,8 +63,7 @@ Distributed
 
 -  Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  Shen Li (`mrshenli <https://github.com/mrshenli>`__)
-..
- -  (proposed) Pritam Damania
+-  (proposed) Pritam Damania
    (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 
 Multiprocessing and DataLoaders
@@ -139,6 +138,9 @@ ONNX <-> PyTorch
 ~~~~~~~~~~~~~~~~
 
 -  Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
+-  Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
+-  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
 
 Windows
 ~~~~~~~

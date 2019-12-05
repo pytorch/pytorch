@@ -21,7 +21,7 @@ class Unpickler {
  public:
   // tensors inside the pickle are references to the tensor_table
   Unpickler(
-      std::function<bool(char*, size_t)> reader,
+      std::function<size_t(char*, size_t)> reader,
       ClassResolver class_resolver,
       const std::vector<at::Tensor>* tensor_table)
       : reader_(reader),
@@ -31,7 +31,7 @@ class Unpickler {
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
   Unpickler(
-      std::function<bool(char*, size_t)> reader,
+      std::function<size_t(char*, size_t)> reader,
       ClassResolver class_resolver,
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
@@ -51,25 +51,41 @@ class Unpickler {
   template <typename T>
   T read() {
     T item;
-    if (!reader_(reinterpret_cast<char*>(&item), sizeof(item))) {
-      AT_ERROR("Unexpected end of pickler archive.");
+    if (sizeof(T) <= buffer_remaining_) {
+      // Fast path: entirely from buffer.
+      memcpy(&item, buffer_.data() + buffer_pos_, sizeof(T));
+      buffer_remaining_ -= sizeof(T);
+      buffer_pos_ += sizeof(T);
+    } else {
+      // Don't over-template the slow path, to avoid code size bloat.
+      readSlowWithBuffer(reinterpret_cast<char*>(&item), sizeof(T));
     }
     return item;
   }
-
+  void readSlowWithBuffer(char *dest, size_t sz);
   std::string readBytes(size_t num_bytes);
 
   double readFloat();
+  void readGlobal(
+      const std::string& module_name,
+      const std::string& class_name);
+  void rebuildTensor(bool quantized);
   PickleOpCode readInstruction();
-  PickleOpCode readOpCode();
+  PickleOpCode readOpCode() {
+    return static_cast<PickleOpCode>(read<uint8_t>());
+  }
   std::string readString();
   void readList(IValue list_ivalue);
   void setInput(size_t memo_id);
   void run();
 
-  // Returns a pointer to the number of bytes requested. This should state-fully
-  // remember how many bytes have been read
-  std::function<bool(char*, size_t)> reader_;
+  // Returns the number of bytes read. This should statefully
+  // remember the position. Don't call reader_ directly.
+  std::function<size_t(char*, size_t)> reader_;
+  // Small buffer to avoid calling reader_ on a per-byte basis.
+  std::array<char, 256> buffer_;
+  size_t buffer_pos_{0};
+  size_t buffer_remaining_{0};
 
   std::vector<IValue> stack_;
 
@@ -88,6 +104,8 @@ class Unpickler {
   std::function<at::DataPtr(const std::string&)> read_record_;
   c10::optional<at::Device> device_;
 };
+
+void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);
 
 } // namespace jit
 } // namespace torch

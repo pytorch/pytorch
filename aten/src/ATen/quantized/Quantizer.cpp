@@ -111,8 +111,6 @@ void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, si
   );
 }
 
-// TODO: dequantize_val?
-
 template <typename T>
 Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
   auto fn_name = "quantize_tensor";
@@ -297,7 +295,8 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   }
 #endif
   auto qdata = qtensor.data_ptr<T>();
-  for (int i = 0; i < rtensor.numel(); ++i) {
+  auto numel = rtensor.numel();
+  for (int i = 0; i < numel; ++i) {
     qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
   }
   return qtensor;
@@ -318,7 +317,8 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
   const auto* qd = qtensor.data_ptr<T>();
   float* rd = rtensor.data_ptr<float>();
-  for (auto i = 0; i < qtensor.numel(); ++i) {
+  auto numel = qtensor.numel();
+  for (auto i = 0; i < numel; ++i) {
     rd[i] = dequantize_val<T>(scale, zero_point, qd[i]);
   }
   return rtensor;
@@ -472,10 +472,9 @@ QuantizerPtr make_per_channel_affine_quantizer(
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
-  // TODO: remove this when Variable and Tensor are merged
-  TORCH_INTERNAL_ASSERT(
-      !self.is_variable(),
-      "_internal_get_QTensorImpl: should not be a variable");
+  TORCH_CHECK(
+      !self.requires_grad(),
+      "quantized tensors do not support autograd");
   TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }

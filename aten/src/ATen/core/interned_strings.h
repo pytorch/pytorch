@@ -94,6 +94,7 @@ namespace c10 {
   _(prim, range)                     \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
+  _(prim, unchecked_cast)            \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
   _(aten, _ncf_unsqueeze)            \
@@ -111,12 +112,17 @@ namespace c10 {
   _(prim, CreateObject)              \
   _(prim, SetAttr)                   \
   _(prim, GetAttr)                   \
+  _(prim, HasAttr)                   \
   _(prim, profile)                   \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
   _(prim, LoopContinuation)          \
+  _(prim, annotate)                  \
+  _(prim, TracedModuleForward)       \
+  _(prim, TracedFork)                \
+  _(prim, TracedAttr)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -162,6 +168,8 @@ namespace c10 {
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
+  _(aten, zero_)                     \
+  _(aten, fill_)                     \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -195,6 +203,9 @@ namespace c10 {
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
   _(onnx, Mod)                       \
+  _(onnx, SplitToSequence)           \
+  _(onnx, SequenceConstruct)         \
+  _(onnx, SequenceEmpty)             \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -224,7 +235,9 @@ namespace c10 {
   _(attr, split)                     \
   _(attr, slot)                      \
   _(attr, kinds)                     \
-  _(attr, types)
+  _(attr, types)                     \
+  _(attr, scope)                     \
+  _(attr, keepdims)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

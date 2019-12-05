@@ -1,4 +1,5 @@
 import inspect
+import threading
 from functools import wraps
 import unittest
 import torch
@@ -123,6 +124,18 @@ device_type_test_bases = []
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
 
+    # Precision is a thread-local setting since it may be overriden per test
+    _tls = threading.local()
+    _tls.precision = TestCase.precision
+
+    @property
+    def precision(self):
+        return self._tls.precision
+
+    @precision.setter
+    def precision(self, prec):
+        self._tls.precision = prec
+
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
     @classmethod
@@ -146,10 +159,15 @@ class DeviceTypeTestBase(TestCase):
             return None
         return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
 
+    def _get_precision_override(self, test, dtype):
+        if not hasattr(test, 'precision_overrides'):
+            return self.precision
+        return test.precision_overrides.get(dtype, self.precision)
+
     # Creates device-specific tests.
     @classmethod
-    def instantiate_test(cls, test):
-        test_name = test.__name__ + "_" + cls.device_type
+    def instantiate_test(cls, name, test):
+        test_name = name + "_" + cls.device_type
 
         dtypes = cls._get_dtypes(test)
         if dtypes is None:  # Test has no dtype variants
@@ -170,7 +188,16 @@ class DeviceTypeTestBase(TestCase):
                 @wraps(test)
                 def instantiated_test(self, test=test, dtype=dtype):
                     device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                    return test(self, device_arg, dtype)
+                    # Sets precision and runs test
+                    # Note: precision is reset after the test is run
+                    guard_precision = self.precision
+                    try :
+                        self.precision = self._get_precision_override(test, dtype)
+                        result = test(self, device_arg, dtype)
+                    finally:
+                        self.precision = guard_precision
+
+                    return result
 
                 setattr(cls, dtype_test_name, instantiated_test)
 
@@ -196,11 +223,10 @@ class CUDATestBase(DeviceTypeTestBase):
         primary_device_idx = int(cls.get_primary_device().split(':')[1])
         num_devices = torch.cuda.device_count()
 
-        devices = [cls.get_primary_device()]
+        prim_device = cls.get_primary_device()
         cuda_str = 'cuda:{0}'
         non_primary_devices = [cuda_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
-        devices.extend(non_primary_devices)
-        return devices
+        return [prim_device] + non_primary_devices
 
     @classmethod
     def setUpClass(cls):
@@ -255,7 +281,6 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
-
                 # Requires tests be a function for Python2 compat
                 # (In Python2 tests are type checked methods wrapping functions)
                 test = getattr(generic_test_class, name)
@@ -264,7 +289,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
                 # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(test)
+                device_type_test_class.instantiate_test(name, test)
             else:  # Ports non-test member
                 assert not hasattr(device_type_test_class, name), "Redefinition of non-test member {0}".format(name)
 
@@ -365,6 +390,48 @@ class deviceCountAtLeast(object):
 
         return multi_fn
 
+# Only runs the test on the CPU and CUDA (the native device types)
+def onlyOnCPUAndCUDA(fn):
+    @wraps(fn)
+    def only_fn(self, device, *args, **kwargs):
+        if self.device_type != 'cpu' and self.device_type != 'cuda':
+            reason = "Doesn't run on {0}".format(self.device_type)
+            raise unittest.SkipTest(reason)
+
+        return fn(self, device, *args, **kwargs)
+
+    return only_fn
+
+# Specifies per-dtype precision overrides.
+# Ex.
+#
+# @precisionOverride(torch.half : 1e-2, torch.float : 1e-4)
+# @dtypes(torch.half, torch.float, torch.double)
+# def test_X(self, device, dtype):
+#   ...
+#
+# When the test is instantiated its class's precision will be set to the
+# corresponding override, if it exists.
+# self.precision can be accessed directly, and it also controls the behavior of
+# functions like self.assertEqual().
+#
+# Note that self.precision is a scalar value, so if you require multiple
+# precisions (or are working with multiple dtypes) they should be specified
+# explicitly and computed using self.precision (e.g.
+# self.precision *2, max(1, self.precision)).
+class precisionOverride(object):
+
+    def __init__(self, d):
+        assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
+        for dtype, prec in d.items():
+            assert isinstance(dtype, torch.dtype), "precisionOverride given unknown dtype {0}".format(dtype)
+
+        self.d = d
+
+    def __call__(self, fn):
+        fn.precision_overrides = self.d
+        return fn
+
 
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
@@ -442,7 +509,7 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
                 if self.no_cudnn:
                     reason = "cuDNN not available"
                     raise unittest.SkipTest(reason)
-                if self.cudnn_version < version:
+                if self.cudnn_version is None or self.cudnn_version < version:
                     reason = "cuDNN version {0} is available but {1} required".format(self.cudnn_version, version)
                     raise unittest.SkipTest(reason)
 

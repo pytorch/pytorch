@@ -70,7 +70,7 @@ class SobolEngine(object):
         else:
             self.shift = torch.zeros(self.dimension, dtype=torch.long)
 
-        self.quasi = self.shift.clone()
+        self.quasi = self.shift.clone(memory_format=torch.contiguous_format)
         self.num_generated = 0
 
     def draw(self, n=1, out=None, dtype=torch.float32):

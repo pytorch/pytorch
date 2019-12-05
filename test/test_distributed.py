@@ -17,7 +17,7 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, skipIfRocm
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 
@@ -56,7 +56,7 @@ class Net(nn.Module):
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
         self.relu = nn.ReLU()
-        self.no_grad_param = nn.Parameter(torch.Tensor([2, 2]).long(),
+        self.no_grad_param = nn.Parameter(torch.tensor([2, 2]).long(),
                                           requires_grad=False)
 
     def forward(self, x):
@@ -226,6 +226,12 @@ def _build_tensor(size, value=None):
     if value is None:
         value = size
     return torch.FloatTensor(size, size, size).fill_(value)
+
+
+def _build_multidim_tensor(dim, dim_size, value=None):
+    if value is None:
+        value = size
+    return torch.FloatTensor(size=[dim_size for _ in range(dim)]).fill_(value)
 
 
 class Barrier(object):
@@ -718,6 +724,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @skipIfRocm
     def test_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1372,6 +1379,111 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_gather_helper(group, group_id, rank)
 
+    def _run_all_gather_coalesced_and_verify(
+        self, output_tensor_lists, input_tensors, expected_tensors, group_id
+    ):
+        """
+        Helper that runs all_gather_coalesced and returns true if output
+        matches expectations.
+        """
+        dist.all_gather_coalesced(
+            output_tensor_lists, input_tensors, group_id)
+
+        for l1, l2 in zip(output_tensor_lists, expected_tensors):
+            for t1, t2 in zip(l1, l2):
+                if not torch.equal(t1, t2):
+                    return False
+        return True
+
+    def _test_all_gather_coalesced_helper(
+        self, group, group_id, rank
+    ):
+        # TODO: Instead we should probably go through _rank_not_in_group
+        # mechanism to disable sending tensors
+        if group_id is not None:
+            for test_case_id in range(2, 5):
+                # Make sure we create tensors of incompatible sizes, e.g.
+                # [1], [2x2], [3x3x3] ... to be sent in one batch
+                input_tensors = [
+                    _build_multidim_tensor(
+                        tensor_id, tensor_id, rank + tensor_id) for tensor_id in range(
+                            1, test_case_id)
+                ]
+                output_tensor_lists = [
+                    [
+                        _build_multidim_tensor(
+                            tensor_id, tensor_id, -1) for tensor_id in range(
+                                1, test_case_id)
+                    ] for _ in group
+                ]
+                expected_tensors = [
+                    [
+                        _build_multidim_tensor(
+                            tensor_id,
+                            tensor_id,
+                            rank_iter + tensor_id) for tensor_id in range(
+                                1, test_case_id)
+                    ] for rank_iter in group
+                ]
+                assert self._run_all_gather_coalesced_and_verify(
+                    output_tensor_lists, input_tensors,
+                    expected_tensors, group_id
+                ), "output tensors do not match expected ouputs"
+
+        self._barrier()
+
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+    def test_all_gather_coalesced_simple(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_gather_coalesced_helper(group, group_id, rank)
+
+    @skip_if_small_worldsize
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+    def test_all_gather_coalesced_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_gather_coalesced_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+    def test_all_gather_coalesced_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_gather_coalesced_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+    def test_all_gather_coalesced_with_empty(self):
+        group, group_id, rank = self._init_global_test()
+        input_tensors = [
+            rank * torch.ones([2, 2]),
+            torch.ones([0]),
+            (rank + 1) * torch.ones([3, 3]),
+            torch.ones([0]),
+            torch.ones([0])
+        ]
+        output_tensors_lists = [
+            [
+                -1 * torch.ones([2, 2]),
+                -1 * torch.ones([0]),
+                -1 * torch.ones([3, 3]),
+                -1 * torch.ones([0]),
+                -1 * torch.ones([0])
+            ] for _ in group
+        ]
+        expected_tensors = [
+            [
+                r * torch.ones([2, 2]),
+                torch.ones([0]),
+                (r + 1) * torch.ones([3, 3]),
+                torch.ones([0]),
+                torch.ones([0])
+            ] for r in group
+        ]
+        assert self._run_all_gather_coalesced_and_verify(
+            output_tensors_lists, input_tensors, expected_tensors, group_id)
+        self._barrier()
+
     # BARRIER
     def _test_barrier_helper(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None):
@@ -1412,6 +1524,7 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     @skip_if_no_gpu
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+    @skipIfRocm
     def test_barrier_group_cuda(self):
         group, group_id, rank = self._init_group_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1541,6 +1654,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports reduce multigpu")
     @skip_if_no_gpu
+    @skipIfRocm
     def test_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1786,6 +1900,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @skipIfRocm
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1800,6 +1915,54 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        # DDP does not support replicating BN layers within a process, hence
+        # testing with one module replica per process
+        gpus = [rank]
+
+        model = nn.BatchNorm1d(2)
+
+        # single gpu training setup
+        model_gpu = copy.deepcopy(model)
+        model_gpu.cuda(gpus[0])
+
+        # DDP training setup
+        model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP.cuda(gpus[0])
+        model_DDP = nn.parallel.DistributedDataParallel(
+            model_DDP, device_ids=gpus
+        )
+
+        local_bs = len(gpus) * 2
+        global_bs = int(WORLD_SIZE) * local_bs
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 2)
+        loss = nn.MSELoss()
+
+        # disabling cudnn.
+        # SyncBatchNorm goes through native_batch_norm kernel, this avoids the
+        # numerical issue created by the divergent code path.
+        with torch.backends.cudnn.flags(False):
+            # check two model parameters over 5 iterations
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_cpu.cuda(gpus[0]),
+                target.cuda(gpus[0]),
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True
+            )
+            self._barrier()
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")

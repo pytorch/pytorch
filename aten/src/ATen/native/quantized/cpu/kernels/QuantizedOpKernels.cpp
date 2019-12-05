@@ -524,18 +524,16 @@ void qavg_pool2d_nhwc_kernel(
         hend = std::min(hend, inputHeight);
         wend = std::min(wend, inputWidth);
 
-        int64_t size;
+        int64_t size = (hend - hstart) * (wend - wstart);
         int64_t divide_factor;
         if (divisor_override.has_value()) {
           divide_factor = divisor_override.value();
-          size = (hend - hstart) * (wend - wstart);
         } else {
           if (count_include_pad) {
             divide_factor = pool_size;
           } else {
             divide_factor = (hend - hstart) * (wend - wstart);
           }
-          size = divide_factor;
         }
 
         int64_t c = 0;

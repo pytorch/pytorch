@@ -339,8 +339,6 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  // opname_table_ has the same order as operator_table_.
-  std::vector<c10::OperatorName> opname_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
   int register_size_ = 0;
@@ -400,8 +398,8 @@ struct CodeImpl {
     return instructions_;
   }
 
-  const std::vector<c10::OperatorName>& opname_table() const {
-    return opname_table_;
+  const std::vector<Node*>& instructions_source() const {
+    return instructions_source_;
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
@@ -491,7 +489,6 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     insertInstruction(OP, operator_table_.size());
     operator_table_.emplace_back(getOperation(node));
-    opname_table_.emplace_back(node->schema().operator_name());
   }
 
   void emitWait(Node* node) {
@@ -848,13 +845,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+//         std::cout << "RUNNING ";
+//         frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
             af.operators[inst.X](stack);
             ++af.pc;
+            break;
+          case OPN:
+            AT_ERROR("OPN is currently supported in mobile mode only.");
             break;
           case LOAD:
             stack.emplace_back(reg(inst.X));
@@ -1044,23 +1044,38 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void formatStackTrace(std::ostream& out) {
-    for (size_t i = 0; i < frames.size(); ++i) {
+    std::string previous_fn_name = "";
+    for (int64_t i = frames.size() - 1; i >= 0; i--) {
       const Frame& frame = frames[frames.size() - 1 - i];
       size_t pc = (i == 0) ? frame.pc
                            : frame.pc -
               1; // make sure we report the call node, not the node after it
       Node* node = frame.function->instructions_source_[pc];
-      if (i > 0) {
-        out << "during call ";
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          p.second.print_with_context(
+              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+          previous_fn_name = p.first->name();
+        }
       }
-      node->sourceRange().highlight(out);
+      node->sourceRange().print_with_context(
+          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+      if (node->kind() == prim::CallFunction) {
+        previous_fn_name = node->inputs()
+                               .at(0)
+                               ->type()
+                               ->expect<FunctionType>()
+                               ->function()
+                               ->name();
+      }
     }
   }
 
   void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
     std::stringstream ss;
     ss << msg << "\n";
-    ss << "The above operation failed in interpreter, with the following stack trace:\n";
+    ss << "The above operation failed in interpreter.\n";
+    ss << "Traceback (most recent call last):\n";
     formatStackTrace(ss);
     if (future_) {
       future_->markCompleted(Future::FutureError(ss.str()));
@@ -1132,8 +1147,8 @@ const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
 }
 
-const std::vector<c10::OperatorName>& Code::opname_table() const {
-  return pImpl->opname_table();
+const std::vector<Node*>& Code::instructions_source() const {
+  return pImpl->instructions_source();
 }
 
 size_t Code::register_size() const {

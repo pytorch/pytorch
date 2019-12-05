@@ -126,7 +126,7 @@ Reducer::Reducer(
         // The gradient accumulator function is lazily initialized once.
         // Therefore we can use its presence in the autograd graph as
         // evidence that the parameter has participated in an iteration.
-        auto grad_accumulator = variable.grad_accumulator();
+        auto grad_accumulator = torch::autograd::impl::grad_accumulator(variable);
 
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
@@ -193,11 +193,11 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   if (grad.defined()) {
     // Ensure that the gradient type matches the bucket type.
     AT_ASSERTM(
-        grad.type() == bucket_view.type(),
+        grad.options().type_equal(bucket_view.options()),
         "Expected ",
-        bucket_view.type(),
+        bucket_view.toString(),
         ", got ",
-        grad.type());
+        grad.toString());
     // Assert that the grad tensor and the bucket don't share storage.
     // If they did, we could avoid the copy altogether.
     // The reason for not doing this is that existing code calls
@@ -454,11 +454,7 @@ void Reducer::initialize_buckets(
         }
 
         // Allocate bucket contents tensor.
-        // This must be a Variable because as of Apr 2019 there is still
-        // a distinction between the Tensor and Variable types, and it
-        // is not recommended (or sometimes even possible) to mix and match.
-        replica.contents = torch::autograd::make_variable(
-            at::empty({static_cast<long>(offset)}, options));
+        replica.contents = at::empty({static_cast<long>(offset)}, options);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -603,9 +599,7 @@ void Reducer::finalize_bucket_sparse(Bucket& bucket) {
     auto& replica = bucket.replicas[i];
     AT_ASSERT(replica.variables.size() == 1);
     auto& variable = replica.variables.front();
-    // The c10d API doesn't work with torch::autograd::Variable. We have to
-    // manually box it when assigning to the grad. See #19145.
-    variable.grad() = torch::autograd::make_variable(result[i]);
+    variable.grad() = result[i];
   }
 }
 

@@ -60,25 +60,33 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsi
 
 Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_elemt", [&] {
+  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  batch_norm_elemt_cuda_out(output, self, weight, bias, mean, invstd, epsilon);
+  return output;
+}
+
+Tensor& batch_norm_elemt_cuda_out(Tensor& output, const Tensor& self, const Tensor& weight, const Tensor& bias,
+                             const Tensor& mean, const Tensor& invstd, double epsilon) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_elemt", [&] {
       auto mean_st = mean.dtype();
       auto invstd_st = invstd.dtype();
       TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
         if (is_half_float) {
-          return batch_norm_elemt_cuda_template<at::Half, float, int32_t>(self, weight, bias, mean, invstd, epsilon);
+          batch_norm_elemt_cuda_template<at::Half, float, int32_t>(output, self, weight, bias, mean, invstd, epsilon);
         } else {
-          return batch_norm_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, weight, bias, mean, invstd, epsilon);
+          batch_norm_elemt_cuda_template<scalar_t, scalar_t, int32_t>(output, self, weight, bias, mean, invstd, epsilon);
         }
       } else {
         if (is_half_float) {
-          return batch_norm_elemt_cuda_template<at::Half, float, int64_t>(self, weight, bias, mean, invstd, epsilon);
+          batch_norm_elemt_cuda_template<at::Half, float, int64_t>(output, self, weight, bias, mean, invstd, epsilon);
         } else {
-          return batch_norm_elemt_cuda_template<scalar_t, scalar_t, int64_t>(self, weight, bias, mean, invstd, epsilon);
+          batch_norm_elemt_cuda_template<scalar_t, scalar_t, int64_t>(output, self, weight, bias, mean, invstd, epsilon);
         }
       }
     });
+    return output;
 }
 
 // accepting input(self) here to determine template data types, since running_mean/running_var are optional

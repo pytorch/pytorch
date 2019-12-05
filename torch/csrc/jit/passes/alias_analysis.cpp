@@ -337,6 +337,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
+    case prim::unchecked_cast:
       return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
@@ -345,20 +346,27 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      AT_ERROR("Analyzing prim::profile isn't yet implemented");
-      // TODO: simply mapping inputs' aliases to outputs'
-      // should work but a) we should probably avoid exposing
-      // prim::profile to optimizations b) the alias semantics
-      // might be more complicated than just mapAliases
-      // mapAliases(node->inputs(), node->outputs());
+      if (node->inputs().size() > 0) {
+        makePointerTo(node->output(), node->inputs().at(0));
+      }
+      return;
+    case prim::BailOut:
+      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
+                            prim::BailoutTemplate);
+      makePointerTo(node->output(), node->inputs().at(1));
+      return;
+    case prim::Guard:
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
       return analyzeConservative(node);
-    case prim::Print:
     case prim::Uninitialized:
+      giveFreshAlias(node->output());
+      return;
+    case prim::Print:
     case prim::isinstance:
       // These ops do nothing
       return;
@@ -1248,6 +1256,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallMethod,
       aten::wait,
       prim::isinstance,
+      prim::unchecked_cast,
   };
 
   // Operators that should not be used by alias analysis
@@ -1257,7 +1266,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Drop,
       at::onnx::Reshape,
       at::onnx::Shape,
-      prim::AutogradAnyNonZero,
       prim::AutogradAdd,
   };
 
