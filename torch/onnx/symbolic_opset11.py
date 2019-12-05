@@ -431,7 +431,7 @@ def flatten(g, input, start_dim, end_dim):
         if (end_dim == -1 or (end_dim is not None and end_dim == dim - 1)):
             return g.op("Flatten", input, axis_i=start_dim)
     elif start_dim == 0:
-        if  (end_dim == -2 or (end_dim is not None and end_dim == dim - 2)):
+        if (end_dim == -2 or (end_dim is not None and end_dim == dim - 2)):
             return g.op("Flatten", input, axis_i=end_dim + 1)
     # use Reshape for cases where the output shape is not 2D
     if not input.isCompleteTensor():
