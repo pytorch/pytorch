@@ -2,6 +2,25 @@
 #define THC_GENERIC_FILE "THCUNN/generic/MultiLabelMarginCriterion.cu"
 #else
 
+static inline void THNN_(MultiLabelMarginCriterion_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input, THCTensor *target) {
+  if (input->dim() <= 1) {
+    int dim = input->dim() == 0 ? 1 : input->size(0);
+    int target_size = target->dim() == 0 ? 1 : target->size(0);
+    TORCH_CHECK(!target->is_empty() && (target->dim() <= 1) && (target_size == dim),
+                "inconsistent target size: ", target->sizes(), " for input of size: ", input->sizes());
+  } else if (input->dim() == 2) {
+    int nframe = input->size(0);
+    int dim = input->size(1);
+    TORCH_CHECK(!target->is_empty() && (target->dim() == 2)
+                && (target->size(0) == nframe) && (target->size(1) == dim),
+                "inconsistent target size: ", target->sizes(), " for input of size: ", input->sizes());
+  } else {
+    TORCH_CHECK(false, "non-empty vector or matrix expected, got size: ", input->sizes());
+  }
+}
+
 // TODO: improve error messages
 void THNN_(MultiLabelMarginCriterion_updateOutput)(
            THCState *state,
@@ -11,6 +30,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
            THCTensor *istarget,
            int64_t reduction)
 {
+  THNN_(MultiLabelMarginCriterion_shapeCheck)(state, input, target);
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
@@ -20,8 +40,6 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   {
     int dim = input->dim() == 0 ? 1 : input->size(0);
     int target_size = target->dim() == 0 ? 1 : target->size(0);
-    THArgCheck(!target->is_empty() && (target->dim() <= 1) && (target_size == dim), 3,
-        "inconsistent target size");
     THCTensor_(resize1d)(state, output, 1);
 
     dim3 blocks(1);
@@ -42,9 +60,6 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   {
     int nframe = input->size(0);
     int dim = input->size(1);
-    THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size(0) == nframe)
-               && (target->size(1) == dim), 3, "inconsistent target size");
-
     dim3 blocks(input->size(0));
     dim3 threads(MULTILABELMARGIN_THREADS);
 
@@ -82,8 +97,9 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
       THCudaCheck(cudaGetLastError());
     }
   }
-  else
-    AT_ERROR("non-empty vector or matrix expected, got size: ", input->sizes());
+  else {
+    TORCH_INTERNAL_ASSERT(false, "non-empty vector or matrix expected (shouldn't get here)");
+  }
 
   THCTensor_(free)(state, input);
   THCIndexTensor_(free)(state, target);
@@ -149,8 +165,9 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         reduction == at::Reduction::Mean,
         reduction != at::Reduction::None);
   }
-  else
+  else {
     AT_ERROR("non-empty vector or matrix expected, got size: ", gradInput->sizes());
+  }
 
   THCudaCheck(cudaGetLastError());
 
