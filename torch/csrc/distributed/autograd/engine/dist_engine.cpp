@@ -227,7 +227,7 @@ void DistEngine::executeSendFunction(
     // TODO: we currently implicitly rely this stack frame not going away
     // before the rpcs complete (e.g. if we return the future and call
     // wait from the caller, tests will fail).
-    autogradContext->clearAndWaitForOutstandingRpcsAsync()->waitNoThrow();
+    autogradContext->clearAndWaitForOutstandingRpcsAsync()->wait();
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
@@ -270,7 +270,7 @@ void DistEngine::execute(const variable_list& roots) {
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
-  autogradContext->clearAndWaitForOutstandingRpcsAsync()->waitNoThrow();
+  autogradContext->clearAndWaitForOutstandingRpcsAsync()->wait();
 }
 
 void DistEngine::clearInitializedContextId(int64_t contextId) {

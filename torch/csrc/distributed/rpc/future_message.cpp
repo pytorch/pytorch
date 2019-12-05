@@ -36,7 +36,8 @@ void FutureMessage::markCompleted(Message message) {
     TORCH_CHECK(!completed());
     message_ = std::move(message);
     completed_ = true;
-    std::vector<Callback> cbs = std::move(callbacks_);
+    std::vector<Callback> cbs;
+    cbs.swap(callbacks_);
     lock.unlock();
     for (auto& callback : cbs) {
       callback(message_);
