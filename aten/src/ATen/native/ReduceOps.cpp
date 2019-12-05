@@ -764,7 +764,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
   return result;
 }
 
-static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> opt_dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
@@ -781,7 +781,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     Tensor real_in = self.real().to(dtype);
     Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor real_out_mean = at::empty({0}, self.options().dtype(dtype));
-    auto iter = make_reduction(fname, real_out_var, real_out_mean, real_in, dim, keepdim, dtype);
+    auto iter = make_reduction(fname, real_out_var, real_out_mean, real_in, opt_dim, keepdim, dtype);
     if (iter.numel() == 0) {
       real_out_var.fill_(NAN);
       real_out_mean.fill_(NAN);
@@ -791,7 +791,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     Tensor imag_in = self.imag().to(dtype);
     Tensor imag_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor imag_out_mean = at::empty({0}, self.options().dtype(dtype));
-    iter = make_reduction(fname, imag_out_var, imag_out_mean, imag_in, dim, keepdim, dtype);
+    iter = make_reduction(fname, imag_out_var, imag_out_mean, imag_in, opt_dim, keepdim, dtype);
     if (iter.numel() == 0) {
       imag_out_var.fill_(NAN);
       imag_out_mean.fill_(NAN);
@@ -803,7 +803,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     at::add_out(result2, real_out_mean, at::mul(imag_out_mean, std::complex<double>{0.0, 1.0}));
   } else {
     ScalarType dtype = get_dtype(result1, self, {}, true);
-    auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
+    auto iter = make_reduction(fname, result1, result2, self, opt_dim, keepdim, dtype);
     if (iter.numel() == 0) {
       result1.fill_(NAN);
       result2.fill_(NAN);
@@ -823,11 +823,11 @@ std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const
 }
 
 std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out("var_mean", result1, result2, self, {}, unbiased, false, false);
+  return std_var_mean_out("var_mean", result1, result2, self, c10::nullopt, unbiased, false, false);
 }
 
 std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out("std_mean", result1, result2, self, {}, unbiased, false, true);
+  return std_var_mean_out("std_mean", result1, result2, self, c10::nullopt, unbiased, false, true);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
