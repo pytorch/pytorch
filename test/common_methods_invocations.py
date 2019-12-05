@@ -536,8 +536,7 @@ def method_tests():
         ('norm', (S, S), (inf,), 'inf'),
         ('norm', (S, S), (-inf,), '-inf'),
         ('norm', (S, S), ('fro',), 'fro_default'),
-        # https://github.com/pytorch/pytorch/issues/30704
-        ('norm', (S, S), ('fro', [0, 1],), 'fro', (), (), [expectedFailureCUDA]),
+        ('norm', (S, S), ('fro', [0, 1],), 'fro'),
         ('norm', (S, S), ('nuc',), 'nuc', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('norm', (S, S, S), ('nuc', [1, 2]), 'nuc_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('norm', (S, S), (-1,), 'neg_1'),

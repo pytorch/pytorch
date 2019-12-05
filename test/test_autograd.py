@@ -25,7 +25,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
@@ -4037,7 +4037,13 @@ for test in method_tests():
 
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
-instantiate_device_type_tests(TestAutogradDeviceType, globals())
+instantiate_device_type_tests(
+    TestAutogradDeviceType,
+    globals(),
+    # Exclude ROCM for now, there are a lot of failures.  See
+    # https://github.com/pytorch/pytorch/issues/30845
+    except_for='cuda' if TEST_WITH_ROCM else None
+)
 
 if __name__ == '__main__':
     run_tests()

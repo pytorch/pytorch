@@ -17379,8 +17379,9 @@ class TestDocs(unittest.TestCase):
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
-# TODO: Decide if we get useful signal running the generated JIT autograd tests
-# on CUDA, and remove the except_for line in that case
+# NB: There isn't much utility in running these tests for CUDA, as the kernels
+# are exercised in test_autograd.py, and the JIT tests intention is to test the
+# JIT infrastructure around it, not the kernels themselves
 instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), except_for='cuda')
 
 for test in nn_functional_tests:
