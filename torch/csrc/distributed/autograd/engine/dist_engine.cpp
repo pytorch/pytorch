@@ -199,7 +199,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   }
 }
 
-void DistEngine::executeSendFunction(
+std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& sendFunction) {
   std::unique_lock<std::mutex> lock(initializedContextIdsLock_);
@@ -223,16 +223,14 @@ void DistEngine::executeSendFunction(
     // Run the autograd engine.
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
 
-    // Wait for all of the outstanding rpcs to complete.
-    // TODO: we currently implicitly rely this stack frame not going away
-    // before the rpcs complete (e.g. if we return the future and call
-    // wait from the caller, tests will fail).
-    autogradContext->clearAndWaitForOutstandingRpcsAsync()->wait();
+    // Return future for all of the outstanding rpcs to complete.
+    return autogradContext->clearAndWaitForOutstandingRpcsAsync();
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
         graphTask, sendFunction, torch::autograd::InputBuffer(0)));
+    return std::make_shared<rpc::FutureMessage>(rpc::Message());
   }
 }
 

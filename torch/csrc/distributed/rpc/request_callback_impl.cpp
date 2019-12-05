@@ -200,11 +200,19 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       // Attach the gradients to the send function.
       sendFunction->setGrads(gradientsCall.getGrads());
 
+      auto responseFuture = std::make_shared<rpc::FutureMessage>();
+
       // Now execute the autograd graph using the "distributed engine."
-      DistEngine::getInstance().executeSendFunction(
+      auto execFuture = DistEngine::getInstance().executeSendFunctionAsync(
           autogradContext, sendFunction);
 
-      return wrap(std::move(PropagateGradientsResp()).toMessage());
+      // Our response is satisfied when the rpcs come back.
+      execFuture->addCallback([responseFuture, messageId](const Message&) {
+        Message m = std::move(PropagateGradientsResp()).toMessage();
+        m.setId(messageId);
+        responseFuture->markCompleted(m);
+      });
+      return responseFuture;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
