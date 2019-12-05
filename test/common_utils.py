@@ -284,6 +284,9 @@ ALL_TENSORTYPES = [torch.float,
                    torch.double,
                    torch.half]
 
+# bfloat16 bringup is currently only available on ROCm
+# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
+# when bfloat16 bringup is complete on all platforms
 if TEST_WITH_ROCM:
     ALL_TENSORTYPES2 = [torch.float,
                         torch.double,
