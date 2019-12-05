@@ -5862,6 +5862,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(output3, output1)
             self.assertEqual(output3, output2)
 
+    @unittest.skipIf(not PY3, 'Warning is thrown but not caught in Python 2.7')
     def test_tensor_grad_warnings(self):
         dummy = torch.empty(1)
 
