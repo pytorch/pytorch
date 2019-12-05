@@ -25,9 +25,6 @@ def build_message(size):
         "BUILD_ENVIRONMENT", "n/a n/a n/a"
     ).split()
     os_name = os.uname()[0].lower()
-    pr = os.environ.get("CIRCLE_PR_NUMBER", "n/a")
-    build_num = os.environ.get("CIRCLE_BUILD_NUM", "n/a")
-    sha1 = os.environ.get("CIRCLE_SHA1", "n/a")
     if os_name == "darwin":
         os_name = "macos"
     return {
@@ -36,9 +33,10 @@ def build_message(size):
             "pkg_type": pkg_type,
             "py_ver": py_ver,
             "cu_ver": cu_ver,
-            "pr": pr,
-            "build": build_num,
-            "sha1": sha1,
+            "pr": os.environ.get("CIRCLE_PR_NUMBER"),
+            "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
+            "sha1": os.environ.get("CIRCLE_SHA1"),
+            "branch": os.environ.get("CIRCLE_BRANCH"),
         },
         "int": {
             "time": int(time.time()),
