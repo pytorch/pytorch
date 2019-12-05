@@ -9,10 +9,10 @@
 
 namespace torch {
 
-// NOTE [ Exposing names in `at::` to `torch::` ]
+// NOTE [ Exposing declarations in `at::` to `torch::` ]
 //
-// The following line `using namespace at;` is responsible for exposing all names declared in
-// `at::` namespace` to `torch::` namespace.
+// The following line `using namespace at;` is responsible for exposing all declarations in
+// `at::` namespace to `torch::` namespace.
 //
 // According to the rules laid out in
 // https://en.cppreference.com/w/cpp/language/qualified_lookup, section "Namespace members":
