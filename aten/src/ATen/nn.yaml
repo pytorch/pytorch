@@ -24,7 +24,7 @@
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: reduction != at::Reduction::None || self_->dim() == 0
+    output: reduction != at::Reduction::None || target_->dim() <= 1
     is_target: 'false'
 
 - name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
