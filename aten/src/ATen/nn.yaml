@@ -18,7 +18,7 @@
 - name: _thnn_multi_margin_loss(Tensor self, LongTensor target, Scalar p, Scalar margin, Tensor? weight, int64_t reduction)
   cname: MultiMarginCriterion
   scalar_check:
-    output: reduction != at::Reduction::None || target_->dim() == 0
+    output: 'false'
 
 - name: _thnn_multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=at::Reduction::Mean)
   cname: MultiLabelMarginCriterion
