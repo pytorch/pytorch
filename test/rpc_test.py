@@ -1199,9 +1199,9 @@ class RpcTest(RpcAgentTestFixture):
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
-        # This is for the below `dist.barrier`.
-        # For `RpcAgent` other than `ProcessGroupAgent`,
-        # no `_default_pg` is initialized.
+        # A barrier is needed to ensure that all RPCs are processed.
+        # Otherwise, some RPCs can timeout since the receiving end
+        # has terminated.
         if not dist.is_initialized():
             dist.init_process_group(
                 backend="gloo",

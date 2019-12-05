@@ -101,7 +101,7 @@ void set_data(const Tensor & self, const Tensor & new_data) {
       const auto prior_device = prior_accumulator->input_metadata(0).device();
       const auto new_device = new_data.device();
 
-      if (new_data.type() != self.type() || prior_device != new_device) {
+      if (!new_data.options().type_equal(self.options()) || prior_device != new_device) {
         autograd_meta->grad_accumulator_.reset();
       }
     }
