@@ -158,17 +158,13 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   }
 }
 
-IValue Unpickler::parse_ivalue(const TypePtr& known_type) {
+IValue Unpickler::parse_ivalue() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
-  if (known_type) {
-    restoreAccurateTypeTags(stack_[0], known_type);
-  } else {
-    restoreAccurateTypeTagsIfPossible(stack_[0]);
-  }
+  restoreAccurateTypeTagsIfPossible(stack_[0]);
   return stack_[0];
 }
 

@@ -276,7 +276,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
 
     torch::jit::Unpickler unpickler(
         metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
-    auto ival = unpickler.parse_ivalue(ListType::ofTensors());
+    auto ival = unpickler.parse_ivalue();
+    torch::jit::restoreAccurateTypeTags(ival, ListType::ofTensors());
     for (auto&& t : ival.toTensorList()) {
       tensors.emplace_back(std::move(t));
     }

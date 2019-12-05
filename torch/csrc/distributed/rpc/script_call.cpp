@@ -11,7 +11,12 @@ const std::string ScriptCall::ATEN_PREFIX_("aten::");
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
     std::vector<at::IValue>&& args)
-    : op_(std::move(op)), stack_(args) {}
+    : op_(std::move(op)), stack_(args) {
+      auto values_it = stack_.begin();
+      for (const Argument& arg : (*op_)->schema().arguments()) {
+        torch::jit::restoreAccurateTypeTags(*values_it++, arg.type());
+      }
+    }
 
 std::shared_ptr<Operator> ScriptCall::op() const {
   return *op_;
