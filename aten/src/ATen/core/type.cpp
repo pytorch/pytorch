@@ -104,8 +104,8 @@ GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;
 }
-QschemeTypePtr QschemeType::get() {
-  static auto value = QschemeType::create();
+QSchemeTypePtr QSchemeType::get() {
+  static auto value = QSchemeType::create();
   return value;
 }
 StringTypePtr StringType::get() {
