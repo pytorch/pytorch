@@ -67,7 +67,7 @@ inline void check_size_nonnegative(IntArrayRef size) {
 
 inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tensor) {
   TORCH_CHECK(at::scalar_tensor(n, tensor.options()).defined(),
-              "n is too large for result tensor type: '", tensor.type().toString(), "'");
+              "n is too large for result tensor type: '", tensor.toString(), "'");
 
   // Ensure sufficient precision for floating point representation.
   switch (tensor.scalar_type()) {

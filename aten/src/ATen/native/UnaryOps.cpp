@@ -267,7 +267,7 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
+           "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
@@ -278,7 +278,7 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
+           "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");

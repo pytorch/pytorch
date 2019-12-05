@@ -4,7 +4,7 @@
 namespace at { namespace native {
 
 void checkLongTensor(const Tensor& tensor) {
-  TORCH_CHECK(tensor.dim() == 1 && tensor.type().device_type() == at::kCPU && tensor.scalar_type() == at::kLong,
+  TORCH_CHECK(tensor.dim() == 1 && tensor.device().type() == at::kCPU && tensor.scalar_type() == at::kLong,
            "'lengths' argument should be a 1D CPU int64 tensor");
 }
 
