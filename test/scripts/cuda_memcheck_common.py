@@ -9,12 +9,9 @@ class ParseError(Exception):
 class Report:
     """A report is a container of errors, and a summary on how many errors are found"""
 
-    HEAD = 'ERROR SUMMARY: '
-    TAIL = ' errors'
-
     def __init__(self, text, errors):
         self.text = text
-        self.num_errors = int(text[len(self.HEAD):len(text) - len(self.TAIL)])
+        self.num_errors = int(text.strip().split()[2])
         self.errors = errors
         if len(errors) != self.num_errors:
             if len(errors) == 10000 and self.num_errors > 10000:
