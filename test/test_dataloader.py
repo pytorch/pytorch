@@ -983,6 +983,24 @@ class TestDataLoader(TestCase):
             self.assertEqual(a, b)
         # DataLoader should match len of the iterable-style dataset (if implemented)
         self.assertEqual(len(dataloader), len(dataset))
+        # When loading more than len(dataset) data, after accessing len(dataloader),
+        # we should get a warning. See NOTE [ IterableDataset and __len__ ].
+        dataset = CountingIterableDataset(20)
+        dataloader = DataLoader(dataset, num_workers=num_workers,
+                                worker_init_fn=set_faulthander_if_available)
+        it = iter(dataloader)
+        for _ in range(40):
+            self.assertNotWarn(lambda: next(it), "Should not warn before accessing len(dataloader)")
+        self.assertEqual(len(dataloader), len(dataset))
+        self.assertEqual(len(dataloader), 20)
+        it = iter(dataloader)
+        for _ in range(20):
+            self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
+        for _ in range(3):
+            self.assertWarnsRegex(
+                lambda: next(it),
+                r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
+                "Should always warn after exceeding length")
 
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
