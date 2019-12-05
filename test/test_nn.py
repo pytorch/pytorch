@@ -10319,6 +10319,10 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_update_stats(device)
 
+    def test_multi_margin_loss_errors(self, device):
+        self.assertRaises(RuntimeError,
+                          lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
+                                                                  torch.zeros(3, device=device)))
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
