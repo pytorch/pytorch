@@ -30,6 +30,16 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
 double getScaleFromInput(Node* input_node) {
   c10::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
+  std::unordered_set<std::string> noscale_ops = {"quantized::max_pool2d",
+                                                 "aten::relu",
+                                                 "prim::ListUnpack",
+                                                 "aten::split_with_sizes",
+                                                 "quantized::nchw2nhwc",
+                                                 "quantized::nhwc2nchw",
+                                                 "aten::slice",
+                                                 "aten::avg_pool2d",
+                                                 "quantized::cat",
+                                                 "prim::ListConstruct"};
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,
@@ -72,14 +82,7 @@ double getScaleFromInput(Node* input_node) {
   }
   // For the ops below the scale is not part of the op signature, so we traverse
   // up the graph to get the scale from its input when defined in the graph.
-  else if (
-      input_name == "quantized::max_pool2d" || input_name == "aten::relu" ||
-      input_name == "prim::ListUnpack" ||
-      input_name == "aten::split_with_sizes" ||
-      input_name == "quantized::nchw2nhwc" ||
-      input_name == "quantized::nhwc2nchw" || input_name == "aten::slice" ||
-      input_name == "aten::avg_pool2d" || input_name == "quantized::cat" ||
-      input_name == "prim::ListConstruct") {
+  else if (noscale_ops.find(input_name) != noscale_ops.end()) {
     return getScaleFromInput(input_node->inputs()[0]->node());
   }
   TORCH_INTERNAL_ASSERT(
@@ -268,14 +271,15 @@ void insertPermutesHelper(
     auto op_node = match_vmap.at(vmap.at("r"))->node();
     auto input_node = match_vmap.at(vmap.at("r"))->node()->inputs()[0]->node();
 
-    Node* permute_node = graph->create(
+    Node* permute_node_before = graph->create(
         Symbol::fromQualString("quantized::nchw2nhwc"), {input_node->output()});
-    permute_node->insertBefore(op_node);
+    permute_node_before->insertBefore(op_node);
     op_node->removeInput(0);
-    op_node->insertInput(0, permute_node->output());
+    op_node->insertInput(0, permute_node_before->output());
 
     Node* permute_node_after = graph->create(
-        Symbol::fromQualString("quantized::nhwc2nchw"), {input_node->output()});
+        Symbol::fromQualString("quantized::nhwc2nchw"),
+        {op_node->outputs()[0]});
     permute_node_after->insertAfter(op_node);
     auto v = op_node->outputs().at(0);
     v->replaceAllUsesWith(permute_node_after->outputs().at(0));
