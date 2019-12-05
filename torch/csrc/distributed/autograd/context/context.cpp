@@ -115,12 +115,12 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
   lock.unlock();
 
   struct State {
-    explicit State(int32_t count) : remaining(count) {}
+    explicit State(int32_t count)
+        : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
     std::shared_ptr<rpc::FutureMessage> future;
     std::atomic<int32_t> remaining;
   };
   auto state = std::make_shared<State>(outStandingRpcs.size());
-  state->future = std::make_shared<rpc::FutureMessage>();
   for (auto& rpc : outStandingRpcs) {
     rpc->addCallback([state](const rpc::Message&) {
       if (--state->remaining == 0) {
