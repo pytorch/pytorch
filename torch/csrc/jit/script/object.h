@@ -58,8 +58,8 @@ struct TORCH_API Object {
     if (auto r = _ivalue()->type()->findAttributeSlot(name)) {
       return _ivalue()->getSlot(*r);
     }
-    if (auto v = _ivalue()->type()->getConstant(name)) {
-      return v;
+    if (_ivalue()->type()->hasConstant(name)) {
+      return *_ivalue()->type()->getConstant(name);
     }
     TORCH_CHECK(
         false,
@@ -73,8 +73,8 @@ struct TORCH_API Object {
     if (auto r = _ivalue()->type()->findAttributeSlot(name)) {
       return _ivalue()->getSlot(*r);
     }
-    if (auto v = _ivalue()->type()->getConstant(name)) {
-      return v;
+    if (_ivalue()->type()->hasConstant(name)) {
+      return *_ivalue()->type()->getConstant(name);
     }
     return or_else;
   }
