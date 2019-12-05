@@ -10,6 +10,10 @@ class Report:
     """A report is a container of errors, and a summary on how many errors are found"""
 
     def __init__(self, text, errors):
+        # text is something like
+        # ERROR SUMMARY: 1 error
+        # or
+        # ERROR SUMMARY: 2 error
         self.text = text
         self.num_errors = int(text.strip().split()[2])
         self.errors = errors
