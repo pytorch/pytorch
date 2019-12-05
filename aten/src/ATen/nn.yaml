@@ -25,7 +25,7 @@
   buffers: [is_target]
   scalar_check:
     output: reduction != at::Reduction::None || self_->dim() == 0
-    is_target: target_->dim() == 0
+    is_target: 'false'
 
 - name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: ClassNLLCriterion
