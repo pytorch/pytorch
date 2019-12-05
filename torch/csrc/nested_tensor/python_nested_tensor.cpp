@@ -220,144 +220,31 @@ static PyObject* _ListNestedTensorVariable_device(
   END_HANDLE_TH_ERRORS
 }
 
-// TODO: This could be multithreaded by inlining invokeScriptFunctionFromPython
-// and accumulating all AutoNoGIL code.
 static _NestedNode apply_jit_function(
     const _NestedNode nested_node,
     Function& fn) {
   if (nested_node._children.size() == 0) {
     Variable child_variable = nested_node._variable_node._variable;
-    // PyObject* child = THPVariable_Wrap(child_variable);
-    // pybind11::object var =
-    //     pybind11::reinterpret_borrow<pybind11::object>(child);
-
-    // auto args = (torch::jit::tuple_slice(py::make_tuple(self)));
-    // auto kwargs = py::dict();
-    auto tracing_state = tracer::getTracingState();
-    c10::optional<IValue> no_opt = c10::nullopt;
-    TORCH_CHECK(!tracing_state, "doesnt support tracing");
-    // if (!tracing_state) {
-    //
-    // auto stack = createStackForSchema(
-    //     fn.getSchema(),
-    //     std::move(args),
-    //     std::move(kwargs),
-    //     std::move(no_opt));
-
-    // inline Stack createStackForSchema(
-    //     const FunctionSchema& schema,
-    //     const tuple_slice& args,
-    //     const py::kwargs& kwargs,
-    //     c10::optional<IValue> self) {
-    // size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
-    // if (all_arguments > schema.arguments().size()) {
-    //   throw std::runtime_error(c10::str(
-    //       schema.name(),
-    //       "() expected at most ",
-    //       schema.arguments().size(),
-    //       " argument(s) but received ",
-    //       all_arguments,
-    //       " argument(s). Declaration: ",
-    //       schema));
-    // }
-
     auto schema = fn.getSchema();
     Stack stack;
     stack.reserve(schema.arguments().size());
 
-    // NOTE: Assuming this is a pure function not a methdo (no self!)
-    // if (self) {
-    //   push(stack, std::move(*self));
-    // }
-
-    // First push all positional args.
-    // for (size_t i = 0; i < args.size(); ++i) {
-    //   // Use the type information from the schema to convert the PyObject.
-    //   push(stack, argumentToIValue(schema, stack.size(), args[i]));
-    // }
-
+    // NOTE: Assuming this is a pure function not a method (no self!)
     // NOTE: We assume there is only one input to the function. A single
-    // variable. NOTE: No named tensors and no sparse variables! push(stack,
-    // argumentToIValue(schema, stack.size(), var)); NOTE: We know the value of
+    // variable.
+    // NOTE: No named tensors and no sparse variables!
+    // NOTE: We know the IValue of
     // the argument, there is no need to cast it around.
     push(stack, child_variable);
 
-    // // Now for every remaining non-positional argument in the schema, look
-    // for it
-    // // in the kwargs dict and push it if found, or use its default value if
-    // it
-    // // has one.
-    // size_t consumed_kwargs = 0;
-    // for (size_t i = stack.size(); i < schema.arguments().size(); ++i) {
-    //   const auto& arg = schema.arguments()[i];
-    //   if (kwargs.contains(arg.name().c_str())) {
-    //     push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
-    //     consumed_kwargs += 1;
-    //   } else if (arg.default_value()) {
-    //     push(stack, *arg.default_value());
-    //   } else {
-    //     throw std::runtime_error(c10::str(
-    //         schema.name(),
-    //         "() is missing value for argument '",
-    //         arg.name(),
-    //         "'. Declaration: ",
-    //         schema));
-    //   }
-    // }
-
-    // if (consumed_kwargs != kwargs.size()) {
-    //   std::vector<std::string> names;
-    //   for (const auto& kwarg : kwargs) {
-    //     names.emplace_back(py::cast<std::string>(kwarg.first));
-    //   }
-    //   schema.findErrorInKwargs(names);
-    // }
-
-    // return stack;
-    // }
-
-    py::gil_scoped_release release;
     fn.run(stack);
     Variable result = stack.back().toTensor();
-    // auto result = InterpreterState(Code(fn.graph())).runAsync(stack);
-    py::gil_scoped_acquire acquire;
-    auto result_node =  _NestedNode(result);
+    auto result_node = _NestedNode(result);
     return result_node;
-    // TORCH_CHECK(
-    //     stack.size() > 0,
-    //     "Expected values in the stack after execution but found none");
-    // return result_node;
-
-    // } else {
-    //   py::object result = runAndInsertCall(
-    //       fn,
-    //       args,
-    //       kwargs,
-    //       no_opt,
-    //       [&](Graph& graph, const script::MatchedSchema& match) {
-    //         return graph.insertFunctionCall(&fn, match);
-    //       });
-    //   return _FutureNestedNode(result.cast<Variable>());
-    // }
   } else {
     std::vector<_NestedNode> result;
     for (size_t i = 0; i < nested_node._children.size(); i++) {
       result.push_back(apply_jit_function(nested_node._children[i], fn));
-    }
-    return _NestedNode(result);
-  }
-}
-
-static _NestedNode get_future(_FutureNestedNode future_nested_node) {
-  if (future_nested_node._children.size() == 0) {
-    future_nested_node._future_variable->wait();
-    py::object result =
-        toPyObject(future_nested_node._future_variable->value());
-    return _NestedNode(result.cast<Variable>());
-  } else {
-    std::vector<_NestedNode> result;
-    for (size_t i = 0; i < future_nested_node._children.size(); i++) {
-      result.push_back(get_future(future_nested_node._children[i]));
     }
     return _NestedNode(result);
   }
@@ -372,12 +259,12 @@ static PyObject* jit_apply_function(PyObject* module, PyObject* args) {
   auto& nt = reinterpret_cast<_ListNestedTensorVariable*>(nt_)->cdata;
   pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
   auto sfn = torch::jit::script::as_function(ofn).value();
+  auto tracing_state = tracer::getTracingState();
+  TORCH_CHECK(!tracing_state, "doesnt support tracing");
   Function& callee = *sfn.function_;
-  // _FutureNestedNode future_nested_node =
-  // apply_jit_function(nt.get_structure(), callee); return
-  // _ListNestedTensorVariable_Wrap(
-  //     _ListNestedTensor(get_future(future_nested_node)));
+  py::gil_scoped_release release;
   _NestedNode nested_node = apply_jit_function(nt.get_structure(), callee);
+  py::gil_scoped_acquire acquire;
   return _ListNestedTensorVariable_Wrap(_ListNestedTensor(nested_node));
 }
 

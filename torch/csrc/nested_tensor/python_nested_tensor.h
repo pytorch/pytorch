@@ -45,17 +45,6 @@ struct _NestedNode {
   const bool is_leaf;
 };
 
-struct _FutureNestedNode {
-  _FutureNestedNode() : is_leaf(true) {}
-  _FutureNestedNode(const std::vector<_FutureNestedNode> children)
-      : _children(children), is_leaf(false) {}
-  _FutureNestedNode(c10::intrusive_ptr<c10::ivalue::Future> future)
-      : _future_variable(future), is_leaf(true) {}
-  const std::vector<_FutureNestedNode> _children;
-  c10::intrusive_ptr<c10::ivalue::Future> _future_variable;
-  const bool is_leaf;
-};
-
 static inline size_t _num_tensor(const _NestedNode& meta_node) {
   size_t result = 0;
   for (size_t i = 0; i < meta_node._children.size(); i++) {
