@@ -28,6 +28,7 @@ import re
 import sys
 import textwrap
 import warnings
+import weakref
 
 from collections import OrderedDict
 
@@ -1275,12 +1276,16 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
     else:
         _check_directly_compile_overloaded(obj)
+        maybe_already_compiled_fn = _try_get_jit_cached_key(obj)
+        if maybe_already_compiled_fn:
+            return maybe_already_compiled_fn
         ast = get_jit_def(obj)
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        _set_jit_cache(obj, fn)
         return fn
 
 def interface(obj):
@@ -1969,6 +1974,28 @@ _builtin_ops = [
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
 ]
+
+
+
+# Caching: we currently cache compilation of free functions.
+# To cache free functions we hold a weak ref to the function object and
+# map to the compiled fn's qualified name.
+# In the future we could consider caching more types of objects so that
+# aliasing is preserved across separate compilations of the same object.
+
+_jit_caching_layer = weakref.WeakKeyDictionary()
+
+def _try_get_jit_cached_key(key):
+    qual_name = _jit_caching_layer.get(key, None)
+    if qual_name:
+        return _python_cu.find_function(qual_name)
+    else:
+        return None
+
+def _set_jit_cache(key, value):
+    # only free functions currently supported
+    assert isinstance(value, torch.jit.ScriptFunction)
+    _jit_caching_layer[key] = value.qualified_name
 
 
 # lazily built to ensure the correct initialization order
