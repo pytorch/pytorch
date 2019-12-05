@@ -40,16 +40,15 @@ class OptimizerW(Optimizer):
 
         for group in self.param_groups:
             lr = group['lr']
-            _group = dict(group)
-            weight_decay = _group.pop('weight_decay')
+            weight_decay = group['weight_decay']
             for p in group['params']:
                 if p.grad is None:
                     continue
 
                 if p.grad.is_sparse:
-                    update = self.get_sparse_update(p, **_group)
+                    update = self.get_sparse_update(p, **group)
                 else:
-                    update = self.get_update(p, **_group)
+                    update = self.get_update(p, **group)
 
                 p.mul_(1 - weight_decay * lr).add_(-lr, update)
 

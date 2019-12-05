@@ -178,8 +178,8 @@ class Optimizer(object):
             and returns the loss. Optional for most optimizers.
 
         .. note::
-            Unless otherwise specified, this function should not modify the
-            ``.grad`` field of the parameters.
+            If L2 weight_decay > 0, this function will update the ``.grad``
+            field of the parameters correspondingly.
         """
         loss = None
         if closure is not None:
@@ -188,13 +188,20 @@ class Optimizer(object):
 
         for group in self.param_groups:
             lr = group['lr']
+            weight_decay = group['weight_decay']
             for p in group['params']:
                 if p.grad is None:
                     continue
 
                 if p.grad.is_sparse:
+                    if weight_decay > 0:
+                        raise RuntimeError("weight_decay option is not compatible with sparse gradients")
+
                     update = self.get_sparse_update(p, **group)
                 else:
+                    if weight_decay > 0:
+                        p.grad.add_(weight_decay, p)
+
                     update = self.get_update(p, **group)
 
                 p.add_(-lr, update)

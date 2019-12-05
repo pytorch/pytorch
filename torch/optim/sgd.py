@@ -74,11 +74,8 @@ class SGD(Optimizer):
                 for p in group['params']:
                     self.state[p]['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, par, momentum=0, dampening=0, weight_decay=0, nesterov=False, **_):
+    def get_update(self, par, momentum=0, dampening=0, nesterov=False, **_):
         update = par.grad
-
-        if weight_decay > 0:
-            update = update.add(weight_decay, par)
 
         if momentum > 0:
             state = self.state[par]

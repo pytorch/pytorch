@@ -23,11 +23,9 @@ class LazyAdam(Adam):
     def get_update(self, par, **kwargs):
         raise ValueError("LazyAdam algorithm only applicable to sparse gradients")
 
-    def get_sparse_update(self, par, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
+    def get_sparse_update(self, par, betas=(.9, .999), eps=1e-8, amsgrad=False, **_):
         if amsgrad:
             raise NotImplementedError("AMSGrad not implemented for sparse gradients")
-        if weight_decay > 0:
-            raise RuntimeError("weight_decay option is not compatible with sparse gradients")
 
         grad = par.grad.coalesce()  # the update is non-linear so indices must be unique
         state = self.state[par]
