@@ -1,7 +1,6 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include "benchmark/benchmark.h"
-
 #include <map>
 #include <memory>
 #include <set>
@@ -45,11 +44,9 @@ static void BM_SharedPtrCtorDtor(benchmark::State& state) {
 }
 BENCHMARK(BM_SharedPtrCtorDtor);
 
-// todo: parameterize the array length
-static const int kLength = 1000;
-
 static void BM_IntrusivePtrArray(benchmark::State& state) {
   intrusive_ptr<Foo> var = make_intrusive<Foo>(0);
+  const size_t kLength = state.range(0);
   std::vector<intrusive_ptr<Foo> > vararray(kLength);
   while (state.KeepRunning()) {
     for (int i = 0; i < kLength; ++i) {
@@ -60,10 +57,11 @@ static void BM_IntrusivePtrArray(benchmark::State& state) {
     }
   }
 }
-BENCHMARK(BM_IntrusivePtrArray);
+BENCHMARK(BM_IntrusivePtrArray)->RangeMultiplier(2)->Range(16, 4096);
 
 static void BM_SharedPtrArray(benchmark::State& state) {
   std::shared_ptr<Bar> var = std::make_shared<Bar>(0);
+  const size_t kLength = state.range(0);
   std::vector<std::shared_ptr<Bar> > vararray(kLength);
   while (state.KeepRunning()) {
     for (int i = 0; i < kLength; ++i) {
@@ -74,7 +72,7 @@ static void BM_SharedPtrArray(benchmark::State& state) {
     }
   }
 }
-BENCHMARK(BM_SharedPtrArray);
+BENCHMARK(BM_SharedPtrArray)->RangeMultiplier(2)->Range(16, 4096);
 } // namespace
 
 
