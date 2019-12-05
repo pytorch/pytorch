@@ -543,8 +543,7 @@ if(USE_FBGEMM)
 
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
-    set(fbgemm_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/fbgemm/include)
-    message(STATUS "fcgemm include dirs: " "${fbgemm_INCLUDE_DIRS}" ", ${CMAKE_INSTALL_PREFIX}")
+    set(fbgemm_INCLUDE_DIRS ${FBGEMM_SOURCE_DIR}/include)
     install(DIRECTORY ${fbgemm_INCLUDE_DIRS}
       DESTINATION ${CMAKE_INSTALL_PREFIX}
       FILES_MATCHING PATTERN "*.h")
