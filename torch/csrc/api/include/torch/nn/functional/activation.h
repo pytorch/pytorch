@@ -586,7 +586,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     );
     attn_output_weights = attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
   }
-  attn_output_weights = softmax(attn_output_weights, /*dim=*/1);
+  attn_output_weights = F::softmax(attn_output_weights, /*dim=*/-1);
   attn_output_weights = dropout(attn_output_weights, /*p=*/dropout_p, /*training=*/training);
   auto attn_output = torch::bmm(attn_output_weights, v);
   TORCH_CHECK(attn_output.sizes() == IntArrayRef({bsz * num_heads, tgt_len, head_dim}));

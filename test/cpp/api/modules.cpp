@@ -3331,20 +3331,21 @@ namespace detail {
 
 TEST_F(ModulesTest, MultiheadAttention) {
   using namespace ::detail;
-  // test_multihead_attn_add_bias_kv
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
 
   // test_multihead_attn_add_zero_attn
   _multihead_attn_test_helper(
     /*add_key_padding_mask=*/false,
     /*add_bias_kv=*/false,
     /*add_zero_attn=*/true,
+    /*saved_kv=*/false,
+    /*same_embed_dim=*/false
+  );
+
+  // test_multihead_attn_add_bias_kv
+  _multihead_attn_test_helper(
+    /*add_key_padding_mask=*/false,
+    /*add_bias_kv=*/true,
+    /*add_zero_attn=*/false,
     /*saved_kv=*/false,
     /*same_embed_dim=*/false
   );
@@ -3388,13 +3389,16 @@ TEST_F(ModulesTest, MultiheadAttention) {
     /*same_embed_dim=*/false
   );
 
-  // test_multihead_attn_all_arguments2
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/false
+  ASSERT_THROWS_WITH(
+    // test_multihead_attn_all_arguments2
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/true,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/false
+    ),
+    "bias cannot be added to static key"
   );
 
   // test_multihead_attn_all_arguments3
