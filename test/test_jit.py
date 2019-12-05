@@ -4496,6 +4496,11 @@ def foo(x):
             def fn():
                 return [1, 1.2]
 
+        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
+            @torch.jit.script
+            def fn():
+                return [1, torch.ones(1, 2)]
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 

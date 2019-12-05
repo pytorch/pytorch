@@ -276,8 +276,6 @@ MatchTypeReturn matchTypeVariables(
       if (maybe_tuple_unified) {
         return matchTypeVariables(
             lt_formal->getElementType(), *maybe_tuple_unified, type_env);
-      } else {
-        return ss.str();
       }
     }
 

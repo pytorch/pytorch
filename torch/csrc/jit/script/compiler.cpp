@@ -2764,12 +2764,19 @@ struct to_ir {
         // if the list is non-empty use type_of(list[0])
         // otherwise assume it is List[Tensor]
         TypePtr elem_type = TensorType::get();
-        if (type_hint && type_hint->kind() == TypeKind::ListType) {
-          elem_type = type_hint->expect<ListType>()->getElementType();
+        if (type_hint) {
+          if (type_hint->kind() == TypeKind::ListType) {
+            elem_type = type_hint->expect<ListType>()->getElementType();
+          } else {
+            // If the type hint was not a List[T] throw an error
+            throw ErrorReport(tree)
+                << "Expected a List type hint but instead got "
+                << type_hint->python_str();
+          }
         } else if (!values.empty()) {
           std::stringstream ss;
           auto types = fmap(values, [](const Value* v) { return v->type(); });
-          auto maybe_elem_type = unifyTypeList(std::move(types), ss);
+          auto maybe_elem_type = unifyTypeList(types, ss);
           if (!maybe_elem_type) {
             throw ErrorReport(tree) << ss.str();
           }
