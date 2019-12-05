@@ -192,16 +192,17 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   propagate_names(result, outnames);
 }
 
-void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef reduced_dims, bool keepdim) {
-  if (keepdim) {
+void propagate_names_for_reduction(Tensor& result, const Tensor& src, c10::optional<IntArrayRef> reduced_dims, bool keepdim) {
+  // This actually means "full reduction"
+  if (!reduced_dims.has_value()) {
+    return;
+  }
+  IntArrayRef reduced_dims_value = reduced_dims.value();
+  if (keepdim || reduced_dims_value.size() == 0) {
     propagate_names(result, src);
     return;
   }
-  // This actually means "full reduction"
-  if (reduced_dims.size() == 0) {
-    return;
-  }
-  propagate_names_except(result, src, reduced_dims);
+  propagate_names_except(result, src, reduced_dims_value);
 }
 
 void propagate_names(Tensor& result, const Tensor& src) {

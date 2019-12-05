@@ -96,7 +96,7 @@ CAFFE2_API void propagate_names(Tensor& result, const Tensor& src);
 CAFFE2_API void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
 
 // Used for reduction ops that have a `keepdim` arg.
-CAFFE2_API void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
+CAFFE2_API void propagate_names_for_reduction(Tensor& result, const Tensor& src, c10::optional<IntArrayRef> excluded_idxs, bool keepdim);
 
 CAFFE2_API void propagate_names_for_expand(Tensor& result, const Tensor& self);
 
