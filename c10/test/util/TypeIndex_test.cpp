@@ -53,7 +53,8 @@ static_assert(
     "");
 
 #if !defined(__GNUC__)
-// GCC doesn't like the type name tests at compile time
+// GCC doesn't like the type name tests at compile time, see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66639
+// TODO Make this work for GCC
 
 namespace test_top_level_name {
 static_assert(
