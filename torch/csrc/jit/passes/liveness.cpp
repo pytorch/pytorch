@@ -72,6 +72,15 @@ struct LivenessAnalyzer {
     return vec;
   }
 
+  void extendLiveness(Block *b, const SparseBitVector &loop_block) {
+    for (Node *lit : b->nodes()) {
+      liveness_sets_.at(lit) |= loop_block;
+      for (Block *ib : lit->blocks()) {
+        extendLiveness(ib, loop_block);
+      }
+    }
+  }
+
   SparseBitVector processBlock(Block* b, SparseBitVector liveness) {
     // block outputs are the uses
     auto block_outputs = toSparseBitVector(b->outputs());
@@ -102,9 +111,7 @@ struct LivenessAnalyzer {
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
         // everything that is alive at the beginning of the loop
         // needs to be extended until the end of the loop
-        for (Node* lit : it->blocks()[0]->nodes()) {
-          liveness_sets_.at(lit) |= loop_block;
-        }
+        extendLiveness(it->blocks()[0], loop_block);
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
         auto true_liveness = processBlock(it->blocks()[0], liveness);
