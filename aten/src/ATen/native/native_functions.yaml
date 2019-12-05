@@ -4923,10 +4923,16 @@
     CUDA: legacy::cuda::_th_remainder
 
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_min_out
+    CUDA: legacy::cuda::_th_min_out
 
 - func: min.other(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_min
+    CUDA: legacy::cuda::_th_min
 
 - func: min(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -4938,10 +4944,16 @@
   supports_named_tensor: True
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_max_out
+    CUDA: legacy::cuda::_th_max_out
 
 - func: max.other(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_max
+    CUDA: legacy::cuda::_th_max
 
 - func: max(Tensor self) -> Tensor
   use_c10_dispatcher: full

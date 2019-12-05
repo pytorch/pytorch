@@ -214,14 +214,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
     }
     case ParameterType::SCALAR:
-      if (THPUtils_checkScalar(obj)) {
-        return true;
-      }
-      if (THPVariable_Check(obj)) {
-        auto & var = ((THPVariable*)obj)->cdata;
-        return !var.requires_grad() && var.dim() == 0;
-      }
-      return false;
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
