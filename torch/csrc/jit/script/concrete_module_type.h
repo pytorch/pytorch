@@ -11,22 +11,6 @@ namespace torch {
 namespace jit {
 namespace script {
 
-bool isSimpleConstant(const IValue& v);
-
-IValue getValidConstantFromTuple(const IValue& v);
-
-IValue getValidConstant(const std::string& attr_name,
-                        const IValue& v);
-
-template <typename T>
-IValue getValidConstant(const std::string& attr_name,
-                        const c10::List<T>& vs) {
-  std::vector<IValue> valid_list;
-  std::transform(vs.begin(), vs.end(), std::back_inserter(valid_list),
-                 [attr_name](T v) -> IValue { return getValidConstant(attr_name, v); });
-  return c10::ivalue::Tuple::create(valid_list);
-}
-
 enum class IterableModuleKind { NONE, LIST, DICT };
 class ConcreteModuleType;
 
