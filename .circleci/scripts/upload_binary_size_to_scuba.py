@@ -16,14 +16,16 @@ def get_size(file_dir):
         file_name = glob.glob(os.path.join(file_dir, "*"))[0]
         return os.stat(file_name).st_size
     except:
-        logging.exception("error getting file from " + file_dir)
+        logging.exception(f"error getting file from: {file_dir}")
         return 0
 
 
 def build_message(size):
-    pkg_type, py_ver, cu_ver, *_ = os.environ.get(
-        "BUILD_ENVIRONMENT", "n/a n/a n/a"
-    ).split()
+    pkg_type, py_ver, cu_ver, *_ = os.environ.get("BUILD_ENVIRONMENT", "").split() + [
+        None,
+        None,
+        None,
+    ]
     os_name = os.uname()[0].lower()
     if os_name == "darwin":
         os_name = "macos"
