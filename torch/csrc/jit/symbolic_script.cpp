@@ -1226,24 +1226,25 @@ const std::vector<std::string> functions = {
         def AD_interpolate_backward(grad,
                                     input,
                                     mode: str,
-                                    align_corners: bool):
+                                    align_corners: bool,
+                                    scale_factor: List[float]):
             output_size = grad.size()[2:]
             input_size = input.size()
             input_dim = len(input_size)
             if input_dim == 3 and mode == 'nearest':
-                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size, -1.0)
+                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size, scale_factor[0])
             elif input_dim == 4 and mode == 'nearest':
-                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size, -1.0, -1.0)
+                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size, scale_factor[0], scale_factor[1])
             elif input_dim == 5 and mode == 'nearest':
-                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size, -1.0, -1.0, -1.0)
+                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size, scale_factor[0], scale_factor[1], scale_factor[2])
             elif input_dim == 3 and mode == 'linear':
-                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners, -1.0)
+                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners, scale_factor[0])
             elif input_dim == 4 and mode == 'bilinear':
-                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners, -1.0, -1.0)
+                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners, scale_factor[0], scale_factor[1])
             elif input_dim == 5 and mode == 'trilinear':
-                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners, -1.0, -1.0, -1.0)
+                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners, scale_factor[0], scale_factor[1], scale_factor[2])
             elif input_dim == 4 and mode == 'bicubic':
-                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners, -1.0, -1.0)
+                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners, scale_factor[0], scale_factor[1])
             elif input_dim == 3 and mode == 'area':
                 grad_input = AD_adaptive_avg_pool1d_backward(grad, input, output_size)
             elif input_dim == 4 and mode == 'area':
@@ -1261,12 +1262,20 @@ const std::vector<std::string> functions = {
                             size: Optional[int],
                             scale_factor: Optional[List[float]],
                             mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                input_dim = len(input.size())
+                if scale_factor is None or not use_scale_factor:
+                    scales = [-1.0 for i in range(input_dim-2)]
+                else:
+                    scales = [scale_factor[i] for i in range(input_dim-2)]
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
@@ -1274,12 +1283,20 @@ const std::vector<std::string> functions = {
                             size: Optional[List[int]],
                             scale_factor: Optional[List[float]],
                             mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                input_dim = len(input.size())
+                if scale_factor is None or not use_scale_factor:
+                    scales = [-1.0 for i in range(input_dim-2)]
+                else:
+                    scales = [scale_factor[i] for i in range(input_dim-2)]
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
@@ -1287,12 +1304,20 @@ const std::vector<std::string> functions = {
                             size: Optional[int],
                             scale_factor: Optional[float],
                             mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                input_dim = len(input.size())
+                if scale_factor is None or not use_scale_factor:
+                    scales = [-1.0 for i in range(input_dim-2)]
+                else:
+                    scales = [scale_factor for i in range(input_dim-2)]
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
@@ -1300,12 +1325,20 @@ const std::vector<std::string> functions = {
                             size: Optional[List[int]],
                             scale_factor: Optional[float],
                             mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                input_dim = len(input.size())
+                if scale_factor is None or not use_scale_factor:
+                    scales = [-1.0 for i in range(input_dim-2)]
+                else:
+                    scales = [scale_factor for i in range(input_dim-2)]
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
       )",

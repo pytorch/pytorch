@@ -2501,7 +2501,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
         if scale_factor is not None:
             if use_scale_factor is None:
-                is_float_scale_factor = any(not scale.is_integer() for scale in _ntuple(dim)(scale_factor))
+                is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
                 if is_float_scale_factor:
                     warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
                                   "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "

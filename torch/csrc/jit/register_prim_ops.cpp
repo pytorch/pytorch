@@ -3429,8 +3429,7 @@ at::Tensor interpolate(
     }
   }
 
-  if(use_scale_factor)
-  {
+  if(use_scale_factor) {
     if (scale_factors.isDouble()) {
       scale_factors_1 = static_cast<float>(scale_factors.toDouble());
       scale_factors_2 = static_cast<float>(scale_factors.toDouble());
