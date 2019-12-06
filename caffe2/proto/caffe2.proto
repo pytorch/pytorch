@@ -8,7 +8,7 @@ package caffe2;
 // (2) We do not use extension because that used to create quite some conflicts
 //     in Caffe's protobuf design.
 // (3) We have not used any proto3 specific features, such as Any or Map. This
-//     is mainly for backward compability purposes but we may consider using
+//     is mainly for backward compatibility purposes but we may consider using
 //     those in the future.
 
 // ExternalDataProto stores the pointer to the content of TensorProto

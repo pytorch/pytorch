@@ -50,7 +50,7 @@ typedef struct mz_zip_archive mz_zip_archive;
 //    the reader can still read files that were compressed.
 // 2. It provides a getRecordOffset function which returns the offset into the
 //    raw file where file data lives. If the file was written with PyTorchStreamWriter
-//    it is guarenteed to be 64 byte aligned.
+//    it is guaranteed to be 64 byte aligned.
 
 // PyTorchReader/Writer handle checking the version number on the archive format
 // and ensure that all files are written to a archive_name directory so they
@@ -91,7 +91,7 @@ namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x2L;
-constexpr uint64_t kProducedFileFormatVersion = 0x1L;
+constexpr uint64_t kProducedFileFormatVersion = 0x2L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;
