@@ -932,7 +932,7 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         "prim::AutogradAnyNonZero(...) -> int",
+         "prim::AutogradAnyNonZero(...) -> bool",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {
@@ -945,7 +945,9 @@ RegisterOperators reg(
                  }
                } else if (v.isTensorList()) {
                  for (const at::Tensor& t : v.toTensorListRef()) {
-                   result = true;
+                   if (t.defined()) {
+                     result = true;
+                   }
                  }
                  if (result) {
                    break;
