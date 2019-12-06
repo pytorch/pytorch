@@ -274,16 +274,6 @@ Tensor& sum_out(Tensor& result, const Tensor& self, c10::optional<ScalarType> op
   return sum_out_impl(result, self, c10::nullopt, false, opt_dtype);
 }
 
-IntArrayRef get_all_dims(const Tensor &tensor) {
-  size_t num_dims = tensor.dim();
-  long int dims_vector[num_dims];
-  for (size_t dim = 0; dim < num_dims; dim++) {
-    dims_vector[dim] = dim;
-  }
-  IntArrayRef dim(dims_vector, &dims_vector[num_dims]);
-  return dim;
-}
-
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   Tensor result;
   return at::native::sum_out(result, self, dtype);
@@ -535,7 +525,6 @@ Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdi
 }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
-  // return at::native::norm(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
   Tensor result;
   return norm_out(result, self, p, dtype);
 }
