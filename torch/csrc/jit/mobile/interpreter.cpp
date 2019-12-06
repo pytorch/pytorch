@@ -2,6 +2,11 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <ATen/core/operator_name.h>
 
+#if defined(PYTORCH_MOBILE_OBSERVER)
+#include <torch/csrc/autograd/record_function.h>
+#include <torch/csrc/jit/mobile/observer.h>
+#endif
+
 namespace torch{
 namespace jit{
 char const * toString(OpCode op);
@@ -42,6 +47,16 @@ bool InterpreterState::run(Stack& stack) {
 //    }
     switch (inst.op) {
       case OP: {
+#if defined(PYTORCH_MOBILE_OBSERVER)
+        if (auto debug_info = at::getThreadLocalDebugInfo()) {
+          if (auto* mobile_debug_info = dynamic_cast<MobileDebugInfo*>(
+            debug_info.get())) {
+            mobile_debug_info->setOpIdx(pc);
+          }
+        }
+        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+#endif
+
         c10::Dispatcher::singleton().callBoxed(*code_->operators_[inst.X], &stack);
         ++pc;
       } break;

@@ -27,6 +27,7 @@ class TORCH_API Module {
     return run_method("forward", std::move(inputs));
   }
   Function* find_method(const std::string& basename) const;
+  std::string name() {return object_->name();}
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::shared_ptr<CompilationUnit> cu_;
