@@ -35,15 +35,17 @@ THP_API PyObject* _ListNestedTensorVariableClass;
 // The implicit contract is that, if there are no children, variable_node is
 // defined.
 struct _NestedNode {
-  _NestedNode() : is_leaf(true) {}
+  _NestedNode() : payload() {}
   _NestedNode(const std::vector<_NestedNode> children)
-      : _children(children), is_leaf(false) {}
-  _NestedNode(_VariableNode variable_node)
-      : _variable_node(variable_node), is_leaf(true) {}
+      : _children(children), payload() {}
+  _NestedNode(c10::IValue _payload) : payload(_payload) {}
   const std::vector<_NestedNode> _children;
+  inline bool is_leaf() const {
+    return _children.size() == 0;
+  }
   // TODO: Make this const?
-  _VariableNode _variable_node;
-  const bool is_leaf;
+  // _VariableNode _variable_node;
+  c10::IValue payload;
 };
 
 static inline size_t _num_tensor(const _NestedNode& meta_node) {
@@ -56,7 +58,7 @@ static inline size_t _num_tensor(const _NestedNode& meta_node) {
 
 static inline int64_t _numel(const _NestedNode& meta_node) {
   if (meta_node._children.size() == 0) {
-    return meta_node._variable_node._variable.numel();
+    return meta_node.payload.toTensor().numel();
   } else {
     int64_t result = 0;
     for (size_t i = 0; i < meta_node._children.size(); i++) {
@@ -122,8 +124,8 @@ static inline bool _verify_variables(
 
 static inline _NestedNode _get_structure(PyObject* tensors) {
   if (THPVariable_Check(tensors)) {
-    torch::autograd::Variable variable = THPVariable_Unpack(tensors);
-    return _NestedNode(_VariableNode(variable));
+    auto variable = THPVariable_Unpack(tensors);
+    return _NestedNode(variable);
   } else {
     std::vector<_NestedNode> meta_nodes;
     Py_ssize_t i, n;
@@ -141,13 +143,13 @@ static inline _NestedNode _get_structure(PyObject* tensors) {
   }
 }
 
-static inline torch::autograd::Variable _get_first_variable(_NestedNode nested_node) {
+static inline at::Tensor _get_first_variable(_NestedNode nested_node) {
   const _NestedNode* start = &nested_node;
-  while (start->_children.size()) {
+  while (!start->is_leaf()) {
     start = &start->_children[0];
   }
-  if (start->_variable_node._variable.defined()) {
-    return start->_variable_node._variable;
+  if (!start->payload.isNone()) {
+    return start->payload.toTensor();
   } else {
     PyObject* fake_args = PyTuple_New(0);
     PyObject* fake_kwargs = PyDict_New();
@@ -160,28 +162,17 @@ static inline torch::autograd::Variable _get_first_variable(_NestedNode nested_n
   }
 }
 
-static inline std::vector<at::IntArrayRef> _get_flat_sizes(
-    _NestedNode nested_node) {
-  if (nested_node._children.size() == 0) {
-    return std::vector<at::IntArrayRef>(
-        {nested_node._variable_node._variable.sizes()});
-  } else {
-    std::vector<at::IntArrayRef> flat_sizes;
-    for (size_t i = 0; i < nested_node._children.size(); i++) {
-      auto flat_sizes_i = _get_flat_sizes(nested_node._children[i]);
-      for (size_t j = 0; j < flat_sizes_i.size(); j++) {
-        flat_sizes.push_back(flat_sizes_i[j]);
-      }
-    }
-    return flat_sizes;
-  }
-}
-
 template <typename T, class F>
 static inline T map(_NestedNode nested_node, F fn) {
-  if (nested_node._children.size() == 0) {
-    T new_nested_node(_VariableNode(fn(nested_node._variable_node._variable)));
-    return new_nested_node;
+  if (nested_node.is_leaf()) {
+    // TODO: For now we assume the user doesn't want to apply her function if
+    // the payload is None.
+    if (nested_node.payload.isNone()) {
+      return _NestedNode();
+    } else {
+      T new_nested_node(fn(nested_node.payload));
+      return new_nested_node;
+    }
   } else {
     std::vector<T> new_children;
     for (size_t i = 0; i < nested_node._children.size(); i++) {
@@ -191,28 +182,13 @@ static inline T map(_NestedNode nested_node, F fn) {
   }
 }
 
-template <typename T, class F, class G>
-static inline T map_more(_NestedNode nested_node, F fn, G gfn) {
-  if (nested_node._children.size() == 0) {
-    T result = fn(nested_node._variable_node._variable);
-    return result;
-  } else {
-    std::vector<T> new_children;
-    for (size_t i = 0; i < nested_node._children.size(); i++) {
-      new_children.push_back(T(map_more<T>(nested_node._children[i], fn, gfn)));
-    }
-    return gfn(new_children);
-  }
-}
-
 template <class F>
 static inline void apply2(
     _NestedNode nested_node1,
     _NestedNode nested_node2,
     F fn) {
   if (nested_node1._children.size() == 0) {
-    fn(nested_node1._variable_node._variable,
-       nested_node2._variable_node._variable);
+    fn(nested_node1.payload.toTensor(), nested_node2.payload.toTensor());
   } else {
     for (size_t i = 0; i < nested_node1._children.size(); i++) {
       apply2(nested_node1._children[i], nested_node2._children[i], fn);
@@ -220,9 +196,10 @@ static inline void apply2(
   }
 }
 
-static inline torch::autograd::Variable _NestedNode_to_tensor(const _NestedNode& nested_node) {
-  if (nested_node._children.size() == 0) {
-    return nested_node._variable_node._variable;
+static inline torch::autograd::Variable _NestedNode_to_tensor(
+    const _NestedNode& nested_node) {
+  if (nested_node.is_leaf()) {
+    return nested_node.payload.toTensor();
   } else {
     std::vector<at::Tensor> variables;
     for (_NestedNode node : nested_node._children) {
@@ -243,14 +220,27 @@ struct TORCH_API _ListNestedTensor {
   int64_t element_size() {
     return _first_variable.element_size();
   }
+  _NestedNode nested_size() {
+    return map<_NestedNode>(
+        _structure, [&](c10::IValue tensor) -> at::IntArrayRef {
+          return tensor.toTensor().sizes();
+        });
+  }
+  _NestedNode nested_stride() {
+    return map<_NestedNode>(
+        _structure, [&](c10::IValue tensor) -> at::IntArrayRef {
+          return tensor.toTensor().strides();
+        });
+  }
   _ListNestedTensor to(
       at::TensorOptions options,
       bool non_blocking,
       bool copy,
       c10::optional<c10::MemoryFormat> memory_format) {
     return _ListNestedTensor(
-        map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
-          return tensor.to(options, non_blocking, copy, memory_format);
+        map<_NestedNode>(_structure, [&](c10::IValue tensor) -> at::Tensor {
+          return tensor.toTensor().to(
+              options, non_blocking, copy, memory_format);
         }));
   }
   _ListNestedTensor to(
@@ -259,8 +249,8 @@ struct TORCH_API _ListNestedTensor {
       bool copy,
       c10::optional<c10::MemoryFormat> memory_format) {
     return _ListNestedTensor(
-        map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
-          return tensor.to(dtype, non_blocking, copy, memory_format);
+        map<_NestedNode>(_structure, [&](c10::IValue tensor) -> at::Tensor {
+          return tensor.toTensor().to(dtype, non_blocking, copy, memory_format);
         }));
   }
   _ListNestedTensor to(
@@ -270,29 +260,33 @@ struct TORCH_API _ListNestedTensor {
       bool copy,
       c10::optional<c10::MemoryFormat> memory_format) {
     return _ListNestedTensor(
-        map<_NestedNode>(_structure, [&](at::Tensor tensor) -> at::Tensor {
-          return tensor.to(device, dtype, non_blocking, copy, memory_format);
+        map<_NestedNode>(_structure, [&](c10::IValue tensor) -> at::Tensor {
+          return tensor.toTensor().to(
+              device, dtype, non_blocking, copy, memory_format);
         }));
   }
   _ListNestedTensor pin_memory() {
-    return _ListNestedTensor(map<_NestedNode>(
-        _structure,
-        [](at::Tensor tensor) -> at::Tensor { return tensor.pin_memory(); }));
+    return _ListNestedTensor(
+        map<_NestedNode>(_structure, [](c10::IValue tensor) -> at::Tensor {
+          return tensor.toTensor().pin_memory();
+        }));
   }
   _ListNestedTensor grad() {
-    return _ListNestedTensor(map<_NestedNode>(
-        _structure,
-        [](at::Tensor tensor) -> at::Tensor { return tensor.grad(); }));
+    return _ListNestedTensor(
+        map<_NestedNode>(_structure, [](c10::IValue tensor) -> at::Tensor {
+          return tensor.toTensor().grad();
+        }));
   }
   _ListNestedTensor detach() {
-    return _ListNestedTensor(map<_NestedNode>(
-        _structure,
-        [](at::Tensor tensor) -> at::Tensor { return tensor.detach(); }));
+    return _ListNestedTensor(
+        map<_NestedNode>(_structure, [](c10::IValue tensor) -> at::Tensor {
+          return tensor.toTensor().detach();
+        }));
   }
   _ListNestedTensor requires_grad_(bool requires_grad) {
     return _ListNestedTensor(map<_NestedNode>(
-        _structure, [requires_grad](at::Tensor tensor) -> at::Tensor {
-          return tensor.requires_grad_(requires_grad);
+        _structure, [requires_grad](c10::IValue tensor) -> at::Tensor {
+          return tensor.toTensor().requires_grad_(requires_grad);
         }));
   }
   void backward(
@@ -302,8 +296,7 @@ struct TORCH_API _ListNestedTensor {
     apply2(
         _structure,
         gradient.get_structure(),
-        [retain_graph, create_graph](
-            at::Tensor& tensor1, const at::Tensor& tensor2) {
+        [retain_graph, create_graph](at::Tensor tensor1, at::Tensor tensor2) {
           tensor1.backward(tensor2, retain_graph, create_graph);
         });
   }
@@ -355,9 +348,9 @@ struct TORCH_API _ListNestedTensor {
     return _structure;
   }
   // TODO: Implement these and call into them isntead of implementing them
+  // separately in Variable dispatch functions.
   // _ListNestedTensor to - it's a pain due to the 100s of to overloads
-  // std::vector<py::object> nested_size();
-  // std::vector<py::object> nested_stride();
+  // py::tuple size(int64_t dim);
   // separately in Variable dispatch functions.
   // std::vector<py::object> unbind();
   // std::string __str__();
@@ -366,7 +359,7 @@ struct TORCH_API _ListNestedTensor {
 
  private:
   const _NestedNode _structure;
-  const torch::autograd::Variable _first_variable;
+  at::Tensor _first_variable;
 };
 
 struct TORCH_API _ListNestedTensorVariable {

@@ -28,6 +28,25 @@ inline PyObject* wrap_list(std::vector<PyObject*> list) {
   return r.release();
 }
 
+inline PyObject* wrap_nested_node(_NestedNode nested_node) {
+  if (nested_node.is_leaf()) {
+    // TODO: Add wider support.
+    if (nested_node.payload.isIntList()) {
+      return wrap(nested_node.payload.toIntListRef());
+    }
+    if (nested_node.payload.isNone()) {
+      return PyTuple_New(0);
+    }
+    return wrap(nested_node.payload.toTensor());
+  } else {
+    std::vector<PyObject*> result;
+    for (size_t i = 0; i < nested_node._children.size(); i++) {
+      result.push_back(wrap_nested_node(nested_node._children[i]));
+    }
+    return wrap_list(result);
+  }
+}
+
 inline PyObject* wrap_nt(
     torch::nested_tensor::_ListNestedTensor nested_tensor) {
   // TODO: Necessary to create new object?
@@ -40,24 +59,12 @@ PyObject* _ListNestedTensorVariableClass = nullptr;
 
 PyObject* _ListNestedTensorVariable_nested_size(PyObject* self_) {
   auto& self = reinterpret_cast<_ListNestedTensorVariable*>(self_)->cdata;
-  if (self.nested_dim() == 0) {
-    return PyTuple_New(0);
-  }
-  return map_more<PyObject*>(
-      self.get_structure(),
-      [](at::Tensor tensor) -> PyObject* { return wrap(tensor.sizes()); },
-      [](std::vector<PyObject*> list) -> PyObject* { return wrap_list(list); });
+  return wrap_nested_node(self.nested_size());
 }
 
 PyObject* _ListNestedTensorVariable_nested_stride(PyObject* self_) {
   auto& self = reinterpret_cast<_ListNestedTensorVariable*>(self_)->cdata;
-  if (self.nested_dim() == 0) {
-    return PyTuple_New(0);
-  }
-  return map_more<PyObject*>(
-      self.get_structure(),
-      [](at::Tensor tensor) -> PyObject* { return wrap(tensor.strides()); },
-      [](std::vector<PyObject*> list) -> PyObject* { return wrap_list(list); });
+  return wrap_nested_node(self.nested_stride());
 }
 
 PyObject* _ListNestedTensorVariable_to(
@@ -102,11 +109,11 @@ PyObject* _ListNestedTensorVariable_unbind(PyObject* self_) {
     throw python_error();
   }
   for (size_t i = 0; i < children.size(); i++) {
-    if (children[i].is_leaf) {
+    if (children[i].is_leaf()) {
       if (PyList_SetItem(
               return_list,
               i,
-              THPVariable_Wrap(children[i]._variable_node._variable)) == -1) {
+              THPVariable_Wrap(children[i].payload.toTensor())) == -1) {
         throw python_error();
       }
     } else {
@@ -138,13 +145,10 @@ static PyObject* _ListNestedTensorVariable_pynew(
   if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &listObj)) {
     throw std::runtime_error("invalid arguments");
   }
-  if (false) {
-    if (PyObject_Length(listObj) > 0) {
-      Variable first_variable = _get_first_variable(listObj);
-      if (!_verify_variables(first_variable, listObj)) {
-        throw std::runtime_error("Invalid list of Tensors");
-      }
-    }
+  if (PyObject_Length(listObj) > 0) {
+    Variable first_variable = _get_first_variable(listObj);
+    TORCH_CHECK(
+        _verify_variables(first_variable, listObj), "Invalid list of Tensors");
   }
   return _ListNestedTensorVariable_NewWithVar(
       type, _ListNestedTensor(_get_structure(listObj)));
@@ -225,7 +229,7 @@ static _NestedNode apply_jit_function(
     Function& fn) {
   bool all_leaf = true;
   for (size_t i = 0; i < nested_nodes.size(); i++) {
-    all_leaf = all_leaf && nested_nodes[i].is_leaf;
+    all_leaf = all_leaf && nested_nodes[i].is_leaf();
   }
   if (all_leaf) {
     // NOTE: Assuming this is a pure function not a method (no self!)
@@ -236,7 +240,7 @@ static _NestedNode apply_jit_function(
     Stack stack;
     stack.reserve(nested_nodes.size());
     for (size_t i = 0; i < nested_nodes.size(); i++) {
-      push(stack, nested_nodes[i]._variable_node._variable);
+      push(stack, nested_nodes[i].payload.toTensor());
     }
     fn.run(stack);
     Variable result = stack.back().toTensor();
@@ -246,10 +250,10 @@ static _NestedNode apply_jit_function(
     bool broadcastable = true;
     size_t num_children = 0;
     for (size_t i = 0; i < nested_nodes.size(); i++) {
-      if (!nested_nodes[i].is_leaf) {
+      if (!nested_nodes[i].is_leaf()) {
         if (num_children > 0) {
-          broadcastable =
-              broadcastable && (num_children == nested_nodes[i]._children.size());
+          broadcastable = broadcastable &&
+              (num_children == nested_nodes[i]._children.size());
         } else {
           num_children = nested_nodes[i]._children.size();
         }
@@ -260,7 +264,7 @@ static _NestedNode apply_jit_function(
     for (size_t i = 0; i < num_children; i++) {
       std::vector<_NestedNode> local_args;
       for (size_t j = 0; j < nested_nodes.size(); j++) {
-        if (nested_nodes[j].is_leaf) {
+        if (nested_nodes[j].is_leaf()) {
           local_args.push_back(nested_nodes[j]);
         } else {
           local_args.push_back(nested_nodes[j]._children[i]);
@@ -318,7 +322,7 @@ static std::string _NestedNode___str__(const _NestedNode& nested_node) {
   std::stringstream result;
   if (nested_node._children.size() == 0) {
     PyObject* objectsRepresentation =
-        PyObject_Str(THPVariable_Wrap(nested_node._variable_node._variable));
+        PyObject_Str(THPVariable_Wrap(nested_node.payload.toTensor()));
     result << THPUtils_unpackString(objectsRepresentation);
     return result.str();
   } else {
