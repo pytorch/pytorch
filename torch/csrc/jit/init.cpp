@@ -52,6 +52,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/serialization.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -456,34 +457,39 @@ void initJITBindings(PyObject* module) {
       return size_;
     }
 
+    THPObjectPtr getMemview(void* buf, size_t n) const {
+#if PY_MAJOR_VERSION >= 3
+      THPObjectPtr memview(PyMemoryView_FromMemory(
+          reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
+#else
+      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
+#endif
+      if (!memview) {
+        throw python_error();
+      }
+      return memview;
+    }
+
     size_t read(uint64_t pos, void* buf, size_t n, const char* what)
         const override {
       // Seek to desired position
       buffer_.attr("seek")(start_offset_ + pos);
 
       if (use_readinto_) {
-        // auto bytes_wrapper = py:(reinterpret_cast<char*>(buf), n);
-        // auto bytes_wrapper =
-        //     py::memoryview(py::bytes(reinterpret_cast<char*>(buf), n));
-        // auto res = buffer_.attr("readinto")(bytes_wrapper);
-        auto bytes_like = py::module::import("io").attr("BytesIO")(py::bytes(reinterpret_cast<char*>(buf), n));
-        auto c = py::capsule()
-        auto res = buffer_.attr("readinto")();
-        // auto res = buffer_.attr("readinto")(bytes_like);
-        // auto res = buffer_.attr("readinto")(PyBytes_FromStringAndSize());
-        if (res.is_none()) {
-          return 0;
+        auto memview = getMemview(buf, n);
+        THPObjectPtr res(
+            PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get()));
+        if (res) {
+          return PyLong_AsSsize_t(res.get());
         }
-        return py::cast<size_t>(res);
-      } else {
-        // Read bytes into `buf` from the buffer
-        std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
-        std::copy(
-            bytes.data(),
-            bytes.data() + bytes.size(),
-            reinterpret_cast<char*>(buf));
-        return bytes.size();
       }
+      // Read bytes into `buf` from the buffer
+      std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
+      std::copy(
+          bytes.data(),
+          bytes.data() + bytes.size(),
+          reinterpret_cast<char*>(buf));
+      return bytes.size();
     }
 
     py::object buffer_;

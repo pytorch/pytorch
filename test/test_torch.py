@@ -4449,15 +4449,9 @@ class _TestTorchMixin(object):
 
         f = io.BytesIO()
         torch.save(a, f)
+        print('size is', f.tell())
         f.seek(0)
-        orig = f.readinto
-        print('f is', f)
-        def new_read(*args):
-            print('hi')
-            orig(*args)
-        f.readinto = new_read
         data = FilelikeMock(f.read(), has_readinto=True)
-        print('data is', data)
 
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
