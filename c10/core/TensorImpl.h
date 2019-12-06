@@ -477,21 +477,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * If `condition_when_zero_dim` is true, and the tensor is a 1-dim, 1-size
-   * tensor, reshape the tensor into a 0-dim tensor (scalar).
-   *
-   * This helper function is called from generated wrapper code, to help
-   * "fix up" tensors that legacy code didn't generate in the correct shape.
-   * For example, suppose that we have a legacy function 'add' which produces
-   * a tensor which is the same shape as its inputs; however, if the inputs
-   * were zero-dimensional, it produced a 1-dim 1-size tensor (don't ask).
-   * result->maybe_zero_dim(lhs->dim() == 0 && rhs->dim() == 0) will be called,
-   * correctly resetting the dimension to 0 when when the inputs had 0-dim.
-   *
-   * As we teach more and more of TH to handle 0-dim correctly, this function
-   * will become less necessary.  At the moment, it is often called from functions
-   * that correctly handle the 0-dim case, and is just dead code in this case.
-   * In the glorious future, this function will be eliminated entirely.
+   *  DONT CALL THIS.  It will go away very soon.
    */
   virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
 
