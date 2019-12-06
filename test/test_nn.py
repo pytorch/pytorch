@@ -6089,6 +6089,18 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    # test hardtanh backward froo large tensor
+    def test_hardtanh_backward(self):
+        x = torch.randn(128, 10000, requires_grad=True)
+        grad = torch.randn(128, 10000)
+        z = torch.zeros(128, 10000)
+        y = F.hardtanh(x)
+        y.backward(grad)
+        # ref backward path for hardtanh
+        mask = (x > -1) & (x < 1)
+        x_grad_ref = torch.where(mask, grad, z)
+        self.assertEqual(x.grad, x_grad_ref)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
@@ -10319,6 +10331,10 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_update_stats(device)
 
+    def test_multi_margin_loss_errors(self, device):
+        self.assertRaises(RuntimeError,
+                          lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
+                                                                  torch.zeros(3, device=device)))
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
