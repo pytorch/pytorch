@@ -8,6 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/EnableNamedTensor.h>
 
 namespace {
@@ -162,6 +163,13 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
 #endif
   return self;
 }
+
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
 
 DEFINE_DISPATCH(copy_stub);
 

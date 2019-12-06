@@ -1,11 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/cuda/Resize.cuh>
 #include <ATen/native/ResizeCommon.h>
 
 namespace at {
 namespace native {
+namespace {
 
 Tensor& resize_cuda_(
     Tensor& self,
@@ -30,5 +31,13 @@ Tensor& resize_cuda_(
   }
   return self;
 }
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(resize_cuda_), &resize_cuda_>(TensorTypeId::CUDATensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
+
+} // namespace
 } // namespace native
 } // namespace at
