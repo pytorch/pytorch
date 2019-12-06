@@ -13,7 +13,7 @@ except ImportError:
     from tools.shared.module_loader import import_module
     TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
 
-# [CHECK THIS] this is a hack. should be fixed later on
+#logissue
 FUNCTION_TEMPLATE_ARANGE = CodeTemplate("""\
 inline at::Tensor ${name}(${collapsed_formals}) {
   ${pre_record_trace}

@@ -16,12 +16,10 @@ Tensor empty_affine_quantized_cpu(
     double scale,
     int64_t zero_point,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-   /* [CHECK THIS]
   TORCH_CHECK(
-      options.has_dtype(),
+      dtype.has_value(),
       "Must provide data type for Tensor creation functions.");
-  */
-
+ 
  const auto options = TensorOptions()
         .dtype(dtype)
         .layout(layout)
@@ -43,14 +41,13 @@ Tensor empty_per_channel_affine_quantized_cpu(
     int64_t axis,
     c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  /* [CHECK THIS]
   TORCH_CHECK(
-      options.has_dtype(),
+      dtype.has_value(),
       "Must provide data type for Tensor creation functions.");
   TORCH_CHECK(
-      options.dtype() == kQInt8 || options.dtype() == kQUInt8,
+      dtype.value() == kQInt8 || dtype.value() == kQUInt8,
       "Supported data type for tensor creation is int8 or uint8");
-*/
+
     const auto options = TensorOptions()
         .dtype(dtype)
         .layout(layout)
