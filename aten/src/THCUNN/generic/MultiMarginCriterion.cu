@@ -66,7 +66,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
 
     if (reduction == at::Reduction::None)
     {
-      THCTensor_(resize1d)(state, output, input->size(0));
+      THCTensor_(resizeAs)(state, output, target);
       if (p == 1)
       {
         cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
