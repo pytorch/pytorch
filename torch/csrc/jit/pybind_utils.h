@@ -357,6 +357,8 @@ inline IValue toIValue(
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::IntType:
+    case TypeKind::LayoutType:
+    case TypeKind::ScalarTypeType:
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);

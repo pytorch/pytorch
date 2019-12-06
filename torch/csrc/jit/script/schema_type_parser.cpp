@@ -16,10 +16,12 @@ using c10::FloatType;
 using c10::FutureType;
 using c10::GeneratorType;
 using c10::IntType;
+using c10::LayoutType;
 using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
+using c10::ScalarTypeType;
 using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
@@ -34,8 +36,8 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
       {"Dimname", StringType::get()},
-      {"ScalarType", IntType::get()},
-      {"Layout", IntType::get()},
+      {"ScalarType", ScalarTypeType::get()},
+      {"Layout", LayoutType::get()},
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
       {"QScheme", IntType::get()},

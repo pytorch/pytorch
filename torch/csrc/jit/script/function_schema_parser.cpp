@@ -244,6 +244,8 @@ struct SchemaParser {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::LayoutType:
+      case TypeKind::ScalarTypeType:
         return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::DeviceObjType: {
@@ -252,6 +254,18 @@ struct SchemaParser {
         return c10::Device(device_text);
         break;
       }
+      // case TypeKind::LayoutType: {
+      //   auto device_text =
+      //       parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
+      //   return c10::Layout(device_text);
+      //   break;
+      // }
+      // case TypeKind::ScalarTypeType: {
+      //   auto device_text =
+      //       parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
+      //   return c10::ScalarType(device_text);
+      //   break;
+      // }
       case TypeKind::ListType: {
         auto elem_kind = arg_type->cast<ListType>()->getElementType();
         if (L.cur().kind == TK_IDENT) {

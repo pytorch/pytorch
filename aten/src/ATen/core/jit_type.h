@@ -49,7 +49,9 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(FunctionType)           \
   _(ClassType)              \
   _(CapsuleType)            \
-  _(InterfaceType)
+  _(InterfaceType)          \
+  _(LayoutType)             \
+  _(ScalarTypeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1677,6 +1679,50 @@ struct CAFFE2_API InterfaceType : public NamedType {
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
+};
+
+struct LayoutType;
+using LayoutTypePtr = std::shared_ptr<LayoutType>;
+// This type represents a Generator
+struct CAFFE2_API LayoutType : public Type {
+  static LayoutTypePtr create() {
+    return LayoutTypePtr(
+        new LayoutType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Layout";
+  }
+  static const TypeKind Kind = TypeKind::LayoutType;
+  // global singleton
+  static LayoutTypePtr get();
+
+ private:
+  LayoutType() : Type(TypeKind::LayoutType) {}
+};
+
+struct ScalarTypeType;
+using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
+// This type represents a Generator
+struct CAFFE2_API ScalarTypeType : public Type {
+  static ScalarTypeTypePtr create() {
+    return ScalarTypeTypePtr(
+        new ScalarTypeType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "ScalarType";
+  }
+  static const TypeKind Kind = TypeKind::ScalarTypeType;
+  // global singleton
+  static ScalarTypeTypePtr get();
+
+ private:
+  ScalarTypeType() : Type(TypeKind::ScalarTypeType) {}
 };
 
 } // namespace c10
