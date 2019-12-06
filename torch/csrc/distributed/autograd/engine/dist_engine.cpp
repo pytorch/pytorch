@@ -25,7 +25,7 @@ static constexpr char* kEngineCPUQueueSize =
 
 namespace {
 
-static std::atomic<int> num_threads_blocked_in_backward = 0;
+static std::atomic<int> num_threads_blocked_in_backward(0);
 
 // Guard to keep track of threads blocked in the autograd backward call.
 class ThreadsBlockedGuard {

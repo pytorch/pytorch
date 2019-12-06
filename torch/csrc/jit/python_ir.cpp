@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/python_ir.h>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
@@ -9,7 +10,6 @@
 #include <torch/csrc/jit/pybind.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -24,7 +24,7 @@ Symbol ConcretePythonOp::Kind = prim::PythonOp;
 using c10::Type;
 
 std::string getPythonName(const PyObject* obj_) {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   PyObject* obj = const_cast<PyObject*>(obj_);
   auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
@@ -33,7 +33,7 @@ std::string getPythonName(const PyObject* obj_) {
 }
 
 std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
   if (py::isinstance<py::tuple>(pyobj)) {
@@ -125,7 +125,7 @@ Node* findNode(Block* block, Symbol kind, bool recurse = true) {
 }
 
 std::string ConcretePythonOp::name() const {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   if (auto autograd = autogradFunction()) {
     return getPythonName(autograd->get());
   } else {
@@ -149,7 +149,7 @@ void ConcretePythonOp::cloneFrom(Node* other_) {
 // was originally SomeFunction.apply
 // used in ONNX for discovering symbolics
 c10::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   py::handle obj = const_cast<PyObject*>(pyobj.get());
 
@@ -253,7 +253,7 @@ void initPythonIRBindings(PyObject* module_) {
             for (auto& kv : export_map) {
               auto t = kv.second;
               size_t copy_bytes = t.element_size() * t.numel();
-              // TODO: this is an unecessary copy. In theory we can directly
+              // TODO: this is an unnecessary copy. In theory we can directly
               // return the map from identifier to Tensor, but we need some API
               // in Python to get raw `bytes` containing the raw tensor data.
               python_serialized_export_map[kv.first] =
@@ -698,6 +698,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
+  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
+      .def_static("get", &DeviceObjType::get);
   py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
       .def_static("get", &NoneType::get);
 
