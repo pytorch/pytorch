@@ -69,6 +69,7 @@ from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+from common_device_type import instantiate_device_type_tests
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -17060,8 +17061,14 @@ def add_autograd_test(
 
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
-        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
+        def do_test(self, device, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     check_ad=check_ad, output_process_fn=output_process_fn):
+            # TODO: The rest of this function does NOT respect device.  If you want to
+            # enable tests for CUDA, you'll need to update everything here to
+            # handle the CUDA case correctly, including how it generates inputs,
+            # and assumptions about which fuser is used.
+            assert torch.device(device) == torch.device('cpu')
+
             # We enable the CPU fuser during these checks for more consistent
             # behavior. Otherwise, we are going to have to analyze the graph to
             # see if producer values are Dimension
@@ -17372,6 +17379,11 @@ class TestDocs(unittest.TestCase):
 
 for test in autograd_method_tests():
     add_autograd_test(*test)
+
+# NB: There isn't much utility in running these tests for CUDA, as the kernels
+# are exercised in test_autograd.py, and the JIT tests intention is to test the
+# JIT infrastructure around it, not the kernels themselves
+instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), except_for='cuda')
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
