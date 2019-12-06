@@ -14,8 +14,6 @@
 
 TH_EXTERNC void dswap_(int *n, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void sswap_(int *n, float *x, int *incx, float *y, int *incy);
-TH_EXTERNC void dscal_(int *n, double *a, double *x, int *incx);
-TH_EXTERNC void sscal_(int *n, float *a, float *x, int *incx);
 TH_EXTERNC void dcopy_(int *n, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void scopy_(int *n, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC void daxpy_(int *n, double *a, double *x, int *incx, double *y, int *incy);
@@ -70,37 +68,6 @@ void THBlas_(swap)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t in
       scalar_t z = x[i*incx];
       x[i*incx] = y[i*incy];
       y[i*incy] = z;
-    }
-  }
-}
-
-void THBlas_(scal)(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
-{
-  if(n == 1)
-    incx = 1;
-
-#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) )
-  {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-
-#if defined(TH_REAL_IS_DOUBLE)
-    dscal_(&i_n, &a, x, &i_incx);
-#else
-    sscal_(&i_n, &a, x, &i_incx);
-#endif
-    return;
-  }
-#endif
-  {
-    int64_t i;
-    for(i = 0; i < n; i++) {
-      if (a == 0) {
-        x[i*incx] = 0;
-      } else {
-        x[i*incx] *= a;
-      }
     }
   }
 }
