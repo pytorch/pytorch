@@ -11,39 +11,6 @@ namespace jit {
 
 namespace {
 
-at::Tensor wrap_tensor(at::Tensor&& tensor) {
-  if (tensor.is_variable()) {
-    return std::move(tensor);
-  } else {
-    return torch::autograd::make_variable(std::move(tensor));
-  }
-}
-
-IValue wrap(IValue&& ivalue) {
-  if (ivalue.isTensor()) {
-    return wrap_tensor(std::move(ivalue).toTensor());
-  } else if (ivalue.isTensorList()) {
-    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = wrap_tensor(list.extract(i));
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericList()) {
-    c10::impl::GenericList list = std::move(ivalue).toGenericList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = wrap(list.extract(i));
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericDict()) {
-    for (auto& item : ivalue.toGenericDict()) {
-      item.setValue(wrap(item.value()));
-    }
-    return std::move(ivalue);
-  } else {
-    return std::move(ivalue);
-  }
-}
-
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
@@ -146,11 +113,6 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 #else
       c10::Dispatcher::singleton().callBoxed(op, &stack);
 #endif // USE_STATIC_DISPATCH
-
-      // wrap tensor outputs as variable
-      for (auto iter = stack.end() - output_size; iter != stack.end(); ++iter) {
-        *iter = wrap(std::move(*iter));
-      }
 
       if (tracer_state) {
         jit::tracer::setTracingState(std::move(tracer_state));

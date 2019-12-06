@@ -15,11 +15,6 @@ import static org.junit.Assert.assertTrue;
 public abstract class PytorchTestBase {
   private static final String TEST_MODULE_ASSET_NAME = "test.pt";
 
-  @Before
-  public void setUp() {
-    System.loadLibrary("pytorch");
-  }
-
   @Test
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));

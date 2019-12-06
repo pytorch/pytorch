@@ -193,7 +193,7 @@ struct SourceImporterImpl : public Resolver,
       const script::Module& mod,
       const std::shared_ptr<Source>& src) {
     auto self = SimpleSelf(mod.type());
-    c10::QualifiedName prefix = mod.name();
+    c10::QualifiedName prefix = *mod.type()->name();
     Parser p(src);
 
     parsePossibleVersionNumber(p.lexer());
@@ -255,7 +255,9 @@ struct SourceImporterImpl : public Resolver,
       // ClassTypes)
       return importNamedTuple(qualified_name, class_def);
     } else if (superclass_name == "Interface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this());
+      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/false);
+    } else if (superclass_name == "ModuleInterface") {
+      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/true);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
@@ -272,6 +274,7 @@ struct SourceImporterImpl : public Resolver,
     std::vector<Def> methods;
     std::vector<ResolverPtr> resolvers;
     std::vector<Assign> attributes;
+    std::vector<Assign> constants;
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
@@ -302,14 +305,15 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else {
-                // This is a regular attribute assignment, of the form:
-                //   foo : Tensor
                 if (assign.rhs().present()) {
-                  throw ErrorReport(assign.rhs())
-                      << "Unexpected right-hand found in assignment in class body. "
-                         "This is not yet supported.";
+                  // This is a constant assignemnt, of the form:
+                  // foo : Final[int] = 3
+                  constants.push_back(assign);
+                } else {
+                  // This is a regular attribute assignment, of the form:
+                  // foo : Tensor
+                  attributes.push_back(assign);
                 }
-                attributes.push_back(assign);
               }
             } break;
             case TK_SUBSCRIPT: {
@@ -363,6 +367,13 @@ struct SourceImporterImpl : public Resolver,
           class_type->addAttribute(name, type, is_parameter);
         }
       }
+    }
+
+    // Populate class constants
+    for (const auto& assign : constants) {
+      auto const_val = type_parser.parseClassConstant(assign);
+      const auto name = Var(assign.lhs()).name().name();
+      class_type->addConstant(name, const_val);
     }
 
     cu_->register_type(class_type);

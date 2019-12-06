@@ -31,16 +31,21 @@ namespace at { namespace namedinference {
 struct CAFFE2_API TensorName {
   explicit TensorName(ArrayRef<Dimname> origin, int origin_idx)
     : origin_(origin),
-      origin_idx_(origin_idx),
-      name_(origin[maybe_wrap_dim(origin_idx, origin.size())]) {}
+      name_(origin[maybe_wrap_dim(origin_idx, origin.size())]),
+      origin_idx_(origin_idx) {}
 
+  // op_name is only used for error reporting.
   const TensorName& unify(const TensorName& other, const char* op_name) const;
   Dimname toDimname() const;
 
  private:
   ArrayRef<Dimname> origin_;
-  int origin_idx_;
   Dimname name_;
+  int origin_idx_; // A named tensor can have at most 64 dims.
+
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const TensorName& tensorname);
 };
 
 using TensorNameVec = SmallVector<TensorName, 10>;
@@ -52,7 +57,11 @@ struct CAFFE2_API TensorNames {
   // `names`, NOT names[start:end], because the original tensor's names are `names`.
   explicit TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end);
 
-  TensorNames unifyFromRight(const TensorNames& other, const char* op_name) const;
+  // op_name is only used for error reporting.
+  TensorNames& unifyFromRightInplace(
+      const TensorNames& other,
+      const char* op_name = "unify");
+  void checkUnique(const char* op_name) const;
 
   void append(TensorName&& name);
   std::vector<Dimname> toDimnameVec() const;
@@ -62,6 +71,7 @@ struct CAFFE2_API TensorNames {
 
   TensorNameVec names_;
 };
+
 #endif
 
 }} // namespace at::namedinference

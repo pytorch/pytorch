@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>
@@ -14,9 +15,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qavg_pool2d_nhwc_stub);
+
+namespace {
 
 template <typename scalar_t>
 static void avg_pool2d_out_frame(

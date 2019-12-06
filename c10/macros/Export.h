@@ -91,11 +91,26 @@
 #define C10_API C10_IMPORT
 #endif
 
-// This one is being used by libcaffe2.so
+// This one is being used by libtorch.so
+// TODO: rename this to TORCH_API
 #ifdef CAFFE2_BUILD_MAIN_LIB
 #define CAFFE2_API C10_EXPORT
 #else
 #define CAFFE2_API C10_IMPORT
+#endif
+
+// NB: For now, HIP is overloaded to use the same macro, but ideally
+// HIPify should translate TORCH_CUDA_API to TORCH_HIP_API
+#if defined(TORCH_CUDA_BUILD_MAIN_LIB) || defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_CUDA_API C10_EXPORT
+#else
+#define TORCH_CUDA_API C10_IMPORT
+#endif
+
+#if defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_HIP_API C10_EXPORT
+#else
+#define TORCH_HIP_API C10_IMPORT
 #endif
 
 #endif // C10_MACROS_MACROS_H_

@@ -26,11 +26,8 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
     const auto it = std::find(other.origin_.begin(), other.origin_.end(), name_);
     TORCH_CHECK(it == other.origin_.end(),
         op_name, ":",
-        " Cannot match ", name_,
-        " (at index ", origin_idx_, " of ", origin_, ")",
-        " with ", other.name_,
-        " (at index ", other.origin_idx_, " of ", other.origin_, ")",
-        " because the latter names already has ", name_, ".",
+        " Cannot match ", *this, " with ", other,
+        " because the latter names already have ", name_, ".",
         " Are your tensors misaligned?");
     return *this;
   }
@@ -43,10 +40,8 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
   // unify(A, B)
   TORCH_CHECK(name_ == other.name_,
       op_name, ":",
-      " Expected ", name_,
-      " (at index ", origin_idx_, " of ", origin_, ")",
-      " to match ", other.name_,
-      " (at index ", other.origin_idx_, " of ", other.origin_, ")",
+      " Expected ", *this,
+      " to match ", other,
       " but they do not match.");
   return *this;
 }
@@ -67,26 +62,58 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
   }
 }
 
-TensorNames TensorNames::unifyFromRight(const TensorNames& other, const char* op_name) const {
-  const auto longer_size = std::max(names_.size(), other.names_.size());
-  TensorNameVec result;
-  result.reserve(longer_size);
+TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
+  int64_t size_diff = std::labs(names_.size() - other.names_.size());
 
-  const auto& longer = names_.size() == longer_size ? names_ : other.names_;
-  const auto& shorter = names_.size() == longer_size ? other.names_ : names_;
-  const auto size_difference = longer_size - shorter.size();
-
-  result.insert(result.begin(), longer.begin(), longer.begin() + size_difference);
-
-  for (int64_t idx = size_difference; idx < longer_size; ++idx) {
-    result.push_back(longer[idx].unify(shorter[idx - size_difference], op_name));
+  if (names_.size() > other.names_.size()) {
+    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+      names_[idx] = names_[idx].unify(other.names_[idx - size_diff], op_name);
+    }
+  } else {
+    // pad names_ to the same length as other.names_ before unification
+    names_.insert(
+        names_.begin(),
+        other.names_.begin(),
+        other.names_.begin() + size_diff);
+    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+      names_[idx] = names_[idx].unify(other.names_[idx], op_name);
+    }
   }
 
-  return TensorNames(std::move(result));
+  return *this;
 }
 
 void TensorNames::append(TensorName&& name) {
   names_.emplace_back(name);
+}
+
+void TensorNames::checkUnique(const char* op_name) const {
+  // O(N^2), but named tensors can have at most N = 64 dimensions, so this
+  // doesn't matter unless benchmarking tells us it does. The alternative is
+  // to create some sort of set data structure but the overhead of that
+  // might dominate for small sizes.
+  for (auto it = names_.begin(); it != names_.end(); ++it) {
+    const auto name = it->toDimname();
+    if (name.isWildcard()) continue;
+
+    auto dup = std::find_if(it + 1, names_.end(),
+        [&](const TensorName& other) { return other.toDimname() == name; });
+    TORCH_CHECK(dup == names_.end(),
+        op_name, ": ",
+        "Attempted to propagate dims ", *it, " and ", *dup, " to the output, ",
+        "but that would create a tensor with duplicate names [", toDimnameVec(),
+        "]. Please rename your inputs with Tensor.rename to prevent this.");
+  }
+}
+
+// Let's say the TensorName represents 'C' in ['N', 'C', 'H, 'W'].
+// It should print like:
+// 'C' (index 1 of ['N', 'C', 'H', 'W'])
+std::ostream& operator<<(std::ostream& out, const TensorName& tensorname) {
+  out << tensorname.name_ << " (index ";
+  out << tensorname.origin_idx_ << " of ";
+  out << tensorname.origin_ << ")";
+  return out;
 }
 
 std::vector<Dimname> TensorNames::toDimnameVec() const {

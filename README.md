@@ -167,7 +167,7 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 #### Install Dependencies
 
-Common
+Common (only install `typing` for Python <3.5)
 ```
 conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
@@ -199,6 +199,14 @@ On macOS
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
+
+Each CUDA version only supports one particular XCode version. The following combinations have been reported to work with PyTorch.
+
+| CUDA version | XCode version |
+| ------------ | ------------- |
+| 10.0         | XCode 9.4     |
+| 10.1         | XCode 10.1    |
+
 
 On Windows
 
