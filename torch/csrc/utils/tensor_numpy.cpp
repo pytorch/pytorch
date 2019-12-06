@@ -71,19 +71,15 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  if (tensor.device() != DeviceType::CPU) {
+  if (tensor.device().type() != DeviceType::CPU) {
       throw TypeError(
-        "can't convert non-CPU tensor to numpy. Use Tensor.cpu() to "
-        "copy the tensor to host memory first.");
-  }
-  if (tensor.is_sparse()) {
-    throw TypeError(
-        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
-        "convert to a dense tensor first.");
+        "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
+        "copy the tensor to host memory first.", tensor.device().type());
   }
   if (tensor.layout() != Layout::Strided) {
       throw TypeError(
-        "can't convert non-strided tensor to numpy.");
+        "can't convert %s layout tensor to numpy."
+        "convert the tensor to a strided layout first.", tensor.layout());
   }
   if (tensor.requires_grad()) {
     throw std::runtime_error(

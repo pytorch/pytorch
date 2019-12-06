@@ -227,7 +227,10 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    checkBackend("clamp", result, Backend::CPU);
+    TORCH_CHECK(self.device().type() == DeviceType::CPU,
+                "clamp only supports CPU device type, got: ", self.device().type());
+    TORCH_CHECK(self.layout() == Layout::Strided,
+                "clamp only supports strided layout, got: ", self.layout());
     auto iter = TensorIterator::unary_op(result, self,
         /*check_mem_overlap=*/true);
     clamp_stub(iter.device_type(), iter, *min, *max);
@@ -246,7 +249,10 @@ Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  checkBackend("clamp_max", result, Backend::CPU);
+  TORCH_CHECK(self.device().type() == DeviceType::CPU,
+              "clamp_max only supports CPU device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_max_stub(iter.device_type(), iter, max);
@@ -258,7 +264,10 @@ Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  checkBackend("clamp_min", result, Backend::CPU);
+  TORCH_CHECK(self.device().type() == DeviceType::CPU,
+              "clamp_min only supports CPU device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_min_stub(iter.device_type(), iter, min);
