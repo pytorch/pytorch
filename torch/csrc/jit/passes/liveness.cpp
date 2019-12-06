@@ -109,8 +109,26 @@ struct LivenessAnalyzer {
         mtc->destroy();
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
-        // everything that is alive at the beginning of the loop
-        // needs to be extended until the end of the loop
+        // given that our IR uses both SSA and loop forests
+        // liveness can be computed in two passes
+        // the first pass propagates the liveness information backwards
+        // the second pass propagates the liveness information from
+        // loop headers forward to every node in a loop recursively
+        // the correctness proof of this version of liveness is given in
+        // https://hal.inria.fr/inria-00558509v2/document
+        // the gist of the proof is that after the backwards pass
+        // loop headers will contain exactly the fixed-point liveness of SSA
+        // variables + GEN/UpwardExposedUses (the latter trivially never change)
+        // if these loop headers' liveness sets are now
+        // propagated to all nodes contained in the loops
+        // we will receive the accurate liveness for every node in a graph
+        // A few notable differences in our implementation is that
+        // * in our IR loop edges are implicit and don't need to be
+        // explicitly excluded
+        // * two passes are interleaved
+        // * loop's block inputs are the same as PhiDefs in the algorithm
+        // modulo the trip count which we have to handle separately since
+        // it might not have explicit uses in a loop
         extendLiveness(it->blocks()[0], loop_block);
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
