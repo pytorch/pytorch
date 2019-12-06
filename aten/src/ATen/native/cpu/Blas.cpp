@@ -143,17 +143,13 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
 
 namespace {
 
+void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
+  auto r_stride = 0;
+  return;
+}
+
 // static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
 // {
-
-//   if(r_ != t)
-//   {
-//     THTensor_(resizeAs)(r_, t);
-//     at::Tensor r__wrap = THTensor_wrap(r_);
-//     at::Tensor t_wrap = THTensor_wrap(t);
-//     at::native::copy_(r__wrap, t_wrap);
-//   }
-
 //   auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
 
 //   // n == 1 || lda >= max(1, m)
@@ -197,10 +193,6 @@ namespace {
 
 //   #undef LDA_COND
 // }
-
-void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
-  return;
-}
 
 } // anonymous namespace
 

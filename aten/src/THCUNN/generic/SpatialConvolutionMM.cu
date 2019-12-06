@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/div_rtn.h>
+#include <ATen/cuda/CUDABlas.h>
 
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,
@@ -43,7 +44,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
   } else if (ndim == 4) {
     valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0;
   }
-         
+
 
   THCUNN_argCheck(state, (!input->is_empty() || valid_empty) && (ndim == 3 || ndim == 4), 2, input,
                   "non-empty 3D or 4D input tensor expected but got: %s");
@@ -484,12 +485,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
       // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
       #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-      #ifdef THC_REAL_IS_FLOAT
-      THCudaBlas_Sgemv(
-      #elif defined(THC_REAL_IS_DOUBLE)
-      THCudaBlas_Dgemv(
-      #endif
-          state,
+      at::cuda::blas::gemv<scalar_t>(
+          at::cuda::getCurrentCUDAStream().stream(),
           't',
           k_, m_,
           scale,
