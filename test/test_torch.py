@@ -6165,9 +6165,11 @@ class TestTorchDeviceType(TestCase):
         # renorm
         self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
 
-        # sort
+        # sort, topk
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, False)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, True)])
 
         # lstsq (gels)
         self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
