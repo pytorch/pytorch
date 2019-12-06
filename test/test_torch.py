@@ -935,6 +935,16 @@ class _TestTorchMixin(object):
             lambda n, d: logsumexp(n, d),
             use_integral=False)
 
+    def test_mean_empty_dim(self):
+        x = torch.randn(25, 25)
+        x_mean = x.mean(dim=())
+        self.assertEqual(x, x_mean)
+
+    def test_sum_empty_dim(self):
+        x = torch.randn(25, 25)
+        x_sum = x.sum(dim=())
+        self.assertEqual(x, x_sum)
+
     def _test_reduce_integer_upcast(self, fn, has_out=True):
         shape = (3, 4, 5)
         reduced_shape = fn(torch.ones(shape)).shape
@@ -9048,6 +9058,11 @@ class TestTorchDeviceType(TestCase):
         # larger tensor sanity check
         self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
 
+        # empty dimensions
+        x = torch.randn(25, 25, device=device)
+        res = x.norm(dim=())
+        self.assertEqual(x.abs(), res)
+
     @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_nuclear_norm_axes_small_brute_force(self, device):
@@ -10336,6 +10351,15 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(std1, std2)
             self.assertEqual(mean1, mean2)
 
+    def test_std_mean_empty_dims(self, device):
+        x = torch.rand(100, 50, 20, device=device)
+        for unbiased in [False, True]:
+            std1, mean1 = torch.std_mean(x, unbiased=unbiased, dim=())
+            std2 = x.std(unbiased=unbiased, dim=())
+            mean2 = x.mean(dim=())
+            self.assertEqual(std1, std2)
+            self.assertEqual(mean1, mean2)
+
     def test_var_mean(self, device):
         x = torch.rand(100, 300, 50, device=device)
         for dim in range(x.dim()):
@@ -10353,6 +10377,15 @@ class TestTorchDeviceType(TestCase):
             var1, mean1 = torch.var_mean(x, unbiased=unbiased)
             var2 = x.var(unbiased=unbiased)
             mean2 = x.mean()
+            self.assertEqual(var1, var2)
+            self.assertEqual(mean1, mean2)
+
+    def test_var_mean_empty_dims(self, device):
+        x = torch.rand(100, 50, 20, device=device)
+        for unbiased in [False, True]:
+            var1, mean1 = torch.var_mean(x, unbiased=unbiased, dim=())
+            var2 = x.var(unbiased=unbiased, dim=())
+            mean2 = x.mean(dim=())
             self.assertEqual(var1, var2)
             self.assertEqual(mean1, mean2)
 
