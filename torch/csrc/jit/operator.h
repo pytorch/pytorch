@@ -150,6 +150,15 @@ struct TORCH_API Operator {
   }
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
+    if (isC10Op()) {
+      const FunctionSchema& schemaRef = schema();
+      TORCH_CHECK(
+          options_.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
+              !schemaRef.hasAnyAliasInfo(),
+          "In operator registration: Tried to register operator ",
+          schemaRef,
+          " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
+    }
     return options_.aliasAnalysis();
   }
 
