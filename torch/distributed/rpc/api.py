@@ -88,8 +88,17 @@ def shutdown(graceful=True):
                          outstanding work to complete.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> # do some work
@@ -97,7 +106,7 @@ def shutdown(graceful=True):
         >>> # ready to shutdown
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> # wait for worker 0 to finish work, and then shutdown.
@@ -221,8 +230,17 @@ def remote(to, func, args=None, kwargs=None):
         to retrieve the result value locally.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
@@ -230,7 +248,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> x = rref1.to_here() + rref2.to_here()
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
@@ -292,14 +310,23 @@ def rpc_sync(to, func, args=None, kwargs=None):
         Returns the result of running ``func`` on ``args`` and ``kwargs``.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
@@ -330,8 +357,17 @@ def rpc_async(to, func, args=None, kwargs=None):
         ``kwargs`` can be retrieved from the ``FutureMessage`` object.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
@@ -339,7 +375,7 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> result = fut1.wait() + fut2.wait()
         >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
