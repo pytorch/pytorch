@@ -163,7 +163,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
       [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); },
-      at::numeric_limits<scalar_t>::upper_bound());
+      std::numeric_limits<scalar_t>::max());
   });
 }
 
@@ -173,7 +173,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
       [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); },
-      at::numeric_limits<scalar_t>::lower_bound());
+      std::numeric_limits<scalar_t>::min());
   });
 }
 
