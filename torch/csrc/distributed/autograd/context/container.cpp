@@ -200,6 +200,11 @@ void DistAutogradContainer::clearCurrentContext() {
   current_context_id_ = -1;
 }
 
+size_t DistAutogradContainer::numAutogradContexts() const {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  return autograd_context_.size();
+}
+
 } // namespace autograd
 } // namespace distributed
 } // namespace torch

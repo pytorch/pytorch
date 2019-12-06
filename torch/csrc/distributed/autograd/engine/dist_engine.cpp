@@ -22,6 +22,7 @@ static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
 static constexpr char* kNumThreadsBlocked = "num_threads_blocked_in_backward";
 static constexpr char* kEngineCPUQueueSize =
     "local_autograd_engine_cpu_queue_size";
+static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 namespace {
 
@@ -311,6 +312,8 @@ std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
       std::to_string(num_threads_blocked_in_backward.load());
   debugInfo[kEngineCPUQueueSize] =
       std::to_string(engine_.ready_queue_size(at::kCPU));
+  debugInfo[kNumAutogradContexts] = std::to_string(
+      DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;
 }
 

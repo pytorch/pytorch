@@ -1413,6 +1413,15 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             dist_autograd.backward([res[i].sum()])
 
+            debug_info = dist_autograd._get_debug_info()
+            num_autograd_context = int(debug_info['num_autograd_contexts'])
+            # Need atleast one context and not more than 4.
+            self.assertTrue(num_autograd_context >= 1 and num_autograd_context <= 4)
+
+        for rd in range(self.world_size - 1):
+            rpc.rpc_sync("worker{}".format((self.rank + rd + 1) % self.world_size),
+                         _set_rpc_done, args=(context_id, rd + 1))
+
         dist.barrier()
 
         # Validate information
@@ -1421,6 +1430,12 @@ class DistAutogradTest(RpcAgentTestFixture):
         self.assertEqual(0, int(debug_info['num_current_backward_passes']))
         self.assertEqual(0, int(debug_info['num_threads_blocked_in_backward']))
         self.assertEqual(0, int(debug_info['local_autograd_engine_cpu_queue_size']))
+
+        self.assertTrue(_all_contexts_cleaned_up())
+
+        # All contexts should be cleaned up.
+        debug_info = dist_autograd._get_debug_info()
+        self.assertEqual(0, int(debug_info['num_autograd_contexts']))
 
 
 if __name__ == '__main__':
