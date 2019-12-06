@@ -39,19 +39,25 @@ if is_available():
         collective communication.
 
         Arguments:
-            backend (Enum): type of RPC backend implementation.
-                        Currently, process group backend is the only
-                        available backend implementation. (default:
-                        ``RpcBackend.PROCESS_GROUP``).
+            backend (Enum): type of RPC backend implementation. Currently,
+                process group backend is the only available backend
+                implementation. (default: ``RpcBackend.PROCESS_GROUP``).
             name (str): a globally unique name of this node. (e.g.,
-                        ``Trainer3``, ``ParameterServer2``, ``Master``,
-                        ``Worker1``) Name can only contain number, alphabet,
-                        underscore, and/or dash, and must be shorter than
-                        128 characters.
+                ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
+                Name can only contain number, alphabet, underscore, and/or dash,
+                and must be shorter than 128 characters.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
-            rpc_backend_options (RpcBackendOptions): The options passed to RpcAgent
-                consturctor.
+            rpc_backend_options (RpcBackendOptions): The options passed to
+                RpcAgent consturctor. It contains RpcAgent specific
+                initialization configurations. By default, it contains
+                ``rpc_timeout = timedelta(seconds=60)``,
+                ``init_method = "env://"``, ``num_send_recv_threads = 4`` for
+                process group agent. If using the default
+                ``rpc_backend_options``, RPC would initialize the underlying
+                process group backend using ``init_method = "env://"``,
+                meaning that environment variables ``MASTER_ADDRESS`` and
+                ``MASTER_PORT`` needs to be set properly.
         """
 
         if not rpc_backend_options:
