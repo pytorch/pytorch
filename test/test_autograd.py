@@ -2871,6 +2871,7 @@ class TestAutograd(TestCase):
         test_reduction(torch.prod, True)
         test_reduction(torch.cumsum, False)
         test_reduction(torch.cumprod, False)
+        test_reduction(torch.cummax, False)
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
