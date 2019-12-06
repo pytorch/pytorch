@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "Pad_0"
     op_type: "Pad"
     attribute {
       name: "mode"
@@ -32,6 +33,7 @@ graph {
   node {
     input: "1"
     output: "2"
+    name: "AveragePool_1"
     op_type: "AveragePool"
     attribute {
       name: "kernel_shape"

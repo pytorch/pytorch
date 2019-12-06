@@ -10,7 +10,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
-#include <torch/csrc/utils/auto_gil.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -48,7 +48,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   variable_list output;
 
   HANDLE_TH_ERRORS {
-    AutoNoGIL nogil;
+    pybind11::gil_scoped_release nogil;
     output = (*((THPCppFunction*)self)->cdata)(std::move(vars));
   }
   END_HANDLE_TH_ERRORS

@@ -164,7 +164,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
 }
 
 // inplace coalesce
-const SparseTensor& coalesce_(const SparseTensor& tensor) {
+SparseTensor& coalesce_(SparseTensor& tensor) {
   SparseTensor coalesced = tensor.coalesce();
   tensor._values().resize_as_(coalesced._values());
   tensor._indices().resize_as_(coalesced._indices());
@@ -191,17 +191,18 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
     }
     r._values().div_(value);
   } else {
+    Tensor t_tmp = t;
     if (!t.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
-      coalesce_(t);
+      t_tmp = t.coalesce();
     }
-    r.resize_as_(t);
+    r.resize_as_(t_tmp);
     auto indices = r._indices();
-    indices.resize_as_(t._indices());
-    indices.copy_(t._indices());
+    indices.resize_as_(t_tmp._indices());
+    indices.copy_(t_tmp._indices());
     Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
-    at::div_out(r_values, t._values(), value);
-    get_sparse_impl(r)->set_nnz_and_narrow(t._nnz());
-    r._coalesced_(t.is_coalesced());
+    at::div_out(r_values, t_tmp._values(), value);
+    get_sparse_impl(r)->set_nnz_and_narrow(t_tmp._nnz());
+    r._coalesced_(t_tmp.is_coalesced());
   }
   return r;
 }
@@ -1097,7 +1098,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
 
 }
-
 // --------------------------------------------------------------------
 // NOTE [ sparse.sum() backward ]
 //
@@ -1248,6 +1248,26 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     }
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options());
   }
+}
+
+Tensor isnan_sparse(const Tensor & self){
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
+  SparseTensor out =  at::sparse_coo_tensor({0}, self.options().dtype(at::kBool));
+  out.resize_as_(self);
+  auto indices = out._indices();
+  indices.resize_as_(self._indices());
+  indices.copy_(self._indices());
+  Tensor out_values = out._values();
+  out_values.resize_as_(self._values());
+  Tensor nan_values = at::isnan(self._values());
+  out_values.copy_(nan_values);
+  return out;
+}
+
+Tensor any_sparse(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
+
+  return at::any(self._values());
 }
 
 }} // namespace at::native
