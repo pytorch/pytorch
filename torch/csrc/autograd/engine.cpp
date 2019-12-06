@@ -411,11 +411,10 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
   return outputs;
 }
 
-static bool is_compatible_type(const at::DeprecatedTypeProperties& expected, const at::DeprecatedTypeProperties& actual) {
+static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
   // Types are compatible if they exactly match or if the gradient is a sparse
   // version of the expected type.
-  return expected == actual || (actual.is_sparse() &&
-      expected == actual.toBackend(toDense(actual.backend())));
+  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
 }
 
 void validate_outputs(
@@ -451,14 +450,14 @@ void validate_outputs(
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
-    TORCH_CHECK(isFloatingType(grads[i].type().scalarType()));
-    if (metadata.type().scalarType() != grads[i].type().scalarType()) {
-      grads[i] = grads[i].to(metadata.type().scalarType());
+    TORCH_CHECK(isFloatingType(grads[i].scalar_type()));
+    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
+      grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (!is_compatible_type(metadata.type(), grads[i].type())) {
+    if (!is_compatible_type(metadata.options(), grads[i].options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.type() << " but got " << grads[i].type();
+       ss << metadata.options() << " but got " << grads[i].options();
        AT_ERROR(format_error(ss.str()));
     }
     auto output_device = output.device();
@@ -576,7 +575,7 @@ void Engine::evaluate_function(
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && output.ne(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());
