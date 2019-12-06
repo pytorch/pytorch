@@ -220,7 +220,9 @@ Pointwise Ops
 .. autofunction:: log10
 .. autofunction:: log1p
 .. autofunction:: log2
+.. autofunction:: logical_and
 .. autofunction:: logical_not
+.. autofunction:: logical_or
 .. autofunction:: logical_xor
 .. autofunction:: mul
 .. autofunction:: mvlgamma
@@ -373,3 +375,4 @@ Utilities
 .. autofunction:: result_type
 .. autofunction:: can_cast
 .. autofunction:: promote_types
+.. autofunction:: export_opnames

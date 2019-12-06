@@ -20,6 +20,9 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     weights = THCTensor_(newContiguous)(state, weights);
   if (THTensor_nDimensionLegacyNoScalars(input) == 1)
   {
+    int nframe = 1;
+    THArgCheck(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
+               "inconsistent target size");
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
     THCTensor_(resize1d)(state, output, 1);
