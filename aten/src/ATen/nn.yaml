@@ -19,6 +19,7 @@
   cname: MultiMarginCriterion
   scalar_check:
     output: 'false'
+    grad_input: 'false'
 
 - name: _thnn_multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=at::Reduction::Mean)
   cname: MultiLabelMarginCriterion
