@@ -98,7 +98,7 @@ inline constexpr type_index get_type_index() noexcept {
   // There's nothing in theory preventing us from running this on device code
   // except for nvcc throwing a compiler error if we enable it.
   return (
-      throw std::logic_error("This should not be called on device code"),
+      abort(),
       type_index(0));
 #endif
 }
