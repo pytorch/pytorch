@@ -6165,9 +6165,11 @@ class TestTorchDeviceType(TestCase):
         # renorm
         self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
 
-        # sort
+        # sort, topk
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, False)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, True)])
 
         # lstsq (gels)
         self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
@@ -6323,6 +6325,13 @@ class TestTorchDeviceType(TestCase):
                     self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
                     self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
                     self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
+
+        # multi_margin_loss
+        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
+            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device)):
+                self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
+                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
+                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
     @onlyCPU
     @dtypes(torch.float)

@@ -21,6 +21,9 @@ namespace jit {
 namespace {
 
 using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
+// Map of quantization parameter name and value
+using QParamMap = std::unordered_map<std::string, IValue>;
+
 // This struct contains a compiled IR pattens slated for use in the
 // findPatternMatches function. The struct encapsulates the common
 // information from parseIR that is used in conjunction with the
@@ -618,7 +621,7 @@ class InsertQuantDeQuantHelper {
 
   // quantization parameters including scale, zero_point,
   // scalar_type and axis(for per channel quantization)
-  std::unordered_map<std::string, IValue> getQParams(script::Module& module, Value* v);
+  QParamMap getQParamMap(script::Module& module, Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
@@ -630,7 +633,7 @@ class InsertQuantDeQuantHelper {
   // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  std::unordered_map<Graph*, std::unordered_map<Value*, std::unordered_map<std::string, IValue>>> values_to_qparams_;
+  std::unordered_map<Graph*, std::unordered_map<Value*, QParamMap>> values_to_qparams_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -655,7 +658,7 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
   Value* new_value = observer->input(1);
   v->replaceAllUsesWith(new_value);
-  values_to_qparams_[g].insert({new_value, getQParams(module, v)});
+  values_to_qparams_[g].insert({new_value, getQParamMap(module, v)});
 }
 
 void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
@@ -732,13 +735,13 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::unordered_map<std::string, IValue> InsertQuantDeQuantHelper::getQParams(
+QParamMap InsertQuantDeQuantHelper::getQParamMap(
     script::Module& module, Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
       observer_name,
-      "getQParams expects the corresponding observer for ",
+      "getQParamMap expects the corresponding observer for ",
       v->debugName(),
       " exists.");
   auto observer_module = module.attr(observer_name.value()).toModule();
