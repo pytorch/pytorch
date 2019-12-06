@@ -917,6 +917,7 @@ class TestClassType(JitTestCase):
     def test_class_constant(self):
         class M(torch.nn.Module):
             __constants__ = ["w"]
+
             def __init__(self, w):
                 super(M, self).__init__()
                 self.w = w
