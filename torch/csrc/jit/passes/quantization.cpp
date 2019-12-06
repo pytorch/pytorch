@@ -541,32 +541,29 @@ void InsertObserversHelper::insertObservers(
 }
 
 void insertQuantDeQuantCall(
+    Value* self,
     Value* v,
-    const IValue& qparams,
-    const IValue& scalar_type) {
+    bool is_per_channel) {
   Graph* g = v->node()->owningGraph();
-  auto tp = qparams.toTuple();
-  at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
-  at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
 
-  bool is_per_channel = scale.numel() > 1;
   std::string quantize_func;
   std::vector<Value*> inputs = {v};
 
   // Inserting before insert point
   WithInsertPoint ins(v->node()->next());
+  std::string prefix = v->debugName();
+  // Insert GetAttr nodes for quantization parameters
   if (is_per_channel) {
     quantize_func = "quantize_per_channel";
-    inputs.push_back(g->insertConstant(scale));
-    inputs.push_back(g->insertConstant(zero_point));
-    inputs.push_back(g->insertConstant(tp->elements()[2].toInt()));
+    inputs.push_back(g->insertGetAttr(self, prefix + "_scale"));
+    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point"));
+    inputs.push_back(g->insertGetAttr(self, prefix + "_axis"));
   } else {
     quantize_func = "quantize_per_tensor";
-    inputs.push_back(g->insertConstant(scale.item<double>()));
-    inputs.push_back(g->insertConstant(zero_point.item<int64_t>()));
+    inputs.push_back(g->insertGetAttr(self, prefix + "_scale")->setType(FloatType::get()));
+    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point")->setType(IntType::get()));
   }
-  Value* scalar_type_val = g->insertConstant(IValue(scalar_type));
-  inputs.push_back(scalar_type_val);
+  inputs.push_back(g->insertGetAttr(self, prefix + "_scalar_type")->setType(IntType::get()));
 
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
@@ -621,7 +618,7 @@ class InsertQuantDeQuantHelper {
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
   void removeObservers(script::Module& module, Graph* g);
-  void quantizeTensors(Graph* g);
+  void quantizeTensors(script::Module& module, Graph* g, Value* self);
 
  private:
   // TODO: we don't need to call this for each graph
@@ -682,16 +679,32 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g)
   }
 }
 
-void InsertQuantDeQuantHelper::quantizeTensors(Graph* g) {
+void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g, Value* self) {
   if (!values_to_quantize_.count(g)) {
     return;
   }
   for (auto& v : values_to_quantize_.at(g)) {
     TORCH_INTERNAL_ASSERT(values_to_qparams_.at(g).count(v));
-    auto tp = values_to_qparams_.at(g).at(v);
-    auto qparams = std::get<0>(tp);
-    auto scalar_type = std::get<1>(tp);
-    insertQuantDeQuantCall(v, qparams, scalar_type);
+    auto qparams_and_scalar_type = values_to_qparams_.at(g).at(v);
+    auto qparams = std::get<0>(qparams_and_scalar_type);
+    auto scalar_type = std::get<1>(qparams_and_scalar_type);
+    // Register attributes for quantization parameters
+    auto tp = qparams.toTuple();
+    at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
+    at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
+    // TODO: get this info from qscheme
+    bool is_per_channel = scale.numel() > 1;
+    std::string prefix = v->debugName();
+    if (is_per_channel) {
+      module.register_attribute(prefix + "_scale", TensorType::get(), scale);
+      module.register_attribute(prefix + "_zero_point", TensorType::get(), zero_point);
+      module.register_attribute(prefix + "_axis", IntType::get(), tp->elements()[2].toInt());
+    } else {
+      module.register_attribute(prefix + "_scale", FloatType::get(), scale.item<double>());
+      module.register_attribute(prefix + "_zero_point", IntType::get(), zero_point.item<int64_t>());
+    }
+    module.register_attribute(prefix + "_scalar_type", IntType::get(), scalar_type);
+    insertQuantDeQuantCall(self, v, is_per_channel);
   }
 }
 
@@ -816,8 +829,9 @@ void InsertQuantDeQuantHelper::run(
   GRAPH_DUMP("Before Remove Observers:", graph);
   removeObservers(module, graph.get());
   GRAPH_DUMP("Before Quantize Tensors:", graph);
-  quantizeTensors(graph.get());
-  GRAPH_DUMP("After Quantize Tensors:",  graph);
+  Value* self = graph->inputs()[0];
+  quantizeTensors(module, graph.get(), self);
+  GRAPH_DUMP("After Quantize Tensors:", graph);
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
