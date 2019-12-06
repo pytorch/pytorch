@@ -20,9 +20,18 @@ inline bool scal_use_fast_path(int64_t n, int64_t incx) {
 }
 
 template <typename scalar_t>
+inline bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+  return false;
+}
+
+template <typename scalar_t>
 inline void scal_fast_path(int n, scalar_t a, scalar_t *x, int incx) {
   TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
-  return;
+}
+
+template <typename scalar_t>
+inline void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_t *a, int *lda, scalar_t *x, int *incx, scalar_t *beta, scalar_t *y, int *incy) {
+  TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
 #ifdef USE_BLAS
@@ -34,20 +43,39 @@ inline bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
 
 template <>
 inline bool scal_use_fast_path<float>(int64_t n, int64_t incx) {
-  auto intmax = std::numeric_limits<int>::max;
-  return n <= intmax && incx <= intmax;
+  return scal_use_fast_path<double>(n, incx);
 }
 
 template <>
 inline void scal_fast_path<double>(int n, double a, double *x, int incx) {
   dscal_(&n, &a, x, &incx);
-  return;
 }
 
 template <>
 inline void scal_fast_path<float>(int n, float a, float *x, int incx) {
   sscal_(&n, &a, x, &incx);
-  return;
+}
+
+template <>
+inline bool gemv_use_fast_path<float>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+  auto intmax = std::numeric_limits<int>::max;
+  return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
+        (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
+}
+
+template <>
+inline bool gemv_use_fast_path<double>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+  return gemv_use_fast_path<float>(m, n, lda, incx, incy);
+}
+
+template <>
+inline void gemv_fast_path<double>(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy) {
+  dgemv_(trans, m, n, alpha, a, lda, x, i_incx, beta, y, i_incy);
+}
+
+template <>
+inline void gemv_fast_path<float>(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy) {
+  sgemv_(trans, m, n, alpha, a, lda, x, i_incx, beta, y, i_incy);
 }
 #endif
 
@@ -74,61 +102,40 @@ void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 
 template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
-  if(n == 1)
-    lda = m;
+  if(n == 1) lda = m;
 
-#ifdef USE_BLAS
-  if (std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value) {
-    if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX) &&
-        (incx > 0) && (incx <= INT_MAX) &&
-        (incy > 0) && (incy <= INT_MAX) )
-    {
-      THArgCheck(lda >= THMax(1, m), 6,
-      "lda should be at least max(1, m=%d), but have %d", m, lda);
-      int i_m = (int)m;
-      int i_n = (int)n;
-      int i_lda = (int)lda;
-      int i_incx = (int)incx;
-      int i_incy = (int)incy;
-
-      if (std::is_same<scalar_t, double>::value) {
-        dgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-      } else if (std::is_same<scalar_t, float>::value) {
-        sgemv_(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-      }
-      return;
-    }
+  if (gemv_use_fast_path(m, n, lda, incx, incy)) {
+    TORCH_CHECK(lda >= std::max(1, m), "lda should be at least max(1,", m, "), but have ", lda);
+    int i_m = (int)m;
+    int i_n = (int)n;
+    int i_lda = (int)lda;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
+    return;
   }
-#endif
 
-  {
-    int64_t i, j;
-
-    if( (trans == 'T') || (trans == 't') )
+  if((trans == 'T') || (trans == 't')) {
+    for(int64_t i = 0; i < n; i++)
     {
-      for(i = 0; i < n; i++)
-      {
-        scalar_t sum = 0;
-        scalar_t *row_ = a+lda*i;
-        for(j = 0; j < m; j++)
-          sum += x[j*incx]*row_[j];
-          if (beta == 0)
-            y[i*incy] = alpha*sum;
-          else
-            y[i*incy] = beta*y[i*incy] + alpha*sum;
-      }
+      scalar_t sum = 0;
+      scalar_t *row_ = a + lda * i;
+      for(int64_t j = 0; j < m; j++)
+        sum += x[j * incx] * row_[j];
+        if (beta == 0) {
+          y[i * incy] = alpha * sum;
+        } else {
+          y[i * incy] = beta * y[i * incy] + alpha * sum;
+        }
     }
-    else
-    {
-      if(beta != 1)
-        scal<scalar_t>(m, beta, y, incy);
+  } else {
+    if(beta != 1) scal<scalar_t>(m, beta, y, incy);
 
-      for(j = 0; j < n; j++)
-      {
-        scalar_t *column_ = a+lda*j;
-        scalar_t z = alpha*x[j*incx];
-        for(i = 0; i < m; i++)
-          y[i*incy] += z*column_[i];
+    for(int64_t j = 0; j < n; j++) {
+      scalar_t *column_ = a + lda * j;
+      scalar_t z = alpha * x[j * incx];
+      for(int64_t i = 0; i < m; i++) {
+        y[i * incy] += z * column_[i];
       }
     }
   }
