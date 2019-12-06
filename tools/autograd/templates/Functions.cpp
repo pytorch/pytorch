@@ -430,10 +430,10 @@ Tensor cummax_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   if (input.dim() == 0) {
     return input;
   }
-  auto result = at::cummax(input, dim);
+  auto result = at::native::cummax(input, dim);
   auto ret = std::get<0>(result);
   auto indices = std::get<1>(result);
-  return grad * scatter(dim, indices, at::ones(ret.sizes()));
+  return grad * at::native::scatter(ret, dim, indices, at::ones(ret.sizes()));
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
