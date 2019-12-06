@@ -11,6 +11,7 @@ namespace autograd {
 
 using torch::distributed::autograd::AutogradMetadata;
 using torch::distributed::autograd::RpcWithAutograd;
+using torch::distributed::rpc::FutureMessage;
 using torch::distributed::rpc::Message;
 using torch::distributed::rpc::MessageType;
 using torch::distributed::rpc::RpcAgent;
@@ -100,7 +101,7 @@ Message getMessageWithAutograd(
   return std::move(*rpcWithAutograd).toMessage();
 }
 
-std::shared_ptr<torch::utils::Future<Message>> sendMessageWithAutograd(
+std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,

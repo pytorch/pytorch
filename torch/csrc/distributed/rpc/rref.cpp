@@ -143,11 +143,10 @@ UserRRef<T>::~UserRRef() {
         ctx.agent()->getWorkerInfo(ownerId_),
         RRefUserDelete(rrefId_, forkId_).toMessage());
 
-    fm->addCallback([](const Message& /* unused */,
-                       bool hasError,
-                       const utils::FutureError& futErr) {
-      RRefContext::handleException(hasError, futErr);
-    });
+    fm->addCallback(
+        [](const Message& /* unused */, const utils::FutureError* futErr) {
+          RRefContext::handleException(futErr);
+        });
   }
 }
 

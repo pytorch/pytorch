@@ -18,7 +18,7 @@ class RRefContext {
   static RRefContext& getInstance();
   static void destroyInstance();
 
-  static void handleException(bool hasError, const utils::FutureError& futErr);
+  static void handleException(const utils::FutureError* futErr);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;

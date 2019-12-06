@@ -4,7 +4,6 @@
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/utils/future.h>
 
 #include <atomic>
 #include <thread>
@@ -61,7 +60,7 @@ class ProcessGroupAgent : public RpcAgent {
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
-  std::shared_ptr<torch::utils::Future<Message>> send(
+  std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message) override;
 
@@ -81,12 +80,12 @@ class ProcessGroupAgent : public RpcAgent {
   // additional information to manage timeouts and destination information,
   // which is needed for termination detection.
   struct FutureInfo {
-    std::shared_ptr<torch::utils::Future<Message>> future_;
+    std::shared_ptr<FutureMessage> future_;
     std::chrono::milliseconds startTime_;
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
-        const std::shared_ptr<torch::utils::Future<Message>>& future,
+        const std::shared_ptr<FutureMessage>& future,
         const std::chrono::milliseconds& startTime,
         int dstRank,
         const std::chrono::milliseconds timeout)

@@ -8,21 +8,20 @@ namespace distributed {
 namespace rpc {
 
 RRefContext& RRefContext::getInstance() {
-  static RRefContext context(RpcAgent::getDefaultRpcAgent());
-  return context;
+  // Leaky singleton to avoid module destructor races.
+  static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
+  return *context;
 }
 
 void RRefContext::destroyInstance() {
   RRefContext::getInstance().checkRRefLeaks();
 }
 
-void RRefContext::handleException(
-    bool hasError,
-    const utils::FutureError& futErr) {
-  if (hasError) {
+void RRefContext::handleException(const utils::FutureError* futErr) {
+  if (futErr) {
     // TODO: allow users to register an error handler and call it here.
-    VLOG(1) << "Got exception: " << futErr.errMsg() << std::endl << std::flush;
-    throw std::runtime_error(futErr.errMsg());
+    VLOG(1) << "Got exception: " << (*futErr).what();
+    throw std::runtime_error((*futErr).what());
   }
 }
 
@@ -220,24 +219,22 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // this fork ID.
     auto fm = agent_->send(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([](const Message& /* unused */,
-                       bool hasError,
-                       const utils::FutureError& futErr) {
-      handleException(hasError, futErr);
-    });
+    fm->addCallback(
+        [](const Message& /* unused */, const utils::FutureError* futErr) {
+          handleException(futErr);
+        });
   } else {
     auto fm = agent_->send(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent](
-                        const Message& /* unused */,
-                        bool hasError,
-                        const utils::FutureError& futErr) {
-      handleException(hasError, futErr);
-      this->finishForkRequest(forkId, parent);
-    });
+    fm->addCallback(
+        [this, forkId, parent](
+            const Message& /* unused */, const utils::FutureError* futErr) {
+          handleException(futErr);
+          this->finishForkRequest(forkId, parent);
+        });
   }
 }
 
@@ -289,11 +286,10 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->send(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([](const Message& /* unused */,
-                     bool hasError,
-                     const utils::FutureError& futErr) {
-    handleException(hasError, futErr);
-  });
+  fm->addCallback(
+      [](const Message& /* unused */, const utils::FutureError* futErr) {
+        handleException(futErr);
+      });
 }
 
 template <typename T>

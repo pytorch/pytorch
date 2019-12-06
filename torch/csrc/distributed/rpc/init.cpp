@@ -8,7 +8,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/utils/future.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
@@ -111,17 +110,19 @@ Otherwise, throws an exception.
                 return PyRRef::unpickle(t);
               }));
 
-  // future.wait() should not be called after join_rpc(), e.g., pythonRpcHandler
-  // is cleaned up in join_rpc(), after join_rpc(), python objects returned
-  // from rpc python call can not be resolved.
-  auto futureMessage =
-      shared_ptr_class_<torch::utils::Future<Message>>(module, "FutureMessage")
-          .def(
-              "wait",
-              [&](torch::utils::Future<Message>& fut) {
-                return toPyObj(fut.wait());
-              },
-              py::call_guard<py::gil_scoped_release>());
+  // future.wait() should not be called after wait_all_workers(), e.g.,
+  // pythonRpcHandler is cleaned up in wait_all_workers(), after
+  // wait_all_workers(), python objects returned from rpc python call can not be
+  // resolved.
+  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
+                    .def(
+                        "wait",
+                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+                        py::call_guard<py::gil_scoped_release>(),
+                        R"(
+Wait on Future, it returns python object, and will throw exception if error is
+set in Future.
+              )");
 
   shared_ptr_class_<ProcessGroupRpcAgentOptions>(
       module, "ProcessGroupRpcAgentOptions", rpcAgentOptions)
