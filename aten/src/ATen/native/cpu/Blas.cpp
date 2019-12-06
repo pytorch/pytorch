@@ -15,12 +15,12 @@ namespace at { namespace native {
 namespace {
 
 template <typename scalar_t>
-inline bool scal_use_fast_path(int64_t n, int64_t incx) {
+constexpr inline bool scal_use_fast_path(int64_t n, int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-inline bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+constexpr inline bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
   return false;
 }
 
@@ -36,13 +36,13 @@ inline void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_
 
 #ifdef USE_BLAS
 template <>
-inline bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
+constexpr inline bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
   auto intmax = std::numeric_limits<int>::max;
   return n <= intmax && incx <= intmax;
 }
 
 template <>
-inline bool scal_use_fast_path<float>(int64_t n, int64_t incx) {
+constexpr inline bool scal_use_fast_path<float>(int64_t n, int64_t incx) {
   return scal_use_fast_path<double>(n, incx);
 }
 
@@ -57,14 +57,14 @@ inline void scal_fast_path<float>(int n, float a, float *x, int incx) {
 }
 
 template <>
-inline bool gemv_use_fast_path<float>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+constexpr inline bool gemv_use_fast_path<float>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
   auto intmax = std::numeric_limits<int>::max;
   return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
         (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
 }
 
 template <>
-inline bool gemv_use_fast_path<double>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+constexpr inline bool gemv_use_fast_path<double>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
   return gemv_use_fast_path<float>(m, n, lda, incx, incy);
 }
 
@@ -104,8 +104,8 @@ template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
   if(n == 1) lda = m;
 
-  if (gemv_use_fast_path(m, n, lda, incx, incy)) {
-    TORCH_CHECK(lda >= std::max(1, m), "lda should be at least max(1,", m, "), but have ", lda);
+  if (gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
+    TORCH_CHECK(lda >= std::max(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_lda = (int)lda;
