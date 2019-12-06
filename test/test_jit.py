@@ -15243,19 +15243,34 @@ a")
         with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
             torch.jit.script(test)
 
-        with self.assertRaisesRegex(Exception, "Overloaded default args must be on the implementation function"):
+        @torch.jit._overload  # noqa: F811
+        def good_overload(x=1):  # noqa: F811
+            # type: (int) -> (int)
+            pass
+
+        def good_overload(x=1):  # noqa: F811
+            return x
+
+        @torch.jit.script
+        def foo():
+            return good_overload()
+
+        self.assertEqual(foo(), 1)
+
+
+        with self.assertRaisesRegex(Exception, "must equal to the default parameter"):
             @torch.jit._overload  # noqa: F811
-            def default_on_overload(x, y=2):  # noqa: F811
+            def bad_default_on_overload(x, y=2):  # noqa: F811
                 # type: (int, int) -> (int)
                 pass
 
-            def default_on_overload(x, y):  # noqa: F811
+            def bad_default_on_overload(x, y=1):  # noqa: F811
                 # type: (int, int) -> (int)
                 pass
 
             @torch.jit.script
             def test():
-                return default_on_overload(1, 2)
+                return bad_default_on_overload(1, 2)
 
         @torch.jit._overload  # noqa: F811
         def diff_default(x):  # noqa: F811

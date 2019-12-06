@@ -297,7 +297,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
       schema.is_varret());
 }
 
-static Decl computeOverloadDecl(
+static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     const Decl& overload_decl,
     const Decl& impl_decl,
     const FunctionDefaults& defaults) {
@@ -360,12 +360,18 @@ static StrongFunctionPtr script_compile_overloaded_function(
     throw ErrorReport(overload_decl.range())
         << "Must explicitly add type annotations to overloaded functions";
   }
-  if (overload_defaults.size()) {
-    throw ErrorReport(overload_decl.range())
-        << "Overloaded default args must be on the implementation function";
+  for (const auto& default_val : overload_defaults) {
+    auto impl_default = implementation_defaults.find(default_val.first);
+    if (impl_default == implementation_defaults.end() ||
+        !impl_default->second.equal(default_val.second)) {
+      throw ErrorReport(overload_decl.range())
+          << "Default parameters on overloads do not "
+          << "effect the runtime so they must equal to the default parameter on the implementation function."
+          << " found on parameter " << impl_default->first;
+    }
   }
 
-  auto adjusted_decl = computeOverloadDecl(
+  auto adjusted_decl = mergeDefaultsAndExtraParametersToOverloadDecl(
       overload_decl, implementation_def.decl(), implementation_defaults);
   auto new_def = implementation_def.withDecl(adjusted_decl);
   auto cu = get_python_cu();
