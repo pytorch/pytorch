@@ -9216,9 +9216,10 @@ class TestNNDeviceType(NNTestCase):
         for fn in [F.softmax, F.log_softmax]:
             for size in sizes:
                 input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
-                output = fn(input, dtype=torch.float, dim=1).sum()
-                grad_input, = torch.autograd.grad(output, input, create_graph=True)
-                grad_input.sum().backward()
+                for dim in [0, 1]:
+                    output = fn(input, dtype=torch.float, dim=dim).sum()
+                    grad_input, = torch.autograd.grad(output, input, create_graph=True)
+                    grad_input.sum().backward()
 
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
