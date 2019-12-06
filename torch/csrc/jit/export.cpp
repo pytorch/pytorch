@@ -508,7 +508,7 @@ GraphEncoder::GraphEncoder(
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
 
-  EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes, 
+  EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes,
               keep_initializers_as_inputs, add_node_names);
 
   for (const std::string& domain : domains_) {

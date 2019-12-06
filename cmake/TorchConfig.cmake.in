@@ -51,6 +51,9 @@ list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
 # shared library.
 # TODO: this list might be incomplete.
 if (NOT @BUILD_SHARED_LIBS@)
+  find_library(TORCH_CPU_LIBRARY torch_cpu PATHS "${TORCH_INSTALL_PREFIX}/lib")
+  list(APPEND TORCH_LIBRARIES ${TORCH_CPU_LIBRARY})
+
   if (@USE_NNPACK@)
     find_library(NNPACK_LIBRARY nnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
     list(APPEND TORCH_LIBRARIES ${NNPACK_LIBRARY})
