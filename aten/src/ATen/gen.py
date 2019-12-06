@@ -143,12 +143,14 @@ cuda_file_manager = FileManager()
 def backend_to_devicetype(backend):
     if backend == 'QuantizedCPU':
         return 'CPU'
+    elif backend == 'QuantizedCUDA':
+        return 'CUDA'
     return backend
 
 backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 
-quantized_backends = ['QuantizedCPU']
+quantized_backends = ['QuantizedCPU', 'QuantizedCUDA']
 
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
@@ -235,7 +237,7 @@ def generate_storage_type_and_tensor(backend, density, declarations):
     top_env['type_ids'].append(tag + ',')
 
     env['legacy_th_headers'] = []
-    if backend == 'CUDA':
+    if backend_to_devicetype(backend) == 'CUDA':
         env['extra_cuda_headers'] = []
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
         if options.rocm:
@@ -339,7 +341,7 @@ def declare_outputs():
     for backend, density in iterate_types():
         full_backend = backend if density == "Dense" else density + backend
         fm = file_manager
-        if backend == 'CUDA':
+        if backend_to_devicetype(backend) == 'CUDA':
             fm = cuda_file_manager
         for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":

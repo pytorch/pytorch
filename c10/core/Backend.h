@@ -25,7 +25,7 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, ComplexCPU, ComplexCUDA, Undefined, MkldnnCPU, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, QuantizedCUDA, ComplexCPU, ComplexCUDA, Undefined, MkldnnCPU, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -66,6 +66,8 @@ static inline Backend toDense(Backend b) {
       return Backend::HIP;
     case Backend::QuantizedCPU:
       return Backend::QuantizedCPU;
+    case Backend::QuantizedCUDA:
+      return Backend::QuantizedCUDA;
     case Backend::ComplexCPU:
       return Backend::ComplexCPU;
     case Backend::ComplexCUDA:
@@ -98,6 +100,8 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::QuantizedCPU;
   } else if (t == TensorTypeId::ComplexCPUTensorId) {
     return Backend::ComplexCPU;
+  } else if (t == TensorTypeId::QuantizedCUDATensorId) {
+    return Backend::QuantizedCUDA;
   } else if (t == TensorTypeId::ComplexCUDATensorId) {
     return Backend::ComplexCUDA;
   } else if (t == TensorTypeId::UndefinedTensorId) {
@@ -131,6 +135,8 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return TensorTypeId::QuantizedCPUTensorId;
     case Backend::ComplexCPU:
       return TensorTypeId::ComplexCPUTensorId;
+    case Backend::QuantizedCUDA:
+      return TensorTypeId::QuantizedCUDATensorId;
     case Backend::ComplexCUDA:
       return TensorTypeId::ComplexCUDATensorId;
     case Backend::Undefined:
@@ -162,6 +168,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::QuantizedCPU:
     case Backend::ComplexCPU:
       return DeviceType::CPU;
+    case Backend::QuantizedCUDA:
     case Backend::ComplexCUDA:
       return DeviceType::CUDA;
     case Backend::Undefined:
@@ -191,6 +198,7 @@ static inline Backend backendToCPU(Backend b) {
     case Backend::MkldnnCPU:
       return Backend::MkldnnCPU;
     case Backend::QuantizedCPU:
+    case Backend::QuantizedCUDA:
       return Backend::QuantizedCPU;
     case Backend::ComplexCPU:
     case Backend::ComplexCUDA:
@@ -268,6 +276,8 @@ static inline const char* toString(Backend b) {
       return "QuantizedCPU";
     case Backend::ComplexCPU:
       return "ComplexCPU";
+    case Backend::QuantizedCUDA:
+      return "QuantizedCUDA";
     case Backend::ComplexCUDA:
       return "ComplexCUDA";
     default:

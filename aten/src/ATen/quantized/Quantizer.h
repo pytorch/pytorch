@@ -263,7 +263,7 @@ CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
     ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
-CAFFE2_API Tensor new_qtensor_cpu(
+CAFFE2_API Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer,

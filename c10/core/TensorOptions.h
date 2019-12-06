@@ -345,11 +345,16 @@ struct C10_API TensorOptions {
             }
             return TensorTypeId::CPUTensorId;
             }
-          case DeviceType::CUDA:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
+          case DeviceType::CUDA: {
+            auto dtype_tmp = typeMetaToScalarType(dtype());
+            if (isComplexType(dtype_tmp)) {
               return TensorTypeId::ComplexCUDATensorId;
             }
+            if (isQIntType(dtype_tmp)) {
+              return TensorTypeId::QuantizedCUDATensorId;
+            }
             return TensorTypeId::CUDATensorId;
+            }
           case DeviceType::MKLDNN:
             return TensorTypeId::MKLDNNTensorId;
           case DeviceType::OPENGL:

@@ -36,6 +36,8 @@ const char* toString(TensorTypeId t) {
       return "QuantizedCPUTensorId";
     case TensorTypeId::ComplexCPUTensorId:
       return "ComplexCPUTensorId";
+    case TensorTypeId::QuantizedCUDATensorId:
+      return "QuantizedCUDATensorId";
     case TensorTypeId::ComplexCUDATensorId:
       return "ComplexCUDATensorId";
     case TensorTypeId::VariableTensorId:

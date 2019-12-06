@@ -50,6 +50,35 @@ void checkQuantizedCPUTensor(std::string fn_name, Tensor t) {
            " expects a CPU quantized Tensor");
 }
 
+void checkFloatTensor(std::string fn_name, Tensor t) {
+  TORCH_CHECK(
+      t.scalar_type() == kFloat,
+      fn_name,
+      " expects a Float Tensor.");
+}
+
+void checkSameDevice(std::string fn_name, Tensor t1, Tensor t2) {
+  TORCH_CHECK(
+      t1.device() == t2.device(),
+      fn_name,
+      " expects a quantized and float tensors to be on the same device.");
+}
+
+template <typename T>
+void checkQuantizedTensor(std::string fn_name, Tensor t) {
+  TORCH_CHECK(t.is_quantized(),
+           fn_name,
+           " expects a quantized Tensor.");
+  TORCH_CHECK(t.scalar_type() == caffe2::TypeMeta::Make<T>(),
+           fn_name,
+           " expects a ",
+           caffe2::TypeMeta::Make<T>(),
+           " Tensor");
+  TORCH_CHECK(t.is_cuda() || t.device() == kCPU,
+           fn_name,
+           " expects a CUDA or CPU quantized Tensor");
+}
+
 template <typename T>
 void checkZeroPoint(std::string fn_name, int64_t zero_point) {
   TORCH_CHECK(zero_point <= std::numeric_limits<T>::max(),
@@ -112,8 +141,8 @@ void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, si
 }
 
 template <typename T>
-Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
-  auto fn_name = "quantize_tensor";
+Tensor quantize_tensor_cpu(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
+  auto fn_name = "quantize_tensor_cpu";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
@@ -140,8 +169,8 @@ inline float dequantize_val(double scale, int64_t zero_point, T value) {
 }
 
 template <typename T>
-Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
-  auto fn_name = "dequantize_tensor";
+Tensor dequantize_tensor_cpu(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
+  auto fn_name = "dequantize_tensor_cpu";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
@@ -280,8 +309,8 @@ void quantize_tensor_arm<c10::quint8>(
 #endif // __ARM_NEON__
 
 template <typename T>
-Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
-  auto fn_name = "quantize_tensor";
+Tensor quantize_tensor_cpu(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
+  auto fn_name = "quantize_tensor_cpu";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
@@ -310,8 +339,8 @@ CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value) {
 }
 
 template <typename T>
-Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
-  auto fn_name = "dequantize_tensor";
+Tensor dequantize_tensor_cpu(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
+  auto fn_name = "dequantize_tensor_cpu";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
@@ -339,16 +368,16 @@ template CAFFE2_API qint32 quantize_val<qint32>(double scale, int64_t zero_point
 template CAFFE2_API void quantize_vec<c10::qint8>(double scale, int64_t zero_point, const float *src, c10::qint8 *dst, size_t count);
 template CAFFE2_API void quantize_vec<c10::quint8>(double scale, int64_t zero_point, const float *src, c10::quint8 *dst, size_t count);
 template CAFFE2_API void quantize_vec<c10::qint32, 32>(double scale, int64_t zero_point, const float *src, c10::qint32 *dst, size_t count);
-template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template Tensor quantize_tensor_cpu<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template Tensor quantize_tensor_cpu<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template Tensor quantize_tensor_cpu<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 
 template CAFFE2_API float dequantize_val<qint8>(double scale, int64_t zero_point, qint8 value);
 template CAFFE2_API float dequantize_val<quint8>(double scale, int64_t zero_point, quint8 value);
 template CAFFE2_API float dequantize_val<qint32>(double scale, int64_t zero_point, qint32 value);
-template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
-template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template Tensor dequantize_tensor_cpu<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template Tensor dequantize_tensor_cpu<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template Tensor dequantize_tensor_cpu<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 
 template CAFFE2_API qint8 requantize_val<qint8, qint8>(double, int64_t, double, int64_t, qint8);
 template CAFFE2_API quint8 requantize_val<qint8, quint8>(double, int64_t, double, int64_t, qint8);
@@ -359,6 +388,56 @@ template CAFFE2_API qint32 requantize_val<quint8, qint32>(double, int64_t, doubl
 template CAFFE2_API qint8 requantize_val<qint32, qint8>(double, int64_t, double, int64_t, qint32);
 template CAFFE2_API quint8 requantize_val<qint32, quint8>(double, int64_t, double, int64_t, qint32);
 template CAFFE2_API qint32 requantize_val<qint32, qint32>(double, int64_t, double, int64_t, qint32);
+
+template <typename T>
+Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point) {
+  auto fn_name = "dequantize_tensor";
+  checkFloatTensor(fn_name, rtensor);
+  checkQuantizedTensor<T>(fn_name, qtensor);
+  checkSameDevice(fn_name, qtensor, rtensor);
+  checkZeroPoint<typename T::underlying>(fn_name, zero_point);
+  switch (qtensor.device().type())
+  {
+  case DeviceType::CUDA:
+    std::cout << "HEY! Nothing will happen." << std::endl;
+    break;
+  case DeviceType::CPU:
+    dequantize_tensor_cpu<T>(qtensor, rtensor, scale, zero_point);
+    break;
+  default:
+    AT_ERROR("Unknown backend");;
+  }
+  return rtensor;
+}
+
+template <typename T>
+Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
+  auto fn_name = "quantize_tensor";
+  checkFloatTensor(fn_name, rtensor);
+  checkQuantizedTensor<T>(fn_name, qtensor);
+  checkSameDevice(fn_name, qtensor, rtensor);
+  checkZeroPoint<typename T::underlying>(fn_name, zero_point);
+  switch (qtensor.device().type())
+  {
+  case DeviceType::CUDA:
+    std::cout << "HEY! Nothing will happen." << std::endl;
+    break;
+  case DeviceType::CPU:
+    quantize_tensor_cpu<T>(rtensor, qtensor, scale, zero_point);
+    break;
+  default:
+    AT_ERROR("Unknown backend");;
+  }
+  return qtensor;
+}
+
+
+template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 
 // TODO: add fbgemm for per channel
 template <typename T>
@@ -479,19 +558,18 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-inline Tensor new_qtensor_cpu(
+inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer,
     MemoryFormat memory_format=MemoryFormat::Contiguous) {
-  AT_ASSERT(options.device().is_cpu());
-
   native::check_size_nonnegative(sizes);
-  auto* allocator = at::getCPUAllocator();
+  at::Allocator* allocator = GetAllocator(options.device().type());
+  at::TensorTypeId tensorTypeId = options.computeTensorTypeId();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
-           "ScalarType is not supported in new_qtensor_cpu.");
+           "ScalarType is not supported in new_qtensor.");
   auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
@@ -499,7 +577,7 @@ inline Tensor new_qtensor_cpu(
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage, at::TensorTypeSet(at::TensorTypeId::QuantizedCPUTensorId), quantizer);
+      storage, at::TensorTypeSet(tensorTypeId), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;
@@ -510,11 +588,11 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
       rtensor.scalar_type() == kFloat,
       "quantize only works on Float Tensor.");
   TORCH_CHECK(
-      rtensor.device() == kCPU,
-      "quantize only works for CPU backend right now.");
+      rtensor.device().is_cpu() || rtensor.device().is_cuda(),
+      "quantize only works for CPU and CUDA backend right now.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
-  Tensor qtensor = new_qtensor_cpu(
+  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
@@ -530,8 +608,8 @@ Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
   TORCH_CHECK(qtensor.is_quantized(),
            "dequantize is only supported in quantized Tensor.");
   TORCH_CHECK(
-      qtensor.device() == kCPU,
-      "dequantize only works for CPU backend right now.");
+      qtensor.device().is_cpu() || qtensor.device().is_cuda(),
+      "dequantize only works for CPU and CUDA backend right now.");
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
 
@@ -551,7 +629,7 @@ Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
       "quantize only works for CPU backend right now.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
-  Tensor qtensor = new_qtensor_cpu(
+  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());

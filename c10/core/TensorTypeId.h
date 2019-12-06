@@ -35,6 +35,7 @@ enum class TensorTypeId : uint8_t {
   XLATensorId, // PyTorch only
   MkldnnCPUTensorId,
   QuantizedCPUTensorId, // PyTorch only
+  QuantizedCUDATensorId, // PyTorch only
   ComplexCPUTensorId, // PyTorch only
   ComplexCUDATensorId, // PyTorch only
 
