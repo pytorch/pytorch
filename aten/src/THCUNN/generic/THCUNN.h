@@ -60,23 +60,6 @@ THC_API void THNN_(ELU_updateGradInput)(
                   accreal scale,
                   accreal input_scale);
 
-THC_API void THNN_(HardTanh_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal min_val,
-                  accreal max_val,
-                  bool inplace);
-
-THC_API void THNN_(HardTanh_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  accreal min_val,
-                  accreal max_val,
-                  bool inplace);
-
 THC_API void THNN_(GatedLinear_updateOutput)(
                   THCState *state,
                   THCTensor *input,

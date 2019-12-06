@@ -5697,7 +5697,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         do_test(torch.tensor([[1, 2]]).data)
         do_test(torch.tensor([[1, 2]]).detach())
 
-    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
@@ -6297,6 +6296,12 @@ class TestTorchDeviceType(TestCase):
         # self.assertEqual((), torch.normal(zero_d, one_d).shape)
         # self.assertEqual((), torch.normal(1, one_d).shape)
 
+        # convolutions.  Yes, we are testing nn.functional here; seems justified
+        # given its similar to the other tests
+        w = torch.randn(2, 1, 3, 3, device=device).div_(2).requires_grad_()
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.conv2d(zero_d, w, groups=1))
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.conv2d(zero_d, w, groups=2))
+
         # nll_loss -- verify input can't be 0-dimensional.
         self.assertRaises(ValueError, lambda: torch.nn.functional.nll_loss(zero_d, zero_d, reduction='none'))
         self.assertRaises(ValueError, lambda: torch.nn.functional.nll_loss(zero_d, one_d, reduction='none'))
@@ -6305,6 +6310,19 @@ class TestTorchDeviceType(TestCase):
                                 (torch.randn(1, 1, 1, 1, device=device), torch.tensor([[[0]]], device=device))):
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='mean').shape)
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='sum').shape)
+
+        # multilabel_margin_loss
+        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
+            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device), torch.tensor([[0]], device=device)):
+                if (input.dim() <= 1 and target.dim() <= 1) or (input.dim() == 2 and target.dim() == 2):
+                    output_shape = (target.shape[0],) if target.dim() == 2 else ()
+                    self.assertEqual(output_shape, torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
+                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean').shape)
+                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum').shape)
+                else:
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
 
     @onlyCPU
     @dtypes(torch.float)
