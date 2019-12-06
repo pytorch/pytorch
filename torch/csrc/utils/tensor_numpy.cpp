@@ -71,9 +71,9 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  if (tensor.is_cuda()) {
-    throw TypeError(
-        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
+  if (tensor.device() != DeviceType::CPU) {
+      throw TypeError(
+        "can't convert non-CPU tensor to numpy. Use Tensor.cpu() to "
         "copy the tensor to host memory first.");
   }
   if (tensor.is_sparse()) {
@@ -81,8 +81,9 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (tensor.options().backend() != Backend::CPU) {
-    throw TypeError("NumPy conversion for %s is not supported", tensor.toString().c_str());
+  if (tensor.layout() != Layout::Strided) {
+      throw TypeError(
+        "can't convert non-strided tensor to numpy.");
   }
   if (tensor.requires_grad()) {
     throw std::runtime_error(
