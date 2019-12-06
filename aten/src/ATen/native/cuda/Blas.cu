@@ -4,15 +4,7 @@
 namespace at { namespace native {
 namespace {
 
-// static void THCTensor_(addmvImpl)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha)
-// {
-// #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-//   if(r_ != t)
-//   {
-//     THCTensor_(resizeAs)(state, r_, t);
-//     THCTensor_(copy)(state, r_, t);
-//   }
-
+void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
 //   auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
 
 //   if(mat->stride(0) == 1)
@@ -90,9 +82,6 @@ namespace {
 // #else
 //   ERROR_ONLY_FP_TYPES("addmv");
 // #endif
-// }
-
-void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
   return;
 }
 

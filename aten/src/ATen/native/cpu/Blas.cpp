@@ -1,4 +1,3 @@
-#include <type_traits>
 #include <limits>
 #include <ATen/Dispatch.h>
 #include <ATen/native/Blas.h>
@@ -25,7 +24,7 @@ constexpr inline bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int6
 }
 
 template <typename scalar_t>
-inline void scal_fast_path(int n, scalar_t a, scalar_t *x, int incx) {
+inline void scal_fast_path(int *n, scalar_t *a, scalar_t *x, int *incx) {
   TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
 }
 
@@ -47,13 +46,13 @@ constexpr inline bool scal_use_fast_path<float>(int64_t n, int64_t incx) {
 }
 
 template <>
-inline void scal_fast_path<double>(int n, double a, double *x, int incx) {
-  dscal_(&n, &a, x, &incx);
+inline void scal_fast_path<double>(int *n, double *a, double *x, int *incx) {
+  dscal_(n, a, x, incx);
 }
 
 template <>
-inline void scal_fast_path<float>(int n, float a, float *x, int incx) {
-  sscal_(&n, &a, x, &incx);
+inline void scal_fast_path<float>(int *n, float *a, float *x, int *incx) {
+  sscal_(n, a, x, incx);
 }
 
 template <>
@@ -86,7 +85,7 @@ void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
   if (scal_use_fast_path<scalar_t>(n, incx)) {
     int i_n = (int)n;
     int i_incx = (int)incx;
-    scal_fast_path(&i_n, &a, x, &i_incx);
+    scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
     return;
   }
   for (int64_t i = 0; i < n; i++) {
@@ -115,26 +114,27 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     return;
   }
 
-  if((trans == 'T') || (trans == 't')) {
-    for(int64_t i = 0; i < n; i++)
+  if ((trans == 'T') || (trans == 't')) {
+    for (int64_t i = 0; i < n; i++)
     {
       scalar_t sum = 0;
       scalar_t *row_ = a + lda * i;
-      for(int64_t j = 0; j < m; j++)
+      for (int64_t j = 0; j < m; j++) {
         sum += x[j * incx] * row_[j];
-        if (beta == 0) {
-          y[i * incy] = alpha * sum;
-        } else {
-          y[i * incy] = beta * y[i * incy] + alpha * sum;
-        }
+      }
+      if (beta == 0) {
+        y[i * incy] = alpha * sum;
+      } else {
+        y[i * incy] = beta * y[i * incy] + alpha * sum;
+      }
     }
   } else {
-    if(beta != 1) scal<scalar_t>(m, beta, y, incy);
+    if (beta != 1) scal<scalar_t>(m, beta, y, incy);
 
-    for(int64_t j = 0; j < n; j++) {
+    for (int64_t j = 0; j < n; j++) {
       scalar_t *column_ = a + lda * j;
       scalar_t z = alpha * x[j * incx];
-      for(int64_t i = 0; i < m; i++) {
+      for (int64_t i = 0; i < m; i++) {
         y[i * incy] += z * column_[i];
       }
     }
@@ -143,56 +143,39 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
 
 namespace {
 
-void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
-  auto r_stride = 0;
-  return;
+constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
+  return n == 1 || lda > std::max(1L, m);
 }
 
-// static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
-// {
-//   auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
+void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
+  auto r_stride = result.stride(0);
+  AT_DISPATCH_FLOATING_TYPES(mat.scalar_type(), "addmv_impl_cpu", [&] {
+    auto beta = beta_.to<scalar_t>();
+    auto alpha = alpha_.to<scalar_t>();
+    if (mat.stride(0) == 1 && lda_cond(mat.size(0), mat.size(1), mat.stride(1))) {
+      gemv<scalar_t>('n', mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1),
+          vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+    }
+    else if (mat.stride(1) == 1 && lda_cond(mat.size(1), mat.size(0), mat.stride(0))) {
+      gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
+          vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+    }
+    else {
+      Tensor cmat = mat.contiguous();
+      gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
+          vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+    }
 
-//   // n == 1 || lda >= max(1, m)
-//   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
-
-//   if(mat->stride(0) == 1 && LDA_COND(mat->size(0), mat->size(1), mat->stride(1)))
-//   {
-//     THBlas_(gemv)('n', mat->size(0), mat->size(1),
-//                   alpha, mat->data<scalar_t>(), mat->stride(1),
-//                   vec->data<scalar_t>(), THTensor_strideLegacyNoScalars(vec, 0),
-//                   beta, r_->data<scalar_t>(), r_stride);
-//   }
-//   else if(mat->stride(1) == 1 && LDA_COND(mat->size(1), mat->size(0), mat->stride(0)))
-//   {
-//     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-//                   alpha, mat->data<scalar_t>(), mat->stride(0),
-//                   vec->data<scalar_t>(), THTensor_strideLegacyNoScalars(vec, 0),
-//                   beta, r_->data<scalar_t>(), r_stride);
-//   }
-//   else
-//   {
-//     THTensor *cmat = THTensor_(newContiguous)(mat);
-
-//     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-//                   alpha, cmat->data<scalar_t>(), cmat->stride(0),
-//                   vec->data<scalar_t>(), THTensor_strideLegacyNoScalars(vec, 0),
-//                   beta, r_->data<scalar_t>(), r_stride);
-
-//     c10::raw::intrusive_ptr::decref(cmat);
-//   }
-
-//   // In gemv (x,0).mv(0) does not
-//   // handle beta, whereas gemm does for case where (x,0).mm(0,y).
-//   if (THTensor_sizeLegacyNoScalars(vec, 0) == 0 && mat->size(0) != 0) {
-//     if (beta == 0) {
-//       THTensor_(zero)(r_);
-//     } else if (beta != 1) {
-//       THTensor_(mul)(r_, r_, beta);
-//     }
-//   }
-
-//   #undef LDA_COND
-// }
+    // In gemv (x,0).mv(0) does not handle beta, whereas gemm does for case where (x,0).mm(0,y).
+    if (vec.size(0) == 0 && mat.size(0) != 0) {
+      if (beta == scalar_t(0)) {
+        result.zero_();
+      } else if (beta != scalar_t(1)) {
+        result.mul_(beta);
+      }
+    }
+  });
+}
 
 } // anonymous namespace
 
