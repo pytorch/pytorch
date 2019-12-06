@@ -739,7 +739,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 # pragma unroll
 #endif
   for (int64_t i = 0; i < n; i++) {
-    *dst = c10::static_cast_with_inter_type<dst_T>(*src);
+    *dst = c10::static_cast_with_inter_type<dst_T, src_T>::apply(*src);
     src++;
     dst++;
   }
