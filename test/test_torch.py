@@ -5273,8 +5273,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(tensor[0], np_val)
 
             t = torch.from_numpy(np_arr)
-            self.assertEqual((t + np_val).dtype, (t + t[0].item()).dtype)
-            self.assertEqual((np_val + t).dtype, (t + t[0].item()).dtype)
+            self.assertEqual((t + np_val).dtype, t.dtype)
+            self.assertEqual((np_val + t).dtype, t.dtype)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(

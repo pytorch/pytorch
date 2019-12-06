@@ -147,7 +147,7 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
   return sizes;
 }
 
-ScalarType infer_scalar_type(PyObject *obj) {
+static ScalarType infer_scalar_type(PyObject *obj) {
 #ifdef USE_NUMPY
   if (PyArray_Check(obj)) {
     return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
