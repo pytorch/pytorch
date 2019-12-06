@@ -1286,7 +1286,7 @@ struct getTypePtr_<at::Scalar> final {
 template <>
 struct getTypePtr_<c10::QScheme> final {
   static TypePtr call() {
-    return QScheme::get();
+    return QSchemeType::get();
   }
 };
 template <>
