@@ -19,22 +19,6 @@ from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from rpc_agent_test_fixture import RpcAgentTestFixture
 
-rpc_done = [False, False, False, False]
-
-# TODO: dedupe this with the code in dist_autograd_test.py.
-# Send rpc done info and context_id to
-# dst_rank = (self.rank + rank_distance) % self.world_size
-# we don't need a lock here since the GIL is held while executing remote
-# python UDFs, so access is serialized across several workers.
-def _set_rpc_done(rank_distance):
-    global rpc_done
-    rpc_done[rank_distance] = True
-
-def _check_rpc_done(rank_distance):
-    while not rpc_done[rank_distance]:
-        # yield control to other threads
-        time.sleep(0)
-
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
@@ -1210,15 +1194,22 @@ class RpcTest(RpcAgentTestFixture):
         )
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ret = rpc.rpc_sync(
+        rpc.rpc_sync(
             "worker{}".format(dst_rank),
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
-        # wait for RPCs to be done, so that some workers don't try to shut down
-        # too early.
-        rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(1,))
-        _check_rpc_done(1)
+        # A barrier is needed to ensure that all RPCs are processed.
+        # Otherwise, some RPCs can timeout since the receiving end
+        # has terminated.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        dist.barrier()
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
 
