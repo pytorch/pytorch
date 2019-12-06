@@ -24,17 +24,6 @@ struct OpsValue : public SugaredValue {
   size_t version_;
 };
 
-struct ConstantValue : public SugaredValue {
-  ConstantValue(IValue value) : value_(std::move(value)) {}
-  IValue value_;
-  std::string kind() const override {
-    return "constant";
-  }
-  Value* asValue(const SourceRange& loc, Function& m) override {
-    return m.graph()->insertConstant(value_);
-  }
-};
-
 // Represents nested namespaces, like `foo.bar.Baz`.
 // Right now these namespaces can only contain other namespaces or NamedTypes
 struct TORCH_API ClassNamespaceValue : public SugaredValue {
@@ -116,12 +105,6 @@ struct SourceImporterImpl : public Resolver,
         {"annotate", SpecialFormValue::create(prim::annotate)},
         {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
         {"uninitialized", SpecialFormValue::create(prim::Uninitialized)},
-        {"inf",
-         std::make_shared<ConstantValue>(
-             std::numeric_limits<double>::infinity())},
-        {"nan",
-         std::make_shared<ConstantValue>(
-             std::numeric_limits<double>::quiet_NaN())},
     };
   }
 
@@ -218,7 +201,15 @@ struct SourceImporterImpl : public Resolver,
     if (it != env_.end()) {
       return it->second;
     }
-
+    auto graph = m.graph();
+    if (name == "inf") {
+      return std::make_shared<SimpleValue>(
+          graph->insertConstant(std::numeric_limits<double>::infinity(), loc));
+    }
+    if (name == "nan") {
+      return std::make_shared<SimpleValue>(
+          graph->insertConstant(std::numeric_limits<double>::quiet_NaN(), loc));
+    }
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(
           c10::QualifiedName(name), shared_from_this());
