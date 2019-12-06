@@ -2,6 +2,7 @@ import inspect
 import threading
 from functools import wraps
 import unittest
+import os
 import torch
 from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf
