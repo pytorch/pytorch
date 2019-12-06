@@ -1,4 +1,5 @@
 #include <limits>
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/Blas.h>
 
@@ -59,7 +60,7 @@ template <>
 constexpr inline bool gemv_use_fast_path<float>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
   auto intmax = std::numeric_limits<int>::max;
   return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
-        (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
+         (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
 }
 
 template <>
@@ -149,7 +150,7 @@ constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
 
 void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
   auto r_stride = result.stride(0);
-  AT_DISPATCH_FLOATING_TYPES(mat.scalar_type(), "addmv_impl_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
     if (mat.stride(0) == 1 && lda_cond(mat.size(0), mat.size(1), mat.stride(1))) {
@@ -166,14 +167,14 @@ void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const
           vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
     }
 
-    // In gemv (x,0).mv(0) does not handle beta, whereas gemm does for case where (x,0).mm(0,y).
-    if (vec.size(0) == 0 && mat.size(0) != 0) {
-      if (beta == scalar_t(0)) {
-        result.zero_();
-      } else if (beta != scalar_t(1)) {
-        result.mul_(beta);
-      }
-    }
+    // // In gemv (x,0).mv(0) does not handle beta, whereas gemm does for case where (x,0).mm(0,y).
+    // if (vec.size(0) == 0 && mat.size(0) != 0) {
+    //   if (beta == scalar_t(0)) {
+    //     result.zero_();
+    //   } else if (beta != scalar_t(1)) {
+    //     result.mul_(beta);
+    //   }
+    // }
   });
 }
 
