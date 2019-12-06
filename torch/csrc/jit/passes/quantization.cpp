@@ -627,7 +627,6 @@ class InsertQuantDeQuantHelper {
   // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  std::unordered_map<Graph*, std::vector<Value*>> values_to_quantize_;
   std::unordered_map<Graph*, std::unordered_map<Value*, std::tuple<IValue, IValue>>> values_to_qparams_;
 };
 
@@ -653,7 +652,6 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
   Value* new_value = observer->input(1);
   v->replaceAllUsesWith(new_value);
-  values_to_quantize_[g].push_back(new_value);
   values_to_qparams_[g].insert({new_value, getQParams(module, v)});
 }
 
@@ -707,11 +705,12 @@ bool InsertQuantDeQuantHelper::registerQParams(
 }
 
 void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g, Value* self) {
-  if (!values_to_quantize_.count(g)) {
+  if (!values_to_qparams_.count(g)) {
     return;
   }
-  for (auto& v : values_to_quantize_.at(g)) {
-    auto qparams_and_scalar_type = values_to_qparams_.at(g).at(v);
+  for (auto& pr : values_to_qparams_.at(g)) {
+    auto* v = pr.first;
+    auto qparams_and_scalar_type = pr.second;
     auto is_per_channel = registerQParams(module, qparams_and_scalar_type, v->debugName());
     insertQuantDeQuantCall(self, v, is_per_channel);
   }
