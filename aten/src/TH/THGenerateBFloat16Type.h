@@ -4,7 +4,8 @@
 
 #include <c10/util/BFloat16.h>
 #define scalar_t at::BFloat16
-#define accreal double
+#define accreal float
+#define TH_CONVERT_ACCREAL_TO_REAL(_val) (scalar_t)(_val)
 #define Real BFloat16
 #define TH_REAL_IS_BFLOAT16
 #line 1 TH_GENERIC_FILE

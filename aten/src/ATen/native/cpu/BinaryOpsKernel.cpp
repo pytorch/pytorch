@@ -479,7 +479,7 @@ void smooth_l1_kernel(TensorIterator& iter) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {

@@ -8133,6 +8133,24 @@ class TestNN(NNTestCase):
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
 
 
+    def test_bce_loss(self, dtype=torch.bfloat16):
+        sigmoid = nn.Sigmoid()
+        loss = nn.BCELoss().cpu()
+        inputf = torch.randn(3, device='cpu', dtype=torch.float, requires_grad=True)
+        input = inputf.to(dtype).detach().requires_grad_(True)
+        targetf = torch.empty(3, device='cpu', dtype=torch.float).random_(2)
+        target = targetf.to(dtype)
+
+        outf = loss(sigmoid(inputf), targetf)
+        out = loss(sigmoid(input), target)
+        self.assertEqual(out.dtype, dtype)
+        self.assertEqual(out, outf, prec=1e-1)
+
+        outf.backward()
+        out.backward()
+        self.assertEqual(input.grad.dtype, dtype)
+        self.assertEqual(input.grad, inputf.grad, prec=1e-1)
+
 class TestNNInit(TestCase):
     def setUp(self):
         super(TestNNInit, self).setUp()
