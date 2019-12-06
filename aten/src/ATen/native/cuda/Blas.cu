@@ -4,85 +4,49 @@
 namespace at { namespace native {
 namespace {
 
-void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
-//   auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
+void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
+  auto r_stride = result.stride(0);
+  auto vec_size = vec.size(0);
+  auto vec_stride = vec.size(0);
 
-//   if(mat->stride(0) == 1)
-//   {
-// #ifdef THC_REAL_IS_FLOAT
-//     THCudaBlas_Sgemv(state, 'n', mat->size(0), mat->size(1),
-//                     alpha, THCTensor_(data)(state, mat), mat->stride(1),
-//                     THCTensor_(data)(state, vec), vec_stride,
-//                     beta, THCTensor_(data)(state, r_), r_stride);
-// #elif defined(THC_REAL_IS_DOUBLE)
-//     THCudaBlas_Dgemv(state, 'n', mat->size(0), mat->size(1),
-//                     alpha, THCTensor_(data)(state, mat), mat->stride(1),
-//                     THCTensor_(data)(state, vec), vec_stride,
-//                     beta, THCTensor_(data)(state, r_), r_stride);
-// #endif
-//   }
-//   else if(mat->stride(1) == 1)
-//   {
-// #ifdef THC_REAL_IS_FLOAT
-//     THCudaBlas_Sgemv(state, 't',  mat->size(1), mat->size(0),
-//                     alpha, THCTensor_(data)(state, mat), mat->stride(0),
-//                     THCTensor_(data)(state, vec), vec_stride,
-//                     beta, THCTensor_(data)(state, r_), r_stride);
-// #elif defined(THC_REAL_IS_DOUBLE)
-//     THCudaBlas_Dgemv(state, 't',  mat->size(1), mat->size(0),
-//                      alpha, THCTensor_(data)(state, mat), mat->stride(0),
-//                      THCTensor_(data)(state, vec), vec_stride,
-//                      beta, THCTensor_(data)(state, r_), r_stride);
-// #endif
-//   }
-//   else
-//   {
-//     THCTensor *cmat = THCTensor_(newContiguous)(state, mat);
+  if (mat.scalar_type() == kHalf || mat.scalar_type() == kBfloat16) {
+    // Currently no Hgemv/SgemvEx in Cublas
+    Tensor vec_as_matrix = vec.reshape({vec_size, 1});
+    Tensor self_as_matrix = self.reshape({self.size(0), 1});
+    native::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta, alpha);
+    return;
+  }
 
-// #ifdef THC_REAL_IS_FLOAT
-//     THCudaBlas_Sgemv(state, 't',  mat->size(1), mat->size(0),
-//                     alpha, THCTensor_(data)(state, cmat), cmat->stride(0),
-//                     THCTensor_(data)(state, vec), vec_stride,
-//                     beta, THCTensor_(data)(state, r_), r_stride);
-// #elif defined(THC_REAL_IS_DOUBLE)
-//     THCudaBlas_Dgemv(state, 't',  mat->size(1), mat->size(0),
-//                     alpha, THCTensor_(data)(state, cmat), cmat->stride(0),
-//                     THCTensor_(data)(state, vec), vec_stride,
-//                     beta, THCTensor_(data)(state, r_), r_stride);
-// #endif
+  AT_DISPATCH_FLOATING_TYPES(mat.scalar_type(), "addmv_impl_cuda", [&] {
+    auto beta = beta_.to<scalar_t>();
+    auto alpha = alpha_.to<scalar_t>();
+    if (mat.stride(0) == 1) {
+      at::cuda::blas::gemv<scalar_t>(at::cuda::getCurrentCUDAStream().stream(), 'n',
+        mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1), vec.data_ptr<scalar_t>(),
+        vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+    }
+    else if (mat.stride(1) == 1) {
+      at::cuda::blas::gemv<scalar_t>(at::cuda::getCurrentCUDAStream().stream(), 't',
+        mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
+        vec.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+    }
+    else {
+      Tensor cmat = mat.contiguous();
+      at::cuda::blas::gemv<scalar_t>(at::cuda::getCurrentCUDAStream().stream(), 't',
+          mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
+          vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
+    }
 
-//     THCTensor_(free)(state, cmat);
-//   }
-
-//   // In cublasSgemv, cublasDgemv (x,0).mv(0) does not
-//   // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
-//   if (THTensor_sizeLegacyNoScalars(vec, 0) == 0 && mat->size(0) != 0) {
-//     if(THCNumerics<scalar_t>::eq(beta, ScalarConvert<int, scalar_t>::to(0))) {
-//       THCTensor_(zero)(state, r_);
-//     } else if(THCNumerics<scalar_t>::ne(beta, ScalarConvert<int, scalar_t>::to(1))) {
-//       THCTensor_(mul)(state, r_, r_, beta);
-//     }
-//   }
-
-// #elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
-//     // Currently no Hgemv/SgemvEx in Cublas
-//     THCTensor *vecAsMatrix = THCTensor_(newWithTensor)(state, vec);
-//     THCTensor_(resize2d)(state, vecAsMatrix, vec_size, 1);
-
-//     THCTensor *tAsMatrix = THCTensor_(newWithTensor)(state, t);
-//     THCTensor_(resize2d)(state, tAsMatrix, THTensor_sizeLegacyNoScalars(tAsMatrix, 0), 1);
-
-//     THCTensor_(addmm)(state, r_, tAsMatrix, mat, vecAsMatrix, beta, alpha);
-
-//     // r_ will have answer as matrix, need to return a vector
-//     THCTensor_(resize1d)(state, r_, THTensor_sizeLegacyNoScalars(r_, 0));
-//     THCTensor_(free)(state, vecAsMatrix);
-//     THCTensor_(free)(state, tAsMatrix);
-// #endif
-// #else
-//   ERROR_ONLY_FP_TYPES("addmv");
-// #endif
-  return;
+    // In cublasSgemv, cublasDgemv (x,0).mv(0) does not
+    // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
+    if (vec.size(0) == 0 && mat.size(0) != 0) {
+      if (beta == scalar_t(0)) {
+        result.zero_();
+      } else if (beta != scalar_t(1)) {
+        result.mul_(beta);
+      }
+    }
+  });
 }
 
 } // anonymous namespace
