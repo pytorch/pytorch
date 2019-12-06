@@ -82,7 +82,7 @@ class TestNumbaIntegration(common.TestCase):
                     AttributeError, lambda: sparse_cuda_t.__cuda_array_interface__
                 )
 
-            # CUDA tensors have the attribute and v0 interface
+            # CUDA tensors have the attribute and v2 interface
             cudat = tp(10).cuda()
 
             self.assertTrue(hasattr(cudat, "__cuda_array_interface__"))
@@ -94,11 +94,11 @@ class TestNumbaIntegration(common.TestCase):
             )
 
             self.assertEqual(ar_dict["shape"], (10,))
-            self.assertEqual(ar_dict["strides"], (cudat.storage().element_size(),))
+            self.assertIs(ar_dict["strides"], None)
             # typestr from numpy, cuda-native little-endian
             self.assertEqual(ar_dict["typestr"], numpy.dtype(npt).newbyteorder("<").str)
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
-            self.assertEqual(ar_dict["version"], 1)
+            self.assertEqual(ar_dict["version"], 2)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
