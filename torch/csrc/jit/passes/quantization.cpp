@@ -1197,6 +1197,7 @@ graph(%self, %x):
             GRAPH_UPDATE("Removing bias constant from conv module");
             conv_submodule.type()->unsafeRemoveConstant("bias");
           } else {
+            TORCH_CHECK(conv_submodule.type()->findAttributeSlot("bias").has_value());
             GRAPH_UPDATE("Removing existing non-Tensor bias attribute from conv module");
             conv_submodule._ivalue()->unsafeRemoveAttr("bias");
             conv_submodule.type()->unsafeRemoveAttribute("bias");
