@@ -10,7 +10,7 @@ Allocator* get() {
 }
 
 void recordStreamMasqueradingAsCUDA(const DataPtr& ptr, HIPStreamMasqueradingAsCUDA stream) {
-  HIPCachingAllocator::recordStream(ptr.get(), stream.hip_stream());
+  HIPCachingAllocator::recordStream(ptr, stream.hip_stream());
 }
 
 } // namespace HIPCachingAllocatorMasqueradingAsCUDA
