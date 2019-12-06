@@ -3176,7 +3176,7 @@ namespace detail {
       const torch::Tensor V = K;
       const torch::Tensor Q = decoder_state.clone().resize_({batch_sz, 1, d_model});
       auto attn_mask = torch::randint(0, 2, {1, seq_len});
-      const torch::Tensor attn_mask_tensor = attn_mask;
+      const torch::Tensor attn_mask_tensor = attn_mask.clone();
       attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
       attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, double(0.0));
 
@@ -3268,9 +3268,21 @@ namespace detail {
         k_proj_weight = multihead_attn_module->k_proj_weight;
         v_proj_weight = multihead_attn_module->v_proj_weight;
       }
-      const auto Q_fc = _fc(Q, q_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, 0, d_model));
-      const auto K_fc = _fc(K, k_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, d_model, (d_model * 2)));
-      const auto V_fc = _fc(V, v_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, (d_model * 2)));
+      auto Q_fc = _fc(Q, q_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, 0, d_model));
+      auto K_fc = _fc(K, k_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, d_model, (d_model * 2)));
+      auto V_fc = _fc(V, v_proj_weight, multihead_attn_module->in_proj_bias.slice(/*dim=*/0, (d_model * 2)));
+
+      if (add_bias_kv) {
+        K_fc = torch::cat({K_fc, bias_k.repeat({K_fc.size(0) / bias_k.size(0), 1, 1}/*, axis=0*/)}, /*dim=*/1);
+        V_fc = torch::cat({V_fc, bias_v.repeat({V_fc.size(0) / bias_v.size(0), 1, 1}/*, axis=0*/)}, /*dim=*/1);
+        if (attn_mask.defined()) {
+          attn_mask = torch::cat({attn_mask, torch::ones({1, 1})}, /*dim=*/1);
+        }
+        if (key_padding_mask.defined()) {
+          key_padding_mask = torch::cat({key_padding_mask, torch::full({batch_sz, 1}, false, torch::kBool)}, /*dim=*/1);
+        }
+        dims[1] += 1;
+      }
       const auto Q_split = _split_heads_ref(
         Q_fc, {batch_sz, 1, d_model}, nheads, d_head
       );
@@ -3319,12 +3331,12 @@ namespace detail {
 
       // result = reference
       ASSERT_EQ(result.sizes(), std::vector<int64_t>({batch_sz, d_model}));
-      ASSERT_TRUE(torch::allclose(result, reference, 1e-5));
+      ASSERT_TRUE(torch::allclose(result, reference, 1e-5, 1e-5, /*equal_nan=*/true));
 
       // result_weight = ref_attn_weight
       result_weight = result_weight.detach();
       ASSERT_EQ(result_weight.sizes(), ref_attn_weight.sizes());
-      ASSERT_TRUE(torch::allclose(result_weight, ref_attn_weight, 1e-5));
+      ASSERT_TRUE(torch::allclose(result_weight, ref_attn_weight, 1e-5, 1e-5, /*equal_nan=*/true));
     }
   }
 }
