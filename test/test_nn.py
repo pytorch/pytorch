@@ -6089,6 +6089,18 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    # test hardtanh backward froo large tensor
+    def test_hardtanh_backward(self):
+        x = torch.randn(128, 10000, requires_grad=True)
+        grad = torch.randn(128, 10000)
+        z = torch.zeros(128, 10000)
+        y = F.hardtanh(x)
+        y.backward(grad)
+        # ref backward path for hardtanh
+        mask = (x > -1) & (x < 1)
+        x_grad_ref = torch.where(mask, grad, z)
+        self.assertEqual(x.grad, x_grad_ref)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
@@ -9204,9 +9216,10 @@ class TestNNDeviceType(NNTestCase):
         for fn in [F.softmax, F.log_softmax]:
             for size in sizes:
                 input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
-                output = fn(input, dtype=torch.float, dim=1).sum()
-                grad_input, = torch.autograd.grad(output, input, create_graph=True)
-                grad_input.sum().backward()
+                for dim in [0, 1]:
+                    output = fn(input, dtype=torch.float, dim=dim).sum()
+                    grad_input, = torch.autograd.grad(output, input, create_graph=True)
+                    grad_input.sum().backward()
 
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):

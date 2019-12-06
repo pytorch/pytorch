@@ -25,7 +25,11 @@ void THNN_(MultiMarginCriterion_updateOutput)(
                "inconsistent target size");
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
-    THCTensor_(resizeAs)(state, output, target);
+    if (reduction == at::Reduction::None) {
+      THCTensor_(resizeAs)(state, output, target);
+    } else {
+      THCTensor_(resize0d)(state, output);
+    }
     if (p == 1)
     {
       cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
