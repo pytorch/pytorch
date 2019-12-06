@@ -732,7 +732,7 @@ private:
         if (value == K) { // skip itself
           continue;
         }
-        out << "    '" << demangle(value) << "'," << std::endl;
+        out << "      '" << demangle(value) << "'," << std::endl;
       }
       out << "  ]," << std::endl;
     }
