@@ -1276,7 +1276,7 @@ def create_generic(top_env, declarations):
                 check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
             if option['manual_kernel_registration']:
                 top_env['function_registrations'].append(
-                        check_namedtensor_enabled(DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
+                    check_namedtensor_enabled(DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
             else:
                 if option['use_c10_dispatcher'] == 'full':
                     top_env['function_registrations'].append(
