@@ -338,6 +338,16 @@ your operator, please do. For a few corner cases, enabling this might not compil
 successfully, so setting this to 'unboxed_only', or as last resort 'no' is a
 workaround. Also, 'no' is the default if you don't specify anything.
 
+### `manual_kernel_registration`
+
+```
+manual_kernel_registration: True
+```
+
+With this flag set, we will not generate code to automatically register the C++ operator
+implementation with the dispatcher. This is a workaround for ops that need manual
+Variable code (see VariableTypeManual.cpp) and should only be used rarely.
+
 ## Writing an implementation in C++
 
 Implementations of native functions go in an appropriate C++ file in the

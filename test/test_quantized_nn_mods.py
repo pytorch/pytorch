@@ -13,7 +13,8 @@ from common_quantized import _calculate_dynamic_qparams, override_quantized_engi
 from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
+import hypothesis_utils as hu
+hu.assert_deadline_disabled()
 
 import io
 import numpy as np
@@ -127,7 +128,6 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
@@ -181,7 +181,6 @@ class FunctionalAPITest(QuantizationTestCase):
                 W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
                 use_channelwise)
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            D=st.integers(4, 8),
@@ -239,7 +238,6 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
 class DynamicModuleAPITest(QuantizationTestCase):
-    @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
@@ -357,7 +355,6 @@ class ModuleAPITest(QuantizationTestCase):
                          message="ReLU6 module API failed")
 
 
-    @no_deadline
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -646,7 +643,6 @@ class ModuleAPITest(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue(module_name in str(converted_qconv_module))
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
