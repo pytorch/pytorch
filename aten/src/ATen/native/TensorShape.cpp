@@ -587,7 +587,7 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
         return new_values.sum(0);
       }
     } else {
-      auto dimIndices = (arange(0, sparse_dim, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory()) != dim).nonzero().view(-1);
+      auto dimIndices = (arange(0, sparse_dim, c10::nullopt, c10::nullopt, self.device()) != dim).nonzero().view(-1);
       auto new_indices = indices.index_select(1, nzIndices).index_select(0, dimIndices);
       return _sparse_coo_tensor_with_dims_and_tensors(
             sparse_dim - 1, dense_dim, new_sizes, new_indices, new_values, self.options());
@@ -1061,7 +1061,7 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
   if (dim <= sparse_dim) {
     auto new_indices = native::cat({
       indices.narrow(0, 0, dim),
-      native::zeros({1, indices.size(1)}, at::kLong, self.options().layout(), self.options().device(), self.options().pinned_memory()),
+      native::zeros({1, indices.size(1)}, at::kLong, indices.options().layout_opt(), indices.options().device_opt(), indices.options().pinned_memory_opt()),
       indices.narrow(0, dim, indices.size(0) - dim)
     });
     return _sparse_coo_tensor_with_dims_and_tensors(
