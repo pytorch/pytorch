@@ -47,7 +47,8 @@ std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
   return getMetrics();
 }
 
-void RpcAgent::addGilWaitTime(const std::chrono::microseconds gilWaitTime) {
+void RpcAgent::addGilWaitTime(
+    const std::chrono::microseconds gilWaitTime /* unused */) {
   // No-op default implementation
 }
 

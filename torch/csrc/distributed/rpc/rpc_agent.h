@@ -12,8 +12,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
-
 struct RpcBackendOptions {
   RpcBackendOptions() = default;
   std::chrono::milliseconds rpcTimeout;
