@@ -86,12 +86,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           worker.
 
           Example::
-
               Following examples skip RPC initialization and shutdown code
               for simplicity. Refer to RPC docs for those details.
 
               1. Create an RRef using rpc.remote
 
+              >>> import torch
               >>> import torch.distributed.rpc as rpc
               >>> rref = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
               >>> # get a copy of value from the RRef
@@ -99,17 +99,21 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
               2. Create an RRef from a local object
 
+              >>> import torch
               >>> from torch.distributed.rpc import RRef
               >>> x = torch.zeros(2, 2)
               >>> rref = RRef(x)
 
               3. Share an RRef with other workers
 
-              On both worker0 and worker1:
+              >>> # On both worker0 and worker1:
               >>> def f(rref):
               >>>   return rref.to_here() + 1
 
-              On worker0:
+              >>> # On worker0:
+              >>> import torch
+              >>> import torch.distributed.rpc as rpc
+              >>> from torch.distributed.rpc import RRef
               >>> rref = RRef(torch.zeros(2, 2))
               >>> # the following RPC shares the rref with worker1, reference
               >>> # count is automatically updated.
