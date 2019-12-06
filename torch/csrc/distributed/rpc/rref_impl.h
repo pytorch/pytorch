@@ -39,12 +39,7 @@ struct RRefForkData {
       const ForkId& forkId_,
       worker_id_t parent);
 
-  static RRefForkData fromIValue(const at::IValue&);
 };
-
-static_assert(
-    C10_IS_TRIVIALLY_COPYABLE(RRefForkData),
-    "RRefForkData must be trivially copyable");
 
 // Note [RRef Protocol]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -41,6 +41,13 @@ RRefContext::~RRefContext() {
   }
 }
 
+std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
+  std::unordered_map<std::string, std::string> info;
+  std::lock_guard<std::mutex> lock(mutex_);
+  info["num_owner_rrefs"] = c10::to_string(owners_.size());
+  return info;
+}
+
 void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
   if (!forks_.empty()) {
     std::stringstream ss;
@@ -64,15 +71,19 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
           << "GC has deleted them before calling shutdown(): \n"
           << ss.str();
     } else {
-      AT_ERROR(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   }
 }
 
 std::shared_ptr<UserRRef> RRefContext::createUserRRef(worker_id_t ownerId, const TypePtr& type) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-  return createUserRRef(
-      ownerId, genGloballyUniqueId(), genGloballyUniqueId(), type);
+  // Explicitly creating rrefId before forkId to make sure the order is
+  // deterministic, as the argument evaluation order is system and compiler
+  // dependent.
+  const auto rrefId = genGloballyUniqueId();
+  const auto forkId = genGloballyUniqueId();
+  return createUserRRef(ownerId, rrefId, forkId, type);
 }
 
 std::shared_ptr<UserRRef> RRefContext::createUserRRef(

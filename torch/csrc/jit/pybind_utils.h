@@ -543,6 +543,8 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::QSchemeType:
+      break;
     case TypeKind::RRefType:
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
