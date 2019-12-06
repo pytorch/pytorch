@@ -350,7 +350,7 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
   // requested by the user, because it is legal to remove implicit expands
   // from the graph, but not legal to remove the explicit ones.
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
-           "expand(", self.type(), "{", self.sizes(), "}, size=", size,
+           "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
            "must be greater or equal to the number of dimensions in the tensor (",
            self.dim(), ")");

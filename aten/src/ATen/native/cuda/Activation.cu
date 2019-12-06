@@ -285,6 +285,16 @@ Tensor hardshrink_backward_cuda(const Tensor & grad, const Tensor & self, Scalar
   return out_tensor;
 }
 
+void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardtanh_backward_cuda", [&]() {
+    auto min_val = min.to<scalar_t>();
+    auto max_val = max.to<scalar_t>();
+    gpu_kernel(iter, [min_val, max_val]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return (b <= min_val) || (b >= max_val) ? scalar_t(0) : a;
+    });
+  });
+}
+
 template <typename scalar_t>
 void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t value) {
   gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t x, scalar_t other) -> scalar_t {
@@ -373,5 +383,7 @@ Tensor& threshold_out_cuda(Tensor& result, const Tensor& self, Scalar threshold,
 Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar threshold) {
   return threshold_out_cuda(nullopt, self, threshold, 0, grad);
 }
+
+REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 
 }}  // namespace at::native
