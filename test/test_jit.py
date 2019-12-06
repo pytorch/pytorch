@@ -4929,14 +4929,14 @@ a")
         str = """
         def foo(x):
             # type: (bool)
-            a = inf
-            if x:
-                a = float(torch.tensor([2]))
+            a = float("-inf")
+            if not x:
+                a = float(torch.tensor([5]))
             return a < 4
         """
         cu = torch.jit.CompilationUnit(str)
-        self.assertFalse(cu.foo(True))
-        self.assertTrue(cu.foo(False))
+        self.assertTrue(cu.foo(True))
+        self.assertFalse(cu.foo(False))
 
     def test_add(self):
         def func(a, b):
