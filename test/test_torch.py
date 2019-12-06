@@ -5697,7 +5697,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         do_test(torch.tensor([[1, 2]]).data)
         do_test(torch.tensor([[1, 2]]).detach())
 
-    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
@@ -6166,9 +6165,11 @@ class TestTorchDeviceType(TestCase):
         # renorm
         self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
 
-        # sort
+        # sort, topk
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, False)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, True)])
 
         # lstsq (gels)
         self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
@@ -13443,32 +13444,6 @@ class TestTorchDeviceType(TestCase):
         res_csub = a.clone()
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
-
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_min_max_binary_op_nan(self, device, dtype):
-        a = torch.rand(1000, dtype=dtype, device=device)
-        b = torch.rand(1000, dtype=dtype, device=device)
-
-        # 0:250: a -- nan, b -- not nan
-        a[:250] = float('nan')
-        # 250:500: a -- not nan, b -- nan
-        b[250:500] = float('nan')
-        # 500:750: a and b both nan
-        a[500:750] = float('nan')
-        b[500:750] = float('nan')
-        # 750:1000: neither nan
-
-        ma = torch.max(a, b)
-        mi = torch.min(a, b)
-
-        for i in range(750):
-            self.assertTrue(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
-            self.assertTrue(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
-
-        for i in range(750, 1000):
-            self.assertFalse(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
-            self.assertFalse(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
 
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
