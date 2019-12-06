@@ -25,12 +25,11 @@ class Rprop(Optimizer):
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
         min_step, max_step = step_sizes
-        defaults = dict(lr=lr, etas=etas, step_sizes=(min_step / lr, max_step / lr))
+        defaults = dict(lr=lr, weight_decay=weight_decay, etas=etas, step_sizes=(min_step / lr, max_step / lr))
         super(Rprop, self).__init__(params, defaults)
 
     def reset_state(self):
         for group in self.param_groups:
-            lr = group['lr']
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
