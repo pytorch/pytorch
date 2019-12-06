@@ -137,6 +137,7 @@ class _ObserverBase(ObserverBase):
             scales: Per channel scales tensor of shape (#channels,)
             zero_points: Per channel zero points tensor of shape (#channels,)
         """
+
         if min_vals is None or max_vals is None:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
