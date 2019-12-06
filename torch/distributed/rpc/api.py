@@ -3,6 +3,7 @@ from . import (
     WorkerInfo,
     _cleanup_python_rpc_handler,
     _destroy_rref_context,
+    _rref_context_get_debug_info,
     _invoke_remote_builtin,
     _invoke_remote_python_udf,
     _invoke_rpc_builtin,
@@ -57,6 +58,12 @@ def _require_initialized(func):
         return func(*args, **kwargs)
     return wrapper
 
+
+@_require_initialized
+def _get_debug_info():
+    info = _rref_context_get_debug_info()
+    info.update(_agent.get_debug_info())
+    return info
 
 def _wait_all_workers():
     r"""
