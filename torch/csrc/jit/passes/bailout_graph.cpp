@@ -11,25 +11,8 @@
 namespace torch {
 namespace jit {
 
-static std::unordered_set<Value *> collectLoopCounts(Node *n) {
-
-  std::unordered_set<Value *> loopCounts;
-  Block *it = n->owningBlock();
-  while (it->owningNode()) {
-    auto outerNode = it->owningNode();
-    if (outerNode->kind() == prim::Loop) {
-      LoopView lv(outerNode);
-      loopCounts.insert(lv.currentTripCount());
-      // if maxTripCount is a constant it will be memoized instead
-      // of being added as a graph input, so we can safely skip it
-      if (lv.maxTripCount()->node()->kind() != prim::Constant) {
-        loopCounts.insert(lv.maxTripCount());
-      }
-    }
-    it = outerNode->owningBlock();
-  }
-
-  return loopCounts;
+static bool shouldBeCapturedInByBailOut(Node* n) {
+  return n->kind() != prim::Constant;
 }
 
 struct BailOutGraphBuilderForNode {
@@ -46,6 +29,7 @@ struct BailOutGraphBuilderForNode {
     // this reduces the number of inputs to a bailout graph significantly
     // making it easier to debug
     if (node->kind() == prim::Constant) {
+      TORCH_INTERNAL_ASSERT(!shouldBeCapturedInByBailOut(node));
       auto new_const = copy_graph_->createClone(node, {nullptr});
       copy_graph_->block()->appendNode(new_const);
       return new_const->output();
@@ -53,10 +37,10 @@ struct BailOutGraphBuilderForNode {
 
     live_inputs_.push_back(old_value);
     auto new_value = copy_graph_->block()->addInput();
-    return mapExistingInputForValue(old_value, new_value);
+    return mapValueAndCopyMetadata(old_value, new_value);
   }
 
-  Value* mapExistingInputForValue(Value* old_value, Value* new_value) {
+  Value* mapValueAndCopyMetadata(Value* old_value, Value* new_value) {
     this->old_to_new_[old_value] = new_value;
     new_value->copyMetadata(old_value);
     return new_value;
@@ -140,7 +124,8 @@ struct BailOutGraphBuilderForNode {
     auto one = copy_graph_->insertConstant({1});
     updated_max_trip_count =
         copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
-    mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
+    TORCH_INTERNAL_ASSERT(old_to_new_.count(outer_node->inputs()[0]) != 0);
+    mapValueAndCopyMetadata(outer_node->inputs()[0], updated_max_trip_count);
     auto cur_plus_one = copy_graph_->insert(aten::add, {one, cur_iter});
 
     auto new_loop = cloneNode(outer_node);
@@ -270,27 +255,13 @@ struct BailOutInserter {
         // guarded inputs come first
         // currently, there's always one guaded input
         bailout_node->addInput(it->input());
-
-        // collect loop counts since liveness won't collect them
-        // if they aren't used explicitly, but they are used
-        // by BailOut graphs if we trigger a bailout inside a loop
-        auto loopCounts = collectLoopCounts(*it);
-        for (auto lc : loopCounts) {
-          bailout_node->addInput(lc);
-        }
-
         for (auto li : live_inputs) {
           // Guarded inputs have already been added
-          // BailOutGraphBuilder materializes constants into a bailout
-          // graph rather than captures them as arguments,
-          // so there's no need to add them to inputs
-          // Also, skip loop counts as they are added in advance right after
-          // the guarded input
-          if (li->node()->kind() == prim::Constant || li == it->input() ||
-              loopCounts.count(li) != 0) {
+          // Also, skip some inputs that BailOutGraphBuilder can
+          // materialize into bailout graphs directly
+          if (!shouldBeCapturedInByBailOut(li->node()) || li == it->input()) {
             continue;
           }
-
           bailout_node->addInput(li);
         }
 
