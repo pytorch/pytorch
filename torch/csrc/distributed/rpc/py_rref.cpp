@@ -8,21 +8,6 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-// Constants below are used in PyRRef pickling and unpickling. PyRRef is
-// converted into a py::tuple in pickling, and reconstructed from the py::tuple
-// in unpickling.
-constexpr int RFD_IDX = 0; // index of RRefForkData
-constexpr int TYPE_IDX = 1; // index of type (py::object or IValue)
-
-// number of data fields in the py::tuple.
-// NB: if more fields are added, make sure this field is also bumped
-constexpr int RREF_TUPLE_SIZE = 2;
-
-} // namespace
-
 ///////////////////////////  PyRRef  //////////////////////////////////
 
 PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
@@ -97,6 +82,18 @@ py::object PyRRef::localValue() {
   }
 }
 
+std::string PyRRef::str() const {
+  std::stringstream ss;
+  if (rref_->isOwner()) {
+    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+  } else {
+    ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
+       << std::static_pointer_cast<UserRRef>(rref_)->forkId()
+       << ")";
+  }
+  return ss.str();
+}
+
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
   // TODO: use a dispatch table to pickle/unpickle an RRef, and only only
@@ -104,21 +101,15 @@ py::tuple PyRRef::pickle() const {
   // a counter example, checkpointing a model with RRefs should not trigger
   // forks to be added as a fork or a child.
   auto rfd = ctx.prepareChildFork(rref_);
-  return py::make_tuple(rfd.toPyTuple(), rref_->isPyObj());
+  py::tuple rfd_py = rfd.toPyTuple();
+  return rfd_py;
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& t) {
-  TORCH_INTERNAL_ASSERT(
-      t.size() == RREF_TUPLE_SIZE, "Pickled RRef must contain 2 numbers.");
   auto& ctx = RRefContext::getInstance();
-  auto rfd = RRefForkData::fromPyTuple(t[RFD_IDX].cast<py::tuple>());
+  auto rfd = RRefForkData::fromPyTuple(t.cast<py::tuple>());
   std::shared_ptr<RRef> rref = nullptr;
-  bool isPyObj = t[TYPE_IDX].cast<bool>();
-  if (isPyObj) {
-    rref = ctx.getOrCreateRRef<py::object>(rfd);
-  } else {
-    rref = ctx.getOrCreateRRef<IValue>(rfd);
-  }
+  rref = ctx.getOrCreateRRef(rfd, PyObjectType::get());
 
   ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
   return PyRRef(std::move(rref));
