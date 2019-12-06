@@ -98,7 +98,7 @@ analyze_torch_mobile() {
     OBJECT_DIR="${WORK_DIR}/torch_objs"
     rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
     for f in "${TORCH_INSTALL_PREFIX}/lib"/*.a; do
-      ar x ${f}
+      ar x "${f}"
     done
     popd
 
@@ -119,7 +119,7 @@ analyze_test_project() {
   OBJECT_DIR="${WORK_DIR}/test_objs"
   rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
   for f in "${TEST_INSTALL_PREFIX}/lib"/*.a; do
-    ar x ${f}
+    ar x "${f}"
   done
   popd
 
