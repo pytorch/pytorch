@@ -5262,6 +5262,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_parse_numpy_int(self):
+        self.assertRaisesRegex(RuntimeError, "Overflow",
+                               lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
             np_arr = np.array([5], dtype=nptype)
