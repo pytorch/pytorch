@@ -553,6 +553,18 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
       : futureInfo.startTime_ + futureInfo.timeout_;
 }
 
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  /* For now return an empty map, TODO add metrics like send/recv count etc */
+  return metrics;
+}
+
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getDebugInfo() {
+  /* This would later include more info other than metrics for eg: may include
+     stack traces for the threads owned by the agent */
+  return getMetrics();
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
