@@ -461,8 +461,10 @@ jobs:
           name: Install Cudnn
           command : |
             cd c:/
-            choco install -y 7zip curl
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
+            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/7zip-19.00-x64.msi
+            ./7zip-19.00-x64.msi /q INSTALLDIR="C:\Program Files\7-Zip"
+            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cmake-3.16.0-win64-x64.msi
+            ./cmake-3.16.0-win64-x64.msi /qn /norestart ADD_CMAKE_TO_PATH=User
             curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
             7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
             cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
@@ -498,8 +500,10 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
-            choco install -y 7zip curl
+            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/7zip-19.00-x64.msi
+            ./7zip-19.00-x64.msi /q INSTALLDIR="C:\Program Files\7-Zip"
+            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cmake-3.16.0-win64-x64.msi
+            ./cmake-3.16.0-win64-x64.msi /qn /norestart ADD_CMAKE_TO_PATH=User
             .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
     <<: *caffe2_params
