@@ -47,18 +47,36 @@ class TORCH_API Future final {
       completed_ = true;
       value_ = std::move(value);
 
-      fireCallbacks();
+      std::vector<Callback> cbs;
+      cbs.swap(callbacks_);
+      lock.unlock();
+      // There is no need to protect callbacks_ with the lock.
+      // Once completed_ is set to true, no one can add new callback to the
+      // list. pass value_, error_ for callback to easily check state.
+      for (auto& callback : cbs) {
+        callback(value_, error_.get());
+      }
     }
     finished_cv_.notify_all();
   }
 
   void setError(std::string&& errorMsg) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    error_ = c10::guts::make_unique<FutureError>(std::move(errorMsg));
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      TORCH_CHECK(!completed());
+      completed_ = true;
+      error_ = c10::guts::make_unique<FutureError>(std::move(errorMsg));
 
-    fireCallbacks();
+      std::vector<Callback> cbs;
+      cbs.swap(callbacks_);
+      lock.unlock();
+      // There is no need to protect callbacks_ with the lock.
+      // Once completed_ is set to true, no one can add new callback to the
+      // list. pass value_, error_ for callback to easily check state.
+      for (auto& callback : cbs) {
+        callback(value_, error_.get());
+      }
+    }
     finished_cv_.notify_all();
   }
 
@@ -78,17 +96,6 @@ class TORCH_API Future final {
   }
 
  private:
-  void fireCallbacks() {
-    TORCH_CHECK(completed(), "Firing callbacks on incomplete Future.");
-    // There is no need to protect callbacks_ with the lock.
-    // Once completed_ is set to true, no one can add new callback to the list.
-    // pass value_, error_ for callback to easily check state.
-    for (auto& callback : callbacks_) {
-      callback(value_, error_.get());
-    }
-    callbacks_.clear();
-  }
-
   mutable std::mutex mutex_;
   std::atomic_bool completed_{false}; // is this future complete
   std::condition_variable finished_cv_;
