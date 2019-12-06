@@ -15,12 +15,20 @@ namespace optim {
 AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
+bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs) {
+  auto eq = (lhs.learning_rate() == rhs.learning_rate()) &&
+            (lhs.lr_decay() == rhs.lr_decay()) &&
+            (lhs.weight_decay() == rhs.weight_decay()) &&
+            (lhs.initial_accumulator_value() == rhs.initial_accumulator_value()) &&
+            (lhs.eps() == rhs.eps());
+  return eq;
+}
 void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, learning_rate);
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, lr_decay);
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, weight_decay);
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, initial_accumulator_value);
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(double, eps);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(learning_rate);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(lr_decay);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(weight_decay);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(initial_accumulator_value);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(eps);
 }
 
 void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
@@ -31,14 +39,14 @@ void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
 }
 
+void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) const {
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(step);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(sum);
+}
+
 void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, step);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, sum);
-}
-
-void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) const {
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(int64_t, step);
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(Tensor, sum);
 }
 
 /// Adapted from

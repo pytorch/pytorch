@@ -200,7 +200,7 @@ void serialize(
 #define _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(OptimizerName) \
   torch::optim::serialize<OptimizerName##ParamState, OptimizerName##Options>(archive, self)
 
-#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(T, name) \
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) \
   archive.write(#name, IValue(name()))
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \

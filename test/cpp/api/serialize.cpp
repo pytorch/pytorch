@@ -289,10 +289,9 @@ TEST(SerializeTest, Optim_Adagrad) {
     ASSERT_TRUE(p->allclose(param2[p.key()]));
     ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
   }
-
   // Make some optimizers with momentum (and thus state)
   auto optim1 = torch::optim::Adagrad(
-      model1->parameters(), torch::optim::AdagradOptions(1e-1));
+      {torch::optim::OptimizerParamGroup(model1->parameters())}, torch::optim::AdagradOptions(1e-1));
   auto optim2 = torch::optim::Adagrad(
       model2->parameters(), torch::optim::AdagradOptions(1e-1));
   auto optim2_2 = torch::optim::Adagrad(
@@ -327,6 +326,26 @@ TEST(SerializeTest, Optim_Adagrad) {
   torch::load(optim3_2, optim_tempfile.name);
   step(optim3_2, model3);
 
+  auto optim3_2_param_groups = optim3_2.param_groups();
+  //auto optim3_2_state = optim3_2.state();
+  auto optim1_param_groups = optim1.param_groups();
+  //auto optim1_state = optim1.state();
+
+  ASSERT_TRUE(optim3_2_param_groups.size() == optim1_param_groups.size());
+  for (int i=0; i<optim3_2_param_groups.size(); i++) {
+    auto params1 = optim3_2_param_groups[i].params();
+    auto params2 = optim1_param_groups[i].params();
+    ASSERT_TRUE(params1.size() == params2.size());
+    for(int j=0; j<params1.size(); j++) {
+      ASSERT_TRUE(torch::equal(params1[j], params2[j]));
+    }
+    //ASSERT_TRUE(operator==(static_cast<const torch::optim::AdagradOptions&>(optim3_2_param_groups[i].options()), static_cast<const torch::optim::AdagradOptions&>(optim1_param_groups[i].options())));
+  }
+
+  // ASSERT_TRUE(optim3_2_state.size() == optim1_state.size());
+  // for(int i=0; i<optim3_2_state.size(); i++) {
+  //
+  // }
   param1 = model1->named_parameters();
   param2 = model2->named_parameters();
   param3 = model3->named_parameters();
