@@ -24,9 +24,8 @@
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: 'false'
-    is_target: 'false'
-    grad_input: 'false'
+    output: reduction != at::Reduction::None || self_->dim() == 0
+    is_target: target_->dim() == 0
 
 - name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: ClassNLLCriterion
@@ -121,13 +120,7 @@
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'BFloat16']
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
 
 - name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding, IntArrayRef[2] dilation)
   cname: SpatialDepthwiseConvolution
   buffers: []
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'

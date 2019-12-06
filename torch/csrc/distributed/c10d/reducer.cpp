@@ -193,11 +193,11 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   if (grad.defined()) {
     // Ensure that the gradient type matches the bucket type.
     AT_ASSERTM(
-        grad.options().type_equal(bucket_view.options()),
+        grad.type() == bucket_view.type(),
         "Expected ",
-        bucket_view.toString(),
+        bucket_view.type(),
         ", got ",
-        grad.toString());
+        grad.type());
     // Assert that the grad tensor and the bucket don't share storage.
     // If they did, we could avoid the copy altogether.
     // The reason for not doing this is that existing code calls

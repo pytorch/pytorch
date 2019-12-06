@@ -32,17 +32,17 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
 }
 
 struct TypeAndSize {
-  TypeAndSize() : options(at::TensorOptions()) {}
+  TypeAndSize() : type(nullptr) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
     : sizes(t.sizes().vec())
-    , options(t.options()) {}
+    , type(&t.type()) {}
 
-  Tensor zeros() { return at::zeros(sizes, options); }
+  Tensor zeros() { return at::zeros(sizes, *type); }
 
 private:
   std::vector<int64_t> sizes;
-  at::TensorOptions options;
+  at::DeprecatedTypeProperties* type;
 };
 
 ${autograd_function_declarations}

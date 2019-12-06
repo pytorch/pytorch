@@ -44,37 +44,41 @@ class TestCheckpoint(TestCase):
         model,
         module_lists_to_compare,
         num_chunks,
-        input,
+        *inputs
     ):
 
         # not checkpointed
-        out = model(input)
-        out_not_checkpointed = out.detach().clone()
+        if not isinstance(inputs, tuple):
+            inputs = (inputs,)
+        out = model(*inputs)
+        out_not_checkpointed = out.data.clone()
         model.zero_grad()
         out.sum().backward()
         grad_not_checkpointed = {
-            name: param.grad.detach().clone()
+            name: param.grad.data.clone()
             for name, param in model.named_parameters()
         }
-        input_grad_not_checkpointed = input.grad.detach().clone()
+        input_grad_not_checkpointed = [i.grad.data.clone() for i in inputs]
         for model_to_compare in module_lists_to_compare:
             # checkpointed model by passing list of modules
-            detached = input.detach()
-            detached.requires_grad = True
+            detached_inputs = [i.detach() for i in inputs]
+            for detached in detached_inputs:
+                detached.requires_grad = True
 
             # pass list of modules to checkpoint
-            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
-            out_checkpointed = out.detach().clone()
+            out = checkpoint_sequential(model_to_compare, num_chunks, *detached_inputs)
+            out_checkpointed = out.data.clone()
             model.zero_grad()
             out.sum().backward()
             grad_checkpointed = {
-                name: param.grad.detach().clone()
+                name: param.grad.data.clone()
                 for name, param in model.named_parameters()
             }
-            input_grad_checkpointed = detached.grad.detach().clone()
+            input_grad_checkpointed = [d.grad.data.clone() for d in detached_inputs]
             # compare outputs as well as the gradients of input and parameters
             self.assertEqual(out_checkpointed, out_not_checkpointed)
-            self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
+            for i, j in zip(input_grad_not_checkpointed, input_grad_checkpointed):
+                self.assertEqual(i, j)
             for name in grad_checkpointed:
                 self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
@@ -148,12 +152,12 @@ class TestCheckpoint(TestCase):
             torch.randn(1, 100, requires_grad=True)
         )
 
-    def test_checkpoint_module_list(self):
+    def test_checkpoint_module_list_multiple_args(self):
         class ModuleListNet(nn.Module):
             def __init__(self):
                 super(ModuleListNet, self).__init__()
                 module_list = [
-                    nn.Linear(100, 50),
+                    nn.Bilinear(100, 60, 50),
                     nn.ReLU(),
                     nn.Linear(50, 20),
                     nn.ReLU(),
@@ -162,19 +166,26 @@ class TestCheckpoint(TestCase):
                 ]
                 self.module_list = nn.ModuleList(module_list)
 
-            def forward(self, input):
+            def forward(self, *inputs):
                 for layer in self.module_list:
-                    input = layer(input)
-                return input
+                    if isinstance(inputs, tuple):
+                        inputs = layer(*inputs)
+                    else:
+                        inputs = layer(inputs)
+                return inputs
 
         model = ModuleListNet()
 
-        # Compare uncheckpointed model with its checkpointed counterparts.
+        # Compare uncheckpointed model with its checkpointed counterparts
+        # In addition to running checkpoint_sequential on the nn.ModuleList
+        # instance, we also run the function on the list of functions within
+        # the ModuleList.
         self._check_checkpoint_sequential(
             model,
             [list(model.module_list.children()), model.module_list],
             2,
             torch.randn(1, 100, requires_grad=True),
+            torch.randn(1, 60, requires_grad=True)
         )
 
     def test_checkpoint_sequential_deprecated_multiple_args(self):
@@ -186,8 +197,11 @@ class TestCheckpoint(TestCase):
         a = torch.randn(1, 100, requires_grad=True)
         b = torch.randn(1, 100, requires_grad=True)
 
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)
+        self.assertWarnsRegex(
+            lambda: checkpoint_sequential(model, 1, a, b),
+            'deprecated',
+            'checkpoint_sequential with multiple args should be deprecated',
+        )
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -196,8 +210,11 @@ class TestCheckpoint(TestCase):
 
         model = nn.Sequential(Noop())
 
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)
+        self.assertWarnsRegex(
+            lambda: checkpoint_sequential(model, 1),
+            'deprecated',
+            'checkpoint_sequential with no args should be deprecated',
+        )
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
