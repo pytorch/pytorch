@@ -353,9 +353,20 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const Decl& overload_decl,
     const Def& implementation_def,
     ResolutionCallback rcb,
-    const FunctionDefaults& defaults) {
-  auto adjusted_decl =
-      computeOverloadDecl(overload_decl, implementation_def.decl(), defaults);
+    const FunctionDefaults& implementation_defaults,
+    const FunctionDefaults& overload_defaults,
+    const py::object& signature) {
+  if (signature.is(py::none())) {
+    throw ErrorReport(overload_decl.range())
+        << "Must explicitly add type annotations to overloaded functions";
+  }
+  if (overload_defaults.size()) {
+    throw ErrorReport(overload_decl.range())
+        << "Overloaded default args must be on the implementation function";
+  }
+
+  auto adjusted_decl = computeOverloadDecl(
+      overload_decl, implementation_def.decl(), implementation_defaults);
   auto new_def = implementation_def.withDecl(adjusted_decl);
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
@@ -366,8 +377,8 @@ static StrongFunctionPtr script_compile_overloaded_function(
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
   auto& defined = defined_functions[0];
-  FunctionDefaults updated_defaults =
-      calcOverloadedFunctionDefaults(defined->getSchema(), defaults);
+  FunctionDefaults updated_defaults = calcOverloadedFunctionDefaults(
+      defined->getSchema(), implementation_defaults);
   defined->setSchema(getSchemaWithNameAndDefaults(
       new_def.range(),
       defined->getSchema(),
@@ -961,10 +972,18 @@ void initJitScriptBindings(PyObject* module) {
          const Decl& overload_decl,
          const Def& implementation_def,
          ResolutionCallback rcb,
-         const FunctionDefaults& defaults) {
+         const FunctionDefaults& implementation_defaults,
+         const FunctionDefaults& overload_defaults,
+         const py::object& signature) {
         const auto name = c10::QualifiedName(qualname);
         return script_compile_overloaded_function(
-            name, overload_decl, implementation_def, rcb, defaults);
+            name,
+            overload_decl,
+            implementation_def,
+            rcb,
+            implementation_defaults,
+            overload_defaults,
+            signature);
       });
   m.def(
       "_replace_overloaded_method_decl",
