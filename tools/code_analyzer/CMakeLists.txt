@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 
 project(code_analyzer)
+set(CMAKE_CXX_STANDARD 14)
 
 find_package(LLVM REQUIRED CONFIG)
 add_definitions(${LLVM_DEFINITIONS})
@@ -12,7 +13,7 @@ add_library(OpDependencyPass MODULE
 )
 
 set_target_properties(OpDependencyPass PROPERTIES
-    COMPILE_FLAGS "-std=c++11 -fno-rtti -O3")
+    COMPILE_FLAGS "-fno-rtti -O3")
 
 if(APPLE)
   set_target_properties(OpDependencyPass PROPERTIES
