@@ -101,7 +101,7 @@ void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 } // anonymous namespace
 
 template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
+bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
   if(n == 1) lda = m;
 
   if (gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
@@ -112,7 +112,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-    return;
+    return true;
   }
 
   if ((trans == 'T') || (trans == 't')) {
@@ -140,6 +140,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
       }
     }
   }
+  return false;
 }
 
 namespace {
@@ -153,28 +154,30 @@ void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
+    bool is_fast = false;
     if (mat.stride(0) == 1 && lda_cond(mat.size(0), mat.size(1), mat.stride(1))) {
-      gemv<scalar_t>('n', mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1),
+      is_fast = gemv<scalar_t>('n', mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1),
           vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
     }
     else if (mat.stride(1) == 1 && lda_cond(mat.size(1), mat.size(0), mat.stride(0))) {
-      gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
+      is_fast = gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
           vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
     }
     else {
       Tensor cmat = mat.contiguous();
-      gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
+      is_fast = gemv<scalar_t>('t', mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
           vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
     }
 
-    // // In gemv (x,0).mv(0) does not handle beta, whereas gemm does for case where (x,0).mm(0,y).
-    // if (vec.size(0) == 0 && mat.size(0) != 0) {
-    //   if (beta == scalar_t(0)) {
-    //     result.zero_();
-    //   } else if (beta != scalar_t(1)) {
-    //     result.mul_(beta);
-    //   }
-    // }
+    // In THE FAST PATH of gemv (x,0).mv(0) does not handle beta, whereas gemm does for case where (x,0).mm(0,y).
+    // But in the naive fall back implementation, this is not the case.
+    if (is_fast && vec.size(0) == 0 && mat.size(0) != 0) {
+      if (beta == scalar_t(0)) {
+        result.zero_();
+      } else if (beta != scalar_t(1)) {
+        result.mul_(beta);
+      }
+    }
   });
 }
 
