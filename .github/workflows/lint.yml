@@ -101,7 +101,7 @@ jobs:
       - name: Run flake8
         run: |
           set -eux
-          pip install flake8 flake8-mypy flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi mccabe pycodestyle pyflakes
+          pip install flake8
           rm -rf .circleci
           flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
           cat ${GITHUB_WORKSPACE}/flake8-output.txt
