@@ -184,7 +184,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   TypePtr getJitType() const;
   py::object getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
-  c10::optional<py::object> findConstant(const std::string& name) const;
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;
   c10::optional<Function*> findFunctionAttribute(const std::string& name) const;
