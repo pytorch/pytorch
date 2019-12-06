@@ -1,5 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/Blas.h>
+#include <ATen/cuda/CUDABlas.h>
 
 namespace at { namespace native {
 namespace {
@@ -9,11 +11,11 @@ void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, cons
   auto vec_size = vec.size(0);
   auto vec_stride = vec.size(0);
 
-  if (mat.scalar_type() == kHalf || mat.scalar_type() == kBfloat16) {
+  if (mat.scalar_type() == kHalf || mat.scalar_type() == kBFloat16) {
     // Currently no Hgemv/SgemvEx in Cublas
     Tensor vec_as_matrix = vec.reshape({vec_size, 1});
     Tensor self_as_matrix = self.reshape({self.size(0), 1});
-    native::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta, alpha);
+    at::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta_, alpha_);
     return;
   }
 
