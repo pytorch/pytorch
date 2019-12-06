@@ -79,14 +79,14 @@ void testIValue() {
 
   // Test tuple print
   {
-    IValue tp(std::tuple<int>(3));
+    IValue tp = std::make_tuple(3);
     std::stringstream ss;
     ss << tp;
     ASSERT_EQ(ss.str(), "(3,)");
   }
 
   {
-    IValue tp(std::tuple<int, int>({3, 3}));
+    IValue tp = std::make_tuple(3, 3);
     std::stringstream ss;
     ss << tp;
     ASSERT_EQ(ss.str(), "(3, 3)");
