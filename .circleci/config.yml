@@ -1578,109 +1578,109 @@ workflows:
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-3f5dc95b57496c4ea938be381efcdc2ea92bb4cc
           sha1: 3f5dc95b57496c4ea938be381efcdc2ea92bb4cc
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-acb81008103de8c63607819f7b87819bd50d991c
           sha1: acb81008103de8c63607819f7b87819bd50d991c
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-7807d4493438670875e39af02d1c25c6c05a8d3d
           sha1: 7807d4493438670875e39af02d1c25c6c05a8d3d
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-5ab6635de12f3f8d45a0af88fc825c60cda071c4
           sha1: 5ab6635de12f3f8d45a0af88fc825c60cda071c4
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-8e61287d1bfcda8851bf1a4d9fe1c94192484da0
           sha1: 8e61287d1bfcda8851bf1a4d9fe1c94192484da0
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-4442fa59c7ebf342596e3ec31dea3f3665077d9f
           sha1: 4442fa59c7ebf342596e3ec31dea3f3665077d9f
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-7889e1e3f947275ae370b9a6089b549217710dd8
           sha1: 7889e1e3f947275ae370b9a6089b549217710dd8
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-69e343f2cc26f7a090fa0a4c4f8cf5064d4df1c9
           sha1: 69e343f2cc26f7a090fa0a4c4f8cf5064d4df1c9
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-23fcc409d533cb8b5b6b2696be976e2eaf875eda
           sha1: 23fcc409d533cb8b5b6b2696be976e2eaf875eda
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-a9c719ba825ebbe3dacf12db938df4c23ad9fba1
           sha1: a9c719ba825ebbe3dacf12db938df4c23ad9fba1
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-9ec1727ea689fb936959b42db5ad382a5eaf4fc8
           sha1: 9ec1727ea689fb936959b42db5ad382a5eaf4fc8
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-0108f473ad3b46cea1734c1f770b875d9ff2748e
           sha1: 0108f473ad3b46cea1734c1f770b875d9ff2748e
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-60ad2a96f0c7649d8b0b86da6119cb9a839a1526
           sha1: 60ad2a96f0c7649d8b0b86da6119cb9a839a1526
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-5e53c1501a95fd46bc3d821f6ac4144bb2e452b4
           sha1: 5e53c1501a95fd46bc3d821f6ac4144bb2e452b4
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
       - binary_linux_build:
           name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build-510ef4b63ac6d09dc32763e294ba5ea30e286a95
           sha1: 510ef4b63ac6d09dc32763e294ba5ea30e286a95
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           requires:
             - setup
-          docker_image: "pytorch/manylinux-cuda101"
+          docker_image: "soumith/manylinux-cuda101"
