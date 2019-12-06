@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/TensorTypeSet.h>
+#include <c10/util/Flags.h>
 
 // TLS management for TensorTypeSet (the "local" TensorTypeSet(s))
 //
@@ -21,6 +22,8 @@
 
 namespace c10 {
 namespace impl {
+
+C10_DECLARE_bool(disable_variable_dispatch);
 
 // POD version of LocalTensorTypeSet.  Declared here just so that
 // we can put it in the guards.
@@ -53,6 +56,8 @@ struct C10_API LocalTensorTypeSet {
 
 C10_API LocalTensorTypeSet tls_local_tensor_type_set();
 
+// RAII API for manipulating the thread-local dispatch state.
+
 class C10_API IncludeTensorTypeIdGuard {
 public:
   IncludeTensorTypeIdGuard(TensorTypeId);
@@ -76,5 +81,23 @@ private:
   TensorTypeId id_;
   bool prev_state_;
 };
+
+// Non-RAII API for manipulating the thread-local dispatch state.
+// Please prefer the RAII API.  The non-RAII API may be useful when
+// the included/excluded state of a given TensorTypeId must span
+// many calls from the Python to the C++, so you cannot conveniently
+// use an RAII guard.
+//
+// Example use case:  a Python context manager that includes a certain
+// TensorTypeId, to ensure ops running under the context manager dispatch
+// through that TensorTypeId's registered overrides.
+//
+// The non-RAII API is less efficient than the RAII guards because both the
+// getter and setter will do a tls_getaddr lookup (the RAII struct only needs one!)
+
+bool tls_is_tensor_type_id_excluded(TensorTypeId x);
+void tls_set_tensor_type_id_excluded(TensorTypeId x, bool desired_state);
+bool tls_is_tensor_type_id_included(TensorTypeId x);
+void tls_set_tensor_type_id_included(TensorTypeId x, bool desired_state);
 
 }} // namespace c10::impl

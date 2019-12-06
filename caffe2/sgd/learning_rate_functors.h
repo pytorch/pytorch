@@ -6,6 +6,11 @@
 #include <list>
 #include <map>
 
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif // _MSC_VER
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 

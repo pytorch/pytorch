@@ -12,11 +12,10 @@ import torch.jit.frontend
 import torch.jit.quantized
 import zipfile
 import functools
-from enum import Enum
 
 # Testing utils
 from common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName
+    freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode
 
 # Standard library
 from contextlib import contextmanager
@@ -33,24 +32,8 @@ import sys
 import tempfile
 import textwrap
 
-IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR = False
-
-class ProfilingMode(Enum):
-    OFF = 1
-    EXECUTOR = 2
-    FULL = 3
-
-@contextmanager
-def enable_profiling_mode(flag):
-    if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
-        old_prof_exec_state = torch._C._jit_set_profiling_executor(flag != ProfilingMode.OFF)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(flag == ProfilingMode.FULL)
-    try:
-        yield
-    finally:
-        if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
-            torch._C._jit_set_profiling_executor(old_prof_exec_state)
-            torch._C._jit_set_profiling_mode(old_prof_mode_state)
+RUN_CUDA = torch.cuda.is_available()
+RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 def execWrapper(code, glob, loc):
     if PY2:
@@ -322,13 +305,13 @@ class JitTestCase(TestCase):
         return defined_vars
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
-                               outputs=None, capture_output=False, profiling=ProfilingMode.FULL):
+                               outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
         """
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the AST frontend
         """
 
-        with enable_profiling_mode(profiling):
+        with enable_profiling_mode():
             # normal python
             with self.assertRaisesRegex(exception, regex):
                 script(*inputs)
@@ -359,12 +342,12 @@ class JitTestCase(TestCase):
                     inputs_requires_grad=False,
                     capture_output=False,
                     frames_up=1,
-                    profiling=ProfilingMode.FULL):
+                    profiling=ProfilingMode.PROFILING):
         with torch.jit.optimized_execution(optimize):
-            with enable_profiling_mode(profiling):
+            with enable_profiling_mode():
                 if isinstance(script, str):
                     # Compile the string to a Script function
-                    # with enable_profiling_mode(profiling):
+                    # with enable_profiling_mode():
                     cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
 
                     # Execute the Python function so we can run it later and get its
@@ -454,7 +437,7 @@ class JitTestCase(TestCase):
             recording_inputs = reference_tensors
 
         # `check_trace` is set to False because check_trace is run with @no_grad
-        # Also, `checkTrace` already does all the checks 
+        # Also, `checkTrace` already does all the checks
         # against python function
         ge = torch.jit.trace(func, input_tensors, check_tolerance=check_tolerance,
                              _force_outplace=_force_outplace, check_trace=False)
@@ -470,6 +453,7 @@ class JitTestCase(TestCase):
         outputs_ge = ge(*nograd_inputs)
         self.assertEqual(outputs, outputs_ge)
 
+        # test gradients case
         outputs = func(*recording_inputs)
         if inputs_require_grads:
             grads = torch.autograd.grad(allSum(outputs), flattened_recording_inputs,
@@ -628,4 +612,4 @@ def get_forward_graph(c):
     return c._get_method('forward').graph
 
 def get_module_method(m, module, method):
-    return m._c._get_module(module)._get_method(method)
+    return m._c.getattr(module)._get_method(method)

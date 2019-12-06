@@ -1392,14 +1392,15 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   std::string str() const override {
-    const auto& n = name().value();
-    return std::string("ClassType<") + n.name() + ">";
+    return python_str();
   }
 
   std::string python_str() const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }
+
+  const std::vector<Function*>& methods() const;
 
   TypePtr getAttribute(const std::string& name) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1417,6 +1418,11 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeTypes_[pos];
   }
 
+  size_t numAttributes() const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    return attributeNames_.size();
+  }
+
   const TypePtr& getAttribute(size_t slot) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     AT_ASSERT(slot < attributeTypes_.size());
@@ -1429,17 +1435,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeNames_[slot];
   }
 
-  Function* getMethod(const std::string& name) const;
-  const std::vector<Function*>& methods() const;
-  void addMethod(Function* method);
-
-  std::shared_ptr<CompilationUnit> compilation_unit();
-  std::shared_ptr<const CompilationUnit> compilation_unit() const;
-
-  size_t numAttributes() const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
-    return attributeNames_.size();
-  }
+  void checkNotExist(const std::string& name, const std::string& what) const;
 
   // Attributes are stored in a specific slot at runtime for effiency.
   // When emitting instructions we specify the slot so that attribute access is
@@ -1477,8 +1473,16 @@ struct CAFFE2_API ClassType : public NamedType {
 
   size_t addAttribute(
       const std::string& name,
-      TypePtr type,
+      const TypePtr& type,
       bool is_parameter = false);
+
+  // [Internal Only] Remove attribute from the ClassType,
+  // caller is responsible to make sure the modification is safe:
+  // it is unsafe to having existing allocations
+  // of this object around anymore, and any code that works on
+  // the attribute is now invalid. Only newly created code is
+  // valid again.
+  void unsafeRemoveAttribute(const std::string& name);
 
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
@@ -1508,7 +1512,6 @@ struct CAFFE2_API ClassType : public NamedType {
     return *slot_idx;
   }
 
-
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
   }
@@ -1517,13 +1520,38 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeTypes_;
   }
 
-  // generate a refined version of this class.
-  // It has the same name but the slot Types are subtypes of
-  // the original slots. It is only valid to refine a class type in a context
-  // where it is know that there are not assignments to the objects slots
-  // that would invalidate the refinement.
-  // These variants are not registered in the global class table.
-  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+  bool hasConstant(const std::string& name) const {
+    return std::find_if(
+               constantNames_.cbegin(),
+               constantNames_.cend(),
+               [&](const std::string& constant) { return constant == name; }) !=
+        constantNames_.cend();
+  }
+
+  size_t addConstant(
+      const std::string& name,
+      const IValue& value);
+
+  const std::string& getConstantName(size_t slot) const {
+    TORCH_CHECK(constantNames_.size() == constantValues_.size());
+    TORCH_CHECK(slot < constantNames_.size());
+    return constantNames_[slot];
+  }
+
+  c10::optional<IValue> getConstant(const std::string& name) const;
+
+  size_t numConstants() const {
+    TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
+    return constantNames_.size();
+  }
+
+  at::ArrayRef<std::string> constantNames() const {
+    return constantNames_;
+  }
+
+  at::ArrayRef<IValue> constantValues() const {
+    return constantValues_;
+  }
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_);
@@ -1548,7 +1576,22 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
+  void addMethod(Function* method);
+  Function* getMethod(const std::string& name) const;
+
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
+
+  // generate a refined version of this class.
+  // It has the same name but the slot Types are subtypes of
+  // the original slots. It is only valid to refine a class type in a context
+  // where it is know that there are not assignments to the objects slots
+  // that would invalidate the refinement.
+  // These variants are not registered in the global class table.
+  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
@@ -1565,6 +1608,9 @@ struct CAFFE2_API ClassType : public NamedType {
   // available from c10
   std::vector<std::string> attributeNames_;
   std::vector<TypePtr> attributeTypes_;
+  // Mapping of constant names -> their value.
+  std::vector<std::string> constantNames_;
+  std::vector<IValue> constantValues_;
   // Holds method attributes
   std::weak_ptr<CompilationUnit> compilation_unit_;
 

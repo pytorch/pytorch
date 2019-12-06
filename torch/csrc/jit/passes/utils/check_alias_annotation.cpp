@@ -14,12 +14,12 @@ IValue deepCopy(const IValue& self) {
 
   // Tensors need special handling, since copy assignment creates an alias
   if (self.isTensor()) {
-    return IValue(self.toTensor().clone());
+    return IValue(self.toTensor().clone(at::MemoryFormat::Preserve));
   }
   if (self.isTensorList()) {
     c10::List<at::Tensor> newList;
     for (const at::Tensor& oldTensor : self.toTensorListRef()) {
-      newList.push_back(oldTensor.clone());
+      newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
     }
     return newList;
   }

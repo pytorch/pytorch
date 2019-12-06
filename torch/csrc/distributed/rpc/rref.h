@@ -38,8 +38,6 @@ struct RRefForkData {
       const RRefId& rrefId_,
       const ForkId& forkId_,
       worker_id_t parent);
-
-  static RRefForkData fromIValue(const at::IValue&);
 };
 
 static_assert(
@@ -248,16 +246,9 @@ class UserRRef final : public RRef {
   // Returns the globally unique ForkId of this RRef
   const ForkId& forkId() const;
 
-  // Get of copy of the value from the ``OwnerRRef``. Returns an ivalue::Future
-  // immediately. If this RRef wraps an IValue, the returned Future also wraps
-  // the same IValue. If this RRef wrap a py::object, the returned Future wraps
-  // an IValue representation of the py::object, which can be reconstructed
-  // using the following code:
-  //
-  // PythonRpcHandler::getInstance().deserialize(
-  //     SerializedPyObj::fromIValues(future->value().toTuple()->elements()));
-  //
-  std::shared_ptr<ivalue::Future> toHere();
+  // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
+  // yet, this call will block.
+  T toHere();
 
   // Upon destruction, this ``UserRRef`` will tell the owner to deref.
   ~UserRRef() override;
