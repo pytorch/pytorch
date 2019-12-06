@@ -4936,7 +4936,7 @@ a")
         """
         cu = torch.jit.CompilationUnit(str)
         self.assertFalse(cu.foo(True))
-        self.assertFalse(cu.foo(False))
+        self.assertTrue(cu.foo(False))
 
     def test_add(self):
         def func(a, b):
