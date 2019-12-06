@@ -1,8 +1,7 @@
 # Generated for selective build without using static dispatch.
 # Manually run the script to update:
 # ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh -closure=false
-TORCH_DEPS = \
-{
+TORCH_DEPS = {
     '_test::cat': [
         'aten::cat',
     ],

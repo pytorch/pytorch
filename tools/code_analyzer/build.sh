@@ -115,8 +115,8 @@ analyze_torch_mobile() {
 # Generated for selective build without using static dispatch.
 # Manually run the script to update:
 # ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh -closure=false
-TORCH_DEPS = \\
 EOM
+    printf "TORCH_DEPS = " >> ${DEST}
     cat "${OUTPUT}" >> ${DEST}
   fi
 }
