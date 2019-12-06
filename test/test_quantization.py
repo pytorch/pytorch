@@ -40,7 +40,8 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
+import hypothesis_utils as hu
+hu.assert_deadline_disabled()
 import io
 import copy
 
@@ -48,7 +49,6 @@ import copy
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class EagerModePostTrainingQuantTest(QuantizationTestCase):
-    @no_deadline
     @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
     def test_single_layer(self, qconfig):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -911,7 +911,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
 
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
-    @no_deadline
     @given(train_mode=st.booleans())
     def test_functional_module(self, train_mode):
         model = ModelWithFunctionals()
@@ -1341,7 +1340,6 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()), 2 * len(self.calib_data))
         self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0], model(self.calib_data[0][0]))
 
-    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
     def test_observer_scriptable(self, qdtype, qscheme):
@@ -1358,7 +1356,6 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
-    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())

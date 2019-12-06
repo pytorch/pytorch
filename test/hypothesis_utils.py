@@ -304,10 +304,11 @@ def tensor_conv(
 
     return X, W, b, groups
 
-# Disable deadline testing if this version of hypthesis supports it, otherwise
-# just return the original function
-def no_deadline(fn):
-    try:
-        return hypothesis.settings(deadline=None)(fn)
-    except hypothesis.errors.InvalidArgument:
-        return fn
+from hypothesis import settings
+settings.register_profile("no_deadline", deadline=None)
+settings.load_profile("no_deadline")
+
+# This is really just to get flake8 to not complain when this file
+# is imported purely for the side-effectful stuff above
+def assert_deadline_disabled():
+    assert settings().deadline is None

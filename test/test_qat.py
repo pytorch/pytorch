@@ -11,15 +11,13 @@ import torch.backends.mkldnn
 from common_utils import TestCase, run_tests
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
+import hypothesis_utils as hu
+hu.assert_deadline_disabled()
 from functools import reduce
 
 
 class IntrinsicQATModuleTest(TestCase):
-    # NOTE: Tests in this class are decorated with no_deadline
-    # to prevent spurious failures due to cuda runtime initialization.
 
-    @no_deadline
     @given(batch_size=st.integers(2, 4),
            input_channels_per_group=st.sampled_from([2, 3, 4]),
            height=st.integers(5, 10),
