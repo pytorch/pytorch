@@ -1260,15 +1260,20 @@ graph(%x : Tensor,
             qconfig_dict = {
                 '': script_qconfig(qconfig)
             }
-            m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
+            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
             get_forward(m._c)(data)
-            m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False)
-            # assert len(m._modules._c.items()) == 1, \
-            #    'Expected to have single submodule of conv'
-
+            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
             get_forward(m._c)(data)
+            # Make sure inserted attributes are the same
+            # This needs to be refactored after we know how to get
+            # all attributes of a given ScriptModule
+            for v in ['input.2', 'weight.2', '12']:
+                for postfix in ['_scale', '_zero_point', '_scalar_type']:
+                    attr = v + postfix
+                    assert m.conv1._c.hasattr(attr)
+                    assert m.conv2._c.hasattr(attr)
             quant_func = "aten::quantize_per_channel" if is_per_channel \
                 else "aten::quantize_per_tensor"
             FileCheck().check_not(quant_func) \
@@ -1282,7 +1287,7 @@ graph(%x : Tensor,
                        .check(quant_func) \
                        .check_next("aten::dequantize") \
                        .check("return") \
-                       .run(str(get_module_method(m, 'conv', '_conv_forward').graph))
+                       .run(str(get_module_method(m, 'conv1', '_conv_forward').graph))
 
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
