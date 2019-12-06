@@ -8,7 +8,7 @@ list(APPEND Caffe2_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 list(APPEND Caffe2_CPU_TEST_SRCS ${NOMNI_TEST_SRCS})
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include
-        DESTINATION include
+        DESTINATION ${CMAKE_INSTALL_PREFIX}
         FILES_MATCHING PATTERN "*.h")
 
 # ---[ Send the lists to the parent scope.

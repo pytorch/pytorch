@@ -48,7 +48,6 @@ bool ResizeNearest3DDNNLowPOp<T>::RunOnDevice() {
       }
     }
   }
-
   // Even if there is a pre-chosen quantization parameters for the output,
   // it is ignored because resize nearest output quantization should be same
   // as the input.

@@ -1,7 +1,7 @@
 #pragma once
 
+#include "caffe2/operators/resize_3d_op.h"
 #include "caffe2/quantization/server/dnnlowp_op.h"
-#include "vision/video_modeling/experimental/abc/ops/resize_3d_op.h"
 
 namespace caffe2 {
 

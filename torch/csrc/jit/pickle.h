@@ -4,6 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/unpickler.h>
+#include <caffe2/serialize/inline_container.h>
 
 namespace torch {
 namespace jit {
@@ -52,15 +53,21 @@ TORCH_API std::vector<char> pickle(
     std::vector<at::Tensor>* tensor_table = nullptr);
 
 
+/// Save a `torch::IValue` in a format that can be loaded by both
+/// `torch::pickle_load` in C++ and `torch.load` in Python.
 TORCH_API std::vector<char> pickle_save(const IValue& ivalue);
+
+/// Deserialize a `torch::IValue` from bytes produced by either
+/// `torch::pickle_save` in C++ or `torch.save` in Python
+TORCH_API IValue pickle_load(const std::vector<char>& data);
 
 
 /// `reader` is a function that takes in a size to read from some pickled
 /// binary. `reader` should remember where it last read, and return
-/// false if the read was not successful.
+/// the number of bytes read.
 /// See `torch::pickle` for details.
 TORCH_API IValue unpickle(
-    std::function<bool(char*, size_t)> reader,
+    std::function<size_t(char*, size_t)> reader,
     ClassResolver class_resolver,
     const std::vector<at::Tensor>* tensor_table);
 

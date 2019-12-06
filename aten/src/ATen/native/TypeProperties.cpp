@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/TypeProperties.h>
 #include <type_traits>
 
 namespace at { namespace native {
@@ -68,38 +69,48 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   return lower;
 }
 
-ScalarType result_type(TensorList tensors) {
-  auto dimResult = ScalarType::Undefined;
-  auto zeroResult = ScalarType::Undefined;
-  auto wrappedResult = ScalarType::Undefined;
-  for (Tensor tensor : tensors) {
-    if (!tensor.defined()) {
-      continue;
-    }
-    ScalarType current = tensor.scalar_type();
-    if (tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(current)) {
-      current = typeMetaToScalarType(at::get_default_dtype());
-    }
-    if ( tensor.dim() > 0 ) {
-      dimResult = promote_skip_undefined(dimResult, current);
-    } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      wrappedResult = promote_skip_undefined(wrappedResult, current);
-    } else {
-      zeroResult = promote_skip_undefined(zeroResult, current);
-    }
+ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeState& in_state) {
+  if (!tensor.defined()) {
+    return in_state;
   }
-  return combine_categories(dimResult, combine_categories(zeroResult, wrappedResult));
+  ResultTypeState new_state = in_state;
+  ScalarType current = tensor.scalar_type();
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(current)) {
+    current = typeMetaToScalarType(at::get_default_dtype());
+  }
+  if ( tensor.dim() > 0 ) {
+    new_state.dimResult = promote_skip_undefined(in_state.dimResult, current);
+  } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    new_state.wrappedResult = promote_skip_undefined(in_state.wrappedResult, current);
+  } else {
+    new_state.zeroResult = promote_skip_undefined(in_state.zeroResult, current);
+  }
+
+  return new_state;
+}
+
+ScalarType result_type(const ResultTypeState& in_state) {
+  return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
+}
+
+ScalarType result_type(TensorList tensors) {
+  ResultTypeState state = {};
+  for (const Tensor& tensor : tensors) {
+    state = update_result_type_state(tensor, state);
+  }
+
+  return result_type(state);
 }
 
 ScalarType result_type(const Tensor &tensor, const Tensor &other) {
-  std::vector<Tensor> tensors({tensor, other});
+  std::vector<Tensor> tensors{std::move(tensor), std::move(other)};
   return native::result_type(tensors);
 }
 
 ScalarType result_type(const Tensor &tensor, const Scalar other) {
   auto tensor2 = scalar_to_tensor(other);
   tensor2.unsafeGetTensorImpl()->set_wrapped_number(true);
-  std::vector<Tensor> tensors({tensor, tensor2});
+  std::vector<Tensor> tensors{std::move(tensor), std::move(tensor2)};
   return native::result_type(tensors);
 }
 
@@ -118,7 +129,9 @@ bool can_cast(const at::ScalarType from, const at::ScalarType to) {
 }
 
 ScalarType promote_types(ScalarType type1, ScalarType type2) {
-  return promoteTypes(type1, type2);
+  ScalarType ret = promoteTypes(type1, type2);
+  TORCH_CHECK(ret != ScalarType::Undefined, "Promotion from ", type1, " and ", type2, " is unsupported.");
+  return ret;
 }
 
 }} // namespace at::native

@@ -64,7 +64,7 @@ std::shared_ptr<Operator> ScriptCall::fromIValues(
   }
 }
 
-Message ScriptCall::toMessage() {
+Message ScriptCall::toMessage() && {
   std::vector<IValue> ivalues;
   toIValues(ivalues);
 
@@ -76,7 +76,7 @@ Message ScriptCall::toMessage() {
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);
 }
 
-ScriptCall ScriptCall::fromMessage(const Message& message) {
+std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
   auto value =
@@ -84,7 +84,7 @@ ScriptCall ScriptCall::fromMessage(const Message& message) {
 
   auto values = value.toTuple()->elements();
   auto op = fromIValues(values);
-  return ScriptCall(op, std::move(values));
+  return c10::guts::make_unique<ScriptCall>(op, std::move(values));
 }
 
 std::shared_ptr<Operator> ScriptCall::matchOperator(

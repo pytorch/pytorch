@@ -90,9 +90,9 @@ def _calculate_dynamic_per_channel_qparams(X, dtype):
     return scale, zero_point
 
 @contextmanager
-def enable_mobile_quantized_engine():
+def override_quantized_engine(qengine):
     previous = torch.backends.quantized.engine
-    torch.backends.quantized.engine = 'qnnpack'
+    torch.backends.quantized.engine = qengine
     try:
         yield
     finally:

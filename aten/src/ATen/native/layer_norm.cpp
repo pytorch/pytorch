@@ -1,4 +1,4 @@
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/layer_norm.h>
 
 #include <array>
 #include <functional>
@@ -10,8 +10,8 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/cpu/layer_norm_kernel.h>
 
 namespace at {
 namespace native {
@@ -23,11 +23,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     int64_t M,
     int64_t N,
     double eps) {
-  Tensor Y = at::native::empty_like(X);
+  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
-  LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  return std::make_tuple(Y, mean, rstd);
+  if (M > 0) {
+    LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  }
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
@@ -43,61 +45,19 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X);
+    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
+    dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
+    dbeta = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  LayerNormBackwardKernel(
-      kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
-}
-
-// TODO(yangxm): Change this function to Aten impl so that we can support higher
-// order gradients.
-std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward_cpu(
-    const Tensor& ddX,
-    const Tensor& ddgamma,
-    const Tensor& ddbeta,
-    const Tensor& dY,
-    const Tensor& X,
-    const Tensor& mean,
-    const Tensor& rstd,
-    const Tensor& gamma,
-    int64_t M,
-    int64_t N,
-    std::array<bool, 3> grad_input_mask) {
-  Tensor ddY;
-  Tensor dX;
-  Tensor dgamma;
-  if (grad_input_mask[0]) {
-    ddY = at::native::empty_like(dY);
+  if (M > 0) {
+    LayerNormBackwardKernel(
+        kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
   }
-  if (grad_input_mask[1]) {
-    dX = at::native::empty_like(X);
-  }
-  if (grad_input_mask[2]) {
-    dgamma = at::native::empty_like(gamma);
-  }
-  LayerNormDoubleBackwardKernel(
-      kCPU,
-      ddX,
-      ddgamma,
-      ddbeta,
-      dY,
-      X,
-      mean,
-      rstd,
-      gamma,
-      M,
-      N,
-      &ddY,
-      &dX,
-      &dgamma);
-  return std::make_tuple(ddY, dX, dgamma);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor layer_norm(
@@ -106,7 +66,7 @@ Tensor layer_norm(
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */,
     double eps,
-    bool cudnn_enabled) {
+    bool /* cudnn_enable, deprecated */) {
   const int normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,
@@ -156,31 +116,14 @@ Tensor layer_norm(
       1LL,
       std::multiplies<int64_t>());
 
-  if (input.device().is_cpu()) {
-    return std::get<0>(native_layer_norm(
-        input.contiguous(), weight.contiguous(), bias.contiguous(), M, N, eps));
-  }
-
-  // Apply layer norm
-  auto input_reshaped = input.contiguous().view({1, M, -1});
-  auto out = at::batch_norm(
-      input_reshaped, {}, {}, {}, {}, true, 0, eps, cudnn_enabled);
-  out = out.view(input_shape);
-
-  if (weight.defined() && bias.defined()) {
-    return bias.addcmul(out, weight, 1);
-  } else if (weight.defined()) {
-    return out.mul(weight);
-  } else if (bias.defined()) {
-    return out.add(bias);
-  } else {
-    return out;
-  }
+  const auto& X = input.is_contiguous() ? input : input.contiguous();
+  const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
+  const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
+  return std::get<0>(at::native_layer_norm(X, gamma, beta, M, N, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
-DEFINE_DISPATCH(LayerNormDoubleBackwardKernel);
 
 } // namespace native
 } // namespace at

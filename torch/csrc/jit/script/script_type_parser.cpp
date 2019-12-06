@@ -19,6 +19,7 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
       // parsing serialized methods that use implicit converions to Scalar
       {"number", NumberType::get()},
       {"None", NoneType::get()},
+      {"Any", AnyType::get()},
   };
   return map;
 }
@@ -269,21 +270,20 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     auto decl_arg = *it;
 
     TypePtr type;
-    c10::optional<int32_t> N;
+    c10::optional<int32_t> N = c10::nullopt;
     bool is_inferred_type = false;
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
       is_inferred_type = true;
       type = TensorType::get();
-      N = c10::nullopt;
     } else {
       // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list = parseBroadcastList(decl_arg.type().get())) {
+      Expr type_expr = decl_arg.type().get();
+      if (auto maybe_broad_list = parseBroadcastList(type_expr)) {
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
       } else {
         type = parseTypeFromExpr(decl_arg.type().get());
-        N = c10::nullopt;
       }
     }
     c10::optional<IValue> default_value = c10::nullopt;
@@ -330,6 +330,37 @@ FunctionSchema ScriptTypeParser::parseSchemaFromDef(
   std::vector<Argument> returns = parseReturnFromDecl(def.decl());
   return FunctionSchema(
       name, "", std::move(args), std::move(returns), false, false);
+}
+
+c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
+  if (assign.lhs().kind() != TK_VAR) {
+    throw ErrorReport(assign.range())
+      << "Expected to a variable for class constant";
+  }
+  const auto final_type = assign.type().get();
+  auto expr = assign.rhs().get();
+  if (final_type.kind() != TK_SUBSCRIPT) {
+    throw ErrorReport(assign.range())
+      << "Expected subscripted type for class constant";
+  }
+  auto subscript = Subscript(final_type);
+  auto value_name = parseBaseTypeName(subscript.value());
+  if (!value_name) {
+    throw ErrorReport(subscript.value().range())
+      << "Subscripted type must be a type identifier";
+  }
+  if (*value_name != "Final") {
+    throw ErrorReport(subscript.range())
+      << "Base type must be Final for class constant";
+  }
+  if (subscript.subscript_exprs().size() != 1) {
+    throw ErrorReport(subscript)
+      << " expected exactly one element type but found "
+      << subscript.subscript_exprs().size();
+  }
+  auto type = *subscript.subscript_exprs().begin();
+  auto default_val = evaluateDefaults(expr.range(), {type}, {expr});
+  return *default_val.begin();
 }
 
 } // namespace script

@@ -10,11 +10,12 @@ from common_utils import run_tests, TestCase
 from torch.quantization import FakeQuantize
 from torch.quantization import default_observer, default_per_channel_weight_observer
 import io
+import unittest
+
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
     res = (torch.clamp(torch.round(X.cpu() * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
     return res
-
 
 # Reference method for the gradient of the fake quantize operator
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
@@ -88,6 +89,7 @@ class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("temporarily disable the test")
     def test_backward_per_tensor(self, device, X):
         r"""Tests the backward method.
         """
@@ -111,6 +113,8 @@ class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    # https://github.com/pytorch/pytorch/issues/30604
+    @unittest.skip("temporarily disable the test")
     def test_numerical_consistency_per_tensor(self, device, X):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """
@@ -173,6 +177,36 @@ class TestFakeQuantizePerTensor(TestCase):
 
         self.assertEqual(loaded_fq_module.calculate_qparams(), fq_module.calculate_qparams())
 
+    def test_fake_quant_control(self):
+        torch.manual_seed(42)
+        X = torch.rand(20, 10, dtype=torch.float32)
+        fq_module = torch.quantization.default_fake_quant()
+        # Output of fake quant is not identical to input
+        Y = fq_module(X)
+        self.assertNotEqual(Y, X)
+        torch.quantization.disable_fake_quant(fq_module)
+        X = torch.rand(20, 10, dtype=torch.float32)
+        Y = fq_module(X)
+        # Fake quant is disabled,output is identical to input
+        self.assertEqual(Y, X)
+        scale = fq_module.scale
+        zero_point = fq_module.zero_point
+        torch.quantization.disable_observer(fq_module)
+        torch.quantization.enable_fake_quant(fq_module)
+        X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
+        Y = fq_module(X)
+        self.assertNotEqual(Y, X)
+        # Observer is disabled, scale and zero-point do not change
+        self.assertEqual(fq_module.scale, scale)
+        self.assertEqual(fq_module.zero_point, zero_point)
+        torch.quantization.enable_observer(fq_module)
+        Y = fq_module(X)
+        self.assertNotEqual(Y, X)
+        # Observer is enabled, scale and zero-point are different
+        self.assertNotEqual(fq_module.scale, scale)
+        self.assertNotEqual(fq_module.zero_point, zero_point)
+
+
 
 class TestFakeQuantizePerChannel(TestCase):
     # NOTE: Tests in this class are decorated with no_deadline
@@ -226,6 +260,7 @@ class TestFakeQuantizePerChannel(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("temporarily disable the test")
     def test_numerical_consistency_per_channel(self, device, X):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """

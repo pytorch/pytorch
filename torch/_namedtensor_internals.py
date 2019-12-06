@@ -54,6 +54,15 @@ def is_ellipsis(item):
     else:
         return item == Ellipsis or item == '...'
 
+def single_ellipsis_index(names, fn_name):
+    ellipsis_indices = [i for i, name in enumerate(names) if is_ellipsis(name)]
+    if len(ellipsis_indices) >= 2:
+        raise RuntimeError('{}: More than one Ellipsis (\'...\') found in names ('
+                           '{}). This function supports up to one Ellipsis.'
+                           .format(fn_name, names))
+    if len(ellipsis_indices) == 1:
+        return ellipsis_indices[0]
+    return None
 
 def expand_single_ellipsis(numel_pre_glob, numel_post_glob, names):
     return names[numel_pre_glob:len(names) - numel_post_glob]
@@ -64,39 +73,14 @@ def replace_ellipsis_by_position(ellipsis_idx, names, tensor_names):
     return names[:ellipsis_idx] + globbed_names + names[ellipsis_idx + 1:]
 
 
-def replace_ellipsis_with_missing_names(ellipsis_idx, names, tensor_names, fn_name):
-    if any([dimname is None for dimname in tensor_names]):
-        raise RuntimeError(
-            '{}: All input dims must be named, got tensor with dims: {}. '
-            'Please use `tensor.refine_names(*names)` to add names to '
-            'unnamed dims'.format(fn_name, tensor_names))
-    if any([dimname is None for dimname in names]):
-        raise RuntimeError('{}: desired order must not contain None, got: {}.'
-                           .format(fn_name, names))
-    desired_ordering_set = set(names)
-    if len(desired_ordering_set) != len(names):
-        raise RuntimeError('{}: Duplicate names are not allowed in desired ordering, got: {}.'
-                           .format(fn_name, names))
-    missing_names = tuple([name for name in tensor_names if name not in desired_ordering_set])
-    return names[:ellipsis_idx] + missing_names + names[ellipsis_idx + 1:]
-
-
-def resolve_ellipsis(names, tensor_names, fn_name, is_positional=True):
+def resolve_ellipsis(names, tensor_names, fn_name):
     """
     Expands ... inside `names` to be equal to a list of names from `tensor_names`.
     """
-    ellipsis_indices = [i for i, name in enumerate(names) if is_ellipsis(name)]
-    if len(ellipsis_indices) >= 2:
-        raise RuntimeError('{}: More than one Ellipsis (\'...\') found in names ('
-                           '{}). This function supports up to one Ellipsis.'
-                           .format(fn_name, names))
-    if len(ellipsis_indices) == 0:
+    ellipsis_idx = single_ellipsis_index(names, fn_name)
+    if ellipsis_idx is None:
         return names
-    ellipsis_idx = ellipsis_indices[0]
-    if is_positional:
-        return replace_ellipsis_by_position(ellipsis_idx, names, tensor_names)
-    else:
-        return replace_ellipsis_with_missing_names(ellipsis_idx, names, tensor_names, fn_name)
+    return replace_ellipsis_by_position(ellipsis_idx, names, tensor_names)
 
 
 def update_names_with_list(tensor, names, inplace):
