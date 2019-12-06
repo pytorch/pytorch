@@ -745,6 +745,16 @@ Types produced by :func:`collections.namedtuple <collections.namedtuple>` can be
     ...
 
 
+.. _jit_iterables:
+
+Iterables
+^^^^^^^^^
+
+Some functions (for example, :any:`zip` and :any:`enumerate`) can only operate on iterable types.
+Iterable types in TorchScript include ``Tensor``\s, lists, tuples, dictionaries, strings,
+:any:`torch.nn.ModuleList` and :any:`torch.nn.ModuleDict`.
+
+
 Expressions
 ~~~~~~~~~~~
 
@@ -1634,23 +1644,31 @@ rather build up the result tensor out-of-place with ``torch.cat``:
 
 .. _Builtin functions:
 
-Builtin Functions
-~~~~~~~~~~~~~~~~~
+Built-in Functions and Modules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-TorchScript supports a subset of the builtin tensor and neural network
+See :ref:`builtin-functions` for a full reference of supported functions.
+
+PyTorch Functions and Modules
+-----------------------------
+
+TorchScript supports a subset of the tensor and neural network
 functions that PyTorch provides. Most methods on Tensor as well as functions in
 the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
 modules from ``torch.nn`` are supported in TorchScript, excluding those in the
 table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
 
-Unsupported ``torch.nn`` Modules  ::
+Unsupported ``torch.nn`` Modules::
 
     torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
     torch.nn.modules.normalization.CrossMapLRN2d
     torch.nn.modules.rnn.RNN
 
-
-See :ref:`builtin-functions` for a full reference of supported functions
+Python Functions and Modules
+----------------------------
+Many Python's `built-in functions <https://docs.python.org/3/library/functions.html>`_ are supported in TorchScript.
+The :any:`math` module is also supported, but no other Python modules
+(built-in or third party) are supported.
 
 
 Frequently Asked Questions

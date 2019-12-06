@@ -14,7 +14,7 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
 
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
-    return F::detail::instance_norm(
+    return torch::nn::functional::detail::instance_norm(
       input, this->running_mean, this->running_var, this->weight, this->bias,
       this->is_training() || !this->options.track_running_stats(), this->options.momentum(), this->options.eps());
   }

@@ -24,15 +24,17 @@
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: reduction != at::Reduction::None || self_->dim() == 0
-    is_target: target_->dim() == 0
+    output: 'false'
+    is_target: 'false'
+    grad_input: 'false'
 
 - name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != at::Reduction::None || self_->dim() == 0
-    total_weight: 'true'
+    output: 'false'
+    total_weight: 'false'
+    grad_input: 'false'
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
@@ -41,8 +43,9 @@
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != at::Reduction::None || self_->dim() == 0
-    total_weight: 'true'
+    output: 'false'
+    total_weight: 'false'
+    grad_input: 'false'
 
 - name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
   cname: SoftMarginCriterion
@@ -63,13 +66,6 @@
   cname: GatedLinear
   wrap_dim:
     dim: self
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_hardtanh(Tensor self, Scalar min_val, Scalar max_val)
-  cname: HardTanh
-  has_inplace: True
   scalar_check:
     output: 'false'
     grad_input: 'false'
@@ -110,12 +106,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_tanh(Tensor self)
-  cname: Tanh
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Convolutions
 
 - name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding)
@@ -124,7 +114,13 @@
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'BFloat16']
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
 - name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding, IntArrayRef[2] dilation)
   cname: SpatialDepthwiseConvolution
   buffers: []
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
