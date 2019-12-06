@@ -396,9 +396,16 @@ class THCCachingAllocator {
     }
 
     // The ptr is not allocated by CUDA, most likely user error
-    TORCH_CHECK(ptr.device().type() == kCUDA, "Tensor is not allocated in CUDA");
-    // This could happen when a tensor is shared across processes, most likely user error
-    TORCH_CHECK(ptr.get_deleter() == &raw_delete, "Tensor is not allocated by the CUDACachingAllocator instance in current context");
+    TORCH_CHECK(
+        ptr.device().type() == kCUDA, "Tensor is not allocated in CUDA");
+
+    // If a tensor is not allocated by this instance, simply skip
+    // This usually happens when CUDA tensors are shared across processes,
+    // we have implemented reference counting based sharing mechanism to
+    // guarantee tensors won't be accidentally freed by one process while
+    // they are still being used in another
+    if (ptr.get_deleter() != &raw_delete)
+      return;
 
     std::lock_guard<std::recursive_mutex> lock(mutex);
 

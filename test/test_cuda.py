@@ -2084,23 +2084,5 @@ t2.start()
         ct = t.to("cuda")
         ct.record_stream(torch.cuda.current_stream())
 
-    @classmethod
-    def _recordStreamFromADifferentProcess(cls, t):
-        inst = cls()
-        # This should throw exception as recrod_stream in a different process will not succeed
-        with inst.assertRaisesRegex(RuntimeError, "Tensor is not allocated by the CUDACachingAllocator instance in current context"):
-            t.record_stream(torch.cuda.current_stream())
-
-    def testCudaRecordStreamWithinWrongProcess(self):
-        SIZE = 5
-        t = torch.cuda.FloatTensor(SIZE)
-
-        ctx = mp.get_context('spawn')
-        p = ctx.Process(target=TestCuda._recordStreamFromADifferentProcess, args=(t,))
-        p.start()
-        p.join()
-        self.assertEqual(t.size()[0], SIZE)
-
-
 if __name__ == '__main__':
     run_tests()
