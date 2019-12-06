@@ -441,9 +441,15 @@ void initJITBindings(PyObject* module) {
     BufferAdapter(const py::object& buffer) : buffer_(buffer) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
-      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
-      size_ = py::cast<size_t>(buffer.attr("tell")());
+      buffer.attr("seek")(0, py::module::import("os").attr("SEEK_END"));
+      start_offset_ = py::cast<size_t>(current);
+      size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
       buffer.attr("seek")(current);
+      // size_ =
+      std::cout << "determined size to be " << size_ << "\n";
+      std::cout << "\t buf is at " << py::str(current) << "\n";
+
+      use_readinto_ = py::hasattr(buffer, "readinto");
     }
 
     size_t size() const override {
@@ -453,19 +459,37 @@ void initJITBindings(PyObject* module) {
     size_t read(uint64_t pos, void* buf, size_t n, const char* what)
         const override {
       // Seek to desired position
-      buffer_.attr("seek")(pos);
+      buffer_.attr("seek")(start_offset_ + pos);
 
-      // Read bytes into `buf` from the buffer
-      std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
-      std::copy(
-          bytes.data(),
-          bytes.data() + bytes.size(),
-          reinterpret_cast<char*>(buf));
-      return bytes.size();
+      if (use_readinto_) {
+        // auto bytes_wrapper = py:(reinterpret_cast<char*>(buf), n);
+        // auto bytes_wrapper =
+        //     py::memoryview(py::bytes(reinterpret_cast<char*>(buf), n));
+        // auto res = buffer_.attr("readinto")(bytes_wrapper);
+        auto bytes_like = py::module::import("io").attr("BytesIO")(py::bytes(reinterpret_cast<char*>(buf), n));
+        auto c = py::capsule()
+        auto res = buffer_.attr("readinto")();
+        // auto res = buffer_.attr("readinto")(bytes_like);
+        // auto res = buffer_.attr("readinto")(PyBytes_FromStringAndSize());
+        if (res.is_none()) {
+          return 0;
+        }
+        return py::cast<size_t>(res);
+      } else {
+        // Read bytes into `buf` from the buffer
+        std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
+        std::copy(
+            bytes.data(),
+            bytes.data() + bytes.size(),
+            reinterpret_cast<char*>(buf));
+        return bytes.size();
+      }
     }
 
     py::object buffer_;
     size_t size_;
+    size_t start_offset_;
+    bool use_readinto_;
   };
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")

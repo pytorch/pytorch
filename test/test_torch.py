@@ -4101,7 +4101,7 @@ class _TestTorchMixin(object):
         t = torch.tensor(data, dtype=torch.uint8)
 
         with tempfile.NamedTemporaryFile() as f:
-            torch.save(t, f.name)
+            torch.save(t, f.name, _use_new_zipfile_serialization=False)
 
             # If this check is False for all Python versions (i.e. the fix
             # has been backported), this test and torch.serialization._is_zipfile
@@ -4125,22 +4125,29 @@ class _TestTorchMixin(object):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
-        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
+        b = torch.randn(2, 2, 2, dtype=torch.float32)
+        # b = torch.randn(1024, 1024, 512, dtype=torch.float32)
         m = torch.nn.Conv2d(1, 1, (1, 3))
         i, j = 41, 43
         with tempfile.NamedTemporaryFile() as f:
             pickle.dump(i, f)
+            print("torch starts at", f.tell())
             torch.save(a, f)
+            print("torch   ends at", f.tell())
             pickle.dump(j, f)
-            torch.save(b, f)
-            torch.save(m, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
+            print("binary ends at", f.tell())
+            # torch.save(b, f)
+            # torch.save(m, f)
+            # self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
+            print("after pickle 1 it is", f.tell())
             a_loaded = torch.load(f)
+            print("after torch load it is", f.tell())
             j_loaded = pickle.load(f)
-            b_loaded = torch.load(f)
-            m_loaded = torch.load(f)
+            print("after pickle 2 it is", f.tell())
+            # b_loaded = torch.load(f)
+            # m_loaded = torch.load(f)
         self.assertTrue(torch.equal(a, a_loaded))
         self.assertTrue(torch.equal(b, b_loaded))
         self.assertTrue(m.kernel_size == m_loaded.kernel_size)
@@ -4286,7 +4293,10 @@ class _TestTorchMixin(object):
         with filecontext_lambda() as checkpoint:
             fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.py')
             module = import_module(tmpmodule_name, fname)
-            torch.save(module.Net(), checkpoint)
+
+            # The zipfile serialization does not save the code of modules, so this
+            # test shouldn't run for it
+            torch.save(module.Net(), checkpoint, _use_new_zipfile_serialization=False)
 
             # First check that the checkpoint can be loaded without warnings
             checkpoint.seek(0)
@@ -4440,7 +4450,14 @@ class _TestTorchMixin(object):
         f = io.BytesIO()
         torch.save(a, f)
         f.seek(0)
+        orig = f.readinto
+        print('f is', f)
+        def new_read(*args):
+            print('hi')
+            orig(*args)
+        f.readinto = new_read
         data = FilelikeMock(f.read(), has_readinto=True)
+        print('data is', data)
 
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))

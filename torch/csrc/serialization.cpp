@@ -1,4 +1,5 @@
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pybind.h>
 #include <system_error>
 
 #include <torch/csrc/THP.h>
@@ -24,6 +25,7 @@ ssize_t doPartialRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
   // Try to use fildes.readinto() instead of fildes.read()
   // because it is more memory efficient.
   // TODO: Stop calling PyObject_HasAttrString() in a loop on our read loop
+  std::cout << "doing partial read " << py::str(fildes) << "\n";
   auto has_readinto = PyObject_HasAttrString(fildes, "readinto") == 1;
   if (has_readinto) {
     return doPartialPythonReadInto(fildes, buf, nbytes);
@@ -96,6 +98,8 @@ static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbyt
   if (is_read) {
     method = "readinto";
   }
+  std::cout << "Calling readingto: " << method << "\n";
+  std::cout << py::str(fildes) << "\n";
   THPObjectPtr r(PyObject_CallMethod(fildes, method, "O", memview.get()));
   if (r) {
     return PyLong_AsSsize_t(r.get());
