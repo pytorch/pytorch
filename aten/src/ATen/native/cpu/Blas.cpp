@@ -1,4 +1,5 @@
 #include <type_traits>
+#include <limits>
 #include <ATen/Dispatch.h>
 #include <ATen/native/Blas.h>
 
@@ -13,33 +14,58 @@ namespace at { namespace native {
 
 namespace {
 
+template <typename scalar_t>
+inline bool scal_use_fast_path(int64_t n, int64_t incx) {
+  return false;
+}
+
+template <typename scalar_t>
+inline void scal_fast_path(int n, scalar_t a, scalar_t *x, int incx) {
+  TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
+  return;
+}
+
+#ifdef USE_BLAS
+template <>
+inline bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
+  auto intmax = std::numeric_limits<int>::max;
+  return n <= intmax && incx <= intmax;
+}
+
+template <>
+inline bool scal_use_fast_path<float>(int64_t n, int64_t incx) {
+  auto intmax = std::numeric_limits<int>::max;
+  return n <= intmax && incx <= intmax;
+}
+
+template <>
+inline void scal_fast_path<double>(int n, double a, double *x, int incx) {
+  dscal_(&n, &a, x, &incx);
+  return;
+}
+
+template <>
+inline void scal_fast_path<float>(int n, float a, float *x, int incx) {
+  sscal_(&n, &a, x, &incx);
+  return;
+}
+#endif
+
+template <typename scalar_t>
 void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 {
-  if(n == 1)
-    incx = 1;
-
-#if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) )
-  {
+  if (n == 1) incx = 1;
+  if (scal_use_fast_path<scalar_t>(n, incx)) {
     int i_n = (int)n;
     int i_incx = (int)incx;
-
-#if defined(TH_REAL_IS_DOUBLE)
-    dscal_(&i_n, &a, x, &i_incx);
-#else
-    sscal_(&i_n, &a, x, &i_incx);
-#endif
+    scal_fast_path(&i_n, &a, x, &i_incx);
     return;
   }
-#endif
-  {
-    int64_t i;
-    for(i = 0; i < n; i++) {
-      if (a == 0) {
-        x[i*incx] = 0;
-      } else {
-        x[i*incx] *= a;
-      }
+  for (int64_t i = 0; i < n; i++) {
+    if (a == 0) {
+      x[i * incx] = 0;
+    } else {
+      x[i * incx] *= a;
     }
   }
 }

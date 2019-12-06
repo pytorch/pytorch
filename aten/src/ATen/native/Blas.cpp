@@ -28,7 +28,7 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
     at::native::copy_(result, self);
   }
 
-  addmv_stub(result, self, mat, vec, beta, alpha);
+  addmv_stub(self.device().type(), result, self, mat, vec, beta, alpha);
 
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmv(result, mat, vec, self);
