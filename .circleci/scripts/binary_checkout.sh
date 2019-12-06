@@ -51,5 +51,6 @@ popd
 retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
+git reset --hard 3d783ef2602b06306e172ced34162b920f05022c ## Commits on Nov 11, 2019
 git --no-pager log --max-count 1
 popd
