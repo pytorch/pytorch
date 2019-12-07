@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from sys import maxsize
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
@@ -40,6 +42,46 @@ def clamp(g, self, min, max):
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
     return g.op("Clip", self, min, max)
+
+
+def index_put(g, self, indices_list_value, values, accumulate=False):
+    indices_list = sym_help._unpack_list(indices_list_value)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        args = [self] + indices_list + [values, accumulate]
+        return g.op("ATen", *args, operator_s='index_put')
+
+    from torch.onnx.symbolic_opset9 import add, expand
+    accumulate = sym_help._parse_arg(accumulate, 'b')
+
+    index = indices_list[0]
+
+    if len(indices_list) > 1:
+        for ind in indices_list[1:]:
+            index = add(g, index, ind)
+        broadcast_index_shape = g.op("Shape", index)
+        indices_list = [
+            g.op("Unsqueeze", expand(g, ind, broadcast_index_shape, None), axes_i=[-1]) for ind in indices_list
+        ]
+        index = g.op("Concat", *indices_list, axis_i=-1)
+    else:
+        broadcast_index_shape = g.op("Shape", index)
+        index = g.op("Unsqueeze", index, axes_i=[-1])
+    sub_data_shape = sym_help._slice_helper(
+        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
+    values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
+    values = g.op("Reshape", values, values_shape)
+
+    if accumulate:
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+        zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
+        result = g.op("ScatterND", zeros, index, values)
+        result = add(g, self, result)
+    else:
+        result = g.op("ScatterND", self, index, values)
+
+    return result
 
 
 @parse_args('v', 'i')
