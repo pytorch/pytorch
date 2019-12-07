@@ -345,223 +345,35 @@ std::string _ListNestedTensor::__repr__() {
   return _NestedNode___str__(_structure);
 }
 
-static struct PyGetSetDef _ListNestedTensorVariable_properties[] = {
-    {"dtype",
-     (getter)_ListNestedTensorVariable_dtype,
-     nullptr,
-     nullptr,
-     nullptr},
-    {"layout",
-     (getter)_ListNestedTensorVariable_layout,
-     nullptr,
-     nullptr,
-     nullptr},
-    {"device",
-     (getter)_ListNestedTensorVariable_device,
-     nullptr,
-     nullptr,
-     nullptr},
-    {"grad", (getter)_ListNestedTensorVariable_grad, nullptr, nullptr, nullptr},
-    {"requires_grad",
-     (getter)_ListNestedTensorVariable_requires_grad,
-     nullptr,
-     nullptr,
-     nullptr},
-    {nullptr}};
-
-static PyMethodDef nested_tensor_functions[] = {{"jit_apply_function",
-                                                 jit_apply_function,
-                                                 METH_VARARGS,
-                                                 "jit_apply_function."},
-                                                {nullptr, nullptr, 0, nullptr}};
-
-static PyMethodDef _ListNestedTensorVariable_methods[] = {
-    {"element_size",
-     (PyCFunction)_ListNestedTensorVariable_element_size,
-     METH_NOARGS,
-     "Return element size."},
-    {"nested_dim",
-     (PyCFunction)_ListNestedTensorVariable_nested_dim,
-     METH_NOARGS,
-     "Return nested dim."},
-    {"nested_size",
-     (PyCFunction)_ListNestedTensorVariable_nested_size,
-     METH_NOARGS,
-     "Return nested_size."},
-    {"nested_stride",
-     (PyCFunction)_ListNestedTensorVariable_nested_stride,
-     METH_NOARGS,
-     "Return nested_stride."},
-    {"pin_memory",
-     (PyCFunction)_ListNestedTensorVariable_pin_memory,
-     METH_NOARGS,
-     "Pins memory."},
-    {"detach",
-     (PyCFunction)_ListNestedTensorVariable_detach,
-     METH_NOARGS,
-     "Detaches and returns."},
-    {"requires_grad_",
-     (PyCFunction)_ListNestedTensorVariable_requires_grad_,
-     METH_O,
-     "requires_grad_ and returns."},
-    {"backward",
-     (PyCFunction)_ListNestedTensorVariable_backward,
-     METH_VARARGS,
-     "backward and returns."},
-    {"is_pinned",
-     (PyCFunction)_ListNestedTensorVariable_is_pinned,
-     METH_NOARGS,
-     "Returns is_pinned."},
-    {"is_contiguous",
-     (PyCFunction)_ListNestedTensorVariable_is_contiguous,
-     METH_NOARGS,
-     "Returns is_contiguous."},
-    {"numel",
-     (PyCFunction)_ListNestedTensorVariable_numel,
-     METH_NOARGS,
-     "Returns numel."},
-    {"to_tensor",
-     (PyCFunction)_ListNestedTensorVariable_to_tensor,
-     METH_NOARGS,
-     "Returns to_tensor."},
-    {"dim",
-     (PyCFunction)_ListNestedTensorVariable_dim,
-     METH_NOARGS,
-     "Returns dim."},
-    {"to",
-     (PyCFunction)_ListNestedTensorVariable_to,
-     METH_VARARGS | METH_KEYWORDS,
-     "Returns to."},
-    {"unbind",
-     (PyCFunction)_ListNestedTensorVariable_unbind,
-     METH_NOARGS,
-     "Returns unbound components."},
-    {NULL} /* Sentinel */
-};
-
-static PySequenceMethods _ListNestedTensorVariable_as_sequence = {
-    (lenfunc)_ListNestedTensorVariable_len, /* sq_length */
-    nullptr, /* sq_concat */
-    nullptr, /* sq_repeat */
-    nullptr, /* sq_item */
-    nullptr, /* sq_slice */
-    nullptr, /* sq_ass_item */
-    nullptr, /* sq_ass_slice */
-    nullptr /* sq_contains */
-};
-
-// TODO: "Py_TPFLAGS_DEFAULT enables all memebers defined until Python 3.3"
-// https://docs.python.org/3/extending/newtypes_tutorial.html
-// Does that mean it won't work before Python 3.3?
-PyTypeObject _ListNestedTensorVariableType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch.nestedtensor._ListNestedTensor", /* tp_name */
-    sizeof(_ListNestedTensorVariable), /* tp_basicsize */
-    0, /* tp_itemsize */
-    (destructor)_ListNestedTensorVariable_dealloc, /* tp_dealloc */
-    nullptr, /* tp_print */
-    nullptr, /* tp_getattr */
-    nullptr, /* tp_setattr */
-    nullptr, /* tp_reserved */
-    (reprfunc)_ListNestedTensorVariable___repr__, /* tp_repr */
-    nullptr, /* tp_as_number */
-    &_ListNestedTensorVariable_as_sequence, /* tp_as_sequence */
-    nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
-    nullptr, /* tp_call */
-    (reprfunc)_ListNestedTensorVariable___str__, /* tp_str */
-    nullptr, /* tp_getattro */
-    nullptr, /* tp_setattro */
-    nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT, /* tp_flags */
-    nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
-    nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
-    nullptr, /* tp_iter */
-    nullptr, /* tp_iternext */
-    _ListNestedTensorVariable_methods, /* tp_methods */
-    nullptr, /* tp_members */
-    _ListNestedTensorVariable_properties, /* tp_getset */
-    nullptr, /* tp_base */
-    nullptr, /* tp_dict */
-    nullptr, /* tp_descr_get */
-    nullptr, /* tp_descr_set */
-    0, /* tp_dictoffset */
-    nullptr, /* tp_init */
-    nullptr, /* tp_alloc */
-    _ListNestedTensorVariable_pynew, /* tp_new */
-};
 
 struct THP_ListNestedTensor {
   THP_ListNestedTensor() = delete;
   THP_ListNestedTensor(py::object list)
       : data(_ListNestedTensor(_get_structure(list.ptr()))) {}
-int64_t element_size() { return data.element_size(); }
+  int64_t element_size() {
+    return data.element_size();
+  }
+  py::object nested_size() {
+    return py::reinterpret_steal<py::object>(
+        wrap_nested_node(data.nested_size()));
+  }
+  py::object nested_stride() {
+    return py::reinterpret_steal<py::object>(
+        wrap_nested_node(data.nested_stride()));
+  }
 
  private:
   _ListNestedTensor data;
 };
 
 void initialize_python_bindings() {
-  auto obj = py::module::import("torch");
+  auto obj = py::module::import("torch.nestedtensor");
   auto m = py::handle(obj).cast<py::module>();
 
   py::class_<THP_ListNestedTensor>(m, "_ListNestedTensor")
       .def(py::init<py::object>())
-      .def_property_readonly("dtype", &_ListNestedTensor::get_dtype)
-      .def_property_readonly("layout", &_ListNestedTensor::get_layout)
-      .def_property_readonly("device", &_ListNestedTensor::get_device)
-      .def_property_readonly("requires_grad", &_ListNestedTensor::requires_grad)
-      .def_property_readonly("grad", &_ListNestedTensor::grad)
-      .def("detach", &_ListNestedTensor::detach)
-      .def("backward", &_ListNestedTensor::backward)
-      .def("requires_grad_", &_ListNestedTensor::requires_grad_)
-      .def("element_size", &_ListNestedTensor::element_size)
-      .def("unbind", &_ListNestedTensor::unbind)
-      .def("nested_size", &_ListNestedTensor::nested_size)
-      .def("nested_stride", &_ListNestedTensor::nested_stride)
-      .def("is_pinned", &_ListNestedTensor::is_contiguous)
-      .def("is_contiguous", &_ListNestedTensor::is_contiguous)
-      .def("__len__", &_ListNestedTensor::__len__)
-      .def("__str__", &_ListNestedTensor::__str__)
-      .def("dim", &_ListNestedTensor::dim)
-      .def("nested_dim", &_ListNestedTensor::nested_dim);
-
-  PyObject* m;
-  if (PyType_Ready(&_ListNestedTensorVariableType) < 0) {
-    throw python_error();
-  }
-
-  m = PyImport_ImportModule("torch");
-  if (!m) {
-    throw python_error();
-  }
-
-  Py_INCREF(&_ListNestedTensorVariableType);
-  if (PyModule_AddObject(
-          m, "_ListNestedTensor", (PyObject*)&_ListNestedTensorVariableType) <
-      0) {
-    Py_DECREF(&_ListNestedTensorVariableType);
-    Py_DECREF(m);
-    throw python_error();
-  }
-
-  static struct PyModuleDef def = {PyModuleDef_HEAD_INIT,
-                                   "torch.nestedtensor",
-                                   NULL,
-                                   -1,
-                                   nested_tensor_functions};
-  PyObject* nested_tensor = PyModule_Create(&def);
-  if (!nested_tensor) {
-    throw python_error();
-  }
-  // steals a reference to nested_tensor
-  if (PyModule_AddObject(m, "nestedtensor", nested_tensor) != 0) {
-    throw python_error();
-  }
+      .def("nested_size", &THP_ListNestedTensor::nested_size)
+      .def("nested_stride", &THP_ListNestedTensor::nested_stride);
 }
 } // namespace nested_tensor
 } // namespace torch
