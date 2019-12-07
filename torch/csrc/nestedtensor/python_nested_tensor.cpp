@@ -319,6 +319,12 @@ struct THP_ListNestedTensor {
   _ListNestedTensor data() {
     return _data;
   }
+  void backward(
+      THP_ListNestedTensor gradient,
+      bool retain_graph,
+      bool create_graph) {
+  _data.backward(gradient.data(), retain_graph, create_graph);
+  }
 
  private:
   _ListNestedTensor _data;
@@ -346,12 +352,14 @@ void initialize_python_bindings() {
               }
             } else {
               for (int64_t i = 0; i < self.len(); i++) {
-                result.push_back(py::cast(THP_ListNestedTensor(_ListNestedTensor(
-                    self.data().get_structure().children(i)))));
+                result.push_back(
+                    py::cast(THP_ListNestedTensor(_ListNestedTensor(
+                        self.data().get_structure().children(i)))));
               }
             }
             return result;
           })
+      .def("backward", &THP_ListNestedTensor::backward)
       .def("element_size", &THP_ListNestedTensor::element_size)
       .def("numel", &THP_ListNestedTensor::numel)
       .def("__len__", &THP_ListNestedTensor::len)

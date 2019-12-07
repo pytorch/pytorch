@@ -20,7 +20,7 @@ def gen_random_int(seed, low=0, high=2 ** 32):
     return int(random_int_tensor(seed, (), low=low, high=high))
 
 
-# TODO: Something occasionally causes a NaN here...
+# TODO: Something occasionally causes a NaN here?
 def gen_nested_list(seed, nested_dim, tensor_dim, size_low=1, size_high=10):
     tensors = []
     num_tensors = gen_random_int(
@@ -71,6 +71,7 @@ def get_first_tensor(nested_list):
         return nested_list
 
 
+# TODO: Test backward
 class Test_ListNestedTensor(TestCase):
 
     def test_nested_constructor(self):
