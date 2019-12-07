@@ -454,7 +454,9 @@ static PySequenceMethods _ListNestedTensorVariable_as_sequence = {
 // https://docs.python.org/3/extending/newtypes_tutorial.html
 // Does that mean it won't work before Python 3.3?
 PyTypeObject _ListNestedTensorVariableType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._ListNestedTensor", /* tp_name */
+    PyVarObject_HEAD_INIT(
+        nullptr,
+        0) "torch.nestedtensor._ListNestedTensor", /* tp_name */
     sizeof(_ListNestedTensorVariable), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)_ListNestedTensorVariable_dealloc, /* tp_dealloc */
@@ -493,7 +495,41 @@ PyTypeObject _ListNestedTensorVariableType = {
     _ListNestedTensorVariable_pynew, /* tp_new */
 };
 
+struct THP_ListNestedTensor {
+  THP_ListNestedTensor() = delete;
+  THP_ListNestedTensor(py::object list)
+      : data(_ListNestedTensor(_get_structure(list.ptr()))) {}
+int64_t element_size() { return data.element_size(); }
+
+ private:
+  _ListNestedTensor data;
+};
+
 void initialize_python_bindings() {
+  auto obj = py::module::import("torch");
+  auto m = py::handle(obj).cast<py::module>();
+
+  py::class_<THP_ListNestedTensor>(m, "_ListNestedTensor")
+      .def(py::init<py::object>())
+      .def_property_readonly("dtype", &_ListNestedTensor::get_dtype)
+      .def_property_readonly("layout", &_ListNestedTensor::get_layout)
+      .def_property_readonly("device", &_ListNestedTensor::get_device)
+      .def_property_readonly("requires_grad", &_ListNestedTensor::requires_grad)
+      .def_property_readonly("grad", &_ListNestedTensor::grad)
+      .def("detach", &_ListNestedTensor::detach)
+      .def("backward", &_ListNestedTensor::backward)
+      .def("requires_grad_", &_ListNestedTensor::requires_grad_)
+      .def("element_size", &_ListNestedTensor::element_size)
+      .def("unbind", &_ListNestedTensor::unbind)
+      .def("nested_size", &_ListNestedTensor::nested_size)
+      .def("nested_stride", &_ListNestedTensor::nested_stride)
+      .def("is_pinned", &_ListNestedTensor::is_contiguous)
+      .def("is_contiguous", &_ListNestedTensor::is_contiguous)
+      .def("__len__", &_ListNestedTensor::__len__)
+      .def("__str__", &_ListNestedTensor::__str__)
+      .def("dim", &_ListNestedTensor::dim)
+      .def("nested_dim", &_ListNestedTensor::nested_dim);
+
   PyObject* m;
   if (PyType_Ready(&_ListNestedTensorVariableType) < 0) {
     throw python_error();
