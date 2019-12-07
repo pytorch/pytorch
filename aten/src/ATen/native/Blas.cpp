@@ -7,7 +7,7 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(addmv_stub);
 
-Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
+Tensor &addmv_out(Tensor& result, const Tensor &self_, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
 
 #ifdef BUILD_NAMEDTENSOR
     at::NoNamesGuard guard;
@@ -18,6 +18,10 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
     result = at::empty(result_sizes, mat.options());
   }
 
+  Tensor self = self_;
+  if (self_.dim() != 1 || self_.size(0) == 1) {
+    self = self_.expand({mat.size(0)});
+  }
   TORCH_CHECK((mat.dim() == 2 && vec.dim() == 1 && self.dim() == 1),
     "vector + matrix @ vector expected, got ", self.dim(), ", ", mat.dim(), ", ", vec.dim());
   TORCH_CHECK((mat.size(1) == vec.size(0) && mat.size(0) == self.size(0)),

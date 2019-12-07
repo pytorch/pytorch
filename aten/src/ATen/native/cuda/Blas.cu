@@ -14,7 +14,7 @@ void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, cons
   if (mat.scalar_type() == kHalf || mat.scalar_type() == kBFloat16) {
     // Currently no Hgemv/SgemvEx in Cublas
     Tensor vec_as_matrix = vec.reshape({vec_size, 1}).contiguous();
-    Tensor self_as_matrix = self.reshape({self.size(0), 1}).contiguous();
+    Tensor self_as_matrix = self.reshape({mat.size(0), 1}).contiguous();
     at::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta_, alpha_);
     result.resize_({result.size(0)});
     return;
