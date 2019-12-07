@@ -100,53 +100,69 @@ inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 
 #else
 
-// Implementation from http://en.cppreference.com/w/cpp/utility/apply (but modified)
-// TODO This is an incomplete implementation of std::apply, not working for member functions.
+// Implementation from http://en.cppreference.com/w/cpp/utility/apply
+// and https://en.cppreference.com/w/cpp/utility/functional/invoke
 namespace detail {
-template <class F, class Tuple, std::size_t... INDEX>
-#if defined(_MSC_VER)
-// MSVC has a problem with the decltype() return type, but it also doesn't need it
-// Also, nvcc on Windows needs C10_HOST_DEVICE here.
-C10_HOST_DEVICE constexpr auto apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
-#else
-// GCC/Clang need the decltype() return type and rocm doesn't like the C10_HOST_DEVICE
-constexpr decltype(auto) apply_impl(F&& f, Tuple&& t, std::index_sequence<INDEX...>)
-#endif
+template <class T>
+struct is_reference_wrapper : std::false_type {};
+template <class U>
+struct is_reference_wrapper<std::reference_wrapper<U>> : std::true_type {};
+template <class T>
+constexpr bool is_reference_wrapper_v = is_reference_wrapper<T>::value;
+
+template <class T, class Type, class T1, class... Args>
+constexpr decltype(auto) INVOKE(Type T::* f, T1&& t1, Args&&... args)
 {
-    return std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...);
+    if constexpr (std::is_member_function_pointer_v<decltype(f)>) {
+        if constexpr (std::is_base_of_v<T, std::decay_t<T1>>)
+            return (std::forward<T1>(t1).*f)(std::forward<Args>(args)...);
+        else if constexpr (is_reference_wrapper_v<std::decay_t<T1>>)
+            return (t1.get().*f)(std::forward<Args>(args)...);
+        else
+            return ((*std::forward<T1>(t1)).*f)(std::forward<Args>(args)...);
+    } else {
+        static_assert(std::is_member_object_pointer_v<decltype(f)>);
+        static_assert(sizeof...(args) == 0);
+        if constexpr (std::is_base_of_v<T, std::decay_t<T1>>)
+            return std::forward<T1>(t1).*f;
+        else if constexpr (is_reference_wrapper_v<std::decay_t<T1>>)
+            return t1.get().*f;
+        else
+            return (*std::forward<T1>(t1)).*f;
+    }
+}
+
+template <class F, class... Args>
+constexpr decltype(auto) INVOKE(F&& f, Args&&... args)
+{
+      return std::forward<F>(f)(std::forward<Args>(args)...);
+}
+} // namespace detail
+
+template< class F, class... Args>
+constexpr std::invoke_result_t<F, Args...> invoke(F&& f, Args&&... args)
+  noexcept(std::is_nothrow_invocable_v<F, Args...>)
+{
+    return detail::INVOKE(std::forward<F>(f), std::forward<Args>(args)...);
+}
+
+namespace detail {
+template <class F, class Tuple, std::size_t... I>
+constexpr decltype(auto) apply_impl(F&& f, Tuple&& t, std::index_sequence<I...>)
+{
+    return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
 }
 }  // namespace detail
 
 template <class F, class Tuple>
-#if defined(_MSC_VER)
-C10_HOST_DEVICE // rocm doesn't like the C10_HOST_DEVICE
-#endif
-constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+constexpr decltype(auto) apply(F&& f, Tuple&& t)
+{
     return detail::apply_impl(
         std::forward<F>(f), std::forward<Tuple>(t),
-        std::make_index_sequence<std::tuple_size<std::remove_reference_t<Tuple>>::value>{});
+        std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
 }
 
 #endif
-
-
-
-
-template <typename Functor, typename... Args>
-typename std::enable_if<
-    std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename std::result_of<Functor && (Args && ...)>::type>::type
-invoke(Functor&& f, Args&&... args) {
-  return std::mem_fn(f)(std::forward<Args>(args)...);
-}
-
-template <typename Functor, typename... Args>
-typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename std::result_of<Functor && (Args && ...)>::type>::type
-invoke(Functor&& f, Args&&... args) {
-  return std::forward<Functor>(f)(std::forward<Args>(args)...);
-}
 
 
 
