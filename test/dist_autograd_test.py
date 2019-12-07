@@ -1432,5 +1432,78 @@ class DistAutogradTest(RpcAgentTestFixture):
                 self.assertNotIn(t2, grads)
                 self.assertEqual(t2, grads[t1])
 
+    class TestDebugInfoFunc(Function):
+        @staticmethod
+        def forward(ctx, input):
+            return input
+
+        @staticmethod
+        @once_differentiable
+        def backward(ctx, input):
+            debug_info = dist_autograd._get_debug_info()
+            assert (debug_info is not None)
+            backward_passes = int(debug_info['num_current_backward_passes'])
+            threads_blocked = int(debug_info['num_threads_blocked_in_backward'])
+
+            # Hard to validate exact numbers because of the distributed nature.
+            # We can't use a barrier() here since that would block the single
+            # CPU thread available for autograd and can cause deadlocks.
+            assert (backward_passes >= 1 and backward_passes <= 4)
+            assert (threads_blocked >= 1 and threads_blocked <= 4)
+            return input
+
+    @dist_init
+    def test_debug_info(self):
+        self._initialize_pg()
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            i = 0
+            res = {}
+            res[i] = t1
+            for rank in range(self.world_size):
+                if rank != self.rank:
+                    res[i + 1] = rpc.rpc_sync('worker{}'.format(rank), torch.add,
+                                              args=(res[i], t2))
+                    i += 1
+
+            # Call custom function in middle of backward pass to ensure all
+            # nodes are still waiting on a backward().
+            res[i + 1] = DistAutogradTest.TestDebugInfoFunc.apply(res[i])
+            i += 1
+
+            for rank in range(self.world_size):
+                if rank != self.rank:
+                    res[i + 1] = rpc.rpc_sync('worker{}'.format(rank), torch.add,
+                                              args=(res[i], t2))
+                    i += 1
+
+            dist_autograd.backward([res[i].sum()])
+
+            debug_info = dist_autograd._get_debug_info()
+            num_autograd_context = int(debug_info['num_autograd_contexts'])
+            # Need atleast one context and not more than 4.
+            self.assertTrue(num_autograd_context >= 1 and num_autograd_context <= 4)
+
+        for rd in range(self.world_size - 1):
+            rpc.rpc_sync("worker{}".format((self.rank + rd + 1) % self.world_size),
+                         _set_rpc_done, args=(context_id, rd + 1))
+
+        dist.barrier()
+
+        # Validate information
+        debug_info = dist_autograd._get_debug_info()
+        assert (debug_info is not None)
+        self.assertEqual(0, int(debug_info['num_current_backward_passes']))
+        self.assertEqual(0, int(debug_info['num_threads_blocked_in_backward']))
+        self.assertEqual(0, int(debug_info['local_autograd_engine_cpu_queue_size']))
+
+        self.assertTrue(_all_contexts_cleaned_up())
+
+        # All contexts should be cleaned up.
+        debug_info = dist_autograd._get_debug_info()
+        self.assertEqual(0, int(debug_info['num_autograd_contexts']))
+
 if __name__ == '__main__':
     unittest.main()
