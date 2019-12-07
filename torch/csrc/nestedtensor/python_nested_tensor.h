@@ -82,80 +82,8 @@ static inline int64_t _numel(const _NestedNode& meta_node) {
   }
 }
 
-static inline torch::autograd::Variable _get_first_variable(PyObject* tensors) {
-  if (THPVariable_Check(tensors)) {
-    return THPVariable_Unpack(tensors);
-  } else {
-    return _get_first_variable(PyList_GetItem(tensors, 0));
-  }
-}
 
-static inline bool _verify_variables(
-    const torch::autograd::Variable& first_variable,
-    PyObject* tensors) {
-  // The attributes must match across all constiuents
-  //
-  // The NestedTensor's attributes then become that of its
-  // constiuents.
-  //
-  // data must be a list of Tensors or NestedTensors
-  //
-  // Attributes:
-  //     dim()
-  //     layout
-  //     device
-  //     dtype
-  //     requires_grad
-  //     is_pinned()
-  if (THPVariable_Check(tensors)) {
-    torch::autograd::Variable variable_ = THPVariable_Unpack(tensors);
-    bool valid = true;
-    // TODO: Add more checks?
-    valid = valid && (variable_.dim() == first_variable.dim());
-    valid = valid && (variable_.layout() == first_variable.layout());
-    valid = valid && (variable_.device() == first_variable.device());
-    valid = valid && (variable_.dtype() == first_variable.dtype());
-    valid =
-        valid && (variable_.requires_grad() == first_variable.requires_grad());
-    // NOTE: This is a very costly check! For now we'll let this to be enabled
-    // manually. valid = valid && (variable_.is_pinned() ==
-    // first_variable.is_pinned());
-    return valid;
-  } else {
-    bool valid = true;
-    Py_ssize_t i, n;
-    n = PyObject_Length(tensors);
-    if (n < 0) {
-      throw python_error();
-    }
-    for (i = 0; i < n; i++) {
-      auto item = PyList_GetItem(tensors, i);
-      valid = valid && _verify_variables(first_variable, item);
-    }
-    return valid;
-  }
-}
 
-static inline _NestedNode _get_structure(PyObject* tensors) {
-  if (THPVariable_Check(tensors)) {
-    auto variable = THPVariable_Unpack(tensors);
-    return _NestedNode(variable);
-  } else {
-    std::vector<_NestedNode> meta_nodes;
-    Py_ssize_t i, n;
-    n = PyObject_Length(tensors);
-    PyObject* item;
-    if (n < 0) {
-      throw python_error();
-    }
-    for (i = 0; i < n; i++) {
-      item = PyList_GetItem(tensors, i);
-      _NestedNode node = _get_structure(item);
-      meta_nodes.push_back(node);
-    }
-    return _NestedNode(meta_nodes);
-  }
-}
 
 static inline at::Tensor _get_first_variable(_NestedNode nested_node) {
   const _NestedNode* start = &nested_node;
