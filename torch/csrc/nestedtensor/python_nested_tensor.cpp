@@ -514,7 +514,7 @@ void initialize_python_bindings() {
   }
 
   static struct PyModuleDef def = {PyModuleDef_HEAD_INIT,
-                                   "torch.nested_tensor",
+                                   "torch.nestedtensor",
                                    NULL,
                                    -1,
                                    nested_tensor_functions};
@@ -523,7 +523,7 @@ void initialize_python_bindings() {
     throw python_error();
   }
   // steals a reference to nested_tensor
-  if (PyModule_AddObject(m, "nested_tensor", nested_tensor) != 0) {
+  if (PyModule_AddObject(m, "nestedtensor", nested_tensor) != 0) {
     throw python_error();
   }
 }
