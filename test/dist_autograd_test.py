@@ -706,6 +706,24 @@ class DistAutogradTest(RpcAgentTestFixture):
         self.assertTrue(success)
 
     @dist_init
+    def test_context_cleanup_tensor_no_grad(self):
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=False)
+            for dst_rank in dst_ranks:
+                rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t1))
+                rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+
+
+
+    @dist_init
     def test_context_cleanup_nested_rpc(self):
         self._initialize_pg()
 
