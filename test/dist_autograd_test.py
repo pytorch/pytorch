@@ -1367,11 +1367,13 @@ class DistAutogradTest(RpcAgentTestFixture):
         rpc.shutdown()
         sys.exit(0)
 
-    def _call_remote_embedding(embedding_rref, input, offsets, per_sample_weights):
+    @classmethod
+    def _call_remote_embedding(cls, embedding_rref, input, offsets, per_sample_weights):
         embedding = embedding_rref.local_value()
         return embedding(input, offsets, per_sample_weights)
 
-    def _get_grad(embedding_rref, context_id):
+    @classmethod
+    def _get_grad(cls, embedding_rref, context_id):
         embedding = embedding_rref.local_value()
         grad_map = dist_autograd.get_gradients(context_id)
         # Can't send sparse tensors over RPC: https://github.com/pytorch/pytorch/issues/30807
@@ -1407,7 +1409,8 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             self.assertEqual(local_grad.to_dense(), remote_grad)
 
-    def _mixed_requires_grad(t1, t2):
+    @classmethod
+    def _mixed_requires_grad(cls, t1, t2):
         if t2.requires_grad:
             return t1 - t2
         else:
