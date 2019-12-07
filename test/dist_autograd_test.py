@@ -70,6 +70,9 @@ def _compare_owner_value(context_id, rref, grad):
 def my_py_add(t1, t2):
     return torch.add(t1, t2)
 
+def my_scalar_add(a, b):
+    return a + b
+
 
 def my_rref_add(rref_t1, t2):
     ret = torch.add(rref_t1.local_value(), t2)
@@ -707,6 +710,11 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_context_cleanup_tensor_no_grad(self):
+        # test that in dist autograd, in the case that tensors communicated over RPC do
+        # NOT require grad, we still cleanup the dist autograd contexts created
+        # on other nodes. This is because the autograd context is still
+        # communicated over RPC even if tensor arguments do not require grad, as
+        #  it is possible that the response could.
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=False)
@@ -720,8 +728,24 @@ class DistAutogradTest(RpcAgentTestFixture):
         success = _all_contexts_cleaned_up()
         self.assertTrue(success)
 
-
-
+    @dist_init
+    def test_context_cleanup_no_tensors(self):
+        # test that in dist autograd, in the case that RPCs do not have tensors
+        # at all, we still cleanup the dist autograd contexts created
+        # on other nodes. This is because the autograd context is still
+        # communicated over RPC even if there are no tensors that require grad,
+        #  since it is possible that the response could have such tensors.
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        with dist_autograd.context() as context_id:
+            for dst_rank in dst_ranks:
+                rpc.rpc_sync("worker{}".format(dst_rank), my_scalar_add, args=(1, 1))
+                rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
 
     @dist_init
     def test_context_cleanup_nested_rpc(self):
