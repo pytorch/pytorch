@@ -421,6 +421,15 @@ struct THP_ListNestedTensor {
   THP_ListNestedTensor requires_grad_(py::bool_ requires_grad) {
     return THP_ListNestedTensor(_data.requires_grad_(requires_grad));
   }
+  //ADD
+  int64_t nested_dim() { return _data.nested_dim(); }
+  int64_t dim() { return _data.dim(); }
+  bool is_contiguous() { return _data.is_contiguous(); }
+  bool is_pinned() { return _data.is_pinned(); }
+  bool requires_grad() { return _data.requires_grad(); }
+  int64_t numel() { return _data.numel(); }
+  at::Tensor to_tensor() { return _data.to_tensor(); }
+  std::string str() { return _NestedNode___str__(_data.get_structure()); }
 
  private:
   _ListNestedTensor _data;
@@ -433,12 +442,20 @@ void initialize_python_bindings() {
   py::class_<THP_ListNestedTensor>(m, "_ListNestedTensor")
       .def(py::init<py::object>())
       .def("element_size", &THP_ListNestedTensor::element_size)
+      .def("numel", &THP_ListNestedTensor::numel)
+      .def("nested_dim", &THP_ListNestedTensor::nested_dim)
+      .def("is_contiguous", &THP_ListNestedTensor::is_contiguous)
+      .def("is_pinned", &THP_ListNestedTensor::is_pinned)
+      .def("dim", &THP_ListNestedTensor::dim)
       .def("nested_size", &THP_ListNestedTensor::nested_size)
       .def("nested_stride", &THP_ListNestedTensor::nested_stride)
       .def("pin_memory", &THP_ListNestedTensor::pin_memory)
       .def("grad", &THP_ListNestedTensor::grad)
       .def("detach", &THP_ListNestedTensor::detach)
       .def("requires_grad_", &THP_ListNestedTensor::requires_grad_)
+      .def("to_tensor", &THP_ListNestedTensor::to_tensor)
+      .def("__str__", &THP_ListNestedTensor::str)
+      .def("__repr__", &THP_ListNestedTensor::str)
       .def("to", &THP_ListNestedTensor::to);
 }
 } // namespace nested_tensor
