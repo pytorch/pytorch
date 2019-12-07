@@ -42,7 +42,7 @@ class TestClassType(JitTestCase):
 
     def test_get_attr(self):
         @torch.jit.script  # noqa: B903
-        class FooTest(object):
+        class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.foo = x
 
@@ -56,7 +56,7 @@ class TestClassType(JitTestCase):
 
     def test_in(self):
         @torch.jit.script  # noqa: B903
-        class FooTest(object):
+        class FooTest(object):  # noqa: B903
             def __init__(self):
                 pass
 
@@ -149,7 +149,7 @@ class TestClassType(JitTestCase):
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
-            class FooTest(object):
+            class FooTest(object):  # noqa: B903
                 def __init__(self, x):
                     # type: (bool) -> None
                     self.foo = x
@@ -171,7 +171,7 @@ class TestClassType(JitTestCase):
     def test_class_type_as_param(self):
         global FooTest  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class FooTest(object):
+        class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.attr = x
 
@@ -272,7 +272,7 @@ class TestClassType(JitTestCase):
 
     def test_save_load_with_classes_nested(self):
         @torch.jit.script  # noqa: B903
-        class FooNestedTest(object):
+        class FooNestedTest(object):  # noqa: B903
             def __init__(self, y):
                 self.y = y
 
@@ -314,7 +314,7 @@ class TestClassType(JitTestCase):
     def test_python_interop(self):
         global Foo   # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
@@ -341,7 +341,7 @@ class TestClassType(JitTestCase):
     def test_class_specialization(self):
         global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
@@ -366,7 +366,7 @@ class TestClassType(JitTestCase):
     def test_class_sorting(self):
         global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __init__(self, x):
                 # type: (int) -> None
                 self.x = x
@@ -860,7 +860,7 @@ class TestClassType(JitTestCase):
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __before_init__(self):
                 # accessing this field should not throw, since __init__ should be compiled
                 return self.x
@@ -871,7 +871,7 @@ class TestClassType(JitTestCase):
 
     def test_class_constructs_itself(self):
         @torch.jit.script  # noqa: B903
-        class LSTMStateStack(object):
+        class LSTMStateStack(object):  # noqa: B903
             def __init__(self, num_layers, hidden_size):
                 # type: (int, int) -> None
                 self.num_layers = num_layers
@@ -896,7 +896,7 @@ class TestClassType(JitTestCase):
 
         # should not throw
         @torch.jit.script  # noqa: B903
-        class Tree(object):
+        class Tree(object):  # noqa: B903
             def __init__(self):
                 self.child = torch.jit.annotate(Optional[Leaf], None)
 
@@ -910,6 +910,6 @@ class TestClassType(JitTestCase):
         """
         with self.assertRaises(RuntimeError):
             @torch.jit.script  # noqa: B903
-            class Tree(object):
+            class Tree(object):  # noqa: B903
                 def __init__(self):
                     self.parent = torch.jit.annotate(Optional[Tree], None)

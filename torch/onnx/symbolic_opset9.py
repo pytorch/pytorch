@@ -878,7 +878,9 @@ def log_softmax(g, input, dim, dtype=None):
     # TODO: remove this as onnx opset 11 spec allows negative axes
     input_dim = input.type().dim()
     if input_dim is None:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input. Input rank must be known at export time.")
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
     if dim < 0:
         dim = input_dim + dim
     is_transpose_required = (input_dim != dim + 1)

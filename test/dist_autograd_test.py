@@ -1168,6 +1168,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 loss = ret.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
+    @staticmethod
     def _complex_python_udf(t1, t2):
         t3 = torch.nn.functional.linear(t1, t2)
         t4 = torch.nn.functional.linear(t2, t3)
@@ -1187,11 +1188,13 @@ class DistAutogradTest(RpcAgentTestFixture):
                 loss = ret.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
+    @staticmethod
     def _python_udf_with_backward_error(t1, t2):
         t3 = t1 + t2
         t4 = SimulateBackwardError.apply(t3)
         return torch.chain_matmul(t1, t2, t3, t4)
 
+    @staticmethod
     def _nested_rpc_call_backward_error(t1, t2, dst):
         t1 = t1 * t2
         t2 = t1 + t2
@@ -1215,9 +1218,11 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     _backward_done = False
 
+    @staticmethod
     def _set_backward_done():
         DistAutogradTest._backward_done = True
 
+    @staticmethod
     def _wait_backward_done():
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
@@ -1260,6 +1265,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Wait for backward to finish on rank 0.
                 DistAutogradTest._wait_backward_done()
 
+    @staticmethod
     def _nested_python_udf(t1, t2, dst):
         t3 = t1 * t2
         t4 = t1 + t2

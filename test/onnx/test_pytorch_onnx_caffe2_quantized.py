@@ -18,7 +18,8 @@ class TestQuantizedOps(unittest.TestCase):
 
         pytorch_res = q_model(*pt_inputs)
         f = io.BytesIO()
-        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names,
+                          operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
         onnx_model = onnx.load(f)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
@@ -68,7 +69,8 @@ class TestQuantizedOps(unittest.TestCase):
 
         model = torch.jit.load(buf)
         f = io.BytesIO()
-        torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+                          operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
 
         onnx_model = onnx.load(f)

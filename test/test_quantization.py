@@ -665,8 +665,11 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
                 super(ScriptWrapperPacked, self).__init__()
                 self.cell = cell
 
-            def forward(self, x, hiddens):
-                # type: (PackedSequence, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+            def forward(self,
+                        x,  # type: PackedSequence
+                        hiddens  # type: Tuple[torch.Tensor, torch.Tensor]
+                        ):
+                # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
                 return self.cell(x, hiddens)
 
         cell_packed = torch.jit.script(ScriptWrapperPacked(cell_int8))
