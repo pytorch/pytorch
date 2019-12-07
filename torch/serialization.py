@@ -781,7 +781,6 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
         tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
         offset = None
         is_real_file = False
-        print(tensor_file)
         loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
 
     def persistent_load(saved_id):

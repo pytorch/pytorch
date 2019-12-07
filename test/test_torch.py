@@ -4443,7 +4443,6 @@ class _TestTorchMixin(object):
 
         f = io.BytesIO()
         torch.save(a, f)
-        print('size is', f.tell())
         f.seek(0)
         data = FilelikeMock(f.read(), has_readinto=True)
 

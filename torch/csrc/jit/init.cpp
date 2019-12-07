@@ -52,7 +52,6 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/serialization.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
