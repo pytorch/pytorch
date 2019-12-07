@@ -102,6 +102,11 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       [](int64_t worker_id) { DistAutogradContainer::init(worker_id); },
       py::call_guard<py::gil_scoped_release>());
 
+  module.def(
+      "_get_debug_info",
+      []() { return DistEngine::getInstance().getDebugInfo(); },
+      py::call_guard<py::gil_scoped_release>());
+
   py::options options;
   options.disable_function_signatures();
 
