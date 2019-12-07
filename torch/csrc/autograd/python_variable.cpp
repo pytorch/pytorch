@@ -17,7 +17,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/utils/auto_gil.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -275,7 +275,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
   bool gradIsSparse = (var.dtype() == grad.dtype() &&
                        var.device().type() == grad.device().type() &&
                        grad.layout() == kSparse);
-  THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
+  THPUtils_assertRet(-1, grad.options().type_equal(var.options()) || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.is_cuda()) {
     THPUtils_assertRet(-1, grad.get_device() == var.get_device(),
@@ -487,7 +487,7 @@ static PyObject *THPVariable_dtype(THPVariable *self, void *unused)
 static PyObject * THPVariable_layout(THPVariable* self, void *unused) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getLayout(self_.type().backend()));
+  return torch::autograd::utils::wrap(torch::getLayout(self_.options().backend()));
   END_HANDLE_TH_ERRORS
 }
 

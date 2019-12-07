@@ -37,9 +37,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
-  # Use linux host toolchain + mobile build options in order to build & test
-  # mobile libtorch without having to setup Android/iOS toolchain/simulator.
-  exec ./scripts/build_mobile.sh -DBUILD_BINARY=ON "$@"
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
 echo "Python version:"
@@ -270,7 +268,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Install bazels3cache for cloud cache
   sudo apt-get -qq install npm
   npm config set strict-ssl false
-  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
   sudo apt-get install -qq nodejs
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"
