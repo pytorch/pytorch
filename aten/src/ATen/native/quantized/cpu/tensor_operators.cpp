@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/QScheme.h>
 
 namespace at {
@@ -59,6 +60,7 @@ AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 #undef AT_FORALL_OPERATORS
 #undef DEFINE_COMPARATOR
 
+namespace {
 Tensor& quantized_resize_cpu_(
     Tensor& self,
     IntArrayRef size,
@@ -77,4 +79,12 @@ Tensor& quantized_resize_cpu_(
   self_->maybe_zero_dim(size.size() == 0);
   return self;
 }
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(quantized_resize_cpu_), &quantized_resize_cpu_>(TensorTypeId::QuantizedCPUTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
+
+}  // namespcae
 }}  // at::native
