@@ -3,10 +3,10 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/script/python_sugared_value.h>
-#include <torch/csrc/nestedtensor/dispatch.h>
 #include <torch/csrc/nestedtensor/python_nested_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 namespace torch {
 namespace nested_tensor {
@@ -282,7 +282,7 @@ static THP_ListNestedTensor jit_apply_function(
   py::gil_scoped_release release;
   _NestedNode nested_node = apply_jit_function(nested_nodes, callee);
   py::gil_scoped_acquire acquire;
-  return THP_ListNestedTensor(_ListNestedTensor(_NestedNode));
+  return THP_ListNestedTensor(_ListNestedTensor(nested_node));
 }
 
 void initialize_python_bindings() {

@@ -28,8 +28,8 @@ def gen_nested_list(seed, nested_dim, tensor_dim, size_low=1, size_high=10):
     assert nested_dim > 0
     if nested_dim == 1:
         for i in range(num_tensors):
-            ran = gen_random_int((seed * nested_dim + seed) *
-                                 (1024 * i), low=size_low, high=size_high)
+            ran = gen_random_int((seed * nested_dim + seed)
+                                 * (1024 * i), low=size_low, high=size_high)
             ran_size = ()
             for _ in range(tensor_dim):
                 ran = gen_random_int(ran * 1024, low=size_low, high=size_high)
@@ -139,6 +139,7 @@ class Test_ListNestedTensor(TestCase):
         na = tuple(t.stride() for t in tensors)
         self.assertEqual(a.nested_stride(), na)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not enabled.")
     def test_pin_memory(self):
         # Check if it can be applied widely
         nt = gen_nested_tensor(1, 4, 3)
@@ -171,12 +172,12 @@ class Test_ListNestedTensor(TestCase):
 
     def test_len(self):
         a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2]),
-                                     torch.tensor([3, 4]),
-                                     torch.tensor([5, 6]),
-                                     torch.tensor([7, 8])])
+                                                  torch.tensor([3, 4]),
+                                                  torch.tensor([5, 6]),
+                                                  torch.tensor([7, 8])])
         self.assertEqual(len(a), 4)
         a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2]),
-                                     torch.tensor([7, 8])])
+                                                  torch.tensor([7, 8])])
         self.assertEqual(len(a), 2)
         a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2])])
         self.assertEqual(len(a), 1)
@@ -228,9 +229,9 @@ class Test_ListNestedTensor(TestCase):
 
     def test_contiguous(self):
         a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2]),
-                                     torch.tensor([3, 4]),
-                                     torch.tensor([5, 6]),
-                                     torch.tensor([7, 8])])
+                                                  torch.tensor([3, 4]),
+                                                  torch.tensor([5, 6]),
+                                                  torch.tensor([7, 8])])
         self.assertTrue(not a.is_contiguous())
 
 
