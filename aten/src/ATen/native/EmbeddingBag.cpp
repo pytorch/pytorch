@@ -197,9 +197,11 @@ void index_select_scale_add<float>(const Tensor &select_indices,
 
 }  // namespace
 
-static void make_bag_size(const Tensor &offsets, const Tensor &indices,
-                          const int64_t mode, Tensor &bag_size) {
+static at::Tensor make_bag_size(const Tensor &offsets, const Tensor &indices,
+                                const int64_t mode, const bool requires_grad) {
+  at::Tensor bag_size;
   if (mode == MODE_MEAN || mode == MODE_MAX) {
+    bag_size = at::zeros(offsets.sizes(), indices.options());
     // Compute this for MODE_MEAN and MODE_MAX (latter needed for backwards)
     if (offsets.size(0) != 1) {
       bag_size.slice(0, 0, bag_size.size(0) - 1, 1) =
@@ -207,7 +209,11 @@ static void make_bag_size(const Tensor &offsets, const Tensor &indices,
           offsets.slice(0, 0, offsets.size(0) - 1, 1);
     }
     bag_size[-1] = indices.size(0) - offsets[-1];
+  } else if (requires_grad) {
+    // in MODE_SUM, only initialize bag_size if we need gradients
+    bag_size = at::zeros(offsets.sizes(), indices.options());
   }
+  return bag_size;
 }
 
 static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
@@ -329,8 +335,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     AT_ASSERT(per_sample_weights.numel() == indices.numel());
   }
 
-  auto bag_size = at::zeros(offsets.sizes(), indices.options());
-  make_bag_size(offsets, indices, mode, bag_size);
+  auto bag_size = make_bag_size(offsets, indices, mode, weight.requires_grad());
 
   auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
 
