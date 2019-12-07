@@ -878,7 +878,9 @@ def log_softmax(g, input, dim, dtype=None):
     # TODO: remove this as onnx opset 11 spec allows negative axes
     input_dim = input.type().dim()
     if input_dim is None:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input. Input rank must be known at export time.")
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
     if dim < 0:
         dim = input_dim + dim
     is_transpose_required = (input_dim != dim + 1)
@@ -928,6 +930,36 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
         return g.op("Add", n, bias)
     else:
         return n
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
+def conv1d(g, input, weight, bias, stride, padding, dilation, groups):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
+def conv2d(g, input, weight, bias, stride, padding, dilation, groups):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
+def conv3d(g, input, weight, bias, stride, padding, dilation, groups):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
+def conv_transpose1d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
+def conv_transpose2d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
+def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
