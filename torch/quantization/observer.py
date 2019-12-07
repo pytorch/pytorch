@@ -175,15 +175,15 @@ class _ObserverBase(ObserverBase):
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
             max_val = torch.max(-min_val, max_val)
             scale = max_val / (float(qmax - qmin) / 2)
-            scale = torch.max(scale, torch.tensor(self.eps, dtype=scale.dtype))
+            scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
             if self.dtype == torch.quint8:
                 zero_point = zero_point.new_full(zero_point.size(), 128)
         else:
             scale = (max_val - min_val) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(self.eps, dtype=scale.dtype))
             zero_point = qmin - torch.round(min_val / scale)
-            zero_point = torch.max(zero_point, torch.tensor(qmin, dtype=zero_point.dtype))
-            zero_point = torch.min(zero_point, torch.tensor(qmax, dtype=zero_point.dtype))
+            zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
+            zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
         return scale, zero_point
 
