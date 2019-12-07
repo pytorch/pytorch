@@ -19,17 +19,17 @@ import operator
 
 import torch
 from torch._six import string_classes
-import common_utils as common
+import torch.testlib.common_utils as common
 from torch import nn
 import torch.nn.functional as F
 import torch.distributed as c10d
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
-from common_distributed import MultiProcessTestCase, \
+from torch.testlib.common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout, skip_if_rocm
-from common_utils import TestCase, load_tests, run_tests, retry_on_address_already_in_use_error, TEST_WITH_TSAN
+from torch.testlib.common_utils import TestCase, load_tests, run_tests, retry_on_address_already_in_use_error, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

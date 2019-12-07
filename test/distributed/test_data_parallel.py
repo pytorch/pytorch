@@ -2,8 +2,8 @@ import contextlib
 import unittest
 import torch
 import torch.nn.parallel as dp
-from common_cuda import TEST_MULTIGPU, TEST_CUDA
-from common_utils import run_tests, TestCase, skipIfRocm, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testlib.common_cuda import TEST_MULTIGPU, TEST_CUDA
+from torch.testlib.common_utils import run_tests, TestCase, skipIfRocm, repeat_test_for_types, ALL_TENSORTYPES, PY3
 
 class TestDataParallel(TestCase):
 

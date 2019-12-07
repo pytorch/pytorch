@@ -8,9 +8,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-import dist_utils
-from dist_utils import dist_init
-from distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+import torch.testlib.dist_utils
+from torch.testlib.dist_utils import dist_init
+from torch.testlib.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 import threading
 
@@ -299,7 +299,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     # nested rpc call to next dst. In return route, receive result tensor t3
     # from next dst and forwarding t3 back to previous calls.
     # For this context in this rank, it expects graph like this:
-    #  send and recv functions for receving and forwarding t1 and t2:
+    #  send and recv functions for receiving and forwarding t1 and t2:
     #       rpcSendBackward
     #          /          \
     # t1.recvRpcBackward    t2.recvRpcBackward
@@ -426,9 +426,15 @@ class DistAutogradTest(RpcAgentTestFixture):
             else:
                 raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
 
+            # Barrier to ensure all RPCs are done.
+            dist.barrier()
+
             for rd in [1, 2, 3]:
                 rpc.rpc_sync("worker{}".format((self.rank + rd) % self.world_size),
                              _set_rpc_done, args=(context_id, rd))
+
+            # Barrier to ensure all set_rpc_done have completed.
+            dist.barrier()
 
             # For self.rank, it has 4 graphs to verify
             # One is for current context id when this rank send first rpc call.
@@ -451,17 +457,14 @@ class DistAutogradTest(RpcAgentTestFixture):
                                                   t1, t2, ret)
 
             # Verify second graph for 1st nested call.
-            self._check_rpc_done(1)
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
 
             # Verify third graph for 2nd nested call.
-            self._check_rpc_done(2)
             ctx = dist_autograd._retrieve_context(ctx_ids[2])
             self._verify_graph_for_nested_rpc_call(ctx)
 
             # verify last graph for rpc call execution.
-            self._check_rpc_done(3)
             ctx = dist_autograd._retrieve_context(ctx_ids[3])
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
@@ -474,7 +477,6 @@ class DistAutogradTest(RpcAgentTestFixture):
     def test_graph_for_py_nested_call(self):
         self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC)
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29938")
     @dist_init
     def test_graph_for_py_nested_remote_call(self):
         self._test_graph_for_py_nested_call(ExecMode.REMOTE)
@@ -876,7 +878,6 @@ class DistAutogradTest(RpcAgentTestFixture):
     #
     # These four test ps-trainer groups run on completely separate autograd
     # graphs, but they share the same set of underlying RpcAgents.
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28874")
     @dist_init
     def test_trainer_ps(self):
         local_grads = None
@@ -1050,7 +1051,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(torch.testlib.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
@@ -1167,6 +1168,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 loss = ret.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
+    @staticmethod
     def _complex_python_udf(t1, t2):
         t3 = torch.nn.functional.linear(t1, t2)
         t4 = torch.nn.functional.linear(t2, t3)
@@ -1186,11 +1188,13 @@ class DistAutogradTest(RpcAgentTestFixture):
                 loss = ret.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
+    @staticmethod
     def _python_udf_with_backward_error(t1, t2):
         t3 = t1 + t2
         t4 = SimulateBackwardError.apply(t3)
         return torch.chain_matmul(t1, t2, t3, t4)
 
+    @staticmethod
     def _nested_rpc_call_backward_error(t1, t2, dst):
         t1 = t1 * t2
         t2 = t1 + t2
@@ -1214,14 +1218,16 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     _backward_done = False
 
+    @staticmethod
     def _set_backward_done():
         DistAutogradTest._backward_done = True
 
+    @staticmethod
     def _wait_backward_done():
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(torch.testlib.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent " +
                      "does not report errors on node failures")
     @dist_init(clean_shutdown=False)
@@ -1259,6 +1265,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Wait for backward to finish on rank 0.
                 DistAutogradTest._wait_backward_done()
 
+    @staticmethod
     def _nested_python_udf(t1, t2, dst):
         t3 = t1 * t2
         t4 = t1 + t2
@@ -1360,7 +1367,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         # receive gradients from the node that received an error (and as a
         # result it didn't execute the rest of the graph).
         dist.barrier()
-        rpc.wait_all_workers()
+        rpc.shutdown()
         sys.exit(0)
 
 

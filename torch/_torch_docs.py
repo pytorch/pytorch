@@ -4320,7 +4320,8 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint(low=0, high, size, *, generator=None, out=None, \
+        dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -5803,8 +5804,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
-NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
-prevent overflow during calculation.
+.. note::
+    When running on CUDA, ``row * col`` must be less than :math:`2^{59}` to
+    prevent overflow during calculation.
 """ + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
@@ -5916,8 +5918,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
-NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
-prevent overflow during calculation.
+.. note::
+    When running on CUDA, ``row * col`` must be less than :math:`2^{59}` to
+    prevent overflow during calculation.
 """ + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
@@ -6765,7 +6768,7 @@ this normalizes the result by multiplying it with
 
     Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
     :attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
-    and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
+    and preferably a :attr:`signal_sizes` is given to avoid size mismatch. See the
     example below for a case of size mismatch.
 
     See :func:`~torch.rfft` for details on conjugate symmetry.
@@ -7121,7 +7124,7 @@ Repeat elements of a tensor.
 
 .. warning::
 
-    This is different from :func:`torch.repeat` but similar to `numpy.repeat`.
+    This is different from :meth:`torch.Tensor.repeat` but similar to ``numpy.repeat``.
 
 Args:
     {input}

@@ -63,7 +63,7 @@ def _interpolate(name, dim, interpolate_mode):
 
         return g.op("Resize",
                     input,
-                    empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                    empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
                     empty_tensor,  # scales is not needed since we are sending out_size
                     output_size,
                     coordinate_transformation_mode_s=coordinate_transformation_mode,
@@ -92,7 +92,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
     align_corners = False if not isinstance(align_corners, bool) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
-    # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+    # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
@@ -107,11 +107,13 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
         except AttributeError:
             is_scalar = not sym_help._is_packed_list(size)
             if not is_scalar:
-                warnings.warn("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
+                warnings.warn("Cannot verify if the output_size is a scalar "
+                              "while exporting interpolate. Assuming that it is not a scalar.")
 
         if is_scalar:
             if not input.type().dim():
-                return sym_help._unimplemented("interpolate (with a scalar output_size)", "missing input shape (try giving an array of output_size values)")
+                return sym_help._unimplemented("interpolate (with a scalar output_size)",
+                                               "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)
