@@ -108,7 +108,6 @@ constexpr string_view assign(string_view value) {
   return result;
 }
 TEST(StringViewTest, testCopyAssignment) {
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
   {
     constexpr string_view hello = assign("hello");
     static_assert(5 == hello.size(), "");
@@ -116,9 +115,8 @@ TEST(StringViewTest, testCopyAssignment) {
 
     static_assert(5 == (string_view() = "hello").size(), "");
     static_assert(
-        string_equal("hello", (string_view() = "hello").data(), 5), "");
+      string_equal("hello", (string_view() = "hello").data(), 5), "");
   }
-#endif
   const string_view hello = assign("hello");
   EXPECT_EQ(5, hello.size());
   EXPECT_EQ("hello", hello);
