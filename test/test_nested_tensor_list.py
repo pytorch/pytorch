@@ -51,7 +51,7 @@ def nested_map(fn, data):
 
 
 def gen_nested_tensor(seed, nested_dim, tensor_dim, size_low=1, size_high=10):
-    return torch._ListNestedTensor(gen_nested_list(seed, nested_dim, tensor_dim, size_low=size_low, size_high=size_high))
+    return torch.nestedtensor._ListNestedTensor(gen_nested_list(seed, nested_dim, tensor_dim, size_low=size_low, size_high=size_high))
 
 
 def _test_property(self, fn):
@@ -59,7 +59,7 @@ def _test_property(self, fn):
     nested_tensor_lists = [gen_nested_list(i, i, 3)
                            for i in range(1, num_nested_tensor)]
     first_tensors = [get_first_tensor(ntl) for ntl in nested_tensor_lists]
-    nested_tensors = [torch._ListNestedTensor(ntl) for ntl in nested_tensor_lists]
+    nested_tensors = [torch.nestedtensor._ListNestedTensor(ntl) for ntl in nested_tensor_lists]
     for nested_tensor, first_tensor in zip(nested_tensors, first_tensors):
         self.assertEqual(fn(nested_tensor), fn(first_tensor))
 
@@ -89,7 +89,7 @@ class Test_ListNestedTensor(TestCase):
         num_tensors = 16
         for i in range(num_tensors):
             tensors.append(gen_float_tensor(i, (i + 1, 128, 128)))
-        nested_tensor = torch._ListNestedTensor(tensors)
+        nested_tensor = torch.nestedtensor._ListNestedTensor(tensors)
         for i in range(num_tensors):
             tensors[i].mul_(i + 2)
         for i in range(num_tensors):
@@ -99,7 +99,7 @@ class Test_ListNestedTensor(TestCase):
     def test_default_constructor(self):
         # self.assertRaises(TypeError, lambda: torch.nested_tensor())
         # nested_dim is 1 and dim is 1 too.
-        default_nested_tensor = torch._ListNestedTensor([])
+        default_nested_tensor = torch.nestedtensor._ListNestedTensor([])
         default_tensor = torch.tensor([])
         self.assertEqual(default_nested_tensor.nested_dim(), 0)
         self.assertEqual(default_nested_tensor.nested_size(), ())
@@ -113,28 +113,28 @@ class Test_ListNestedTensor(TestCase):
                          default_tensor.is_pinned())
 
     def test_element_size(self):
-        nt1 = torch._ListNestedTensor([])
+        nt1 = torch.nestedtensor._ListNestedTensor([])
         self.assertEqual(nt1.element_size(), torch.randn(1).element_size())
         a = torch.randn(4).int()
-        nt2 = torch._ListNestedTensor([a])
+        nt2 = torch.nestedtensor._ListNestedTensor([a])
         self.assertEqual(a.element_size(), nt2.element_size())
 
     def test_nested_dim(self):
-        nt = torch._ListNestedTensor([torch.tensor(3)])
+        nt = torch.nestedtensor._ListNestedTensor([torch.tensor(3)])
         self.assertTrue(nt.nested_dim() == 1)
         for i in range(2, 5):
             nt = gen_nested_tensor(i, i, 3)
             self.assertTrue(nt.nested_dim() == i)
 
     def test_nested_size(self):
-        a = torch._ListNestedTensor(
+        a = torch.nestedtensor._ListNestedTensor(
             [torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
         na = (torch.Size([1, 2]), torch.Size([2, 3]), torch.Size([4, 5]))
         self.assertEqual(a.nested_size(), na)
 
     def test_nested_stride(self):
         tensors = [torch.rand(1, 2, 4)[:, :, 0], torch.rand(2, 3, 4)[:, 1, :], torch.rand(3, 4, 5)[1, :, :]]
-        a = torch._ListNestedTensor(tensors)
+        a = torch.nestedtensor._ListNestedTensor(tensors)
         na = tuple(t.stride() for t in tensors)
         self.assertEqual(a.nested_stride(), na)
 
@@ -148,7 +148,7 @@ class Test_ListNestedTensor(TestCase):
         self.assertTrue(nt1.is_pinned())
         a1 = torch.randn(1, 2)
         a2 = torch.randn(2, 3)
-        nt2 = torch._ListNestedTensor([a1, a2])
+        nt2 = torch.nestedtensor._ListNestedTensor([a1, a2])
         self.assertFalse(a1.is_pinned())
         self.assertFalse(a2.is_pinned())
 
@@ -169,15 +169,15 @@ class Test_ListNestedTensor(TestCase):
         self.assertFalse(a6.is_pinned())
 
     def test_len(self):
-        a = torch._ListNestedTensor([torch.tensor([1, 2]),
+        a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2]),
                                      torch.tensor([3, 4]),
                                      torch.tensor([5, 6]),
                                      torch.tensor([7, 8])])
         self.assertEqual(len(a), 4)
-        a = torch._ListNestedTensor([torch.tensor([1, 2]),
+        a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2]),
                                      torch.tensor([7, 8])])
         self.assertEqual(len(a), 2)
-        a = torch._ListNestedTensor([torch.tensor([1, 2])])
+        a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2])])
         self.assertEqual(len(a), 1)
 
     def test_dtype(self):
@@ -207,7 +207,7 @@ class Test_ListNestedTensor(TestCase):
 
         a = torch.tensor([1, 2])
         b = torch.tensor([7, 8])
-        nt = torch._ListNestedTensor([a, b])
+        nt = torch.nestedtensor._ListNestedTensor([a, b])
         a1, b1 = nt.unbind()
         self.assertTrue(a is a1)
         self.assertTrue(b is b1)
@@ -216,7 +216,7 @@ class Test_ListNestedTensor(TestCase):
         d = torch.tensor([5, 6])
         e = torch.tensor([6, 7])
 
-        nt1 = torch._ListNestedTensor([[c, d], [e]])
+        nt1 = torch.nestedtensor._ListNestedTensor([[c, d], [e]])
         nt11, nt12 = nt1.unbind()
         c1, d1 = nt11.unbind()
         e1 = nt12.unbind()[0]
@@ -226,7 +226,7 @@ class Test_ListNestedTensor(TestCase):
         self.assertTrue(e is e1)
 
     def test_contiguous(self):
-        a = torch._ListNestedTensor([torch.tensor([1, 2]),
+        a = torch.nestedtensor._ListNestedTensor([torch.tensor([1, 2]),
                                      torch.tensor([3, 4]),
                                      torch.tensor([5, 6]),
                                      torch.tensor([7, 8])])

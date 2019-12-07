@@ -47,7 +47,7 @@
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <ATen/core/EnableNamedTensor.h>
-#include <torch/csrc/nested_tensor/python_nested_tensor.h>
+#include <torch/csrc/nestedtensor/python_nested_tensor.h>
 
 #ifdef USE_CUDNN
 #include <cudnn.h>

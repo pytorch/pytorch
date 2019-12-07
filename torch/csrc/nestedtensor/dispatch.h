@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
-#include <torch/csrc/nested_tensor/python_nested_tensor.h>
+#include <torch/csrc/nestedtensor/python_nested_tensor.h>
 #include <torch/csrc/python_headers.h>
 namespace torch {
 namespace nested_tensor {

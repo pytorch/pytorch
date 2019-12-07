@@ -3,8 +3,8 @@
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/script/python_sugared_value.h>
-#include <torch/csrc/nested_tensor/dispatch.h>
-#include <torch/csrc/nested_tensor/python_nested_tensor.h>
+#include <torch/csrc/nestedtensor/dispatch.h>
+#include <torch/csrc/nestedtensor/python_nested_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/python_strings.h>
 
