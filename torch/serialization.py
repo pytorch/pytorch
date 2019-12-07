@@ -70,59 +70,34 @@ def _is_zipfile(f):
 
 def _get_zip_size(f):
     start = f.tell()
-    print(f.read(30))
-    # P
-    # K
-    # \x03
-    # \x04
+    # print(f.read(774))
+    print('start', start)
+    curr_byte = f.read(1)
+    eocd_magic_number = [b'P', b'K', b'\x05', b'\x06']
+    pos = 0
+    while curr_byte:
+        if curr_byte == eocd_magic_number[pos]:
+            pos += 1
+            if pos == len(eocd_magic_number):
+                print("Found it at ", f.tell())
+                break
+        else:
+            pos = 0
+        curr_byte = f.read(1)
 
-    # version
-    # \x00
-    # \x00
-
-    # bit flag
-    # \x08
-    # \x08
-
-    # compression method
-    # \x00
-    # \x00
-
-    # last mod time
-    # \x00
-    # \x00
-
-    # last mod date
-    # \x00
-    # \x00
-
-    # CRC32
-    # \x00
-    # \x00
-    # \x00
-    # \x00
-
-    # compressed size
-    # \x00
-    # \x00
-    # \x00
-    # \x00
-
-    # uncompressed size
-    # \x00
-    # \x00
-    # \x00
-    # \x00
-
-    # file name lenght
-    # \x0f
-    # \x00
-
-    # extra field length
-    # \x13
-    # \x00
+    # read the rest of the EOCD, minus 4 for the magic number which we already read
+    eocd = b'abcd' + f.read(22 - 4)
+    EOCD_SIZE = 20
+    eocd_comment_size = eocd[20:22]
+    print(eocd_comment_size)
+    # < means little-endian
+    # H means unsigned short
+    eocd_comment_size = struct.unpack('<H', eocd_comment_size)[0]
+    print(eocd_comment_size)
+    size = (f.tell() - start) + eocd_comment_size
+    print("SIZE IS ", size)
     f.seek(start)
-    return 100
+    return size
 
 
 def register_package(priority, tagger, deserializer):
@@ -264,8 +239,8 @@ def _open_file_like(name_or_buffer, mode):
 
 
 class _open_zipfile_reader(_opener):
-    def __init__(self, name_or_buffer):
-        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
+    def __init__(self, name_or_buffer, size=None):
+        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer, size))
 
 
 class _open_zipfile_writer_file(_opener):
@@ -568,7 +543,8 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     with _open_file_like(f, 'rb') as opened_file:
         if _is_zipfile(opened_file):
-            # print(_get_zip_size(opened_file))
+            start = f.tell()
+            size = _get_zip_size(opened_file)
             # start = f.tell()
             # import os
             # import io
@@ -577,13 +553,16 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             # print('py start', start)
             # print('py size', f.tell())
             # f.seek(start)
-            with _open_zipfile_reader(f) as opened_zipfile:
+            with _open_zipfile_reader(f, size=size) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                                   " silence this warning)", UserWarning)
                     return torch.jit.load(f)
-                return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+                x = _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+                print('afterwards, seeking to', size, start)
+                f.seek(start + size)
+                return x
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 

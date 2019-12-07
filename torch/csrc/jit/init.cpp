@@ -439,21 +439,22 @@ void initJITBindings(PyObject* module) {
   // that the buffer implement `seek()`, `tell()`, and `read()`.
   class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
    public:
-    BufferAdapter(const py::object& buffer) : buffer_(buffer) {
+    BufferAdapter(const py::object& buffer, size_t size) : buffer_(buffer), size_(size) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
-      buffer.attr("seek")(0, py::module::import("os").attr("SEEK_END"));
+      // buffer.attr("seek")(0, py::module::import("os").attr("SEEK_END"));
       start_offset_ = py::cast<size_t>(current);
-      size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
-      buffer.attr("seek")(current);
-      // size_ =
-      std::cout << "determined size to be " << size_ << "\n";
-      std::cout << "\t buf is at " << py::str(current) << "\n";
+      // size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
+      // buffer.attr("seek")(current);
+      // // size_ =
+      // std::cout << "determined size to be " << size_ << "\n";
+      // std::cout << "\t buf is at " << py::str(current) << "\n";
 
       use_readinto_ = py::hasattr(buffer, "readinto");
     }
 
     size_t size() const override {
+      std::cout << "Getting size, it is " << size_ << "\n";
       return size_;
     }
 
@@ -500,8 +501,9 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
-      .def(py::init([](const py::object& buffer) {
-        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
+      .def(py::init([](const py::object& buffer, const py::object& py_size) {
+        size_t size = py::cast<size_t>(py_size);
+        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer), size);
         return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
