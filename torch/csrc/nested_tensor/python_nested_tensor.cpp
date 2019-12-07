@@ -30,18 +30,11 @@ inline PyObject* wrap_list(std::vector<PyObject*> list) {
 
 inline PyObject* wrap_nested_node(_NestedNode nested_node) {
   if (nested_node.is_leaf()) {
-    // TODO: Add wider support.
-    if (nested_node.payload.isIntList()) {
-      return wrap(nested_node.payload.toIntListRef());
-    }
-    if (nested_node.payload.isNone()) {
-      return PyTuple_New(0);
-    }
-    return wrap(nested_node.payload.toTensor());
+    return torch::jit::toPyObject(nested_node.payload()).release().ptr();
   } else {
     std::vector<PyObject*> result;
-    for (size_t i = 0; i < nested_node._children.size(); i++) {
-      result.push_back(wrap_nested_node(nested_node._children[i]));
+    for (size_t i = 0; i < nested_node.degree(); i++) {
+      result.push_back(wrap_nested_node(nested_node.children(i)));
     }
     return wrap_list(result);
   }
@@ -103,25 +96,26 @@ PyObject* _ListNestedTensorVariable_to(
 
 PyObject* _ListNestedTensorVariable_unbind(PyObject* self_) {
   auto& self = reinterpret_cast<_ListNestedTensorVariable*>(self_)->cdata;
-  auto children = self.get_structure()._children;
-  PyObject* return_list = PyList_New(children.size());
+  _NestedNode structure = self.get_structure();
+  PyObject* return_list = PyList_New(structure.degree());
   if (return_list == NULL) {
     throw python_error();
   }
-  for (size_t i = 0; i < children.size(); i++) {
-    if (children[i].is_leaf()) {
+  for (size_t i = 0; i < structure.degree(); i++) {
+    if (structure.children(i).is_leaf()) {
       if (PyList_SetItem(
               return_list,
               i,
-              THPVariable_Wrap(children[i].payload.toTensor())) == -1) {
+              THPVariable_Wrap(structure.children(i).payload().toTensor())) ==
+          -1) {
         throw python_error();
       }
     } else {
       if (PyList_SetItem(
               return_list,
               i,
-              _ListNestedTensorVariable_Wrap(_ListNestedTensor(children[i]))) ==
-          -1) {
+              _ListNestedTensorVariable_Wrap(
+                  _ListNestedTensor(structure.children(i)))) == -1) {
         throw python_error();
       }
     }
@@ -240,7 +234,7 @@ static _NestedNode apply_jit_function(
     Stack stack;
     stack.reserve(nested_nodes.size());
     for (size_t i = 0; i < nested_nodes.size(); i++) {
-      push(stack, nested_nodes[i].payload.toTensor());
+      push(stack, nested_nodes[i].payload().toTensor());
     }
     fn.run(stack);
     Variable result = stack.back().toTensor();
@@ -252,10 +246,10 @@ static _NestedNode apply_jit_function(
     for (size_t i = 0; i < nested_nodes.size(); i++) {
       if (!nested_nodes[i].is_leaf()) {
         if (num_children > 0) {
-          broadcastable = broadcastable &&
-              (num_children == nested_nodes[i]._children.size());
+          broadcastable =
+              broadcastable && (num_children == nested_nodes[i].degree());
         } else {
-          num_children = nested_nodes[i]._children.size();
+          num_children = nested_nodes[i].degree();
         }
       }
     }
@@ -267,7 +261,7 @@ static _NestedNode apply_jit_function(
         if (nested_nodes[j].is_leaf()) {
           local_args.push_back(nested_nodes[j]);
         } else {
-          local_args.push_back(nested_nodes[j]._children[i]);
+          local_args.push_back(nested_nodes[j].children(i));
         }
       }
       result.push_back(apply_jit_function(local_args, fn));
@@ -320,17 +314,17 @@ static PyObject* jit_apply_function(PyObject* module, PyObject* args) {
 
 static std::string _NestedNode___str__(const _NestedNode& nested_node) {
   std::stringstream result;
-  if (nested_node._children.size() == 0) {
+  if (nested_node.is_leaf()) {
     PyObject* objectsRepresentation =
-        PyObject_Str(THPVariable_Wrap(nested_node.payload.toTensor()));
+        PyObject_Str(THPVariable_Wrap(nested_node.payload().toTensor()));
     result << THPUtils_unpackString(objectsRepresentation);
     return result.str();
   } else {
     result << "nested_tensor([";
     result << std::endl;
-    for (_NestedNode node : nested_node._children) {
+    for (size_t i = 0; i < nested_node.degree(); i++) {
       result << "  ";
-      result << _NestedNode___str__(node);
+      result << _NestedNode___str__(nested_node.children(i));
       result << ",";
       result << std::endl;
     }
