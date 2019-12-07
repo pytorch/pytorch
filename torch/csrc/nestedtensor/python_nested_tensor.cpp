@@ -1,12 +1,12 @@
 #include <ATen/Parallel.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/nestedtensor/python_nested_tensor.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 namespace torch {
 namespace nested_tensor {
@@ -37,60 +37,6 @@ inline PyObject* wrap_nested_node(_NestedNode nested_node) {
       result.push_back(wrap_nested_node(nested_node.children(i)));
     }
     return wrap_list(result);
-  }
-}
-
-static _NestedNode apply_jit_function(
-    const std::vector<_NestedNode>& nested_nodes,
-    Function& fn) {
-  bool all_leaf = true;
-  for (size_t i = 0; i < nested_nodes.size(); i++) {
-    all_leaf = all_leaf && nested_nodes[i].is_leaf();
-  }
-  if (all_leaf) {
-    // NOTE: Assuming this is a pure function not a method (no self!)
-    // NOTE: We assume there is only one Tensor inputs.
-    // NOTE: We assume no named tensors and no sparse variables as
-    // appropriate
-    // for TorchScript. NOTE: We know the IValues of the argument, there is
-    // no
-    // need to cast around.
-    Stack stack;
-    stack.reserve(nested_nodes.size());
-    for (size_t i = 0; i < nested_nodes.size(); i++) {
-      push(stack, nested_nodes[i].payload().toTensor());
-    }
-    fn.run(stack);
-    Variable result = stack.back().toTensor();
-    auto result_node = _NestedNode(result);
-    return result_node;
-  } else {
-    bool broadcastable = true;
-    size_t num_children = 0;
-    for (size_t i = 0; i < nested_nodes.size(); i++) {
-      if (!nested_nodes[i].is_leaf()) {
-        if (num_children > 0) {
-          broadcastable =
-              broadcastable && (num_children == nested_nodes[i].degree());
-        } else {
-          num_children = nested_nodes[i].degree();
-        }
-      }
-    }
-    TORCH_CHECK(broadcastable, "Can't broadcast given nested tensors");
-    std::vector<_NestedNode> result;
-    for (size_t i = 0; i < num_children; i++) {
-      std::vector<_NestedNode> local_args;
-      for (size_t j = 0; j < nested_nodes.size(); j++) {
-        if (nested_nodes[j].is_leaf()) {
-          local_args.push_back(nested_nodes[j]);
-        } else {
-          local_args.push_back(nested_nodes[j].children(i));
-        }
-      }
-      result.push_back(apply_jit_function(local_args, fn));
-    }
-    return _NestedNode(result);
   }
 }
 
@@ -260,31 +206,6 @@ struct THP_ListNestedTensor {
   _ListNestedTensor _data;
 };
 
-static THP_ListNestedTensor jit_apply_function(
-    std::vector<THP_ListNestedTensor> nts_,
-    py::object fn) {
-  std::vector<_ListNestedTensor> nts;
-  for (size_t i = 0; i < nts_.size(); i++) {
-    nts.push_back(nts_[i].data());
-  }
-  auto sfn = torch::jit::script::as_function(fn).value();
-  auto tracing_state = tracer::getTracingState();
-  TORCH_CHECK(!tracing_state, "doesnt support tracing");
-  Function& callee = *sfn.function_;
-  auto schema = callee.getSchema();
-  TORCH_CHECK(
-      schema.arguments().size() == nts.size(),
-      "Give NestedTensors don't match function args.");
-  std::vector<_NestedNode> nested_nodes;
-  for (size_t i = 0; i < nts.size(); i++) {
-    nested_nodes.push_back(nts[i].get_structure());
-  }
-  py::gil_scoped_release release;
-  _NestedNode nested_node = apply_jit_function(nested_nodes, callee);
-  py::gil_scoped_acquire acquire;
-  return THP_ListNestedTensor(_ListNestedTensor(nested_node));
-}
-
 void initialize_python_bindings() {
   auto obj = py::module::import("torch.nestedtensor");
   auto m = py::handle(obj).cast<py::module>();
@@ -335,8 +256,6 @@ void initialize_python_bindings() {
       .def("__str__", &THP_ListNestedTensor::str)
       .def("__repr__", &THP_ListNestedTensor::str)
       .def("to", &THP_ListNestedTensor::to);
-
-  m.def("jit_apply_function", &jit_apply_function);
 }
 } // namespace nested_tensor
 } // namespace torch
