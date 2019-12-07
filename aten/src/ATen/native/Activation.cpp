@@ -14,8 +14,35 @@ static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(threshold_stub);
+DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardshrink_cpu_stub);
 DEFINE_DISPATCH(hardshrink_backward_cpu_stub);
+
+Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor& hardtanh_out(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor& hardtanh_(Tensor& self, Scalar min, Scalar max) {
+  return at::clamp_(self, min, max);
+}
+
+Tensor& hardtanh_backward_out(Tensor& grad_input,
+    const Tensor& grad_output, const Tensor& self, Scalar min, Scalar max) {
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
+  hardtanh_backward_stub(iter.device_type(), iter, min, max);
+  return grad_input;
+}
+
+Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, Scalar min, Scalar max) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, self);
+  hardtanh_backward_stub(iter.device_type(), iter, min, max);
+  return iter.output();
+}
 
 Tensor relu(const Tensor & self) {
   return at::threshold(self, 0, 0);
