@@ -19,6 +19,7 @@ from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
+import torchvision
 
 
 def ort_test_with_input(ort_sess, input, output, rtol, atol):
@@ -106,7 +107,7 @@ class TestONNXRuntime(unittest.TestCase):
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=False,
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
         return run_model_test(self, model, batch_size=batch_size,
@@ -115,6 +116,112 @@ class TestONNXRuntime(unittest.TestCase):
                               dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                               input_names=input_names, output_names=output_names,
                               fixed_batch_size=fixed_batch_size)
+
+    # Export Torchvision models
+
+    def test_alexnet(self):
+        model = torchvision.models.alexnet(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_densenets(self):
+        model = torchvision.models.densenet121(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_googlenet(self):
+        model = torchvision.models.googlenet(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_inception(self):
+        model = torchvision.models.inception_v3(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mnasnet(self):
+        model = torchvision.models.mnasnet1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mobilenet(self):
+        model = torchvision.models.mobilenet_v2(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_resnet(self):
+        model = torchvision.models.resnet50(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_shufflenet(self):
+        model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_squeezenet(self):
+        model = torchvision.models.squeezenet1_1(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_vgg(self):
+        model = torchvision.models.vgg19(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+        model = torchvision.models.vgg19_bn(pretrained=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_fcn(self):
+        model = torchvision.models.segmentation.segmentation.fcn_resnet101(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_deeplab(self):
+        model = torchvision.models.segmentation.segmentation.deeplabv3_resnet101(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_googlenet_quantization(self):
+        model = torchvision.models.quantization.googlenet(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_inception_quantization(self):
+        model = torchvision.models.quantization.inception_v3(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mobilenet_quantization(self):
+        model = torchvision.models.quantization.mobilenet_v2(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_resnet_quantization(self):
+        model = torchvision.models.quantization.resnet50(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_shufflenet_quantization(self):
+        model = torchvision.models.quantization.shufflenet_v2_x1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_r3d_18_video(self):
+        model = torchvision.models.video.r3d_18(pretrained=True)
+        x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mc3_18_video(self):
+        model = torchvision.models.video.mc3_18(pretrained=True)
+        x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_r2plus1d_18_video(self):
+        model = torchvision.models.video.r2plus1d_18(pretrained=True)
+        x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
@@ -293,6 +400,59 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    def test_conv(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super(TraceModel, self).__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        class ScriptModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
+            @torch.jit.script_method
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        x1 = torch.randn(20, 16, 50)
+        x2 = torch.randn(20, 16, 50, 100)
+        x3 = torch.randn(20, 16, 10, 50, 100)
+
+        self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
+        self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
+
+    # TODO: Add ConvTranspose1d and ConvTranspose3d when supported in ORT
+    # TODO : Add test with dilation != 1 when ORT fixed
+    def test_conv_transpose(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super(TraceModel, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
+            def forward(self, input2):
+                return self.conv2(input2)
+
+        class ScriptModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
+            @torch.jit.script_method
+            def forward(self, input2):
+                return self.conv2(input2)
+
+        x2 = torch.randn(20, 16, 50, 100)
+
+        self.run_test(TraceModel(), (x2,), atol=10e-5)
+        self.run_test(ScriptModel(), (x2,), atol=10e-5)
 
     def test_squeeze(self):
         class Squeeze(torch.nn.Module):
@@ -958,6 +1118,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
 
+    def test_logsoftmax(self):
+        for i in range(7)[2:]:
+            model = torch.nn.LogSoftmax(dim=i - 1)
+            dims = [2] * (i - 2) + [3, 4]
+            input = torch.ones(*dims, requires_grad=True)
+            self.run_test(model, input)
+
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = torch.nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_test(model, input)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm(self):
         model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
@@ -1291,6 +1464,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_getitem(self):
+        class GetItemModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z, ind):
+                # this will create prim::ListConstruct(x, y, z) + aten::__getitem__
+                arr = [x, y, z]
+                return arr[ind]
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(1, 4, 5)
+        z = torch.randn(2, 4, 5)
+        ind = torch.tensor(1, dtype=torch.long)
+        self.run_test(GetItemModel(), (x, y, z, ind))
+
+        ind = torch.tensor(-2, dtype=torch.long)
+        self.run_test(GetItemModel(), (x, y, z, ind))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
@@ -1306,6 +1497,65 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5)
         self.run_test(UnbindModel2(), x)
+
+        class UnbindModel3(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(-2)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel3(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unbind_dynamic(self):
+        class UnbindModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.unbind()[1]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel(), x)
+
+        class UnbindModel2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.unbind(-1)[1]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel2(), x)
+
+    def test_split(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 2])
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+        class SplitModel2(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 1], -2)
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_dynamic(self):
+        class SplitModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.split(2)[1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+        class SplitModel2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.split(2, -3)[1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel2(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
@@ -1337,6 +1587,36 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_zero(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.zero_(), x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Zero_(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_fill(self):
+        class Fill_(torch.nn.Module):
+            def forward(self, x):
+                return x.fill_(3), x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Fill_(), x)
+
+    def test_inplace_arithmetic(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                x.add_(3)
+                y.mul_(x)
+                return x, y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(Arithmetic(), (x, y))
 
     def test_sort(self):
         class SortModel(torch.nn.Module):
@@ -1696,6 +1976,21 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
+
+    # This test checks output scalar type in the ONNX graph should not be null
+    # https://github.com/pytorch/pytorch/issues/28607
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_trace_script(self):
+        @torch.jit.script
+        def center_slice_helper(input, h_offset):
+            return input[:, h_offset:]
+
+        class CenterCrop(torch.nn.Module):
+            def forward(self, input):
+                return center_slice_helper(input, torch.tensor(input.shape[1] - 1))
+
+        x = torch.randn(3, 4)
+        self.run_test(CenterCrop(), x)
 
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)

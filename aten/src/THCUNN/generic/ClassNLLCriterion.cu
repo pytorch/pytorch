@@ -66,8 +66,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     return;
   }
 
-  THCTensor_(resize1d)(state, output, 1);
-  THCTensor_(resize1d)(state, total_weight, 1);
+  THCTensor_(resize0d)(state, output);
+  THCTensor_(resize0d)(state, total_weight);
 
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;

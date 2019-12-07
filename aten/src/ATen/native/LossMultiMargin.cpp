@@ -116,7 +116,7 @@ void multi_margin_loss_out_cpu_template(
       target.sizes());
 
   // produce a scalar output for 1d input
-  if (reduction == Reduction::None && ndims > 1) {
+  if (reduction == Reduction::None && target.dim() > 0) {
     output.resize_({nframe});
   } else {
     output.resize_({});

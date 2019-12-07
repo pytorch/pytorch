@@ -48,7 +48,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
     }
   }
 
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Failed to match operator name ",
       opName,
       " and arguments "
@@ -110,7 +111,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       Stack stack;
       stack.push_back(ret.value());
       {
-        AutoGIL ag;
+        pybind11::gil_scoped_acquire ag;
         // The createPyObjectForStack does not acquire GIL, but creating a new
         // py::object requires GIL.
         return torch::jit::createPyObjectForStack(std::move(stack));
@@ -137,7 +138,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
     }
     default: {
-      AT_ERROR("Unrecognized response message type ", messageType);
+      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
     }
   }
 }

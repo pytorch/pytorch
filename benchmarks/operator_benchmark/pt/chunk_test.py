@@ -14,6 +14,7 @@ import torch
 chunk_short_configs = op_bench.config_list(
     attr_names=["M", "N", "chunks"],
     attrs=[
+        [8, 8, 2],
         [256, 512, 2],
         [512, 512, 2],
     ],
