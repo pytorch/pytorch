@@ -300,7 +300,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         diff_input_list = list(iter_tensors(tupled_inputs, True))
         if not diff_input_list:
             raise RuntimeError("no Tensors requiring grad found in input")
-        grads_input = torch.autograd.grad(output, diff_input_list, [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output],
+        grads_input = torch.autograd.grad(output, diff_input_list,
+                                          [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output],
                                           allow_unused=True)
         for gi, i in zip(grads_input, diff_input_list):
             if gi is None:

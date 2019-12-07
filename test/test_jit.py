@@ -3542,7 +3542,7 @@ graph(%Ra, %Rb):
                 return x
 
         class Test(torch.nn.Module):
-            def forward(self, input=[]):
+            def forward(self, input=[]):  # noqa: B006
                 return input
 
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
@@ -5648,7 +5648,8 @@ a")
                     self.assertEqual(grad, grad_ref)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Profiling executor fails to recognize that tensors in a list require gradients")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING,
+                     "Profiling executor fails to recognize that tensors in a list require gradients")
     def test_meshgrid(self):
         with enable_profiling_mode():
             @torch.jit.script
@@ -6977,7 +6978,9 @@ a")
 
         with self.assertRaises(RuntimeError) as cm:
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
+        FileCheck().check("The above operation failed in interpreter") \
+                   .check("Traceback (most recent call last)") \
+                   .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
         global IFace
@@ -7014,7 +7017,9 @@ a")
         with self.assertRaises(RuntimeError) as cm:
             x = f.one(torch.rand(10), torch.rand(9))
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
+        FileCheck().check("The above operation failed in interpreter") \
+                   .check("Traceback (most recent call last)") \
+                   .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_binop_unsupported_error(self):
         with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
@@ -7305,7 +7310,8 @@ a")
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_dtype.graph_for(5, profile_and_replay=True)
             # both should have completed shapes
-            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
+            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut") \
+                       .check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
         else:
             g = test_dtype.graph_for(5)
             # first should have type set second should not
@@ -7318,7 +7324,8 @@ a")
 
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay=True)
-            FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
+            FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut") \
+                       .check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
         else:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
             FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
@@ -11588,7 +11595,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
                 @torch.jit.script_method  # noqa: B902
-                def forward():
+                def forward():  # noqa: B902
                     return torch.zeros(3, 4)
 
             MethodNoSelf()
