@@ -62,14 +62,6 @@ struct _NestedNode {
   c10::IValue _payload;
 };
 
-static inline size_t _num_tensor(const _NestedNode& meta_node) {
-  size_t result = 0;
-  for (size_t i = 0; i < meta_node.degree(); i++) {
-    result += _num_tensor(meta_node.children(i));
-  }
-  return result;
-}
-
 static inline int64_t _numel(const _NestedNode& meta_node) {
   if (meta_node.is_leaf()) {
     return meta_node.payload().toTensor().numel();
@@ -81,9 +73,6 @@ static inline int64_t _numel(const _NestedNode& meta_node) {
     return result;
   }
 }
-
-
-
 
 static inline at::Tensor _get_first_variable(_NestedNode nested_node) {
   const _NestedNode* start = &nested_node;
@@ -146,8 +135,6 @@ static inline torch::autograd::Variable _NestedNode_to_tensor(
     return stack(variables);
   }
 }
-
-TORCH_API extern PyTypeObject _ListNestedTensorVariableType;
 
 // TODO: Eventually allow construction from a list of _BufferNestedTensors.
 struct TORCH_API _ListNestedTensor {
@@ -306,39 +293,7 @@ struct TORCH_API _ListNestedTensor {
   at::Tensor _first_variable;
 };
 
-struct TORCH_API _ListNestedTensorVariable {
-  PyObject_HEAD
-      /* Type-specific fields go here. */
-      _ListNestedTensor cdata;
-};
-
-inline bool _ListNestedTensorVariable_Check(PyObject* obj) {
-  return _ListNestedTensorVariableClass &&
-      PyObject_IsInstance(obj, _ListNestedTensorVariableClass);
-}
-
 void initialize_python_bindings();
-
-// Creates a new Python object for a Variable. The Variable must not already
-// have a PyObject* associated with it.
-static inline PyObject* _ListNestedTensorVariable_NewWithVar(
-    PyTypeObject* type,
-    _ListNestedTensor nested_tensor) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  if (obj) {
-    auto v = (_ListNestedTensorVariable*)obj;
-    new (&v->cdata) _ListNestedTensor(std::move(nested_tensor));
-    // v->cdata.set_pyobj(obj);
-    return obj;
-  } else {
-    throw python_error();
-  }
-}
-
-static inline PyObject* _ListNestedTensorVariable_Wrap(_ListNestedTensor var) {
-  return _ListNestedTensorVariable_NewWithVar(
-      (PyTypeObject*)_ListNestedTensorVariableClass, std::move(var));
-}
 
 } // namespace nested_tensor
 } // namespace torch
