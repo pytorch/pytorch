@@ -1,5 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
@@ -28,30 +30,6 @@ Tensor quantize_per_channel_cpu(
 
 Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
-}
-
-Tensor dequantize_per_tensor_cpu(
-    const Tensor& self,
-    double scale,
-    int64_t zero_point,
-    ScalarType dtype) {
-  TORCH_CHECK(
-      isQIntType(toQIntType(self.scalar_type())),
-      "Scalar type for quantized Tensor must have same underlying type as input.");
-  TORCH_CHECK(
-      dtype == toQIntType(self.scalar_type()),
-      "ScalarType argument must match the corresponding quantized scalar type of input integer Tensor");
-  // scalar type of output Tensor is hard-coded as float
-  Tensor f = at::empty(self.sizes(), self.options().dtype(at::kFloat));
-  AT_DISPATCH_QINT_TYPES(
-      toQIntType(self.scalar_type()), "dequantize_linear_cpu", [&]() {
-        underlying_t* qdata = self.data_ptr<underlying_t>();
-        auto* fdata = f.data_ptr<float>();
-        for (int i = 0; i < self.numel(); ++i) {
-          fdata[i] = (static_cast<float>(qdata[i]) - zero_point) * scale;
-        }
-      });
-  return f;
 }
 
 double q_scale_quant(const Tensor& self) {
@@ -88,18 +66,23 @@ int64_t q_per_channel_axis_quant(const Tensor& self) {
   return static_cast<PerChannelAffineQuantizer*>(quantizer.get())->axis();
 }
 
+// When input Tensor is non-dense, i.e. the allocated memory
+// is larger than the memory used by all the elements, we'll
+// convert it to dense tensor, otherwise we'll keep the memory
+// format of the output the same as input
 Tensor int_repr_quant(const Tensor& self) {
   Tensor dst;
-  // TODO: replace with TensorIterator
-  auto self_c = self.contiguous();
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
-    dst = at::empty(self.sizes(), self.options().dtype(UNDERLYING_TYPE));
-    underlying_t* self_data =
-        reinterpret_cast<underlying_t*>(self_c.data_ptr<scalar_t>());
-    underlying_t* dst_data = dst.data_ptr<underlying_t>();
-    if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.nbytes());
-    }
+    dst = at::empty(
+        self.sizes(),
+        self.options().dtype(UNDERLYING_TYPE),
+        self.suggest_memory_format());
+    auto iter = TensorIterator();
+    iter.add_output(dst);
+    iter.add_input(self);
+    iter.dont_compute_common_dtype();
+    iter.build();
+    cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
   });
   return dst;
 }
@@ -172,13 +155,29 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   return self;
 }
 
-Tensor quantized_clone(const Tensor& self) {
+Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
   // TODO: add per channel support
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == at::kPerTensorAffine,
       "clone for quantized Tensor only works for PerTensorAffine scheme right now");
+
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+
+  // TODO: To support all features of MemoryFormat::Preserve we need to add
+  // _empty_affine_quantized_strided function and use it similarly to
+  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
+  // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
+  if (memory_format == MemoryFormat::Preserve) {
+    memory_format = self.suggest_memory_format();
+  }
+
   Tensor dst = at::_empty_affine_quantized(
-      self.sizes(), self.options(), self.q_scale(), self.q_zero_point());
+      self.sizes(),
+      self.options(),
+      self.q_scale(),
+      self.q_zero_point(),
+      memory_format);
 
   at::native::copy_(dst, self, false);
 

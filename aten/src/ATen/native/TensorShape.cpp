@@ -1,4 +1,3 @@
-#include <TH/THTensor.hpp>
 #include <algorithm>
 #include <vector>
 #include <ATen/ATen.h>
@@ -30,8 +29,20 @@ Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
 }
 
 Tensor _shape_as_tensor(const Tensor& self) {
-  auto options = TensorOptions(at::kLong).is_variable(self.options().is_variable());
+  auto options = TensorOptions(at::kLong);
   return at::tensor(self.sizes(), options);
+}
+
+Tensor& set_(Tensor& result, Storage source) {
+  return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+}
+
+// this needs to be split along CPU/CUDA lines because we don't have a consistent
+// way of getting the allocator to use for a device (c10::GetAllocator is not
+// the same as at::cuda::getCUDADeviceAllocator().
+Tensor& set_cpu_(Tensor& result) {
+  Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
+  return result.set_(storage, 0, {0}, {});
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
@@ -50,14 +61,14 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   {
     NoNamesGuard guard;
 #endif
     at::_cat_out(result, tensors, dim);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -202,7 +213,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
 #endif
   Tensor result;
   {
@@ -212,7 +223,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
     result = at::_cat(tensors, dim);
   }
 #ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -247,6 +258,11 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
   int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
   TORCH_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
+  NoNamesGuard no_names_guard;
+#endif
+
   int64_t diag_size;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
@@ -273,7 +289,7 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
     storage_offset -= offset * self.stride(dim1);
   }
 
-  // construct new size and stride: we drop dim1 and dim2 (maximum first for not changing the index of the minumum)
+  // construct new size and stride: we drop dim1 and dim2 (maximum first for not changing the index of the minimum)
   // the new ("joint") dimension is appended to the end of the shape / stride to match numpy semantics
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
@@ -285,8 +301,30 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   strides.push_back(self.stride(dim1)+self.stride(dim2));
 
   // return view with new parameters
-  return self.as_strided(sizes, strides, storage_offset);
+  auto result = self.as_strided(sizes, strides, storage_offset);
+
+#ifdef BUILD_NAMEDTENSOR
+  no_names_guard.reset();
+  namedinference::propagate_names_if_nonempty(result, outnames);
+#endif
+  return result;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor diagonal(const Tensor& self, Dimname outdim, Dimname dim1, Dimname dim2, int64_t offset) {
+  auto result = at::diagonal(
+      self,
+      offset,
+      dimname_to_position(self, dim1),
+      dimname_to_position(self, dim2));
+  // This is slower than it needs to be because there is no way to modify
+  // the names of a tensor in-place right now. In the future we should consider
+  // offering that functionality.
+  std::vector<Dimname> new_names = result.names().vec();
+  new_names[new_names.size() - 1] = outdim;
+  return result.refine_names(new_names);
+}
+#endif
 
 Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
   int64_t nDims = self.dim() + 1;
@@ -312,7 +350,7 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
   // requested by the user, because it is legal to remove implicit expands
   // from the graph, but not legal to remove the explicit ones.
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
-           "expand(", self.type(), "{", self.sizes(), "}, size=", size,
+           "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
            "must be greater or equal to the number of dimensions in the tensor (",
            self.dim(), ")");
@@ -399,7 +437,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-    return self.narrow(dim, start, length).clone();
+    return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -473,6 +511,32 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
+Tensor alias_with_sizes_and_strides(
+    const Tensor& self,
+    const c10::IntArrayRef sizes,
+    const c10::IntArrayRef strides) {
+  Tensor self_;
+  if (self.is_quantized()) {
+    auto impl = c10::make_intrusive<QTensorImpl>(
+        Storage(self.storage()),
+        self.type_set(),
+        get_qtensorimpl(self)->quantizer());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(sizes, strides);
+    self_ = Tensor(std::move(impl));
+  } else {
+    auto impl = c10::make_intrusive<TensorImpl>(
+        Storage(self.storage()), self.type_set());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(sizes, strides);
+    self_ = Tensor(std::move(impl));
+  }
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(self_, self);
+#endif
+  return self_;
+}
+
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -483,10 +547,19 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    return self.as_strided(shape, *stride);
+  auto stride =
+      at::detail::computeStride(self.sizes(), self.strides(), shape);
+    // `computeStride` returns the proper strides to use if this
+    // `reshape` can be just a view.
+    //
+    // NB: Even though we have viewable geometry and the target strides here,
+    //     we do not just call `as_strided` on `self` because the backward
+    //     for `as_strided` is not as efficient as that of `view` (since the
+    //     former is meant to handle general cases).
+  if (stride.has_value()) {
+    return self.view(shape);
   }
-  return at::_unsafe_view(self.clone(), shape);
+  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
@@ -774,7 +847,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto row1 = indices.select(0, dim1);
 
     // swap row0 and row1
-    auto tmp = at::zeros_like(row0);
+    auto tmp = at::zeros_like(row0, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     tmp.copy_(row0);
     row0.copy_(row1);
     row1.copy_(tmp);
@@ -798,7 +871,7 @@ static Tensor& propagate_transposed_names(
   if (other.has_names()) {
     auto names = other.names().vec();
     std::swap(names[dim0], names[dim1]);
-    namedinference::propagate_names(result, names);
+    namedinference::propagate_names_if_nonempty(result, names);
   }
   return result;
 }
@@ -926,7 +999,12 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+#endif
+  return result;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -937,7 +1015,11 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
     return self.as_strided(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_except(result, self, {dim});
+#endif
+  return result;
 }
 
 Tensor & squeeze_(Tensor& self) {
@@ -1145,33 +1227,39 @@ Tensor view(const Tensor& self, IntArrayRef size) {
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  auto self_ = self.alias();
-  self_.set_(
-    self.storage(), self.storage_offset(), inferred_size, stride_value);
-  return self_;
+  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
 Tensor alias(const Tensor& self) {
-  Tensor self_;
-  if (self.is_quantized()) {
-    auto impl = c10::make_intrusive<QTensorImpl>(
-                    Storage(self.storage()),
-                    self.type_set(),
-                    get_qtensorimpl(self)->quantizer());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(self.sizes(), self.strides());
-    self_ = Tensor(std::move(impl));
-  } else {
-    auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
-                                                self.type_set());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(self.sizes(), self.strides());
-    self_ = Tensor(std::move(impl));
+    return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+}
+
+Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
+  // some special handling to deal with allow dimension == 0 when self.dim() == 0
+  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+  int64_t max_size = self.dim() == 0 ? 1 : self.size(dimension);
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+                                " is ", max_size, " but size is ", size);
+  TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
+
+  std::vector<int64_t> new_size(self.dim() + 1);
+  std::vector<int64_t> new_stride(self.dim() + 1);
+
+  new_size[self.dim()] = size;
+  new_stride[self.dim()] = self.dim() == 0 ? 1 : self.stride(dimension);
+  for(int64_t d = 0; d < self.dim(); d++) {
+    auto self_size = self.size(d);
+    auto self_stride = self.stride(d);
+    if(d == dimension) {
+      new_size[d] = (self_size - size) / step + 1;
+      new_stride[d] = step*self_stride;
+    } else {
+      new_size[d] = self_size;
+      new_stride[d] = self_stride;
+    }
   }
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(self_, self);
-#endif
-  return self_;
+
+  return self.as_strided(new_size, new_stride);
 }
 
 }} // at::native

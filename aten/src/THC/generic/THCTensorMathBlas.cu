@@ -11,6 +11,9 @@
 
 accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   if ( (THTensor_nDimension(self) != 1) || (THTensor_nDimension(src) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
        THTensor_nDimension(self), THTensor_nDimension(src));
@@ -43,9 +46,6 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::check_names_for_dot(self, src);
-#endif
   return result;
 
 #else
@@ -54,9 +54,9 @@ accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 #endif
 }
 
-void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha)
+static void THCTensor_(addmvImpl)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
@@ -78,9 +78,6 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   if(r_ != t)
   {
-#ifdef BUILD_NAMEDTENSOR
-    at::NoNamesGuard guard;
-#endif
     THCTensor_(resizeAs)(state, r_, t);
     THCTensor_(copy)(state, r_, t);
   }
@@ -144,7 +141,7 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *
     }
   }
 
-#elif defined(THC_REAL_IS_HALF)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
     // Currently no Hgemv/SgemvEx in Cublas
     THCTensor *vecAsMatrix = THCTensor_(newWithTensor)(state, vec);
     THCTensor_(resize2d)(state, vecAsMatrix, vec_size, 1);
@@ -162,6 +159,15 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *
 #else
   ERROR_ONLY_FP_TYPES("addmv");
 #endif
+}
+
+void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha) {
+  {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
+    THCTensor_(addmvImpl)(state, r_, t, mat, vec, beta, alpha);
+  }
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
 #endif
@@ -169,7 +175,7 @@ void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *
 
 void THCTensor_(addr)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *vec1, THCTensor *vec2, scalar_t beta, scalar_t alpha)
 {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
   if ( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
@@ -246,7 +252,7 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *v
 
     THCTensor_(freeCopyTo)(state, cr, r_);
   }
-#elif defined(THC_REAL_IS_HALF)
+#elif defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
   // currently no Hger/SgerEx in Cublas.
   THCTensor *vec2T = THCTensor_(newWithTensor)(state, vec2);
   THCTensor_(resize2d)(state, vec2T, vec2_size, 1);
@@ -264,15 +270,9 @@ void THCTensor_(addr)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *v
 #endif
 }
 
-void THCTensor_(addmm)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *m1, THCTensor *m2, scalar_t beta, scalar_t alpha)
+static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *m1, THCTensor *m2, scalar_t beta, scalar_t alpha)
 {
-#ifdef BUILD_NAMEDTENSOR
-  // The logic in this function changes around the pointers, so save a copy of the originals.
-  THCTensor* orig_m1 = m1;
-  THCTensor* orig_m2 = m2;
-#endif
-
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_BFLOAT16)
 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
   char transpose_r, transpose_m1, transpose_m2;
@@ -301,11 +301,13 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *
   {
     THCTensor_(resizeAs)(state, r_, t);
     if (ScalarConvert<scalar_t, double>::to(beta) != 0.0) {
-#ifdef BUILD_NAMEDTENSOR
-      at::NoNamesGuard guard;
-#endif
       THCTensor_(copy)(state, r_, t);
     }
+  }
+
+  if((r_->size(0) == 0) || (r_->size(1) == 0))
+  {
+    return;
   }
 
   /* r_ */
@@ -402,6 +404,25 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *
                    beta,
                    THCTensor_(data)(state, r__),
                    r__->stride((transpose_r == 'n' ? 1 : 0)));
+#elif defined(THC_REAL_IS_BFLOAT16)
+#if defined(__HIP_PLATFORM_HCC__)
+  THCudaBlas_Bgemm(state,
+                   transpose_m1,
+                   transpose_m2,
+                   r__->size((transpose_r == 'n' ? 0 : 1)),
+                   r__->size((transpose_r == 'n' ? 1 : 0)),
+                   m1_->size((transpose_r == 'n' ? 1 : 0)),
+                   alpha,
+                   THCTensor_(data)(state, m1_),
+                  (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
+                   THCTensor_(data)(state, m2_),
+                   (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
+                   beta,
+                   THCTensor_(data)(state, r__),
+                   r__->stride((transpose_r == 'n' ? 1 : 0)));
+#else
+  TORCH_CHECK(false, "Bgemm not supported on at::BFloat16 type");
+#endif // __HIP_PLATFORM_HCC__
 #elif defined(THC_REAL_IS_DOUBLE)
   THCudaBlas_Dgemm(state,
                    transpose_m1,
@@ -434,15 +455,23 @@ void THCTensor_(addmm)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *
 #else
   ERROR_ONLY_FP_TYPES("addmm");
 #endif
+}
 
+void THCTensor_(addmm)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *m1, THCTensor *m2, scalar_t beta, scalar_t alpha) {
+  {
 #ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names_for_addmm(r_, orig_m1, orig_m2, t);
+    at::NoNamesGuard guard;
+#endif
+    THCTensor_(addmmImpl)(state, r_, t, m1, m2, beta, alpha);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
 #endif
 }
 
 void THCTensor_(addbmm)(THCState *state, THCTensor *result, THCTensor *t,
                         THCTensor *batch1, THCTensor *batch2, scalar_t beta, scalar_t alpha) {
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, t) == 2, 4, "expected 2D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch1) == 3, 6, "expected 3D tensor");
@@ -507,7 +536,7 @@ __global__ void createBatchGemmBuffer3(const scalar_t** buffer1, const scalar_t 
 void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
                          THCTensor *batch1, THCTensor *batch2,
                          scalar_t beta, scalar_t alpha) {
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_BFLOAT16)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, t) == 3, 4, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch1) == 3, 6, "expected 3D tensor");
@@ -517,7 +546,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
              "equal number of batches expected");
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
+  auto maybe_outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
   {
     at::NoNamesGuard guard;
 #endif
@@ -760,9 +789,28 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
       }
    }
 #endif
+#endif //CUDA_VERSION
 
+#elif defined(THC_REAL_IS_BFLOAT16)
+#if defined(__HIP_PLATFORM_HCC__)
+  THCudaBlas_BgemmStridedBatched(
+      state,
+      transpose_batch1,
+      transpose_batch2,
+      result_->size(transpose_result ? 2 : 1),
+      result_->size(transpose_result ? 1 : 2),
+      batch1_->size(transpose_result ? 1 : 2),
+      alpha,
+      THCTensor_(data)(state, batch1_), lda, batch1_->stride(0),
+      THCTensor_(data)(state, batch2_), ldb, batch2_->stride(0),
+      beta,
+      THCTensor_(data)(state, result_), ldc, result_->stride(0),
+      num_batches);
+#else
+  TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
+#endif // __HIP_PLATFORM_HCC__
 #endif
-#endif
+
   if (batch1_ != batch1) {
     THCTensor_(free)(state, batch1_);
   }
@@ -776,7 +824,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   }
 #ifdef BUILD_NAMEDTENSOR
   }
-  at::namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  at::namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
 
 #else

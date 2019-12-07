@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
+- func: func_name[.overload_name](ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -170,7 +170,29 @@ two functions:
 Note that argument type modifiers such as defaults and optional are not currently supported on Return.
 
 
-The declarations also support the following attributes:
+**Overloads.** You can register multiple functions with the same name and different
+function signatures if you give them unique overload names. An overload name
+is specified after the function name, separated by a dot.
+
+Overload names do not have to be globally unique, but must be unique in the set
+of all overloads for the same function. Overload names cannot be changed for
+backwards compatibility reasons. Please try to make overload names semantically
+meaningful. An overload name that just enumerates all the argument types isn't
+helpful. In many cases, a semantic name is clear from what the overload is doing
+differently. As a fallback, you can use the name or type of the first differing
+argument as an overload name.
+
+If you add a new overload to an existing function, please leave the existing
+overload names as they are (for backwards compatibility), but give the new
+overload a new, unique name.
+
+Not specifying an overload name is equivalent to specifying an empty overload
+name. If you add a new function with multiple overloads, give them unique
+overload names, at most one overload is allowed to have an empty overload name.
+
+
+The declarations also support the following attributes.
+
 
 ### `variants`
 
@@ -316,6 +338,16 @@ your operator, please do. For a few corner cases, enabling this might not compil
 successfully, so setting this to 'unboxed_only', or as last resort 'no' is a
 workaround. Also, 'no' is the default if you don't specify anything.
 
+### `manual_kernel_registration`
+
+```
+manual_kernel_registration: True
+```
+
+With this flag set, we will not generate code to automatically register the C++ operator
+implementation with the dispatcher. This is a workaround for ops that need manual
+Variable code (see VariableTypeManual.cpp) and should only be used rarely.
+
 ## Writing an implementation in C++
 
 Implementations of native functions go in an appropriate C++ file in the
@@ -384,44 +416,6 @@ NB: There is one downside to following the `at::` qualification rule, which
 is that if you know that you will only ever be called with `Tensor`, a
 direct `at::native` call will be more efficient (as it avoids a dynamic
 dispatch).
-
-### How to handle broadcasting?
-
-Unlike our legacy TH bindings, ATen native functions do not automatically
-handle broadcasting; you will have to insert the necessary broadcasting
-calls yourself.
-
-When writing broadcasting code, we obey the convention that `op` is
-broadcasting, while `s_op` (with the `s_` prefix) is not broadcasting.  The
-relationship is best seen by an example of how you would implement broadcasting
-addition out of non-broadcasting addition:
-
-```
-#include <ATen/ExpandUtils.h>
-
-Tensor add(const Tensor& self, const Tensor& other) {
-  Tensor b_self, b_other;
-  std::tie(b_self, b_other) = expand_outplace(self, other, "add");
-  return s_add(b_self, b_other);
-}
-
-Tensor s_add(const Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of addition
-}
-```
-
-For inplace operations, the convention looks like this:
-
-```
-Tensor& add_(Tensor& self, const Tensor& other) {
-  Tensor b_other = expand_inplace(self, other, "add_");
-  return s_add_(self, b_other);
-}
-
-Tensor& s_add_(Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of inplace addition
-}
-```
 
 ### Undefined tensor conventions
 

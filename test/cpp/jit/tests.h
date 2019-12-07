@@ -12,6 +12,8 @@ namespace jit {
   _(ADFormulas)                        \
   _(Attributes)                        \
   _(Blocks)                            \
+  _(CallStack)                         \
+  _(CallStackCaching)                  \
   _(CodeTemplate)                      \
   _(ControlFlow)                       \
   _(CreateAutodiffSubgraphs)           \
@@ -54,6 +56,7 @@ namespace jit {
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
   _(SubgraphRewriter)                  \
+  _(ModuleCloneInstance)               \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
@@ -62,9 +65,16 @@ namespace jit {
   _(SaveExtraFilesHook)                \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
-  _(ImportTooNew)                      \
   _(ClassDerive)                       \
-  _(Inliner)
+  _(ModuleInterfaceSerialization)      \
+  _(ClassTypeAddRemoveAttr)            \
+  _(Inliner)                           \
+  _(LiteInterpreterAdd)                \
+  _(LiteInterpreterConv)               \
+  _(LiteInterpreterInline)             \
+  _(LiteInterpreterTuple)              \
+  _(LiteInterpreterPrimOverload)       \
+  _(CommonAncestor)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

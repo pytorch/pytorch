@@ -1,14 +1,54 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
+import datetime
+import re
 import sys
 import torch
 from torch._C import parse_schema
 
 
+# The date specifies how long the whitelist exclusion should apply to.
+#
+#   - If we NEVER give BC guarantee for an operator, you can put the
+#     date arbitrarily far in the future.
+#   - Otherwise, pick a date that is far enough in the future that you
+#     believe you can land your diff before then.
+#
+# Whitelist entries can be removed after the date listed on them passes.
+white_list = [
+    ('c10_experimental', datetime.date(2020, 1, 1)),
+    ('_batch_norm_impl_index', datetime.date(2019, 11, 15)),
+    ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
+    ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
+    ('_aten', datetime.date(2019, 12, 22)),
+    ('_prim::ListConstruct', datetime.date(2019, 11, 22)),
+    ('thnn_conv3d', datetime.date(9999, 1, 1)),
+    ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
+    ('grad', datetime.date(2020, 1, 1)),
+    ('logical_and', datetime.date(2019, 12, 12)),
+    ('logical_or', datetime.date(2019, 12, 12)),
+]
+
+
+def white_listed(schema, white_list):
+    for item in white_list:
+        if item[1] < datetime.date.today():
+            continue
+        regexp = re.compile(item[0])
+        if regexp.search(schema.name):
+            return True
+    return False
+
+
 def check_bc(new_schema_dict):
     existing_schemas = torch._C._jit_get_all_schemas()
     for existing_schema in existing_schemas:
+        if white_listed(existing_schema, white_list):
+            print("skipping schema: ", str(existing_schema))
+            continue
         print("processing existing schema: ", str(existing_schema))
         new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False

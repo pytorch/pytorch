@@ -31,6 +31,8 @@ int64_t decrementKernel(const Tensor& tensor, int64_t input) {
 }
 
 void expectCallsIncrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -40,6 +42,8 @@ void expectCallsIncrement(TensorTypeId type_id) {
 }
 
 void expectCallsDecrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -166,7 +170,7 @@ c10::List<Tensor> kernelWithTensorListOutput(const Tensor& input1, const Tensor&
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", RegisterOperators::options().kernel<decltype(kernelWithTensorListOutput), &kernelWithTensorListOutput>(TensorTypeId::CPUTensorId));
+      .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", RegisterOperators::options().kernel<decltype(kernelWithTensorListOutput), &kernelWithTensorListOutput>(TensorTypeId::CUDATensorId));
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
@@ -542,12 +546,12 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithOptionalInputs
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(0, outputs.size());
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CUDATensorId);
+  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CPUTensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
@@ -577,13 +581,13 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithOptionalInputs
   ASSERT_TRUE(op.has_value());
 
   called = false;
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractTypeId(outputs[0].toTensor()));
+  EXPECT_EQ(TensorTypeId::CPUTensorId, extractTypeId(outputs[0].toTensor()));
 
   EXPECT_TRUE(called);
   EXPECT_TRUE(called_arg2.has_value());
-  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CUDATensorId);
+  EXPECT_EQ(extractTypeId(*called_arg2), TensorTypeId::CPUTensorId);
   EXPECT_FALSE(called_arg3.has_value());
   EXPECT_TRUE(called_arg4.has_value());
   EXPECT_EQ(*called_arg4, "text");
@@ -610,9 +614,9 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithOptionalInputs
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CUDATensorId), c10::IValue(), std::string("text"));
+  auto outputs = callOp(*op, dummyTensor(TensorTypeId::CPUTensorId), dummyTensor(TensorTypeId::CPUTensorId), c10::IValue(), std::string("text"));
   EXPECT_EQ(3, outputs.size());
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractTypeId(outputs[0].toTensor()));
+  EXPECT_EQ(TensorTypeId::CPUTensorId, extractTypeId(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
   EXPECT_EQ("text", outputs[2].toString()->string());
 
@@ -628,14 +632,18 @@ std::string concatKernel(const Tensor& tensor1, std::string a, const std::string
 }
 
 void expectCallsConcatUnboxed(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, type_id, dummyTensor(type_id), "1", "2", 3);
+  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(type_id), "1", "2", 3);
   EXPECT_EQ("123", result);
 }
 
 void expectCannotCallConcatBoxed(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());

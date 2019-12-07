@@ -6,6 +6,7 @@
 namespace c10 {
 
 using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+class OperatorHandle;
 
 /**
  * Inherit from OperatorKernel to implement a c10 kernel.
@@ -38,7 +39,8 @@ namespace detail {
     bool,
     std::string,
     at::Tensor,
-    at::Scalar
+    at::Scalar,
+    c10::QScheme
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
@@ -221,14 +223,14 @@ namespace detail {
     }
   };
 
-  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct wrap_kernel_functor_boxed final {};
+  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct make_boxed_from_unboxed_functor final {};
 
   // SFINAE version for kernels that return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(OperatorKernel* functor, Stack* stack) {
+    static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
@@ -239,10 +241,10 @@ namespace detail {
 
   // SFINAE version for kernels that don't return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(OperatorKernel* functor, Stack* stack) {
+    static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
@@ -270,9 +272,9 @@ namespace detail {
     explicit constexpr KernelFactory(Args... args)
     : constructor_parameters_(std::move(args)...) {}
 
-    std::shared_ptr<KernelFunctor> operator()() const {
+    std::unique_ptr<OperatorKernel> operator()() const {
       return guts::apply(
-        [] (const Args&... params) {return std::make_shared<KernelFunctor>(params...); },
+        [] (const Args&... params) -> std::unique_ptr<OperatorKernel> {return guts::make_unique_base<OperatorKernel, KernelFunctor>(params...); },
         constructor_parameters_);
     }
 
@@ -280,11 +282,17 @@ namespace detail {
     std::tuple<Args...> constructor_parameters_;
   };
 
+  template<class FuncType>
+  std::unique_ptr<FunctionSchema> inferFunctionSchema_() {
+    return guts::make_unique<FunctionSchema>(inferFunctionSchema<FuncType>("", ""));
+  }
+
   template<class KernelFunctor>
   class FunctionSchemaInferer final {
   public:
+    using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
     std::unique_ptr<FunctionSchema> operator()() const {
-      return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
+      return inferFunctionSchema_<func_type>();
     }
   };
 }

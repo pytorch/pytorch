@@ -30,6 +30,11 @@ from itertools import product
 from random import shuffle
 
 import torch
+
+# TODO: remove this global setting
+# Distributions tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 from torch._six import inf
 from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from common_cuda import TEST_CUDA

@@ -963,8 +963,8 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
   // contiguous can greatly simplify this code.
   auto grad_output = grad_output_.contiguous();
 
-  auto grad_input = at::zeros_like(input);
-  auto grad_grid = at::empty_like(grid);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto N = input.size(0);
   auto spatial_size = grid.size(1) * grid.size(2);
   auto grain_size = spatial_size == 0 ? (N + 1)

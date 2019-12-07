@@ -31,10 +31,13 @@ class ReLU(torch.nn.ReLU):
     """
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
-        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
+        self.inplace = inplace
 
     def forward(self, input):
-        return torch.nn.quantized.functional.relu(input)
+        return torch.nn.quantized.functional.relu(input, inplace=self.inplace)
+
+    def _get_name(self):
+        return 'QuantizedReLU'
 
     @staticmethod
     def from_float(mod):
@@ -66,10 +69,13 @@ class ReLU6(torch.nn.ReLU):
     """
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(inplace)
-        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
+        self.inplace = inplace
 
     def forward(self, input):
-        return torch.ops.quantized.relu6(input)
+        return torch.ops.quantized.relu6(input, self.inplace)
+
+    def _get_name(self):
+        return 'QuantizedReLU6'
 
     @staticmethod
     def from_float(mod):

@@ -30,8 +30,8 @@ struct Quantizer;
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
-struct TORCH_API TypeDefault {
+namespace TypeDefault {
   ${type_method_declarations}
-};
+}  // namespace TypeDefault
 
 } // namespace at

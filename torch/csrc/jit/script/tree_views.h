@@ -906,7 +906,7 @@ struct SliceExpr : public Expr {
 
  private:
   Expr createInt(int value) const {
-    return Expr(Const::create(range(), std::to_string(value)));
+    return Expr(Const::create(range(), c10::to_string(value)));
   }
 };
 

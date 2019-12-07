@@ -18,14 +18,14 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   TORCH_CHECK(cuda::check_device({r, t, mask}),
       "sparse_mask: arguments are located on different devices; self is on device ", t.get_device(),
       ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
-  resize_as_sparse_(r, mask);
+  r.resize_as_(mask);
   if (mask._nnz() == 0) {
     return r.zero_();
   }
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
-  alias_into_sparse(r, mask_indices.clone(), r_values);
+  alias_into_sparse(r, mask_indices.clone(at::MemoryFormat::Contiguous), r_values);
   r._coalesced_(mask.is_coalesced());
   if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
     return r;

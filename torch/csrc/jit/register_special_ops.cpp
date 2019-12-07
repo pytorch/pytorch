@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/vararg_functions.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
@@ -139,7 +140,7 @@ void storeLastDimension<bool>(
   }
 }
 
-// refernce python implementation recursive_store in tensor_new.cpp
+// reference python implementation recursive_store in tensor_new.cpp
 
 void recursiveStore(
     char* data,
@@ -195,8 +196,8 @@ Operation createTensorFromList(const Node* node) {
       pop(stack, data, dtype, device);
     }
     auto sizes = compute_sizes(data);
-    auto tensor = autograd::make_variable(at::empty(
-        sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
+    auto tensor = at::empty(
+        sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
     recursiveStore(
         (char*)tensor.data_ptr(),
@@ -278,66 +279,38 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            auto a = pop(stack);
-            auto b = pop(stack);
-            push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
-            return 0;
-          };
+        [](Stack& stack) {
+          auto a = pop(stack);
+          auto b = pop(stack);
+          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            at::Tensor weight;
-            at::Tensor input;
-            double max_norm;
-            double norm_type;
-            pop(stack, weight, input, max_norm, norm_type);
+        [](Stack& stack) {
+          at::Tensor weight;
+          at::Tensor input;
+          double max_norm;
+          double norm_type;
+          pop(stack, weight, input, max_norm, norm_type);
 
-            // TODO: remove when script supports setting grad mode
-            torch::NoGradGuard no_grad;
+          // TODO: remove when script supports setting grad mode
+          torch::NoGradGuard no_grad;
 
-            at::Tensor result =
-                at::embedding_renorm_(weight, input, max_norm, norm_type);
-            push(stack, std::move(result));
+          at::Tensor result =
+              at::embedding_renorm_(weight, input, max_norm, norm_type);
+          push(stack, std::move(result));
 
-            return 0;
-          };
+          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::format(str self, ...) -> str",
         [](const Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
-          std::regex unsupported_options("\\{(.*)\\}");
-          return [num_inputs, unsupported_options](Stack& stack) {
-            auto format = peek(stack, 0, num_inputs).toStringRef();
-
-            if (std::regex_search(format, unsupported_options)) {
-              AT_WARN("Format options are not supported.");
-            }
-
-            auto args = last(stack, num_inputs - 1);
-            std::stringstream ss;
-            for (size_t begin = 0, used_args = 0; true; ++used_args) {
-              size_t loc = format.find("{}", begin);
-              if (loc == std::string::npos) {
-                ss << format.substr(begin);
-                break;
-              }
-              ss << format.substr(begin, loc - begin);
-              if (used_args >= args.size()) {
-                AT_ERROR("Too few arguments for format string: ", format);
-              }
-              ss << args[used_args];
-              begin = loc + 2;
-            }
-
-            drop(stack, num_inputs);
-            push(stack, ss.str());
+          return [num_inputs](Stack& stack) {
+            formatFunc(num_inputs, stack);
             return 0;
           };
         },
@@ -348,35 +321,31 @@ RegisterOperators reg({
       "aten::tensor(" #operator_type                                       \
       " t, *, ScalarType? dtype=None, Device? device=None"                 \
       ", bool requires_grad=False) -> Tensor",                             \
-      [](const Node* node) -> Operation {                                               \
-        return [](Stack& stack) {                                          \
-          c_type scalar_val;                                               \
-          IValue dtype;                                                    \
-          IValue device;                                                   \
-          bool requires_grad;                                              \
-          pop(stack, scalar_val, dtype, device, requires_grad);            \
-          auto tensor = autograd::make_variable(tensor_creation_op);       \
-          tensor = castTensorTo(tensor, dtype, device);                    \
-          tensor.set_requires_grad(requires_grad);                         \
-          push(stack, std::move(tensor));                                  \
-          return 0;                                                        \
-        };                                                                 \
+      [](Stack& stack) {                                                   \
+        c_type scalar_val;                                                 \
+        IValue dtype;                                                      \
+        IValue device;                                                     \
+        bool requires_grad;                                                \
+        pop(stack, scalar_val, dtype, device, requires_grad);              \
+        auto tensor = tensor_creation_op;                                  \
+        tensor = castTensorTo(tensor, dtype, device);                      \
+        tensor.set_requires_grad(requires_grad);                           \
+        push(stack, std::move(tensor));                                    \
+        return 0;                                                          \
       },                                                                   \
       aliasAnalysisFromSchema()),                                          \
       Operator(                                                            \
           "aten::as_tensor(" #operator_type                                \
           " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor", \
-          [](const Node* node) -> Operation {                                           \
-            return [](Stack& stack) {                                      \
-              c_type scalar_val;                                           \
-              IValue dtype;                                                \
-              IValue device;                                               \
-              pop(stack, scalar_val, dtype, device);                       \
-              auto tensor = autograd::make_variable(tensor_creation_op);   \
-              tensor = castTensorTo(tensor, dtype, device);                \
-              push(stack, std::move(tensor));                              \
-              return 0;                                                    \
-            };                                                             \
+          [](Stack& stack) {                                               \
+            c_type scalar_val;                                             \
+            IValue dtype;                                                  \
+            IValue device;                                                 \
+            pop(stack, scalar_val, dtype, device);                         \
+            auto tensor = tensor_creation_op;                              \
+            tensor = castTensorTo(tensor, dtype, device);                  \
+            push(stack, std::move(tensor));                                \
+            return 0;                                                      \
           },                                                               \
           aliasAnalysisFromSchema()),
 
@@ -391,34 +360,30 @@ RegisterOperators reg({
     // tensor_new.cpp
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            auto a = pop(stack);
-            auto b = pop(stack);
-            push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
-            return 0;
-          };
+        [](Stack& stack) {
+          auto a = pop(stack);
+          auto b = pop(stack);
+          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            at::Tensor weight;
-            at::Tensor input;
-            double max_norm;
-            double norm_type;
-            pop(stack, weight, input, max_norm, norm_type);
+        [](Stack& stack) {
+          at::Tensor weight;
+          at::Tensor input;
+          double max_norm;
+          double norm_type;
+          pop(stack, weight, input, max_norm, norm_type);
 
-            // TODO: remove when script supports setting grad mode
-            torch::NoGradGuard no_grad;
+          // TODO: remove when script supports setting grad mode
+          torch::NoGradGuard no_grad;
 
-            at::Tensor result =
-                at::embedding_renorm_(weight, input, max_norm, norm_type);
-            push(stack, std::move(result));
+          at::Tensor result =
+              at::embedding_renorm_(weight, input, max_norm, norm_type);
+          push(stack, std::move(result));
 
-            return 0;
-          };
+          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -427,22 +392,20 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::as_tensor(Tensor(a) data, *, ScalarType? dtype=None, Device? device=None) -> Tensor(a|b)",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            auto device = pop(stack).toOptional<c10::Device>();
-            auto dtype = pop(stack).toOptional<at::ScalarType>();
-            at::Tensor data = pop(stack).toTensor();
-            at::ScalarType scalar_type =
-                dtype? dtype.value(): data.scalar_type();
-            c10::Device dev =
-                device? device.value(): data.device();
+        [](Stack& stack) {
+          auto device = pop(stack).toOptional<c10::Device>();
+          auto dtype = pop(stack).toOptional<at::ScalarType>();
+          at::Tensor data = pop(stack).toTensor();
+          at::ScalarType scalar_type =
+              dtype ? dtype.value() : data.scalar_type();
+          c10::Device dev = device ? device.value() : data.device();
 
-           if (scalar_type != data.scalar_type() || dev != data.device()) {
-              data = data.to(dev, scalar_type, /*non_blocking=*/false, /*copy=*/false);
-            }
-            push(stack, std::move(data));
-            return 0;
-          };
+          if (scalar_type != data.scalar_type() || dev != data.device()) {
+            data = data.to(
+                dev, scalar_type, /*non_blocking=*/false, /*copy=*/false);
+          }
+          push(stack, std::move(data));
+          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -451,13 +414,11 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            // Everything is a list at the point this is used, so don't do
-            // anything
-            drop(stack, 3);
-            return 0;
-          };
+        [](Stack& stack) {
+          // Everything is a list at the point this is used, so don't do
+          // anything
+          drop(stack, 3);
+          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(

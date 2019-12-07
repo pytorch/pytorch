@@ -30,11 +30,15 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
+namespace VariableType {
+namespace {
 ${type_derived_method_definitions}
+}
+}
 
 namespace {
 
-static auto registerer = torch::RegisterOperators()
+auto registerer = torch::RegisterOperators()
   ${wrapper_registrations};
 
 }

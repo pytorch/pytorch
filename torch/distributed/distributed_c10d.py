@@ -129,7 +129,8 @@ _default_pg = None
 _default_pg_init_method = None
 
 # Default process group wide timeout, if applicable.
-# This currently only applies to the gloo backend. To make an attempt at
+# This only applies to the gloo and nccl backends
+# (only if NCCL_BLOCKING_WAIT is set to 1). To make an attempt at
 # backwards compatibility with THD, we use an extraordinarily high default
 # timeout, given that THD did not have timeouts.
 _default_pg_timeout = timedelta(minutes=30)
@@ -321,7 +322,8 @@ def init_process_group(backend,
         2. Specify ``init_method`` (a URL string) which indicates where/how
            to discover peers. Optionally specify ``rank`` and ``world_size``,
            or encode all required parameters in the URL and omit them.
-        If neither is specified, ``init_method`` is assumed to be "env://".
+
+    If neither is specified, ``init_method`` is assumed to be "env://".
 
 
     Arguments:
@@ -346,7 +348,9 @@ def init_process_group(backend,
                                 Mutually exclusive with ``init_method``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
-            This is only applicable for the ``gloo`` backend.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            is set to 1.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to built from source
@@ -389,15 +393,8 @@ def init_process_group(backend,
     else:
         # backward compatible API
         if store is None:
-            url = init_method
-            if world_size != -1 and rank != -1:
-                url += "?rank={}&world_size={}".format(rank, world_size)
-            elif rank != -1:
-                url += "?rank={}".format(rank)
-            elif world_size != -1:
-                url += "?world_size={}".format(world_size)
-
-            store, rank, world_size = next(rendezvous(url))
+            rendezvous_iterator = rendezvous(init_method, rank, world_size)
+            store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
         _default_pg = _new_process_group_helper(
@@ -485,7 +482,8 @@ def _new_process_group_helper(world_size,
             pg = ProcessGroupNCCL(
                 prefix_store,
                 rank,
-                world_size)
+                world_size,
+                timeout)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -509,6 +507,7 @@ def destroy_process_group(group=group.WORLD):
     global _pg_group_ranks
     global _default_pg
     global _default_pg_init_method
+    global _group_count
 
     if group == GroupMember.NON_GROUP_MEMBER:
         return
@@ -527,6 +526,16 @@ def destroy_process_group(group=group.WORLD):
         _pg_map.clear()
         _pg_names.clear()
         _pg_group_ranks.clear()
+
+        # when process group doesn't have an explicit name (only WORLD (default)
+        # process group can have an explicit name), we use global _group_counter
+        # to generate the name. We need to reset the counter on destruction to
+        # allow consistent value to be generated when we re-create process
+        # groups after some trainers recover from failure
+        #
+        # We only reset this when WORLD is being destroyed because if this
+        # process group is in good state, we aren't dealing with failures.
+        _group_count = 0
     else:
         del _pg_map[pg]
         del _pg_names[pg]
@@ -1142,6 +1151,73 @@ def all_gather(tensor_list,
         work = _default_pg.allgather([tensor_list], [tensor])
     else:
         work = group.allgather([tensor_list], [tensor])
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+def all_gather_coalesced(output_tensor_lists,
+                         input_tensor_list,
+                         group=group.WORLD,
+                         async_op=False):
+    """
+    Gathers input tensors from the whole group in a list in a coalesced manner.
+
+    Arguments:
+        output_tensor_lists (list[list[Tensor]]): Output list. It should contain
+            correctly-sized tensors to be used for output of the collective.
+        input_tensor_list (list[Tensor]): Tensors to be broadcast from
+            current process. At least one tensor has to be non empty.
+        group (ProcessGroup, optional): The process group to work on
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group
+
+    Example:
+        we have 2 process groups, 2 ranks.
+        rank 0 passes:
+            input_tensor_list = [[[1, 1], [1, 1]], [2], [3, 3]]
+            output_tensor_lists =
+               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
+        rank 1 passes:
+            input_tensor_list = [[[3, 3], [3, 3]], [5], [1, 1]]
+            output_tensor_lists =
+               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
+        both rank 0 and 1 get:
+            output_tensor_lists =
+               [[[1, 1], [1, 1]], [2], [3, 3]],
+                [[3, 3], [3, 3]], [5], [1, 1]]].
+
+    WARNING: at this time individual shape checking is not implemented across nodes.
+    For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the
+    rank 1 node passes [torch.rand(2), torch.rand(2), torch.rand(2)], the
+    all_gather_coalesced operation will proceed without complaint and return
+    erroneous outputs. This lack of shape checking results in significant
+    performance improvements but users of this function should take extra care
+    to ensure that each node passes in tensors whose shapes match across nodes.
+    """
+    # We only check basic compatibility with C++ params here, C++ code will
+    # do shape and type checking.
+    if _rank_not_in_group(group):
+        return
+    _check_tensor_list(input_tensor_list, "tensor_list")
+    if not isinstance(output_tensor_lists, list):
+        RuntimeError("Invalid function argument: "
+                     "output_tensor_lists should be a list")
+    for output_tensor_list in output_tensor_lists:
+        _check_tensor_list(output_tensor_list, "output_tensor_lists")
+
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.allgather_coalesced(
+            output_tensor_lists, input_tensor_list)
+    else:
+        work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
         return work

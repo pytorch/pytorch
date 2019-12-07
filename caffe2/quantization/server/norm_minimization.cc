@@ -41,39 +41,6 @@ GetNorm(float begin, float end, float density, NormMinimization::Kind kind) {
   return density * norm;
 }
 
-namespace {
-
-vector<float>
-adjust_hist_to_include_zero(const Histogram& hist, float* min, float* max) {
-  const vector<uint64_t> bins = *hist.GetHistogram();
-  *min = hist.Min();
-  *max = hist.Max();
-  int nbins = bins.size();
-  float bin_width = (*max - *min) / nbins;
-
-  // Pad histogram to include zero
-  int additional_nbins = 0;
-  int offset = 0;
-  if (*min > 0) {
-    // additional nbins to include 0
-    additional_nbins = ceil(*min / bin_width);
-    offset = additional_nbins;
-    *min -= additional_nbins * bin_width;
-    assert(*min <= 0);
-  } else if (*max < 0) {
-    additional_nbins = ceil((-*max) / bin_width);
-    *max += additional_nbins * bin_width;
-    assert(*max >= 0);
-  }
-
-  vector<float> bins_f(nbins + additional_nbins);
-  for (int i = 0; i < nbins; ++i) {
-    bins_f[i + offset] = bins[i];
-  }
-  return bins_f;
-}
-
-} // namespace
 
 // Filter out outliers in input distributions
 // Exploit the input distributions for the quick search
@@ -88,11 +55,13 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   VLOG(2) << "Using the nonlinear quantile search";
 
   float min, max;
-  vector<float> bins_f(adjust_hist_to_include_zero(hist, &min, &max));
+  vector<float> bins_f(dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
   float bin_width = (max - min) / nbins;
   int dst_nbins = 1 << precision;
 
+  float org_max = max;
+  float org_min = min;
   // calculate the CDF
   uint64_t total = 0;
   for (uint64_t x : bins_f) {
@@ -200,6 +169,8 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   max = min + bin_width * (end_bin + 1);
   min = min + bin_width * start_bin;
 
+  VLOG(2) << "Org min " << org_min << " org max " << org_max << " found min "
+          << min << " max " << max << " with minimal norm " << norm_min;
   QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
   return qfactory->ChooseQuantizationParams(
       min, max, precision, preserve_sparsity);
@@ -211,7 +182,7 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
     int precision) {
   VLOG(2) << "Using the brute force search";
   float min, max;
-  vector<float> bins_f(adjust_hist_to_include_zero(hist, &min, &max));
+  vector<float> bins_f(dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
   float bin_width = (max - min) / nbins;
 

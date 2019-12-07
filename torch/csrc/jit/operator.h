@@ -95,14 +95,17 @@ struct TORCH_API Operator {
       OperationCreator op_creator,
       c10::OperatorOptions options = c10::OperatorOptions())
       : Operator(
-            FunctionSchema(
-                name,
-                "",
-                {},
-                {},
-                /*is_vararg*/ true,
-                /*is_varret*/ true),
+            varArgSchemaWithName(name),
             std::move(op_creator),
+            std::move(options)) {}
+
+  Operator(
+      Symbol name,
+      Operation op,
+      c10::OperatorOptions options = c10::OperatorOptions())
+      : Operator(
+            varArgSchemaWithName(name),
+            std::move(op),
             std::move(options)) {}
 
   Operator(
@@ -147,10 +150,28 @@ struct TORCH_API Operator {
   }
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
+    if (isC10Op()) {
+      const FunctionSchema& schemaRef = schema();
+      TORCH_CHECK(
+          options_.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
+              !schemaRef.hasAnyAliasInfo(),
+          "In operator registration: Tried to register operator ",
+          schemaRef,
+          " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
+    }
     return options_.aliasAnalysis();
   }
 
  private:
+  static FunctionSchema varArgSchemaWithName(Symbol name) {
+    return FunctionSchema(
+        name,
+        "",
+        {},
+        {},
+        /*is_vararg*/ true,
+        /*is_varret*/ true);
+  }
   mutable c10::optional<std::string> schema_string_;
   // cannot use c10::optional because windows has issues that require an
   // assignment operator to be generated cannot use std::unique_ptr because

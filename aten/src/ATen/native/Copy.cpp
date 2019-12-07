@@ -8,6 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/EnableNamedTensor.h>
 
 namespace {
@@ -72,9 +73,6 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       }
     }
   });
-#ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names_for_copy(self, src);
-#endif
 }
 
 // Devices directly supported by this copy implementation. Other device types
@@ -89,7 +87,7 @@ bool is_supported_device(Device device) {
 namespace at {
 namespace native {
 
-Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
@@ -98,7 +96,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
     AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
-             self.type(), " and src type = ", src.type());
+             self.toString(), " and src type = ", src.toString());
   }
 
   if (self.is_same(src)) {
@@ -142,7 +140,8 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     device_type = kCUDA;
   }
 
-  if (device_type == kCPU && copy_transpose_valid(self, src)) {
+  // TODO: if we need to, we can also enable this path for quantized tensor
+  if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
     copy_same_type_transpose_(self, src);
     return self;
   }
@@ -150,6 +149,27 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   copy_stub(device_type, iter, non_blocking);
   return self;
 }
+
+Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
+#ifdef BUILD_NAMEDTENSOR
+  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
+  {
+    NoNamesGuard guard;
+#endif
+    copy_impl(self, src, non_blocking);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+#endif
+  return self;
+}
+
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
 
 DEFINE_DISPATCH(copy_stub);
 

@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/DeviceGuard.h>
@@ -71,6 +72,7 @@ static void invalid_index(PyObject* obj) {
 static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, bool ensure_view=false) {
   Py_ssize_t start, stop, step;
   auto length = self.size(dim);
+
   if (!THPUtils_unpackSlice(slice, &start, &stop, &step)) {
     throw python_error();
   }
@@ -81,6 +83,22 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     // TODO: implement negative step
     throw ValueError("negative step not yet supported");
   }
+
+  PySliceObject* sliceobj = (PySliceObject*) slice;
+  if (jit::tracer::isTracing() && THPVariable_Check(sliceobj->start)) {
+      auto& var = THPVariable_Unpack(sliceobj->start);
+      jit::tracer::ArgumentStash::stashValue(std::string("start"), 1, var, jit::IntType::get());
+  }
+  if (jit::tracer::isTracing() && THPVariable_Check(sliceobj->stop)) {
+      auto& var = THPVariable_Unpack(sliceobj->stop);
+      jit::tracer::ArgumentStash::stashValue(std::string("end"), 1, var, jit::IntType::get());
+  }
+  if (jit::tracer::isTracing() && THPVariable_Check(sliceobj->step)) {
+      auto& var = THPVariable_Unpack(sliceobj->step);
+      jit::tracer::ArgumentStash::stashValue(std::string("step"), 1, var, jit::IntType::get());
+  }
+
+
   // Skip this optimization if we are tracing, as the trace may be polymorphic
   // over the shape of the `self` tensor, and we still want to record
   // the slice.
@@ -90,21 +108,27 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
   return self.slice(dim, start, stop, step);
 }
 
-static Variable applySelect(const Variable& self, int64_t dim, int64_t index, int64_t real_dim=0) {
-  if (index == 0 && dim == 0 && self.dim() == 0) {
+static Variable applySelect(const Variable& self, int64_t dim, PyObject* index, int64_t real_dim=0) {
+  if (jit::tracer::isTracing() && THPVariable_Check(index)) {
+    auto& var = THPVariable_Unpack(index);
+    jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, var, jit::IntType::get());
+  }
+
+  int64_t unpacked_index = THPUtils_unpackLong(index);
+  if (unpacked_index == 0 && dim == 0 && self.dim() == 0) {
     throw IndexError(
         "invalid index of a 0-dim tensor. "
         "Use tensor.item() to convert a 0-dim tensor to a Python number");
   }
   int64_t size = self.size(dim);
-  if (index < -size || index >= size) {
+  if (unpacked_index < -size || unpacked_index >= size) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
-      index, real_dim, size);
+      unpacked_index, real_dim, size);
   }
   // if the index is negative, do not normalize it because that would fix the index
   // on the current tensor size in the tracer.
   // aten::select also works on negative indices
-  return self.select(dim, index);
+  return self.select(dim, unpacked_index);
 }
 
 static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
@@ -115,7 +139,7 @@ static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
-  options = options.is_variable(true);
+  at::AutoNonVariableTypeMode guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), options);
   }
@@ -125,7 +149,7 @@ static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   throw TypeError(
     "can't assign a %s to a %s",
     Py_TYPE(value)->tp_name,
-    torch::utils::type_to_string(getNonVariableDeprecatedTypeProperties(options.backend(), typeMetaToScalarType(options.dtype()))).c_str());
+    torch::utils::options_to_string(options).c_str());
 }
 
 static Variable boolToIndexingTensor(const Variable& self, bool value) {
@@ -157,7 +181,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
   for (int64_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPUtils_checkLong(obj)) {
-      result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
+      result = applySelect(result, dim, obj, i);
     } else if (PySlice_Check(obj)) {
       result = applySlice(result, dim, obj);
       dim++;
@@ -174,7 +198,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       auto scalar_type = var.scalar_type();
       if (var.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/true)) {
         if (scalar_type != at::kByte && scalar_type != at::kBool) {
-          result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
+          result = applySelect(result, dim, obj, i);
         } else {
           result = result.unsqueeze(dim);
           if(scalar_type == at::kBool) {
@@ -196,7 +220,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
         PyErr_Clear();
         invalid_index(obj);
       }
-      result = applySelect(result, dim, THPUtils_unpackLong(index), i);
+      result = applySelect(result, dim, index, i);
     }
   }
   return result;
@@ -216,14 +240,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);
@@ -291,7 +315,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   } else if (index == Py_Ellipsis) {
     return wrap(at::alias(self_));
   } else if (THPUtils_checkLong(index)) {
-    return wrap(applySelect(self_, 0, THPUtils_unpackLong(index)));
+    return wrap(applySelect(self_, 0, index));
   } else if (PySlice_Check(index)) {
     return wrap(applySlice(self_, 0, index, true));
   }
@@ -365,7 +389,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     copy_to(self_.unsqueeze(0), value);
     return 0;
   } else if (THPUtils_checkLong(index)) {
-    copy_to(applySelect(self_, 0, THPUtils_unpackLong(index)), value);
+    copy_to(applySelect(self_, 0, index), value);
     return 0;
   } else if (PySlice_Check(index)) {
     copy_to(applySlice(self_, 0, index), value);

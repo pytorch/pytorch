@@ -1117,7 +1117,7 @@ def gelu(input):
     r"""gelu(input) -> Tensor
 
     Applies element-wise the function
-    :math:`\text{GeLU}(x) = x * \Phi(x)`
+    :math:`\text{GELU}(x) = x * \Phi(x)`
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
@@ -1160,6 +1160,13 @@ def softsign(input):
 
 softplus = _add_docstr(torch._C._nn.softplus, r"""
 softplus(input, beta=1, threshold=20) -> Tensor
+
+Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
+
+For numerical stability the implementation reverts to the linear function
+for inputs above :attr:`threshold` (default ``20``).
+
+See :class:`~torch.nn.Softplus` for more details.
 """)
 
 
@@ -1279,14 +1286,14 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
-    gumbels = -torch.empty_like(logits).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()  # ~Gumbel(0,1)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
     if hard:
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
@@ -1846,8 +1853,17 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         if target.size()[1:] != input.size()[2:]:
             raise ValueError('Expected target size {}, got {}'.format(
                 out_size, target.size()))
-        input = input.contiguous().view(n, c, 1, -1)
-        target = target.contiguous().view(n, 1, -1)
+        input = input.contiguous()
+        target = target.contiguous()
+        # support empty batches, see #15870
+        if input.numel() > 0:
+            input = input.view(n, c, 1, -1)
+        else:
+            input = input.view(n, c, 0, 0)
+        if target.numel() > 0:
+            target = target.view(n, 1, -1)
+        else:
+            target = target.view(n, 0, 0)
         reduction_enum = _Reduction.get_enum(reduction)
         if reduction != 'none':
             ret = torch._C._nn.nll_loss2d(
@@ -1938,6 +1954,9 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
+
+    .. _Kullback-Leibler divergence:
+        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -2477,7 +2496,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
         # make scale_factor a tensor in tracing so constant doesn't get baked in
         if torch._C._get_tracing_state():
-            return [(torch.floor((input.size(i + 2) * torch.tensor(float(scale_factors[i]))).float())) for i in range(dim)]
+            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
+                     dtype=torch.float32)).float())) for i in range(dim)]
         else:
             return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
@@ -2590,7 +2610,7 @@ GRID_SAMPLE_PADDING_MODES = {
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None):
-    # type: (Tensor, Tensor, str, str, bool) -> Tensor
+    # type: (Tensor, Tensor, str, str, Optional[bool]) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -2699,7 +2719,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
 
 def affine_grid(theta, size, align_corners=None):
-    # type: (Tensor, List[int], bool) -> Tensor
+    # type: (Tensor, List[int], Optional[bool]) -> Tensor
     r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
     affine matrices :attr:`theta`.
 
@@ -3167,7 +3187,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         attn_mask: mask that prevents attention to certain positions. This is an additive mask
             (i.e. the values will be added to the attention layer).
         use_separate_proj_weight: the function accept the proj. weights for query, key,
-            and value in differnt forms. If false, in_proj_weight will be used, which is
+            and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
@@ -3195,24 +3215,20 @@ def multi_head_attention_forward(query,                           # type: Tensor
           L is the target sequence length, S is the source sequence length.
     """
 
-    qkv_same = torch.equal(query, key) and torch.equal(key, value)
-    kv_same = torch.equal(key, value)
-
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
-    assert list(query.size()) == [tgt_len, bsz, embed_dim]
     assert key.size() == value.size()
 
     head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if use_separate_proj_weight is not True:
-        if qkv_same:
+    if not use_separate_proj_weight:
+        if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
             q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-        elif kv_same:
+        elif torch.equal(key, value):
             # encoder-decoder attention
             # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias

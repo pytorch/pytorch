@@ -1,15 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/data.h>
-#include <torch/nn/modules/batchnorm.h>
-#include <torch/nn/modules/conv.h>
-#include <torch/nn/modules/dropout.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/optim/adam.h>
-#include <torch/optim/optimizer.h>
-#include <torch/optim/sgd.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -259,7 +250,7 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto drop = Dropout(0.3);
-  auto drop2d = FeatureDropout(0.3);
+  auto drop2d = Dropout2d(0.3);
   auto linear1 = model->add(Linear(320, 50), "linear1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 

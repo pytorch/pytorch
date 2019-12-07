@@ -1,7 +1,14 @@
+#pragma once
+
 #include <cstdlib>
 #include <cmath>
 #include <limits>
 #include <type_traits>
+#include <c10/util/math_compat.h>
+
+#ifndef M_PIf
+#define M_PIf 3.1415926535f
+#endif  // M_PIf
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
