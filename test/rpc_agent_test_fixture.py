@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import dist_utils
 import torch.distributed.rpc as rpc
 
