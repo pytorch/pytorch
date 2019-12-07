@@ -53,11 +53,11 @@ inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
   // checksum through std::integral_constant.
   return type_index{std::integral_constant<
       uint64_t,
-      detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()>::value};
+      detail::type_index_impl<std::remove_cv_t<std::decay_t<T>>>()>::value};
 #else
   // nvcc unfortunately doesn't like this being constexpr in device code
   return type_index{
-      detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()};
+      detail::type_index_impl<std::remove_cv_t<std::decay_t<T>>>()};
 #endif
 }
 

@@ -1,7 +1,7 @@
 #include <c10/util/C++17.h>
 
-using c10::guts::max;
-using c10::guts::min;
+using std::max;
+using std::min;
 
 static_assert(min(3, 5) == 3, "");
 static_assert(min(5, 3) == 3, "");
