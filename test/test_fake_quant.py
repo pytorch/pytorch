@@ -55,10 +55,6 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
-    # print('dY = ', dY)
-    # print('X = ', X)
-    # print('Xq = ', Xq)
-    # print('res = ', res)
     return res
 
 def to_tensor(X, device):
