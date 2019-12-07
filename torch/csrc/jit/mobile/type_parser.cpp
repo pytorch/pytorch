@@ -19,8 +19,8 @@ bool isSpecialChar(char a) {
 
 class TypeParser {
  public:
-  explicit TypeParser(const std::string& pythonStr)
-    : pythonStr_(pythonStr), start_(0) {
+  explicit TypeParser(std::string pythonStr)
+    : pythonStr_(std::move(pythonStr)), start_(0) {
     lex();
   }
 
