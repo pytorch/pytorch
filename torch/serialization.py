@@ -70,8 +70,6 @@ def _is_zipfile(f):
 
 def _get_zip_size(f):
     start = f.tell()
-    # print(f.read(774))
-    print('start', start)
     curr_byte = f.read(1)
     eocd_magic_number = [b'P', b'K', b'\x05', b'\x06']
     pos = 0
@@ -79,7 +77,6 @@ def _get_zip_size(f):
         if curr_byte == eocd_magic_number[pos]:
             pos += 1
             if pos == len(eocd_magic_number):
-                print("Found it at ", f.tell())
                 break
         else:
             pos = 0
@@ -89,13 +86,10 @@ def _get_zip_size(f):
     eocd = b'abcd' + f.read(22 - 4)
     EOCD_SIZE = 20
     eocd_comment_size = eocd[20:22]
-    print(eocd_comment_size)
     # < means little-endian
     # H means unsigned short
     eocd_comment_size = struct.unpack('<H', eocd_comment_size)[0]
-    print(eocd_comment_size)
     size = (f.tell() - start) + eocd_comment_size
-    print("SIZE IS ", size)
     f.seek(start)
     return size
 
@@ -545,14 +539,6 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         if _is_zipfile(opened_file):
             start = f.tell()
             size = _get_zip_size(opened_file)
-            # start = f.tell()
-            # import os
-            # import io
-            # print(io.SEEK_END)
-            # f.seek(0, io.SEEK_END)
-            # print('py start', start)
-            # print('py size', f.tell())
-            # f.seek(start)
             with _open_zipfile_reader(f, size=size) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
@@ -560,7 +546,6 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
                                   " silence this warning)", UserWarning)
                     return torch.jit.load(f)
                 x = _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
-                print('afterwards, seeking to', size, start)
                 f.seek(start + size)
                 return x
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
