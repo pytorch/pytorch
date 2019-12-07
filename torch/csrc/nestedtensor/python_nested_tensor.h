@@ -45,6 +45,9 @@ struct _NestedNode {
   inline c10::IValue payload() const {
     return _payload;
   }
+  inline const std::vector<_NestedNode> children() const {
+    return _children;
+  }
   inline _NestedNode children(size_t i) const {
     return _children[i];
   }
@@ -136,12 +139,57 @@ static inline torch::autograd::Variable _NestedNode_to_tensor(
   }
 }
 
+static inline bool _verify_variables(
+    const torch::autograd::Variable& first_variable,
+    const _NestedNode nested_node) {
+  // The attributes must match across all constiuents
+  //
+  // The NestedTensor's attributes then become that of its
+  // constiuents.
+  //
+  // data must be a list of Tensors or NestedTensors
+  //
+  // Attributes:
+  //     dim()
+  //     layout
+  //     device
+  //     dtype
+  //     requires_grad
+  //     is_pinned()
+  bool valid = true;
+  if (nested_node.is_leaf()) {
+    at::Tensor variable = nested_node.payload().toTensor();
+    // TODO: Add more checks?
+    valid = valid && (variable.dim() == first_variable.dim());
+    valid = valid && (variable.layout() == first_variable.layout());
+    valid = valid && (variable.device() == first_variable.device());
+    valid = valid && (variable.dtype() == first_variable.dtype());
+    valid =
+        valid && (variable.requires_grad() == first_variable.requires_grad());
+    // NOTE: This is a very costly check! For now we'll let this to be enabled
+    // manually. valid = valid && (variable_.is_pinned() ==
+    // first_variable.is_pinned());
+  } else {
+    for (size_t i = 0; i < nested_node.degree(); i++) {
+      valid =
+          valid && _verify_variables(first_variable, nested_node.children(i));
+    }
+  }
+  return valid;
+}
+
 // TODO: Eventually allow construction from a list of _BufferNestedTensors.
 struct TORCH_API _ListNestedTensor {
   _ListNestedTensor() = delete;
   _ListNestedTensor(_NestedNode structure)
       : _structure(structure),
-        _first_variable(_get_first_variable(_structure)) {}
+        _first_variable(_get_first_variable(_structure)) {
+    if (__len__() > 0) {
+      TORCH_CHECK(
+          _verify_variables(_first_variable, _structure),
+          "Tensors don't line up.");
+    }
+  }
   int64_t element_size() {
     return _first_variable.element_size();
   }
