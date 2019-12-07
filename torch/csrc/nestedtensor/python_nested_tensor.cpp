@@ -40,129 +40,59 @@ inline PyObject* wrap_nested_node(_NestedNode nested_node) {
   }
 }
 
-// static void _ListNestedTensorVariable_backward(
-//     PyObject* self_,
-//     PyObject* args) {
-//   PyObject* gradient_;
-//   PyObject* retain_graph_;
-//   PyObject* create_graph_;
-//   if (!PyArg_ParseTuple(
-//           args, "OOO", &gradient_, &retain_graph_, &create_graph_)) {
-//     throw std::runtime_error("tuple parsing failed");
-//   }
-//   if (!_ListNestedTensorVariable_Check(gradient_)) {
-//     throw std::runtime_error("variable parsing failed");
-//   }
-//   if (!PyBool_Check(retain_graph_)) {
-//     throw std::runtime_error("retain bool parsing failed");
-//   }
-//   if (!PyBool_Check(create_graph_)) {
-//     throw std::runtime_error("create graph bool parsing failed");
-//   }
-//   auto& self = reinterpret_cast<_ListNestedTensorVariable*>(self_)->cdata;
-//   auto& gradient =
-//       reinterpret_cast<_ListNestedTensorVariable*>(gradient_)->cdata;
-//   bool retain_graph = PyObject_IsTrue(retain_graph_);
-//   bool create_graph = PyObject_IsTrue(create_graph_);
-//   self.backward(gradient, retain_graph, create_graph);
-// }
-
-// static _NestedNode apply_jit_function(
-//     const std::vector<_NestedNode>& nested_nodes,
-//     Function& fn) {
-//   bool all_leaf = true;
-//   for (size_t i = 0; i < nested_nodes.size(); i++) {
-//     all_leaf = all_leaf && nested_nodes[i].is_leaf();
-//   }
-//   if (all_leaf) {
-//     // NOTE: Assuming this is a pure function not a method (no self!)
-//     // NOTE: We assume there is only one Tensor inputs.
-//     // NOTE: We assume no named tensors and no sparse variables as
-//     appropriate
-//     // for TorchScript. NOTE: We know the IValues of the argument, there is
-//     no
-//     // need to cast around.
-//     Stack stack;
-//     stack.reserve(nested_nodes.size());
-//     for (size_t i = 0; i < nested_nodes.size(); i++) {
-//       push(stack, nested_nodes[i].payload().toTensor());
-//     }
-//     fn.run(stack);
-//     Variable result = stack.back().toTensor();
-//     auto result_node = _NestedNode(result);
-//     return result_node;
-//   } else {
-//     bool broadcastable = true;
-//     size_t num_children = 0;
-//     for (size_t i = 0; i < nested_nodes.size(); i++) {
-//       if (!nested_nodes[i].is_leaf()) {
-//         if (num_children > 0) {
-//           broadcastable =
-//               broadcastable && (num_children == nested_nodes[i].degree());
-//         } else {
-//           num_children = nested_nodes[i].degree();
-//         }
-//       }
-//     }
-//     TORCH_CHECK(broadcastable, "Can't broadcast given nested tensors");
-//     std::vector<_NestedNode> result;
-//     for (size_t i = 0; i < num_children; i++) {
-//       std::vector<_NestedNode> local_args;
-//       for (size_t j = 0; j < nested_nodes.size(); j++) {
-//         if (nested_nodes[j].is_leaf()) {
-//           local_args.push_back(nested_nodes[j]);
-//         } else {
-//           local_args.push_back(nested_nodes[j].children(i));
-//         }
-//       }
-//       result.push_back(apply_jit_function(local_args, fn));
-//     }
-//     return _NestedNode(result);
-//   }
-// }
-
-// static PyObject* jit_apply_function(PyObject* module, PyObject* args) {
-//   PyObject* nts_;
-//   PyObject* fn;
-//
-//   if (!PyArg_ParseTuple(args, "OO", &nts_, &fn)) {
-//     throw std::runtime_error("jit apply args parsing failed");
-//   }
-//
-//   TORCH_CHECK(
-//       PySequence_Check(nts_),
-//       "First argument must be sequence of nested tensors as arguments to
-//       given function.");
-//   std::vector<_ListNestedTensor> nts;
-//   nts.reserve(PySequence_Size(nts_));
-//
-//   for (int64_t i = 0; i < PySequence_Size(nts_); i++) {
-//     TORCH_CHECK(
-//         _ListNestedTensorVariable_Check(PySequence_GetItem(nts_, i)),
-//         "argument is not a NestedTensor");
-//     nts.push_back(reinterpret_cast<_ListNestedTensorVariable*>(
-//                       PySequence_GetItem(nts_, i))
-//                       ->cdata);
-//   }
-//
-//   pybind11::object ofn = pybind11::reinterpret_borrow<pybind11::object>(fn);
-//   auto sfn = torch::jit::script::as_function(ofn).value();
-//   auto tracing_state = tracer::getTracingState();
-//   TORCH_CHECK(!tracing_state, "doesnt support tracing");
-//   Function& callee = *sfn.function_;
-//   auto schema = callee.getSchema();
-//   TORCH_CHECK(
-//       schema.arguments().size() == nts.size(),
-//       "Give NestedTensors don't match function args.");
-//   std::vector<_NestedNode> nested_nodes;
-//   for (size_t i = 0; i < nts.size(); i++) {
-//     nested_nodes.push_back(nts[i].get_structure());
-//   }
-//   py::gil_scoped_release release;
-//   _NestedNode nested_node = apply_jit_function(nested_nodes, callee);
-//   py::gil_scoped_acquire acquire;
-//   return _ListNestedTensorVariable_Wrap(_ListNestedTensor(nested_node));
-// }
+static _NestedNode apply_jit_function(
+    const std::vector<_NestedNode>& nested_nodes,
+    Function& fn) {
+  bool all_leaf = true;
+  for (size_t i = 0; i < nested_nodes.size(); i++) {
+    all_leaf = all_leaf && nested_nodes[i].is_leaf();
+  }
+  if (all_leaf) {
+    // NOTE: Assuming this is a pure function not a method (no self!)
+    // NOTE: We assume there is only one Tensor inputs.
+    // NOTE: We assume no named tensors and no sparse variables as
+    // appropriate
+    // for TorchScript. NOTE: We know the IValues of the argument, there is
+    // no
+    // need to cast around.
+    Stack stack;
+    stack.reserve(nested_nodes.size());
+    for (size_t i = 0; i < nested_nodes.size(); i++) {
+      push(stack, nested_nodes[i].payload().toTensor());
+    }
+    fn.run(stack);
+    Variable result = stack.back().toTensor();
+    auto result_node = _NestedNode(result);
+    return result_node;
+  } else {
+    bool broadcastable = true;
+    size_t num_children = 0;
+    for (size_t i = 0; i < nested_nodes.size(); i++) {
+      if (!nested_nodes[i].is_leaf()) {
+        if (num_children > 0) {
+          broadcastable =
+              broadcastable && (num_children == nested_nodes[i].degree());
+        } else {
+          num_children = nested_nodes[i].degree();
+        }
+      }
+    }
+    TORCH_CHECK(broadcastable, "Can't broadcast given nested tensors");
+    std::vector<_NestedNode> result;
+    for (size_t i = 0; i < num_children; i++) {
+      std::vector<_NestedNode> local_args;
+      for (size_t j = 0; j < nested_nodes.size(); j++) {
+        if (nested_nodes[j].is_leaf()) {
+          local_args.push_back(nested_nodes[j]);
+        } else {
+          local_args.push_back(nested_nodes[j].children(i));
+        }
+      }
+      result.push_back(apply_jit_function(local_args, fn));
+    }
+    return _NestedNode(result);
+  }
+}
 
 static std::string _NestedNode___str__(const _NestedNode& nested_node) {
   std::stringstream result;
@@ -323,17 +253,45 @@ struct THP_ListNestedTensor {
       THP_ListNestedTensor gradient,
       bool retain_graph,
       bool create_graph) {
-  _data.backward(gradient.data(), retain_graph, create_graph);
+    _data.backward(gradient.data(), retain_graph, create_graph);
   }
 
  private:
   _ListNestedTensor _data;
 };
 
+static THP_ListNestedTensor jit_apply_function(
+    std::vector<THP_ListNestedTensor> nts_,
+    py::object fn) {
+  std::vector<_ListNestedTensor> nts;
+  for (size_t i = 0; i < nts_.size(); i++) {
+    nts.push_back(nts_[i].data());
+  }
+  auto sfn = torch::jit::script::as_function(fn).value();
+  auto tracing_state = tracer::getTracingState();
+  TORCH_CHECK(!tracing_state, "doesnt support tracing");
+  Function& callee = *sfn.function_;
+  auto schema = callee.getSchema();
+  TORCH_CHECK(
+      schema.arguments().size() == nts.size(),
+      "Give NestedTensors don't match function args.");
+  std::vector<_NestedNode> nested_nodes;
+  for (size_t i = 0; i < nts.size(); i++) {
+    nested_nodes.push_back(nts[i].get_structure());
+  }
+  py::gil_scoped_release release;
+  _NestedNode nested_node = apply_jit_function(nested_nodes, callee);
+  py::gil_scoped_acquire acquire;
+  return THP_ListNestedTensor(_ListNestedTensor(_NestedNode));
+}
+
 void initialize_python_bindings() {
   auto obj = py::module::import("torch.nestedtensor");
   auto m = py::handle(obj).cast<py::module>();
 
+  // NOTE: Never forget about pybind return value policies
+  // since you can expect transparent changes to the constiuents
+  // via unbind.
   py::class_<THP_ListNestedTensor>(m, "_ListNestedTensor")
       .def(py::init<py::object>(), py::keep_alive<1, 2>())
       .def_property_readonly("dtype", &THP_ListNestedTensor::getDtype)
@@ -377,6 +335,8 @@ void initialize_python_bindings() {
       .def("__str__", &THP_ListNestedTensor::str)
       .def("__repr__", &THP_ListNestedTensor::str)
       .def("to", &THP_ListNestedTensor::to);
+
+  m.def("jit_apply_function", &jit_apply_function);
 }
 } // namespace nested_tensor
 } // namespace torch

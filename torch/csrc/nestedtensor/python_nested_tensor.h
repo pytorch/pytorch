@@ -21,17 +21,6 @@
 namespace torch {
 namespace nested_tensor {
 
-struct _ListNestedTensor;
-
-struct _VariableNode {
-  _VariableNode() {}
-  _VariableNode(torch::autograd::Variable variable) : _variable(variable) {}
-
-  torch::autograd::Variable _variable;
-};
-
-THP_API PyObject* _ListNestedTensorVariableClass;
-
 // The implicit contract is that, if there are no children, variable_node is
 // defined.
 struct _NestedNode {
