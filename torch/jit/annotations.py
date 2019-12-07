@@ -156,7 +156,7 @@ def get_type_line(source):
             break
         elif type_comment in line:
             parameter_type_lines.append(line)
-    else:
+    if return_line is None:
         raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
                            "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
 
