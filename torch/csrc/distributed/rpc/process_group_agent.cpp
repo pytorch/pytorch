@@ -270,7 +270,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     }
     message.setId(requestId);
   } else {
-    future->markCompleted(std::move(Message()));
+    future->markCompleted(Message());
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
