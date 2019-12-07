@@ -1,4 +1,5 @@
 #include <limits>
+#include <algorithm>
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/Blas.h>
@@ -105,7 +106,7 @@ bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   if(n == 1) lda = m;
 
   if (gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
-    TORCH_CHECK(lda >= std::max(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
+    TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_lda = (int)lda;
@@ -146,7 +147,7 @@ bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
 namespace {
 
 constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
-  return n == 1 || lda > std::max(1L, m);
+  return n == 1 || lda > std::max<int64_t>(1L, m);
 }
 
 void addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
