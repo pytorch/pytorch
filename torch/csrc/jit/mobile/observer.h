@@ -2,6 +2,7 @@
 
 #include <string>
 #include <ATen/ThreadLocalDebugInfo.h>
+
 namespace torch {
 
 class MobileDebugInfo
@@ -38,5 +39,28 @@ private:
   std::string method_name_;
   size_t op_idx_ = 0;
 };
+
+class MobileModuleObserver {
+    public:
+    virtual ~MobileModuleObserver() = default;
+
+    virtual void onEnter() {}
+    virtual void onExit() {}
+};
+
+class MobileObserverConfig {
+  public:
+  void setModuleObserver(std::unique_ptr<MobileModuleObserver> reporter) {
+    module_observer_ = std::move(reporter);
+  }
+  MobileModuleObserver* getModuleObserver() {
+    return module_observer_.get();
+  }
+
+private:
+  std::unique_ptr<MobileModuleObserver> module_observer_;
+};
+
+MobileObserverConfig& observerConfig();
 
 } // namespace torch
