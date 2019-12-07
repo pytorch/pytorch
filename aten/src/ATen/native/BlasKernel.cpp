@@ -142,4 +142,9 @@ bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   return false;
 }
 
+#define DEFINE_GEMV(scalar_t, _) \
+template bool gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+
+AT_FORALL_SCALAR_TYPES_AND(BFloat16, DEFINE_GEMV);
+
 }} // namespace at::native
