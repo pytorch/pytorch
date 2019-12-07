@@ -136,7 +136,9 @@ void RRefContext::delUser(
         RRefUserDelete(rrefId, forkId).toMessage());
 
     fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
+        [](const Message& /* unused */, const utils::FutureError* futErr) {
+          RRefContext::handleException(futErr);
+        });
   }
 }
 
