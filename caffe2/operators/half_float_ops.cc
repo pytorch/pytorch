@@ -1,5 +1,8 @@
 #include "caffe2/operators/half_float_ops.h"
 #include <c10/util/Half.h>
+#ifdef USE_FBGEMM
+#include "fbgemm/FbgemmConvert.h"
+#endif
 
 namespace caffe2 {
 
@@ -12,9 +15,21 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   at::Half* out = output->template mutable_data<at::Half>();
   auto N = input.numel();
 
-  for (size_t i = 0; i < N; i++) {
-    out[i] = data[i];
+#ifdef USE_FBGEMM
+  fbgemm::FloatToFloat16_simd(
+      data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
+#else
+  if (clip_) {
+    constexpr float FP16_MAX = 65504.f;
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = std::max(-FP16_MAX, std::min(data[i], FP16_MAX));
+    }
+  } else {
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = data[i];
+    }
   }
+#endif
 
   return true;
 }
@@ -28,9 +43,15 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   float* out = output->template mutable_data<float>();
   auto N = input.numel();
 
-  for (size_t i = 0; i < N; i++) {
+#ifdef USE_FBGEMM
+  fbgemm::Float16ToFloat_simd(
+      reinterpret_cast<const fbgemm::float16*>(data), out, N);
+#else
+  for (size_t i = 0; i < N; ++i) {
     out[i] = data[i];
   }
+#endif
+
   return true;
 }
 
