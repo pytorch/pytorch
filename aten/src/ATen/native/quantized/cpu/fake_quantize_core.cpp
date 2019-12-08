@@ -50,9 +50,15 @@ void fake_quantize_grad_slice(
     int64_t quant_min,
     int64_t quant_max) {
   float inv_scale = 1.0f / sc;
+  std::cout << "C++ sc = " << sc << std::endl;
+  std::cout << "C++ z_point = " << z_point << std::endl;
+  std::cout << "C++ quant_min = " << quant_min << std::endl;
+  std::cout << "C++ quant_max = " << quant_max << std::endl;
   auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
   cpu_kernel(iter, [&](float x, float dy) -> float {
     int64_t xq = static_cast<int64_t>(std::nearbyint(x * inv_scale + z_point));
+    std::cout << "C++ x = " << x << std::endl;
+    std::cout << "C++ xq = " << xq << std::endl;
     return dy * (xq >= quant_min && xq <= quant_max);
   });
 }
