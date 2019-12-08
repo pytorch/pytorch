@@ -228,6 +228,7 @@ def should_generate_python_binding(declaration):
 
     return True
 
+
 def get_py_variable_methods(declarations):
     """
     Get declarations (grouped by name) which should be generated
@@ -297,6 +298,7 @@ def gen_py_torch_functions(out, declarations, template_path):
     PY_TORCH_DISPATCH_H = CodeTemplate.from_file(template_path + '/python_torch_functions_dispatch.h')
 
     py_torch_functions = get_py_torch_functions(declarations)
+
     env = create_python_bindings(py_torch_functions, has_self=False)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
     write(out, 'python_torch_functions_dispatch.h', PY_TORCH_DISPATCH_H, env)
@@ -459,7 +461,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 arg_idx+=1
 
             if has_tensor_options and arg['name'] in ['dtype', 'layout', 'device', 'pin_memory']:
-                expr, formal = parse_arg(arg, arg_idx, False)
+                expr, formal = parse_arg(arg, arg_idx)
                 actuals.append(arg['name'])
                 formal_args.append(formal)
                 continue
@@ -504,7 +506,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         # type args go after the outputs to match the signature generation.
         arg_idx = arg_idx if out_idx is None else out_idx + 1
         for arg in type_args:
-            parsed_type_args = parse_arg(arg, arg_idx, False)
+            parsed_type_args = parse_arg(arg, arg_idx)
             arg_idx += 1
 
         # check python_binding_arguments
@@ -552,22 +554,20 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                                     "\"Device device\" are supported".format(arg)))
 
         dtype = parsed_type_args[0] if parsed_type_args else None
-        requires_grad_needed = check_is_factory_or_like_or_new_function(declaration)
+        add_requires_grad = check_is_factory_or_like_or_new_function(declaration)
         
         if has_tensor_options:
             body.append('auto dtype = ' + dtype + ';')
             body.append('auto layout = ' + layout + '.layout;')
             body.append('auto device = ' + device + ';')
             body.append('auto pin_memory = ' + pin_memory + ';')
-            
-            if requires_grad_needed:
+
+            if add_requires_grad:
                 body.append("auto requires_grad = " + requires_grad + ";")
 
         env['unpack_args'] = []
         env['formal_args'] = formal_args
         env['actuals'] = actuals
-
-
 
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
@@ -582,11 +582,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
-        
+
         if has_tensor_options:
             env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
             env['dispatch_args'] = TOUtils.collapse_actuals(env['dispatch_args'])
-            if requires_grad_needed:
+            if add_requires_grad:
                 env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device).layout(layout).pinned_memory(pin_memory).requires_grad(requires_grad);"
             else:
                 env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device).layout(layout).pinned_memory(pin_memory);"
@@ -1018,7 +1018,7 @@ def get_python_signature(declaration, include_out):
             type_args.append(arg)
             continue
         # Skip `TensorOptions` in Python, as it is only used on the C++ side.
-        # TODO: [CHECK THIS] : if 2 scalar types are passed - we have an issue
+        # logissue if 2 scalar types are passed - we have an issue
         if TOUtils.check_if_factory_method(declaration['arguments']):
             if arg['name'] == 'dtype':
                 continue

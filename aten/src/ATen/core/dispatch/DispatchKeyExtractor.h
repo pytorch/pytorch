@@ -64,6 +64,10 @@ namespace detail {
       if (layout.has_value())
         options = options.layout(*layout);
     }
+    void operator()(c10::optional<bool> pin_memory) {
+      if (pin_memory.has_value())
+        options = options.pinned_memory(*pin_memory);
+    }
     void operator()(ScalarType dtype) { 
       options = options.dtype(dtype);
     }
@@ -73,6 +77,9 @@ namespace detail {
     void operator()(Layout layout) {
       options = options.layout(layout);
     }
+    void operator()(bool pin_memory) {
+      options = options.pinned_memory(pin_memory);
+    }
     template <typename T>
     void operator()(const T& x) {
       // do nothing
@@ -81,7 +88,7 @@ namespace detail {
 
   template<class Arg> using arg_is_tensor_option_arg = guts::typelist::contains<
     guts::typelist::typelist<c10::optional<ScalarType>, c10::optional<Layout>, 
-                             c10::optional<Device>, ScalarType, Layout, Device>,
+                             c10::optional<Device>, c10::optional<bool>, ScalarType, Layout, Device, bool>,
     guts::remove_const_t<guts::remove_reference_t<Arg>>>;
   template<class... Args> using args_have_tensor_options = guts::disjunction<
     arg_is_tensor_option_arg<Args>...>;
