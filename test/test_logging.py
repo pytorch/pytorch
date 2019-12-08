@@ -1,5 +1,5 @@
 import torch
-from common_utils import TestCase, run_tests
+from torch.testlib.common_utils import TestCase, run_tests
 
 
 class LoggingTest(TestCase):

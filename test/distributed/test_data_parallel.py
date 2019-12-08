@@ -1,9 +1,15 @@
 import contextlib
 import unittest
 import torch
+from torch import nn
 import torch.nn.parallel as dp
 from torch.testlib.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testlib.common_utils import run_tests, TestCase, skipIfRocm, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testlib.test_nn import _assertGradAndGradgradChecks
+from torch.testlib.test_nn import dtype2prec
+import torch.nn.functional as F
+from copy import deepcopy
+from collections import OrderedDict
 
 class TestDataParallel(TestCase):
 

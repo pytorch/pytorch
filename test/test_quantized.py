@@ -12,8 +12,8 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
-from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
+from torch.testlib.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
+from torch.testlib.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.

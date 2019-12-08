@@ -10,7 +10,7 @@ import torch.quantization
 
 from common_quantization import QuantizationTestCase, prepare_dynamic
 from common_quantized import _calculate_dynamic_qparams, override_quantized_engine
-from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
+from torch.testlib.common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu

@@ -3,7 +3,7 @@ import sys
 import os
 import contextlib
 import subprocess
-from common_utils import TemporaryFileName
+from torch.testlib.common_utils import TemporaryFileName
 
 
 @contextlib.contextmanager

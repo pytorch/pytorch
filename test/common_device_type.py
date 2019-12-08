@@ -3,7 +3,7 @@ import threading
 from functools import wraps
 import unittest
 import torch
-from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
+from torch.testlib.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf
 
 # Note: Generic Device-Type Testing

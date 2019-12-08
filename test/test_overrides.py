@@ -4,7 +4,7 @@ import unittest
 import inspect
 import functools
 
-from common_utils import TestCase
+from torch.testlib.common_utils import TestCase
 from torch._overrides import torch_function_dispatch
 
 # The functions below simulate the pure-python torch functions in the

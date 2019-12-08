@@ -44,7 +44,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from torch.testlib.common_utils import TestCase, run_tests, TEST_WITH_ASAN
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)

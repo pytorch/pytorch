@@ -2,7 +2,7 @@ r"""Importing this file must **not** initialize CUDA context. test_distributed
 relies on this assumption to properly run. This means that when this is imported
 no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 
-common_cuda.py can freely initialize CUDA context when imported.
+torch.testlib.common_cuda.py can freely initialize CUDA context when imported.
 """
 
 import sys
@@ -487,7 +487,7 @@ class CudaMemoryLeakCheck():
 
         # initialize context & RNG to prevent false positive detections
         # when the test is the first to initialize those
-        from common_cuda import initialize_cuda_context_rng
+        from torch.testlib.common_cuda import initialize_cuda_context_rng
         initialize_cuda_context_rng()
 
     @staticmethod
@@ -613,7 +613,7 @@ class TestCase(expecttest.TestCase):
         # the import below may initialize CUDA context, so we do it only if
         # self._do_cuda_memory_leak_check or self._do_cuda_non_default_stream
         # is True.
-        from common_cuda import TEST_CUDA
+        from torch.testlib.common_cuda import TEST_CUDA
         fullname = self.id().lower()  # class_name.method_name
         if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
             setattr(self, method_name, self.wrap_method_with_cuda_policy(test_method, policy))

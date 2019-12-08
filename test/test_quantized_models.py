@@ -1,6 +1,6 @@
 import torch
 import torch.jit
-from common_utils import run_tests, TEST_WITH_UBSAN, IS_PPC
+from torch.testlib.common_utils import run_tests, TEST_WITH_UBSAN, IS_PPC
 from common_quantization import QuantizationTestCase, ModelMultipleOps, ModelMultipleOpsNoAvgPool
 from common_quantized import override_quantized_engine
 

@@ -1,4 +1,4 @@
-from common_utils import run_tests
+from torch.testlib.common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List, Optional, Any

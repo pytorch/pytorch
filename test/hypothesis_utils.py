@@ -8,7 +8,7 @@ from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
 
-from common_quantized import _calculate_dynamic_qparams, _calculate_dynamic_per_channel_qparams
+from torch.testlib.common_quantized import _calculate_dynamic_qparams, _calculate_dynamic_per_channel_qparams
 
 # Setup for the hypothesis tests.
 # The tuples are (torch_quantized_dtype, zero_point_enforce), where the last

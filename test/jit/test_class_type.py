@@ -14,7 +14,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase
 import jit_utils
-from common_utils import IS_SANDCASTLE
+from torch.testlib.common_utils import IS_SANDCASTLE
 from typing import List
 
 if __name__ == '__main__':

@@ -5,8 +5,8 @@ from operator import mul, itemgetter
 import collections
 from torch.autograd import Variable
 from torch.testing import make_non_contiguous
-from common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
-from common_utils import (prod_single_zero, random_square_matrix_of_rank,
+from torch.testlib.common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
+from torch.testlib.common_utils import (prod_single_zero, random_square_matrix_of_rank,
                           random_symmetric_matrix, random_symmetric_psd_matrix,
                           random_symmetric_pd_matrix, make_nonzero_det,
                           random_fullrank_matrix_distinct_singular_value, set_rng_seed)

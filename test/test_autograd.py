@@ -25,13 +25,13 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+from torch.testlib.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
-from common_methods_invocations import (method_tests,
+from torch.testlib.common_methods_invocations import (method_tests,
                                         create_input, unpack_variables,
                                         EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
                                         EXCLUDE_GRADGRADCHECK,
@@ -39,7 +39,7 @@ from common_methods_invocations import (method_tests,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
                                         S)
-from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+from torch.testlib.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                 onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                 deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
@@ -2710,6 +2710,15 @@ class TestAutograd(TestCase):
             2,
         )
 
+        # We can also use record_function to decorate arbitrary function
+        @record_function('my_func')
+        def f(x, y):
+            return x + y
+
+        with profile() as p:
+            f(1, 2)
+
+        self.assertTrue('my_func' in str(p))
 
     def test_dir(self):
         x = torch.randn(10, 10)

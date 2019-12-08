@@ -22,7 +22,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
-from common_utils import run_tests
+from torch.testlib.common_utils import run_tests
 from common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \

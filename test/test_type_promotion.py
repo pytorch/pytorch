@@ -3,10 +3,10 @@ from functools import wraps
 import torch
 import itertools
 
-from common_utils import TestCase, run_tests, load_tests
+from torch.testlib.common_utils import TestCase, run_tests, load_tests
 from common_device_type import instantiate_device_type_tests
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testlib.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 

@@ -1,6 +1,6 @@
 import unittest
-from common_utils import TestCase, run_tests, TEST_NUMPY
-from common_cuda import TEST_CUDA
+from torch.testlib.common_utils import TestCase, run_tests, TEST_NUMPY
+from torch.testlib.common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
 import functools
