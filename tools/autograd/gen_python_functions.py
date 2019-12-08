@@ -80,11 +80,22 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  ${check_has_torch_function}
   ${declare_namedtuple_return_types}
   ${dispatch}
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+""")
+
+TORCH_FUNCTION_CHECK = """\
+if(r.has_torch_function()) {
+  return handle_torch_function(r, args, kwargs, THPVariableFunctions);
+}
+"""
+
+PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION = CodeTemplate("""\
+static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
 """)
 
 PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
@@ -310,6 +321,7 @@ def get_type_default(declaration):
 
 def create_python_bindings(python_functions, has_self, is_module=False):
     """Generates Python bindings to ATen functions"""
+    py_signatures = []
     py_methods = []
     py_method_defs = []
     py_method_dispatch = []
@@ -541,7 +553,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
-        env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
+        env['AutoNoGIL'] = 'pybind11::gil_scoped_release no_gil;' if not declaration['with_gil'] else ''
 
         # Use the simple_return_type (Tensor) rather than the fancy return type
         # (Tensor &).  This is important because the dispatch functions take
@@ -644,7 +656,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             }
             python_binding_arguments.append(dtype_arg)
         if is_factory_function or is_like_or_new_function_with_options:
-            py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_or_new_function_with_options else None
+            py_default_layout = '*torch::getLayout(self.options().backend())' if is_like_or_new_function_with_options else None
             layout_arg = {
                 'default': 'torch.strided',
                 'dynamic_type': 'Layout',
@@ -728,6 +740,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             'unpack_self': [],
             'dispatch': [],
             'declare_namedtuple_return_types': '',
+            'check_has_torch_function': '',
         }
 
         if has_self:
@@ -770,6 +783,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         if not is_module and not has_self:
             env['flags'] += ' | METH_STATIC'
+            env['check_has_torch_function'] = TORCH_FUNCTION_CHECK
+            py_signatures.append(PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION.substitute(env))
 
         py_methods.append(tmpl.substitute(env))
         if name in BINARY_OP_NAMES:
@@ -781,6 +796,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         process_function(name, python_functions[name])
 
     return {
+        'py_signatures': py_signatures,
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
         'py_method_dispatch': py_method_dispatch,

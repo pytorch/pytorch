@@ -714,7 +714,7 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  auto mean_tensor = at::full({1}, mean, output.options());
+  auto mean_tensor = at::full({}, mean, output.options());
   // NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
