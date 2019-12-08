@@ -474,7 +474,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             append_actuals_formals(*parse_arg(arg, arg_idx, unpack))
             arg_idx += 1
 
-
+        #logissue: req grad problem
         if has_tensor_options and check_is_factory_or_like_or_new_function(declaration): 
             #insert req_grad 
             added = False
@@ -618,7 +618,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)
-
         if requires_grad and not has_tensor_options:
             call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch,
                                                                      requires_grad=requires_grad)
@@ -629,7 +628,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
         py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
-        
         return body
 
     def emit_dispatch(i, dictionary, base_env):
@@ -650,7 +648,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             body = emit_single_dispatch(dictionary['base'], None, base_env)
 
         cond = 'if' if i == 0 else '} else if'
-
         return PY_VARIABLE_CASE.substitute(i=i, cond=cond, call_dispatch=body)
 
     def check_is_factory_or_like_or_new_function(declaration):
@@ -660,6 +657,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         for arg in declaration['arguments']:
             if arg.get('output', False):
                 continue
+
             typename = arg['simple_type']
             if typename in ['Tensor', 'TensorList']:
                 has_tensor_input_arg = True
@@ -760,7 +758,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'simple_type': 'bool',
             }
             python_binding_arguments.append(pin_memory_arg)
-        
+
         if is_factory_or_like_or_new_function:
             requires_grad_arg = {
                 'default': False,
@@ -1020,13 +1018,7 @@ def get_python_signature(declaration, include_out):
         # Skip `TensorOptions` in Python, as it is only used on the C++ side.
         # logissue if 2 scalar types are passed - we have an issue
         if TOUtils.check_if_factory_method(declaration['arguments']):
-            if arg['name'] == 'dtype':
-                continue
-            if arg['name'] == 'layout':
-                continue
-            if arg['name'] == 'device':
-                continue
-            if arg['name'] == 'pin_memory':
+            if arg['name'] in ['dtype', 'layout', 'device', 'pin_memory']:
                 continue
 
         if arg.get('kwarg_only', False) and positional:

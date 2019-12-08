@@ -1,3 +1,7 @@
+
+tensor_options_optional_types_and_var = ['c10::optional<ScalarType> dtype', 'c10::optional<Layout> layout', 'c10::optional<Device> device', 'c10::optional<bool> pin_memory']
+tensor_options_types_and_var = ['ScalarType dtype', 'Layout layout', 'Device device', 'bool pin_memory']
+
 def check_if_factory_method(args):
     for arg in args: 
         if 'type' not in arg:
@@ -18,18 +22,20 @@ def collapse_actuals2(actuals):
     collapsed[index + 3] = 'options.pinned_memory()'
     return collapsed
 
+
+def check_tensor_options_in_formals(formals):
+    return (any(formal['dynamic_type'] == 'ScalarType' for formal in formals) and
+            any(formal['dynamic_type'] == 'Layout' for formal in formals) and
+            any(formal['dynamic_type'] == 'Device' for formal in formals) and 
+            any(formal['dynamic_type'] == 'bool' for formal in formals))
+
 def collapse_actuals(actuals):
         collapsed = actuals[:]
         if (any(actual == 'dtype' for actual in actuals) and
             any(actual == 'layout' for actual in actuals) and
             any(actual == 'device' for actual in actuals) and 
             any(actual == 'pin_memory' for actual in actuals)):
-            index = 0
-            for i in range(len(collapsed)):
-                if collapsed[index] == 'dtype':
-                    break
-                else:
-                    index += 1
+            index = collapsed.index('dtype')
 
             collapsed.pop(index)
             collapsed.pop(index)
@@ -39,15 +45,12 @@ def collapse_actuals(actuals):
 
         return collapsed
 
-tensor_options_optional_types = ['c10::optional<ScalarType> dtype', 'c10::optional<Layout> layout', 'c10::optional<Device> device', 'c10::optional<bool> pin_memory']
-tensor_options_types_and_var = ['ScalarType dtype', 'Layout layout', 'Device device', 'bool pin_memory']
-
 def collapse_formals(formals):
     collapsed = formals[:]
 
     hasTO = True
     hasDefVal = False
-    for option in tensor_options_optional_types:
+    for option in tensor_options_optional_types_and_var:
         if not any(option in formal for formal in formals):
             hasTO = False
             break
@@ -129,9 +132,3 @@ def collapse_formals_list(formals):
             collapsed.insert(index, {"annotation" : "None", "dynamic_type": "TensorOptions", "is_nullable": "False", "kwarg_only": "True", "name": "options", "type": "const TensorOptions &", })
 
         return collapsed
-
-def check_tensor_options_in_formals(formals):
-    return (any(formal['dynamic_type'] == 'ScalarType' for formal in formals) and
-            any(formal['dynamic_type'] == 'Layout' for formal in formals) and
-            any(formal['dynamic_type'] == 'Device' for formal in formals) and 
-            any(formal['dynamic_type'] == 'bool' for formal in formals))

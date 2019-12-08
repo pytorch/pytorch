@@ -50,6 +50,28 @@ void window_function_checks(
       window_length);
 }
 
+void window_function_checks(
+    const char* function_name,
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout,
+    int64_t window_length) {
+  TORCH_CHECK(
+      layout.has_value() && layout.value() != kSparse,
+      function_name,
+      " is not implemented for sparse types, got: ",
+      layout.value());
+  TORCH_CHECK(
+      at::isFloatingType(dtype.value()) || at::isComplexType(dtype.value()),
+      function_name,
+      " expects floating point dtypes, got: ",
+      dtype.value());
+  TORCH_CHECK(
+      window_length >= 0,
+      function_name,
+      " requires non-negative window_length, got window_length=",
+      window_length);
+}
+
 // bool inputs are considered integral
 static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
   for (Scalar& s : l) {
@@ -114,7 +136,7 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::op
   }
 
   int64_t nelements = prod_intlist(size);
-  auto currDtype = dtype.has_value() ? scalarTypeToTypeMeta(dtype.value()) : scalarTypeToTypeMeta(at::ScalarType::Float);
+  auto currDtype = dtype.has_value() ? scalarTypeToTypeMeta(dtype.value()) : at::get_default_dtype();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
     currDtype,
     nelements,
@@ -145,9 +167,9 @@ Tensor empty(
   if (!names.has_value()) {
     return at::_empty(size, dtype, layout, device, pin_memory, optional_memory_format);
   }
-  TORCH_CHECK(layout.value() == Layout::Strided,
+  TORCH_CHECK(layout.has_value() && layout.value() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(device.value().type() == DeviceType::CPU || device.value().type() == DeviceType::CUDA,
+  TORCH_CHECK(device.has_value() && device.value().type() == DeviceType::CPU || device.value().type() == DeviceType::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::_empty(size, dtype, layout, device, pin_memory, optional_memory_format);
   internal_set_names_inplace(result, names);
@@ -202,6 +224,7 @@ Tensor empty_like(
   return native::empty_like(self, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory(), optional_memory_format);
 }
 
+//logissue : _like functions should behave same as others.
 Tensor empty_like(
     const Tensor& self,
     ScalarType dtype, Layout layout, Device device, bool pin_memory,
@@ -713,7 +736,7 @@ Tensor range(
 
 Tensor tril_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  //check_args(row, col, dtype, layout, device, pin_memory); // [CHECK THIS]
+  check_args(row, col, layout);
 
   auto tril_size = get_tril_size(row, col, offset);
 
@@ -758,7 +781,7 @@ Tensor tril_indices_cpu(
 
 Tensor triu_indices_cpu(
     int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  //check_args(row, col, dtype, layout, device, pin_memory); // [CHECK THIS]
+  check_args(row, col, layout);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
 
@@ -843,6 +866,7 @@ Tensor new_zeros(
     c10::optional<bool> pin_memory
     ) {
 
+  //logissue there should be no need for this kind of stuff.
   const auto options = TensorOptions()
         .dtype(dtype)
         .layout(layout)
@@ -862,7 +886,7 @@ Tensor bartlett_window(
     int64_t window_length,
     bool periodic,
     c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  //window_function_checks("bartlett_window", options, window_length); [CHECK THIS]
+  window_function_checks("bartlett_window", dtype, layout, window_length);
   if (window_length == 0) {
     return at::_empty({0}, dtype, layout, device, pin_memory);
   }
@@ -888,7 +912,7 @@ Tensor blackman_window(
     int64_t window_length,
     bool periodic,
     c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  //window_function_checks("blackman_window", options, window_length); // [CHECK THIS]
+  window_function_checks("blackman_window", dtype, layout, window_length);
   if (window_length == 1) {
     return native::ones({1}, dtype, layout, device, pin_memory);
   }
@@ -930,7 +954,7 @@ Tensor hamming_window(
     double alpha,
     double beta,
     c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  // window_function_checks("hamming_window", options, window_length); // [CHECK THIS]
+   window_function_checks("hamming_window", dtype, layout, window_length);
   if (window_length == 0) {
     return at::_empty({0}, dtype, layout, device, pin_memory);
   }
@@ -955,7 +979,7 @@ Tensor hann_window(
     int64_t window_length,
     bool periodic,
     c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  //window_function_checks("hann_window", options, window_length); // [CHECK THIS]
+  window_function_checks("hann_window", dtype, layout, window_length);
   return native::hamming_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, dtype, layout, device, pin_memory);
 }
@@ -1006,7 +1030,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-    // TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned"); [CHECK THIS]
+    TORCH_CHECK(!pin_memory.value(), "tensors constructed from a file cannot be pinned");
     size_t my_size = size.value_or(0);
     int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
