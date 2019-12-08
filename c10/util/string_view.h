@@ -642,6 +642,9 @@ class basic_string_view final {
 };
 
 template <class CharT>
+const typename basic_string_view<CharT>::size_type basic_string_view<CharT>::npos;
+
+template <class CharT>
 inline std::basic_ostream<CharT>& operator<<(
     std::basic_ostream<CharT>& stream,
     basic_string_view<CharT> sv) {
