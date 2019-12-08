@@ -12,13 +12,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Clang version:"
 clang --version
 
-echo "LLVM prefix:"
-llvm-config-7 --prefix
-
-find /usr/lib/llvm-7
-
-export LLVM_DIR="$(llvm-config-7 --cmakedir)"
-find ${LLVM_DIR}
+export LLVM_DIR="$(llvm-config-7 --prefix)"
+echo "LLVM_DIR: ${LLVM_DIR}"
 
 # Run the following 2 steps together because they share the same (reusable) time
 # consuming process to build LibTorch into LLVM assembly.
