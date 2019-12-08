@@ -180,7 +180,7 @@ class _ObserverBase(ObserverBase):
                 zero_point = zero_point.new_full(zero_point.size(), 128)
         else:
             scale = (max_val - min_val) / float(qmax - qmin)
-            scale = torch.max(scale, torch.tensor(self.eps, dtype=scale.dtype))
+            scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
             zero_point = qmin - torch.round(min_val / scale)
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
