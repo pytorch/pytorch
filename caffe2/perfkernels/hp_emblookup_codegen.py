@@ -1,6 +1,4 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from typing import List
-from typing import Any
 
 import argparse
 import sys
@@ -9,8 +7,8 @@ import sys
 sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1}
 
 
-def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets) -> List[Any]:
-    def compute(regid, InType, use_weights, isa, prefetch) -> List[Any]:
+def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
+    def compute(regid, InType, use_weights, isa, prefetch):
         code = []
 
         if InType == "float":
@@ -188,8 +186,8 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
     return code
 
 
-def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets) -> List[Any]:
-    def compute(InType, use_weights, isa) -> List[Any]:
+def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
+    def compute(InType, use_weights, isa):
         code = []
         if InType == "float":
             code.append(

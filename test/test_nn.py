@@ -9682,7 +9682,8 @@ class TestNNDeviceType(NNTestCase):
             print(expected)
             print("result:")
             print(result)
-            print("mode: " + str(mode) + "; dtype: " + str(dtype) + "; trainable: " + str(trainable) + "; new_offsets: " + str(new_offsets))
+            print("mode: " + str(mode) + "; dtype: " + str(dtype) + "; trainable: "
+                  + str(trainable) + "; new_offsets: " + str(new_offsets))
             self.assertEqual(result, expected, prec=dtype2prec[dtype])
 
             grad = torch.randn_like(expected)
