@@ -185,6 +185,9 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
+        scale[min_val == max_val] = 1.0
+        zero_point[min_val == max_val] = 0
+
         return scale, zero_point
 
     @torch.jit.export
