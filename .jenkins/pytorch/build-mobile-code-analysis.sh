@@ -13,11 +13,11 @@ echo "Clang version:"
 clang --version
 
 echo "LLVM prefix:"
-llvm-config-5.0 --prefix
+llvm-config-7 --prefix
 
-find /usr/lib/llvm-5.0
+find /usr/lib/llvm-7
 
-export LLVM_DIR="$(llvm-config-5.0 --cmakedir)"
+export LLVM_DIR="$(llvm-config-7 --cmakedir)"
 find ${LLVM_DIR}
 
 # Run the following 2 steps together because they share the same (reusable) time
