@@ -135,6 +135,7 @@ check_test_result() {
     echo "Test result is the same as expected."
   else
     echo "Test result is DIFFERENT from expected!"
+    exit 1
   fi
 }
 
