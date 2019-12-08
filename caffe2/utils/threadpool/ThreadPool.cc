@@ -87,6 +87,11 @@ int ThreadPool::getNumThreads() const {
   return numThreads_;
 }
 
+void ThreadPool::setNumThreads(size_t numThreads) {
+  std::lock_guard<std::mutex> guard(executionMutex_);
+  numThreads_ = numThreads;
+}
+
 // Sets the minimum work size (range) for which to invoke the
 // threadpool; work sizes smaller than this will just be run on the
 // main (calling) thread

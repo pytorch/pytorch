@@ -36,6 +36,7 @@ class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
   ~ThreadPool();
   // Returns the number of threads currently in use
   int getNumThreads() const;
+  void setNumThreads(size_t numThreads);
 
   // Sets the minimum work size (range) for which to invoke the
   // threadpool; work sizes smaller than this will just be run on the
