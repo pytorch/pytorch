@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 import copy
 import itertools
+import time
 
 import torch
 
@@ -303,6 +304,10 @@ class DistributedDataParallel(Module):
                 self.broadcast_bucket_size)
 
         self._ddp_init_helper()
+
+        # Add delay to get around of the tricky deadlock related to pinned mem
+        # allocator and distributed backend.
+        time.sleep(3)
 
     def _ddp_init_helper(self):
         """
