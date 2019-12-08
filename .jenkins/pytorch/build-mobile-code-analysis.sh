@@ -15,6 +15,8 @@ clang --version
 echo "LLVM prefix:"
 llvm-config-5.0 --prefix
 
+export LLVM_DIR=/usr/lib/llvm-5.0
+
 # Run the following 2 steps together because they share the same (reusable) time
 # consuming process to build LibTorch into LLVM assembly.
 
