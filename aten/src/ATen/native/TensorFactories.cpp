@@ -29,26 +29,6 @@
 namespace at {
 namespace native {
 namespace {
-void window_function_checks(
-    const char* function_name,
-    const TensorOptions& options,
-    int64_t window_length) {
-  TORCH_CHECK(
-      options.layout() != kSparse,
-      function_name,
-      " is not implemented for sparse types, got: ",
-      options);
-  TORCH_CHECK(
-      at::isFloatingType(typeMetaToScalarType(options.dtype())) || at::isComplexType(typeMetaToScalarType(options.dtype())),
-      function_name,
-      " expects floating point dtypes, got: ",
-      options);
-  TORCH_CHECK(
-      window_length >= 0,
-      function_name,
-      " requires non-negative window_length, got window_length=",
-      window_length);
-}
 
 void window_function_checks(
     const char* function_name,
@@ -169,7 +149,7 @@ Tensor empty(
   }
   TORCH_CHECK(layout.has_value() && layout.value() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(device.has_value() && device.value().type() == DeviceType::CPU || device.value().type() == DeviceType::CUDA,
+  TORCH_CHECK((device.has_value() && device.value().type() == DeviceType::CPU) || device.value().type() == DeviceType::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::_empty(size, dtype, layout, device, pin_memory, optional_memory_format);
   internal_set_names_inplace(result, names);
