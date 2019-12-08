@@ -12,8 +12,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Clang version:"
 clang --version
 
-# !!!REMOVE THIS HACK!!!
-sudo apt-get install -y --no-install-recommends llvm-7-dev
+# !!! THIS HACK SHOULD BE MOVED TO DOCKER BUILD SCRIPT !!!
+wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-7 main"
+sudo apt-get -qq update
+sudo apt-get -qq install llvm-7-dev
 
 export LLVM_DIR="$(llvm-config-7 --prefix)"
 echo "LLVM_DIR: ${LLVM_DIR}"
