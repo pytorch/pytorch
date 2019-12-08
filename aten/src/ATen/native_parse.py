@@ -422,6 +422,7 @@ def run(paths):
                 declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'unboxed_only')
                 assert declaration['use_c10_dispatcher'] in ['unboxed_only', 'full']
+                declaration['manual_kernel_registration'] = func.get('manual_kernel_registration', False)
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])

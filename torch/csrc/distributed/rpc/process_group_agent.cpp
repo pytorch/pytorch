@@ -251,8 +251,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       if (timeout.count() == 0) {
         timeout = INFINITE_TIMEOUT;
       }
-      auto futureInfo = FutureInfo(future, futureStartTime, to.id_, timeout);
-      futures_[requestId] = futureInfo;
+      auto& futureInfo = futures_
+                             .emplace(
+                                 std::piecewise_construct,
+                                 std::forward_as_tuple(requestId),
+                                 std::forward_as_tuple(FutureInfo(
+                                     future, futureStartTime, to.id_, timeout)))
+                             .first->second;
       auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[rpcEndTime].push_back(requestId);
@@ -546,6 +551,18 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
   return futureInfo.timeout_ == INFINITE_TIMEOUT
       ? INFINITE_TIMEOUT
       : futureInfo.startTime_ + futureInfo.timeout_;
+}
+
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  /* For now return an empty map, TODO add metrics like send/recv count etc */
+  return metrics;
+}
+
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getDebugInfo() {
+  /* This would later include more info other than metrics for eg: may include
+     stack traces for the threads owned by the agent */
+  return getMetrics();
 }
 
 } // namespace rpc

@@ -69,6 +69,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_worker_infos",
               &RpcAgent::getWorkerInfos,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_debug_info",
+              &RpcAgent::getDebugInfo,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_metrics",
+              &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
@@ -78,12 +86,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           worker.
 
           Example::
-
               Following examples skip RPC initialization and shutdown code
               for simplicity. Refer to RPC docs for those details.
 
               1. Create an RRef using rpc.remote
 
+              >>> import torch
               >>> import torch.distributed.rpc as rpc
               >>> rref = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
               >>> # get a copy of value from the RRef
@@ -91,17 +99,21 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
               2. Create an RRef from a local object
 
+              >>> import torch
               >>> from torch.distributed.rpc import RRef
               >>> x = torch.zeros(2, 2)
               >>> rref = RRef(x)
 
               3. Share an RRef with other workers
 
-              On both worker0 and worker1:
+              >>> # On both worker0 and worker1:
               >>> def f(rref):
               >>>   return rref.to_here() + 1
 
-              On worker0:
+              >>> # On worker0:
+              >>> import torch
+              >>> import torch.distributed.rpc as rpc
+              >>> from torch.distributed.rpc import RRef
               >>> rref = RRef(torch.zeros(2, 2))
               >>> # the following RPC shares the rref with worker1, reference
               >>> # count is automatically updated.
@@ -148,7 +160,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
               [](py::tuple t) { // NOLINT
                 // __setstate__
                 return PyRRef::unpickle(t);
-              }));
+              }))
+          // not releasing GIL to avoid context switch
+          .def("__str__", &PyRRef::str);
 
   // future.wait() should not be called after shutdown(), e.g.,
   // pythonRpcHandler is cleaned up in shutdown(), after
@@ -214,6 +228,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
+  });
+
+  module.def("_get_debug_info", []() {
+    return RRefContext::getInstance().getDebugInfo();
   });
 
   module.def("_cleanup_python_rpc_handler", []() {

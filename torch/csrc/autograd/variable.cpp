@@ -331,7 +331,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       fn->storage_offset = self.storage_offset();
       fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
-        diff_view_meta->base_.type()
+        diff_view_meta->base_.options()
       , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
