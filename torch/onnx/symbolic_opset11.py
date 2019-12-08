@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from sys import maxsize
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
@@ -42,6 +44,46 @@ def clamp(g, self, min, max):
     return g.op("Clip", self, min, max)
 
 
+def index_put(g, self, indices_list_value, values, accumulate=False):
+    indices_list = sym_help._unpack_list(indices_list_value)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        args = [self] + indices_list + [values, accumulate]
+        return g.op("ATen", *args, operator_s='index_put')
+
+    from torch.onnx.symbolic_opset9 import add, expand
+    accumulate = sym_help._parse_arg(accumulate, 'b')
+
+    index = indices_list[0]
+
+    if len(indices_list) > 1:
+        for ind in indices_list[1:]:
+            index = add(g, index, ind)
+        broadcast_index_shape = g.op("Shape", index)
+        indices_list = [
+            g.op("Unsqueeze", expand(g, ind, broadcast_index_shape, None), axes_i=[-1]) for ind in indices_list
+        ]
+        index = g.op("Concat", *indices_list, axis_i=-1)
+    else:
+        broadcast_index_shape = g.op("Shape", index)
+        index = g.op("Unsqueeze", index, axes_i=[-1])
+    sub_data_shape = sym_help._slice_helper(
+        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
+    values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
+    values = g.op("Reshape", values, values_shape)
+
+    if accumulate:
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+        zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
+        result = g.op("ScatterND", zeros, index, values)
+        result = add(g, self, result)
+    else:
+        result = g.op("ScatterND", self, index, values)
+
+    return result
+
+
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
     dims = self.type().sizes()
@@ -63,7 +105,7 @@ def _interpolate(name, dim, interpolate_mode):
 
         return g.op("Resize",
                     input,
-                    empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                    empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
                     empty_tensor,  # scales is not needed since we are sending out_size
                     output_size,
                     coordinate_transformation_mode_s=coordinate_transformation_mode,
@@ -92,7 +134,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
     align_corners = False if not isinstance(align_corners, bool) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
-    # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+    # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
@@ -107,11 +149,13 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
         except AttributeError:
             is_scalar = not sym_help._is_packed_list(size)
             if not is_scalar:
-                warnings.warn("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
+                warnings.warn("Cannot verify if the output_size is a scalar "
+                              "while exporting interpolate. Assuming that it is not a scalar.")
 
         if is_scalar:
             if not input.type().dim():
-                return sym_help._unimplemented("interpolate (with a scalar output_size)", "missing input shape (try giving an array of output_size values)")
+                return sym_help._unimplemented("interpolate (with a scalar output_size)",
+                                               "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)

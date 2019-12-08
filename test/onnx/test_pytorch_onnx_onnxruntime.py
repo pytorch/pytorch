@@ -107,7 +107,7 @@ class TestONNXRuntime(unittest.TestCase):
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=False,
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
         return run_model_test(self, model, batch_size=batch_size,
@@ -400,6 +400,59 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    def test_conv(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super(TraceModel, self).__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        class ScriptModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+                self.conv3 = torch.nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
+
+            @torch.jit.script_method
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        x1 = torch.randn(20, 16, 50)
+        x2 = torch.randn(20, 16, 50, 100)
+        x3 = torch.randn(20, 16, 10, 50, 100)
+
+        self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
+        self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
+
+    # TODO: Add ConvTranspose1d and ConvTranspose3d when supported in ORT
+    # TODO : Add test with dilation != 1 when ORT fixed
+    def test_conv_transpose(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super(TraceModel, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
+            def forward(self, input2):
+                return self.conv2(input2)
+
+        class ScriptModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+
+            @torch.jit.script_method
+            def forward(self, input2):
+                return self.conv2(input2)
+
+        x2 = torch.randn(20, 16, 50, 100)
+
+        self.run_test(TraceModel(), (x2,), atol=10e-5)
+        self.run_test(ScriptModel(), (x2,), atol=10e-5)
 
     def test_squeeze(self):
         class Squeeze(torch.nn.Module):
@@ -626,6 +679,174 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_tensor_index_advanced_indexing_consecutive(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, ind, update):
+                x[ind] = update
+                return x
+
+        x = torch.randn(3, 4)
+        ind = torch.tensor([1], dtype=torch.long)
+        update = torch.ones(4)
+        self.run_test(IndexPutModel(), (x, ind, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_accumulate(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, ind, update):
+                return x.index_put((ind, ), update, accumulate=True)
+
+        x = torch.randn(3, 4)
+        ind = torch.tensor([2], dtype=torch.long)
+        update = torch.ones(4)
+        self.run_test(IndexPutModel(), (x, ind, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_slice_index(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:2, 1:3, torch.tensor([1])] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(1, 2, 1)
+        self.run_test(IndexPutModel(), (x, update))
+
+        class IndexPutModel2(torch.nn.Module):
+            def forward(self, x, update):
+                x[torch.tensor([0, 2]), torch.tensor([1, 2])] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.randn(2, 5)
+        self.run_test(IndexPutModel2(), (x, update))
+
+        class IndexPutModel3(torch.nn.Module):
+            def forward(self, x, update):
+                x[torch.tensor([0, 2]), 1:2] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(2, 1, 1)
+        self.run_test(IndexPutModel3(), (x, update))
+
+        class IndexPutModel4(torch.nn.Module):
+            def forward(self, x, update):
+                x[torch.tensor([0, 2]), 2] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(2, 1)
+        self.run_test(IndexPutModel4(), (x, update))
+
+        class IndexPutModel5(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:3, torch.tensor([0, 2]), 2] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(2, 1)
+        self.run_test(IndexPutModel5(), (x, update))
+
+        class IndexPutModel6(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:3, 0] = update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.arange(2 * 5).to(torch.float).view(2, 5)
+        self.run_test(IndexPutModel6(), (x, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_ellipsis(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, update):
+                x[..., torch.tensor([2, 1, 3]), 2:4] += update
+                return x
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        update = torch.randn(3, 1, 1, 3, 2)
+        self.run_test(IndexPutModel(), (x, update))
+
+        class IndexPutModel2(torch.nn.Module):
+            def forward(self, x, update):
+                x[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
+                return x
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        update = torch.randn(4, 1, 3, 2)
+        self.run_test(IndexPutModel2(), (x, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_copy_(self):
+        class CopyModel(torch.nn.Module):
+            def forward(self, x, data):
+                x[1:3] = data
+                return x
+
+        x = torch.randn(3, 4)
+        update = torch.randn(2, 4)
+        self.run_test(CopyModel(), (x, update))
+
+        # mixed slice and select
+        class CopyModel2(torch.nn.Module):
+            def forward(self, x, data):
+                x[1:3, 0] = data
+                return x
+
+        x = torch.randn(3, 4)
+        update = torch.tensor([0], dtype=torch.float32)
+        self.run_test(CopyModel2(), (x, update))
+
+        update = torch.tensor([2, 3], dtype=torch.float32)
+        self.run_test(CopyModel2(), (x, update))
+
+        update = torch.randn(2)
+        self.run_test(CopyModel2(), (x, update))
+
+        class CopyModel3(torch.nn.Module):
+            def forward(self, x, data):
+                x[1, 1:3] = data
+                return x
+
+        x = torch.randn(3, 4)
+        update = torch.tensor([0], dtype=torch.float32)
+        self.run_test(CopyModel3(), (x, update))
+
+        update = torch.tensor([2, 3], dtype=torch.float32)
+        self.run_test(CopyModel3(), (x, update))
+
+        update = torch.randn(2)
+        self.run_test(CopyModel3(), (x, update))
+
+        update = torch.randn(1, 2)
+        self.run_test(CopyModel3(), (x, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_copy_ellipsis(self):
+        class CopyModel(torch.nn.Module):
+            def forward(self, x, update):
+                x[..., 1] = update
+                return x
+
+        x = torch.randn(2, 3, 4)
+        update = torch.ones(1)
+        self.run_test(CopyModel(), (x, update))
+
+        x = torch.randn(2, 3, 4, 5, 6)
+        update = torch.ones(1)
+        self.run_test(CopyModel(), (x, update))
+
+        class CopyModel2(torch.nn.Module):
+            def forward(self, x, update):
+                x[2, ..., 1:3] = update
+                return x
+
+        x = torch.randn(3, 4, 5, 6)
+        update = torch.ones(1)
+        self.run_test(CopyModel2(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_flip(self):
@@ -1064,6 +1285,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
+
+    def test_logsoftmax(self):
+        for i in range(7)[2:]:
+            model = torch.nn.LogSoftmax(dim=i - 1)
+            dims = [2] * (i - 2) + [3, 4]
+            input = torch.ones(*dims, requires_grad=True)
+            self.run_test(model, input)
+
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = torch.nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm(self):

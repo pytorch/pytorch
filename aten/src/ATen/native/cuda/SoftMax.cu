@@ -621,7 +621,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
   } else {
     uint32_t smem_size;
     dim3 grid, block;
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "host_softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(gI.scalar_type(), "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
     if (!half_to_float) {
         SpatialSoftMax_getLaunchSizes<accscalar_t>(
