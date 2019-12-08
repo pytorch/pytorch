@@ -15,7 +15,10 @@ clang --version
 echo "LLVM prefix:"
 llvm-config-5.0 --prefix
 
-export LLVM_DIR=/usr/lib/llvm-5.0
+find /usr/lib/llvm-5.0
+
+export LLVM_DIR="$(llvm-config-5.0 --cmakedir)"
+find ${LLVM_DIR}
 
 # Run the following 2 steps together because they share the same (reusable) time
 # consuming process to build LibTorch into LLVM assembly.
