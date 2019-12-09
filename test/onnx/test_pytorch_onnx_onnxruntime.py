@@ -2410,7 +2410,7 @@ TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
                                dict(TestONNXRuntime.__dict__, opset_version=11))
 
 
-# opset 9 tests, with keep_initializers_as_inputs=False for 
+# opset 9 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
@@ -2418,7 +2418,7 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    keep_initializers_as_inputs=False))
 
 
-# opset 10 tests, with keep_initializers_as_inputs=False for 
+# opset 10 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
@@ -2426,7 +2426,7 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     keep_initializers_as_inputs=False))
 
 
-# opset 11 tests, with keep_initializers_as_inputs=False for 
+# opset 11 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
                                     (unittest.TestCase,),
