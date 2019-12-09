@@ -101,12 +101,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_softshrink(Tensor self, Scalar lambd)
-  cname: SoftShrink
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Convolutions
 
 - name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding)
