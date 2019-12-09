@@ -36,8 +36,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
 echo "Python version:"
@@ -256,7 +260,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Bazel dependencies
   sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
   # XLA build requires Bazel
-  wget https://github.com/bazelbuild/bazel/releases/download/0.24.1/bazel-0.24.1-installer-linux-x86_64.sh
+  wget https://github.com/bazelbuild/bazel/releases/download/1.1.0/bazel-1.1.0-installer-linux-x86_64.sh
   chmod +x bazel-*.sh
   sudo ./bazel-*.sh
   BAZEL="$(which bazel)"

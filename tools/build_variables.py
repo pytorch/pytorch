@@ -315,6 +315,7 @@ def add_torch_libs():
         "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",
         "torch/csrc/jit/passes/onnx/scalar_type_analysis.cpp",
         "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
+        "torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.cpp",
         "torch/csrc/jit/passes/remove_inplace_ops.cpp",
         "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
         "torch/csrc/jit/python_arg_flatten.cpp",
