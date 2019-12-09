@@ -364,7 +364,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     for (size_t i = 0; i < local_used_maps_.size(); i++) {
       // We do async H2D to avoid the blocking overhead. The async copy and
       // allreduce respect the current stream, so will be sequenced correctly.
-      local_used_maps_dev_[i].copy_(local_used_maps_[i], false);
+      local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
     }
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 
