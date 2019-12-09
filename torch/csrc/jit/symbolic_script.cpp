@@ -989,85 +989,6 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
-        def AD_adaptive_avg_pool2d_backward(grad,
-                                            self,
-                                            output_size: List[int]):
-            if output_size[0] == 1 and output_size[1] == 1:
-                self_size = self.size()
-                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2])
-            else:
-                grad_self = torch._adaptive_avg_pool2d_backward(grad, self)
-
-            return grad_self
-
-        def AD_adaptive_avg_pool1d_backward(grad,
-                                            input,
-                                            output_size: List[int]):
-            output_size_2d = [1, output_size[0]]
-            grad_input = AD_adaptive_avg_pool2d_backward(grad.unsqueeze(2), input.unsqueeze(2), output_size_2d).squeeze(2)
-            return grad_input
-
-        def adaptive_avg_pool1d(self,
-                                output_size: List[int]):
-            def backward(grad_output):
-                grad_self = AD_adaptive_avg_pool1d_backward(grad_output, self, output_size)
-                return grad_self, None
-
-            return torch.adaptive_avg_pool1d(self, output_size), backward
-
-        def adaptive_avg_pool2d(self,
-                                output_size: List[int]):
-            def backward(grad_output):
-                # self is used in backward, no need to pass in its size explicitly
-                grad_self = AD_adaptive_avg_pool2d_backward(grad_output, self, output_size)
-                return grad_self, None
-            return torch.adaptive_avg_pool2d(self, output_size), backward
-
-        def adaptive_avg_pool3d(self,
-                                output_size: List[int]):
-            def backward(grad_output):
-                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
-                return grad_self, None
-
-            return torch.adaptive_avg_pool3d(self, output_size), backward
-
-        def avg_pool2d(self,
-                       kernel_size: List[int],
-                       stride: List[int],
-                       padding: List[int],
-                       ceil_mode: bool,
-                       count_include_pad: bool,
-                       divisor_override: Optional[int]):
-            def backward(grad_output):
-                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
-                return grad_self, None, None, None, None, None, None
-
-            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override), backward
-
-        def max_pool2d(self,
-                       kernel_size: List[int],
-                       stride: List[int],
-                       padding: List[int],
-                       dilation: List[int],
-                       ceil_mode: bool):
-            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
-            def backward(grad_output):
-                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
-                return grad_self, None, None, None, None, None
-            return output, backward
-
-        def max_pool2d_with_indices(self,
-                                    kernel_size: List[int],
-                                    stride: List[int],
-                                    padding: List[int],
-                                    dilation: List[int],
-                                    ceil_mode: bool):
-            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
-            def backward(grad_output):
-                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
-                return grad_self, None, None, None, None, None
-            return output, indices, backward
-
         def batch_norm_disabled(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1224,6 +1145,85 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
+        def AD_adaptive_avg_pool2d_backward(grad,
+                                            self,
+                                            output_size: List[int]):
+            if output_size[0] == 1 and output_size[1] == 1:
+                self_size = self.size()
+                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2])
+            else:
+                grad_self = torch._adaptive_avg_pool2d_backward(grad, self)
+
+            return grad_self
+
+        def AD_adaptive_avg_pool1d_backward(grad,
+                                            input,
+                                            output_size: List[int]):
+            output_size_2d = [1, output_size[0]]
+            grad_input = AD_adaptive_avg_pool2d_backward(grad.unsqueeze(2), input.unsqueeze(2), output_size_2d).squeeze(2)
+            return grad_input
+
+        def adaptive_avg_pool1d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                grad_self = AD_adaptive_avg_pool1d_backward(grad_output, self, output_size)
+                return grad_self, None
+
+            return torch.adaptive_avg_pool1d(self, output_size), backward
+
+        def adaptive_avg_pool2d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                # self is used in backward, no need to pass in its size explicitly
+                grad_self = AD_adaptive_avg_pool2d_backward(grad_output, self, output_size)
+                return grad_self, None
+            return torch.adaptive_avg_pool2d(self, output_size), backward
+
+        def adaptive_avg_pool3d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
+                return grad_self, None
+
+            return torch.adaptive_avg_pool3d(self, output_size), backward
+
+        def avg_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       ceil_mode: bool,
+                       count_include_pad: bool,
+                       divisor_override: Optional[int]):
+            def backward(grad_output):
+                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
+                return grad_self, None, None, None, None, None, None
+
+            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override), backward
+
+        def max_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       dilation: List[int],
+                       ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, backward
+
+        def max_pool2d_with_indices(self,
+                                    kernel_size: List[int],
+                                    stride: List[int],
+                                    padding: List[int],
+                                    dilation: List[int],
+                                    ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, indices, backward
+
         def AD_interpolate_backward(grad,
                                     input,
                                     mode: str,
