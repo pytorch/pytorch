@@ -1948,7 +1948,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
         self.run_test(Pad(), (x, y))
 
-
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -1966,6 +1965,14 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.ReplicationPad2d((3, 0, 2, 1))
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
+
+    def test_im2col(self):
+        class Unfold(torch.nn.Module):
+            def forward(self, input, kernel_size=[10, 15], dilation=[2, 3], padding=5, stride=3):
+                return torch.nn.functional.unfold(input, kernel_size, dilation, padding, stride)
+
+        x = torch.rand(1, 1, 200, 100)
+        self.run_test(Unfold(), x)
 
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)

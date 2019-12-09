@@ -5,7 +5,7 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import expand
+from torch.onnx.symbolic_opset9 import expand, size
 from torch.nn.modules.utils import _single, _pair, _triple
 
 
@@ -421,3 +421,85 @@ def __lshift_(g, self, other):
 
     lshift = g.op('Mul', self, two_pow)
     return lshift
+
+
+def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding_d, stride_d):
+    # Input is always 4-D (N, C, H, W)
+    # All other input args are int[2]
+    # Calculate indices of sliding blocks along spatial dimension
+    # Slide kernel over input each dim d:
+    # each dimension d ranges from 0 to input[d]+2×padding[d]−dilation[d]×(kernel_size[d]−1)
+    # with steps=stride
+
+    # padding_d = g.op("Cast", padding_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    # dilation_d = g.op("Cast", dilation_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    # kernel_size_d = g.op("Cast", kernel_size_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    # stride_d = g.op("Cast", stride_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    blocks_d = g.op("Add", input_d, g.op("Constant", value_t=torch.tensor(padding_d * 2)))
+    blocks_d = g.op("Sub", blocks_d, g.op("Constant", value_t=torch.tensor(dilation_d * (kernel_size_d - 1))))
+
+    # Stride kernel over input and find starting indices along dim d
+    blocks_d_indices = g.op("Range", g.op("Constant", value_t=torch.tensor(0)),
+                            blocks_d, g.op("Constant", value_t=torch.tensor(stride_d)))
+
+    # Apply dilation on kernel and find its indices along dim d
+    kernel_grid = g.op("Range",
+                       g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64)),
+                       g.op("Constant", value_t=torch.tensor(kernel_size_d * dilation_d)),
+                       g.op("Constant", value_t=torch.tensor(dilation_d)))
+
+    # Broadcast and add kernel staring positions (indices) with
+    # kernel_grid along dim d, to get block indices along dim d
+    blocks_d_indices = g.op('Reshape', blocks_d_indices, g.op('Constant', value_t=torch.tensor([1, -1])))
+    kernel_mask = g.op('Reshape', kernel_grid, g.op('Constant', value_t=torch.tensor([-1, 1])))
+    block_mask = g.op("Add", blocks_d_indices, kernel_mask)
+
+    return block_mask
+
+
+def _get_im2col_padded_input(g, input, padding_h, padding_w):
+    # Input is always 4-D tensor (N, C, H, W)
+    # Padding tensor has the following format: (padding_h, padding_w)
+    # Reshape the padding to follow ONNX format: (dim1_begin, dim2_begin,...,dim1_end, dim2_end,...)
+    pad = g.op("Concat",
+               g.op("Constant", value_t=torch.LongTensor([0, 0, padding_h, padding_w] * 2)),
+               axis_i=0)
+    return g.op("Pad", input, pad)
+
+
+def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
+    batch_dim = size(g, input, g.op("Constant", value_t=torch.tensor(0)))
+    channel_dim = size(g, input, g.op("Constant", value_t=torch.tensor(1)))
+    channel_unfolded = g.op("Mul", channel_dim,
+                            g.op("Constant", value_t=torch.tensor(kernel_h * kernel_w)))
+
+    return g.op("Concat",
+                g.op("Unsqueeze", batch_dim, axes_i=[0]),
+                g.op("Unsqueeze", channel_unfolded, axes_i=[0]),
+                g.op("Constant", value_t=torch.tensor([-1])), axis_i=0)
+
+
+@parse_args('v', 'is', 'is', 'is', 'is')
+def im2col(g, input, kernel_size, dilation, padding, stride):
+    # Input is always 4-D tensor (N, C, H, W)
+    # All other input args are int[2]
+
+    input_h = size(g, input, g.op("Constant", value_t=torch.tensor(2)))
+    input_w = size(g, input, g.op("Constant", value_t=torch.tensor(3)))
+
+    stride_h, stride_w = stride[0], stride[1]
+    padding_h, padding_w = padding[0], padding[1]
+    dilation_h, dilation_w = dilation[0], dilation[1]
+    kernel_h, kernel_w = kernel_size[0], kernel_size[1]
+
+    blocks_row_indices = _get_im2col_indices_along_dim(g, input_h, kernel_h, dilation_h, padding_h, stride_h)
+    blocks_col_indices = _get_im2col_indices_along_dim(g, input_w, kernel_w, dilation_w, padding_w, stride_h)
+
+    output_shape = _get_im2col_output_shape(g, input, kernel_h, kernel_w)
+    padded_input = _get_im2col_padded_input(g, input, padding_h, padding_w)
+
+    output = g.op("Gather", padded_input, blocks_row_indices, axis_i=2)
+    output = g.op("Gather", output, blocks_col_indices, axis_i=4)
+    output = g.op("Transpose", output, perm_i=[0, 1, 2, 4, 3, 5])
+
+    return g.op("Reshape", output, output_shape)
