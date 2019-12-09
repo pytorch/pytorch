@@ -160,12 +160,15 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   // Copy between CPU and GPU
   cuda::OptionalCUDAGuard device_guard;
   cudaMemcpyKind kind;
+  DeviceIndex device_index;
   if (dst_device.is_cuda() && src_device.is_cpu()) {
     device_guard.set_device(dst_device);
     kind = cudaMemcpyHostToDevice;
+    device_index = dst_device.index();
   } else if (dst_device.is_cpu() && src_device.is_cuda()) {
     device_guard.set_device(src_device);
     kind = cudaMemcpyDeviceToHost;
+    device_index = src_device.index();
   } else {
     TORCH_INTERNAL_ASSERT(false, "unsupported devices in GPU copy_()");
   }
@@ -173,7 +176,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   void* dst = iter.data_ptr(0);
   void* src = iter.data_ptr(1);
   int64_t nbytes = iter.numel() * iter.element_size(0);
-  CUDAStream stream = getCurrentCUDAStream();
+  CUDAStream stream = getCurrentCUDAStream(device_index);
 
   AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
 
