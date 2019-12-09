@@ -203,6 +203,7 @@ class TransformerDecoder(Module):
     def __init__(self, decoder_layer, num_layers, norm=None):
         super(TransformerDecoder, self).__init__()
         self.layers = _get_clones(decoder_layer, num_layers)
+        self.num_layers = num_layers
         self.norm = norm
 
     def forward(self, tgt, memory, tgt_mask=None,
