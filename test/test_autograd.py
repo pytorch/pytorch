@@ -2710,6 +2710,15 @@ class TestAutograd(TestCase):
             2,
         )
 
+        # We can also use record_function to decorate arbitrary function
+        @record_function('my_func')
+        def f(x, y):
+            return x + y
+
+        with profile() as p:
+            f(1, 2)
+
+        self.assertTrue('my_func' in str(p))
 
     def test_dir(self):
         x = torch.randn(10, 10)
