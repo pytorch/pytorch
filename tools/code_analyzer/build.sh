@@ -97,8 +97,9 @@ analyze_torch_mobile() {
     # Extract libtorch archive
     OBJECT_DIR="${WORK_DIR}/torch_objs"
     rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
-    ar x "${TORCH_INSTALL_PREFIX}/lib/libc10.a"
-    ar x "${TORCH_INSTALL_PREFIX}/lib/libtorch.a"
+    for f in "${TORCH_INSTALL_PREFIX}/lib"/*.a; do
+      ar x "${f}"
+    done
     popd
 
     # Link libtorch into a single module
@@ -117,8 +118,9 @@ analyze_test_project() {
   # Extract archive
   OBJECT_DIR="${WORK_DIR}/test_objs"
   rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
-  ar x "${TEST_INSTALL_PREFIX}/lib/libc10.a"
-  ar x "${TEST_INSTALL_PREFIX}/lib/libOpLib.a"
+  for f in "${TEST_INSTALL_PREFIX}/lib"/*.a; do
+    ar x "${f}"
+  done
   popd
 
   # Link into a single module
