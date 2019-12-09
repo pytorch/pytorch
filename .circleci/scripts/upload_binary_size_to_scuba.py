@@ -37,8 +37,9 @@ def build_message(size):
             "py_ver": py_ver,
             "cu_ver": cu_ver,
             "pr": pr,
-            "build": build_num,
+            "build_num": build_num,
             "sha1": sha1,
+            "branch": os.environ.get("CIRCLE_BRANCH"),
         },
         "int": {
             "time": int(time.time()),
