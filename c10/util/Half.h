@@ -259,7 +259,7 @@ namespace detail {
            * A normalized single-precision floating-point number is represented as:
            *    FP32 = (1 + mantissa * 2**(-23)) * 2**(exponent - 127)
            * Therefore, when the biased exponent is 126, a unit change in the mantissa of the input denormalized half-precision
-           * number causes a change of the constructud single-precision number by 2**(-24), i.e. the same ammount.
+           * number causes a change of the constructud single-precision number by 2**(-24), i.e. the same amount.
            *
            * The last step is to adjust the bias of the constructed single-precision number. When the input half-precision number
            * is zero, the constructed single-precision number has the value of
@@ -427,6 +427,14 @@ struct Converter<
 #pragma warning( disable : 4804 )
 #endif
 
+// The overflow checks may involve float to int conversion which may
+// trigger precision loss warning. Re-enable the warning once the code
+// is fixed. See T58053069.
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#endif
 
 // bool can be converted to any type.
 // Without specializing on bool, in pytorch_linux_trusty_py2_7_9_build:
@@ -466,6 +474,10 @@ overflows(From f) {
   }
   return f < limit::lowest() || f > limit::max();
 }
+
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
 
 #ifdef _MSC_VER
 #pragma warning( pop )

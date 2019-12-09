@@ -15,8 +15,9 @@ torch/csrc/jit/generated/
 import argparse
 import copy
 import re
+import yaml
 from itertools import groupby
-from ..autograd.utils import CodeTemplate, write
+from ..autograd.utils import CodeTemplate, YamlLoader, write
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
@@ -27,7 +28,7 @@ from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 #      | Tensor # any tensor, as defined by at::Tensor
 #      | Type[] # a dynamically sized list[ of a type
 #      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
-#      | (Type1, Type2, ...) # a heterogenous tuple
+#      | (Type1, Type2, ...) # a heterogeneous tuple
 #      | Layout | ScalarType | Device | Generator # special singleton types for built-in concepts in tensor lib
 
 # clean up the variety of C++ types in the ATen declarations
@@ -263,7 +264,13 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
-def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
+def load_op_list(path):
+    with open(path, 'r') as f:
+        op_list = yaml.load(f, Loader=YamlLoader)
+    return op_list
+
+
+def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, selected_op_list_path=None):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -307,6 +314,8 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
         return 'jit_type' in arg and arg['jit_type'] in {"Tensor!", "Tensor(a!)"}
 
     def emit_decl_variant(decl):
+        if ('emit_dummy_placeholder' in decl):
+            return "DUMMY_OPERATION"
         kw_assignments = []
 
         # mutable arguments in aten are passed as non const references
@@ -337,11 +346,13 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
                                              lvalues=lvalues)
         return constructor
 
-    def filter_decls(jit_decls, disable_autograd):
+    def filter_decls(jit_decls, disable_autograd, selected_op_list):
         result = []
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
+            if selected_op_list and signature_without_args(decl) not in selected_op_list:
+                decl['emit_dummy_placeholder'] = True
             result.append(decl)
         return result
 
@@ -431,7 +442,8 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
-    jit_decls = filter_decls(jit_decls, disable_autograd)
+    selected_op_list = load_op_list(selected_op_list_path) if selected_op_list_path else None
+    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list)
 
     # Group and sort the generated snippets to ensure that the
     # generation is deterministic
@@ -561,6 +573,12 @@ def signature(decl, should_match_schema=True):
     overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
     constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
     return match_signature(decl, constructed_string, should_match_schema)
+
+
+def signature_without_args(decl):
+    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
+    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
+    return 'aten::{}{}'.format(name, overload_name)
 
 
 def main():

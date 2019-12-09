@@ -197,6 +197,7 @@ Pointwise Ops
 .. autofunction:: atan
 .. autofunction:: atan2
 .. autofunction:: bitwise_not
+.. autofunction:: bitwise_xor
 .. autofunction:: ceil
 .. autofunction:: clamp
 .. autofunction:: conj
@@ -219,7 +220,9 @@ Pointwise Ops
 .. autofunction:: log10
 .. autofunction:: log1p
 .. autofunction:: log2
+.. autofunction:: logical_and
 .. autofunction:: logical_not
+.. autofunction:: logical_or
 .. autofunction:: logical_xor
 .. autofunction:: mul
 .. autofunction:: mvlgamma
@@ -245,8 +248,6 @@ Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: argmax
 .. autofunction:: argmin
-.. autofunction:: cumprod
-.. autofunction:: cumsum
 .. autofunction:: dist
 .. autofunction:: logsumexp
 .. autofunction:: mean
@@ -305,6 +306,8 @@ Other Operations
 .. autofunction:: cdist
 .. autofunction:: combinations
 .. autofunction:: cross
+.. autofunction:: cumprod
+.. autofunction:: cumsum
 .. autofunction:: diag
 .. autofunction:: diag_embed
 .. autofunction:: diagflat
@@ -372,3 +375,4 @@ Utilities
 .. autofunction:: result_type
 .. autofunction:: can_cast
 .. autofunction:: promote_types
+.. autofunction:: export_opnames
