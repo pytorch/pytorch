@@ -12,8 +12,6 @@ void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, cons
   auto vec_stride = vec.stride(0);
 
   if (mat.scalar_type() == kHalf || mat.scalar_type() == kBFloat16) {
-    auto beta = beta_.to<scalar_t>();
-    auto alpha = alpha_.to<scalar_t>();
     // Currently no Hgemv/SgemvEx in Cublas
     Tensor vec_as_matrix = vec.reshape({vec_size, 1}).contiguous();
     Tensor self_as_matrix = self.reshape({mat.size(0), 1}).contiguous();
