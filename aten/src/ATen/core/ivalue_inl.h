@@ -417,7 +417,8 @@ struct C10_EXPORT ivalue::PyObjectHolder final : c10::intrusive_ptr_target {
     return py_obj_;
   }
 
-  PyObjectHolder(PyObject* py_obj): py_obj_(py_obj) {}
+  // explicit construction to avoid errornous implicit conversion and copy-initialization
+  explicit PyObjectHolder(PyObject* py_obj): py_obj_(py_obj) {}
  private:
     PyObject* py_obj_;
 };
