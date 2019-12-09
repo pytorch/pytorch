@@ -36,6 +36,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   rpc::worker_id_t worker_id = 1;
   addSendRpcBackward(
       autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
+  autogradContext->addKnownWorkerId(worker_id);
   auto send_function = autogradContext->sendFunctions()[1];
 
   // ensure that the worker_ids are recorded

@@ -43,8 +43,6 @@ void addSendRpcBackward(
 
   // Record the send autograd function in our current context.
   autogradContext->addSendFunction(grad_fn, autogradMetadata.autogradMessageId);
-  // Record the workerID
-  autogradContext->addKnownWorkerId(dst);
 }
 
 ContextPtr addRecvRpcBackward(
@@ -108,6 +106,8 @@ Message getMessageWithAutograd(
     addSendRpcBackward(
         autogradContext, autogradMetadata, rpcWithAutograd->tensors(), dstId);
   }
+  // Record the workerID
+  autogradContext->addKnownWorkerId(dstId);
 
   return std::move(*rpcWithAutograd).toMessage();
 }
