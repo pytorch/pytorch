@@ -1203,9 +1203,6 @@ class RpcTest(RpcAgentTestFixture):
         # might be either 1 or 2 busy threads
         self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
 
-        DONE_FUTURE.set_result(self.rank)
-        self.assertEqual(dst_rank, fut.wait())
-
         if not dist.is_initialized():
             dist.init_process_group(
                 backend="gloo",
@@ -1213,6 +1210,13 @@ class RpcTest(RpcAgentTestFixture):
                 rank=self.rank,
                 world_size=self.world_size,
             )
+
+        # add a barrier to make sure the request is not finished before checking
+        # num_pending_requests
+        dist.barrier()
+
+        DONE_FUTURE.set_result(self.rank)
+        self.assertEqual(dst_rank, fut.wait())
 
         # add a barrier to make sure the dst_rank has finished processing the
         # request
