@@ -51,13 +51,27 @@ inline std::ostream& operator<<(
 }
 
 inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
-  AT_ASSERT(sizes.size() == 4);
-  std::vector<int64_t> strides(sizes.size());
-  strides[1] = 1;
-  strides[3] = sizes[1];
-  strides[2] = strides[3] * sizes[3];
-  strides[0] = strides[2] * sizes[2];
-  return strides;
+  switch (sizes.size()) {
+    case 4: {
+    std::vector<int64_t> strides(sizes.size());
+    strides[1] = 1;
+    strides[3] = sizes[1];
+    strides[2] = strides[3] * sizes[3];
+    strides[0] = strides[2] * sizes[2];
+    return strides;
+  }
+    case 3: {
+    std::vector<int64_t> strides(sizes.size());
+    strides[0] = 1;
+    strides[2] = sizes[0];
+    strides[1] = strides[2] * sizes[2];
+    return strides;
+  }
+    default:
+    AT_ERROR("Unsupported tensor dimentiality for 2d images");
+  }
+
+
 }
 
 } // namespace c10

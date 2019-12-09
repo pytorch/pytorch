@@ -1388,8 +1388,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       }
       case MemoryFormat::ChannelsLast: {
         TORCH_CHECK(
-            dim() == 4,
-            "required rank 4 tensor to use channels_last format");
+            dim() == 4 || dim() == 3,
+            "required rank 4 or 3 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
         set_channels_last_tag(true);
         break;

@@ -126,6 +126,18 @@ bool TensorImpl::compute_strides_like_channels_last() const {
       }
     }
     return true;
+  } else if (sizes_.size() == 3) {
+    int64_t min = 0;
+    for (auto& d : {0, 2, 1}) {
+      if (sizes_[d] != 1) {
+        if (strides_[d] > min) {
+          min = strides_[d];
+        } else {
+          return false;
+        }
+      }
+    }
+    return true;
   }
   return false;
 }
