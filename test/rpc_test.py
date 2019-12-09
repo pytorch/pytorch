@@ -1109,6 +1109,7 @@ class RpcTest(RpcAgentTestFixture):
             "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
         )
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/30988")
     @dist_init
     def test_rref_context_debug_info(self):
         if not dist.is_initialized():
