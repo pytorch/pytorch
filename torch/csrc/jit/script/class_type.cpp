@@ -112,7 +112,7 @@ size_t ClassType::addConstant(
   return slot;
 }
 
-c10::optional<IValue> ClassType::getConstant(const std::string& name) const {
+IValue ClassType::getConstant(const std::string& name) const {
   TORCH_CHECK(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
@@ -123,9 +123,18 @@ c10::optional<IValue> ClassType::getConstant(const std::string& name) const {
   }
 
   if (pos >= constantNames_.size()) {
-    return c10::nullopt;
+    TORCH_CHECK(
+        false,
+        "Can't get constant: ",
+        name);
   }
   return constantValues_[pos];
+}
+
+IValue ClassType::getConstant(size_t slot) const {
+  TORCH_CHECK(constantNames_.size() == constantValues_.size());
+  TORCH_CHECK(slot < constantValues_.size());
+  return constantValues_[slot];
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
