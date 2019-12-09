@@ -1113,22 +1113,38 @@ struct PythonPrintImpl {
     return body_;
   }
 
+  template <typename dtype>
+  IValue createBroadList(dtype value, const int64_t& N) {
+    c10::List<dtype> repeated;
+    repeated.reserve(N);
+    for (int i = 0; i < N; ++i) {
+      repeated.push_back(value);
+    }
+    return repeated;
+  }
+
   void printDefaultValue(
-      const TypePtr& typ,
+      const Argument& arg,
       TaggedStringStream& stmt,
       const IValue& value) {
-    // xxx - many weak script modules store default values for broadcasting
-    // lists that are not actually the same type as the argument. We can only
-    // serialize default values that will implicitly convert to their declared
-    // return type since we do not need to serialize these built-in modules with
-    // their defaults, we just drop them for now.
-    if (typ->kind() == ListType::Kind &&
-        (value.isInt() || value.isDouble() || value.isBool())) {
-      return;
-    }
     stmt << "=";
-    printConstant(stmt, value);
+    // handle broadcasting lists
+    if (arg.type()->kind() == ListType::Kind &&
+        (value.isInt() || value.isDouble() || value.isBool())) {
+      TORCH_INTERNAL_ASSERT(arg.N(), "expected broadcastinglist");
+      if (value.isInt()) {
+        printConstant(stmt, createBroadList<int64_t>(value.toInt(), *arg.N()));
+      } else if (value.isBool()) {
+        printConstant(stmt, createBroadList<bool>(value.toBool(), *arg.N()));
+      } else if (value.isDouble()) {
+        printConstant(
+            stmt, createBroadList<double>(value.toDouble(), *arg.N()));
+      }
+    } else {
+      printConstant(stmt, value);
+    }
   }
+
   void printBody(Block* body) {
     // we always print constants at the top of the function, in the order
     // in which they are used.
@@ -1176,7 +1192,7 @@ struct PythonPrintImpl {
         body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
       }
       if (arg.default_value()) {
-        printDefaultValue(arg.type(), body_, *arg.default_value());
+        printDefaultValue(arg, body_, *arg.default_value());
       }
       assignValue(*param_it++, arg_name);
     }
