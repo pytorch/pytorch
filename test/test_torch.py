@@ -5876,7 +5876,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             foo = dummy.grad
             self.assertEqual(len(w), 1)
 
-            # Accessing .grad on non-leaf that retain gradients
+            # Accessing .grad on non-leaf that retains gradients
             dummy.retain_grad()
             foo = dummy.grad
             self.assertEqual(len(w), 1)
