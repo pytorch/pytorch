@@ -4,6 +4,21 @@ import torch
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
+try:
+    # Available in Python >= 3.2
+    from contextlib import ContextDecorator
+except ImportError:
+    import functools
+
+    class ContextDecorator(object):
+        def __call__(self, func):
+            @functools.wraps(func)
+            def wrapped(*args, **kwargs):
+                with self:
+                    return func(*args, **kwargs)
+
+            return wrapped
+
 
 class EventList(list):
     """A list of Events (for pretty printing)"""
@@ -310,9 +325,10 @@ class profile(object):
         return self.function_events.self_cpu_time_total
 
 
-class record_function(object):
-    """Context manager that adds a label to a block of Python code when running autograd
-    profiler.  It is useful when tracing the code profile.
+class record_function(ContextDecorator):
+    """Context manager/function decorator that adds a label to a block of
+    Python code (or function) when running autograd profiler. It is
+    useful when tracing the code profile.
 
     Arguments:
         name (str): Label assigned to the block of code.
@@ -339,6 +355,7 @@ class record_function(object):
         -----------------------------------  ---------------  ---------------  ---------------
         Self CPU time total: 234.344us
         CUDA time total: 0.000us
+
     """
     def __init__(self, name):
         self.name = name
