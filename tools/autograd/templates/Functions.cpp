@@ -426,14 +426,11 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   return ret;
 }
 
-Tensor cummax_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
+Tensor cummax_backward(const Tensor &cummax_out, const Tensor &cummax_indices, const Tensor &grad, const Tensor &input, int64_t dim) {
   if (input.dim() == 0) {
     return input;
   }
-  auto result = at::native::cummax(input, dim);
-  auto ret = std::get<0>(result);
-  auto indices = std::get<1>(result);
-  return grad * at::native::scatter(ret, dim, indices, at::ones(ret.sizes()));
+  return grad * at::scatter(cummax_out, dim, cummax_indices, at::ones(cummax_out.sizes()));
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
