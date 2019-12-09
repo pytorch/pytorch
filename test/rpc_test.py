@@ -1277,7 +1277,10 @@ class RpcTest(RpcAgentTestFixture):
         autograd_info = dist_autograd._get_debug_info()
         common_keys = rref_info.keys() & agent_info.keys() & autograd_info.keys()
         self.assertEqual(0, len(common_keys))
-        expected = {**rref_info, **agent_info, **autograd_info}
+        expected = {}
+        expected.update(rref_info)
+        expected.update(agent_info)
+        expected.update(autograd_info)
         self.assertEqual(expected, info)
 
     @dist_init(setup_rpc=False)
