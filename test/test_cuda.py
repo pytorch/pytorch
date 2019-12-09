@@ -2076,13 +2076,5 @@ t2.start()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
-    def testCudaRecordStreamWithWrongDevice(self):
-        t = torch.randn(5, 5)
-        with self.assertRaisesRegex(RuntimeError, "Tensor is not allocated in CUDA"):
-            t.record_stream(torch.cuda.current_stream())
-        # Copy to CUDA
-        ct = t.to("cuda")
-        ct.record_stream(torch.cuda.current_stream())
-
 if __name__ == '__main__':
     run_tests()

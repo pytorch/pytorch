@@ -395,10 +395,6 @@ class THCCachingAllocator {
       return;
     }
 
-    // The ptr is not allocated by CUDA, most likely user error
-    TORCH_CHECK(
-        ptr.device().type() == kCUDA, "Tensor is not allocated in CUDA");
-
     // If a tensor is not allocated by this instance, simply skip
     // This usually happens when CUDA tensors are shared across processes,
     // we have implemented reference counting based sharing mechanism to
@@ -411,7 +407,7 @@ class THCCachingAllocator {
 
     Block* block = find_allocated_block(ptr.get());
     // block must not be null reaching here
-    TORCH_INTERNAL_ASSERT(block != NULL, "No allocated block can be found");
+    TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
     if (stream.stream() == block->stream) {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
