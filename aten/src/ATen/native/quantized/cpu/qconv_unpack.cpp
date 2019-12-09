@@ -35,7 +35,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       TORCH_CHECK(
           kSpatialDim == 2,
-          "quantized::conv_unpack (qnnpack): QNNPACK only supports Conv2d "
+          "quantized::conv2d_unpack (qnnpack): QNNPACK only supports Conv2d "
           "now.");
       return qnnpack_conv_unpack(packed_weights);
     }
@@ -43,7 +43,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
 
     TORCH_CHECK(
         false,
-        "Didn't find engine for operation quantized::conv_unpack ",
+        "Didn't find engine for operation quantized::conv2d_unpack ",
         toString(ctx.qEngine()));
   }
 
@@ -145,7 +145,13 @@ static auto registry =
         .op("quantized::conv_unpack(Tensor packed_weights)"
             " -> (Tensor unpacked_weights, Tensor? B_origin)",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
-                TensorTypeId::CPUTensorId))
+                TensorTypeId::CPUTensorId)) // conv_unpack is deprecated, please
+                                            // use conv2d_unpack for 2D conv.
+        .op("quantized::conv2d_unpack(Tensor packed_weights)"
+            " -> (Tensor unpacked_weights, Tensor? B_origin)",
+            c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<2>>(
+                TensorTypeId::CPUTensorId)) // We use  conv2d_unpack to be
+                                            // consistent with conv3d_unpack
         .op("quantized::conv3d_unpack",
             c10::RegisterOperators::options().kernel<QConvUnpackWeightsInt8<3>>(
                 TensorTypeId::CPUTensorId));

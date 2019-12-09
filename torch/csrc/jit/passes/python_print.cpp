@@ -296,11 +296,10 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.type() == tensor_table_[i].type() && t.equal(tensor_table_[i])) {
+      if (t.options().type_equal(tensor_table_[i].options()) && t.equal(tensor_table_[i])) {
         return i;
       }
     }
-    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }
@@ -1241,6 +1240,18 @@ struct PythonPrintImpl {
         body_ << name << " : " << type->python_str() << "\n";
       }
     }
+
+    size_t numConstants = moduleType->numConstants();
+    for (size_t i = 0; i < numConstants; i++) {
+      const auto& name = moduleType->getConstantName(i);
+      const auto& v = moduleType->getConstant(name).value();
+
+      indent();
+      body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
+      auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      printConstant(*ss, v);
+      body_ << ss->str() << "\n";
+    }
   }
 
   void printNamedType(const c10::NamedTypePtr& type) {
@@ -1361,10 +1372,6 @@ std::string PythonPrint::str() const {
 
 const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
-}
-
-void PythonPrint::LEGACY_printOpVersion() {
-  pImpl->body_ << "op_version_set = 1\n";
 }
 
 PythonPrint::~PythonPrint() = default;

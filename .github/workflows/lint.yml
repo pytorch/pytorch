@@ -16,7 +16,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@master
+        uses: actions/checkout@v1
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -51,7 +51,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@master
+        uses: actions/checkout@v1
       - name: Checkout PR tip
         run: |
           set -eux
@@ -65,7 +65,8 @@ jobs:
       - name: Run flake8
         run: |
           set -eux
-          pip install flake8
+          pip install flake8 flake8-mypy flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi mccabe pycodestyle pyflakes
+          flake8 --version
           flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
           cat ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
@@ -88,7 +89,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@master
+        uses: actions/checkout@v1
       - name: Checkout PR tip
         run: |
           set -eux

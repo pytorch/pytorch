@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "IsNaN_0"
     op_type: "IsNaN"
   }
   name: "torch-jit-export"

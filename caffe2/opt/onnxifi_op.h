@@ -236,8 +236,10 @@ class OnnxifiOp final : public Operator<Context> {
         for (const auto d : shape0) {
           shape.add_dims(d);
         }
-        weight_shape_info[weight_names[i]] =
-            ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
+        weight_shape_info[weight_names[i]] = ShapeInfo(
+            std::vector<TensorBoundShape::DimType>(
+                shape0.size(), TensorBoundShape_DimType_CONSTANT),
+            std::move(shape));
       }
 
       Blob* defered_blob_reader = nullptr;
