@@ -323,7 +323,7 @@ def _add_single_target_ifneeded(g):
 
 
 def _get_path(pred_list, dist_list):
-    ''' Get the path from nx.bellman_ford()'s output '''
+    ''' Get the path from nx.bellman_ford_predecessor_and_distance()'s output '''
 
     # distances are negative
     assert all(dist_list[x] <= 0 for x in dist_list)
@@ -338,17 +338,14 @@ def _get_path(pred_list, dist_list):
         ret.append(cur)
         # Hack to get networkx 2.0 happy: it uses list in pred.
         # TODO(tulloch): are there cases with multiple predecessors?
-        try:
-            cur = pred_list[cur][0]
-        except TypeError:
-            cur = pred_list[cur]
+        cur = pred_list[cur][0] if pred_list[cur] else None 
 
     return list(reversed(ret))
 
 
 def _get_longest_paths(g, source_nodes):
     ''' Get the longest path for nodes in 'source_nodes'
-        Find with bellman_ford() by setting weight = -1
+        Find with bellman_ford_predecessor_and_distance() by setting weight = -1
     '''
 
     ng = copy.deepcopy(g)
@@ -357,7 +354,7 @@ def _get_longest_paths(g, source_nodes):
 
     ret = {}
     for cn in source_nodes:
-        pred, dist = nx.bellman_ford(ng, cn, weight="weight")
+        pred, dist = nx.bellman_ford_predecessor_and_distance(ng, cn, weight="weight")
         path = _get_path(pred, dist)
         assert path[0] == cn
         assert len(path) - 1 == -dist[path[-1]]
