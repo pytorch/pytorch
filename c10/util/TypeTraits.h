@@ -120,5 +120,14 @@ template<template<class> class C>
 struct is_type_condition<C, guts::enable_if_t<std::is_same<bool, guts::remove_cv_t<decltype(C<int>::value)>>::value>> : std::true_type {};
 
 
+/**
+ * is_fundamental<T> is true_type iff the lambda type T is a fundamental type (that is, arithmetic type, void, or nullptr_t).
+ * Example:
+ *  is_fundamental<int> // true
+ */
+template <class T>
+struct is_fundamental : std::is_fundamental<T> {};
+
+
 }
 }
