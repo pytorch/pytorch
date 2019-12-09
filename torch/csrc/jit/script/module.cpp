@@ -199,6 +199,25 @@ Module Module::clone_impl(
   return r;
 }
 
+Module Module::clone_instance() const {
+  Module r(_ivalue()->compilation_unit(), type());
+
+  // Copy slots. If a slot is a module - recursively clone it.
+  size_t N = type()->numAttributes();
+  for (size_t i = 0; i < N; ++i) {
+    IValue s = _ivalue()->getSlot(i);
+    if (type()->getAttribute(i)->is_module()) {
+      const Module& orig = Module(s.toObject());
+      Module cloned = orig.clone_instance();
+      r._ivalue()->setAttr(type()->getAttributeName(i), cloned._ivalue());
+    } else {
+      r._ivalue()->setAttr(type()->getAttributeName(i), s);
+    }
+  }
+
+  return r;
+}
+
 void Module::train(bool on) {
   for (Module m : modules()) {
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
