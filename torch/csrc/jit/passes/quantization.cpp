@@ -21,6 +21,11 @@ namespace jit {
 namespace {
 
 using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
+// Map of quantization parameter name and value
+// for example _scale, _zero_point,
+// _scalar_type and _axis(for per channel quantization)
+using QParamMap = std::unordered_map<std::string, IValue>;
+
 // This struct contains a compiled IR pattens slated for use in the
 // findPatternMatches function. The struct encapsulates the common
 // information from parseIR that is used in conjunction with the
@@ -611,23 +616,23 @@ class InsertQuantDeQuantHelper {
   void run(
     script::Module& module,
     const std::string& method_name);
-  // quantization parameters and scalar type
-  std::tuple<IValue, IValue> getQParams(script::Module& module, Value* v);
+
+  // Get quantization parameter map of the given Value in Graph
+  // by searching for observer module of the value and extract the
+  // quantization parameters from the observer module
+  QParamMap getQParamMap(script::Module& module, Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
   void removeObservers(script::Module& module, Graph* g);
-  bool registerQParams(script::Module& module,
-                       const std::tuple<IValue, IValue>& qparams_and_scalar_type,
-                       const std::string& prefix);
   void quantizeTensors(script::Module& module, Graph* g, Value* self);
 
  private:
   // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  std::unordered_map<Graph*, std::unordered_map<Value*, std::tuple<IValue, IValue>>> values_to_qparams_;
+  std::unordered_map<Graph*, std::unordered_map<Value*, QParamMap>> values_to_qparams_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -652,7 +657,7 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
   Value* new_value = observer->input(1);
   v->replaceAllUsesWith(new_value);
-  values_to_qparams_[g].insert({new_value, getQParams(module, v)});
+  values_to_qparams_[g].insert({new_value, getQParamMap(module, v)});
 }
 
 void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
@@ -680,38 +685,19 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g)
   }
 }
 
-bool InsertQuantDeQuantHelper::registerQParams(
-    script::Module& module,
-    const std::tuple<IValue, IValue>& qparams_and_scalar_type,
-    const std::string& prefix) {
-  auto qparams = std::get<0>(qparams_and_scalar_type);
-  auto scalar_type = std::get<1>(qparams_and_scalar_type);
-  // Register attributes for quantization parameters
-  auto tp = qparams.toTuple();
-  at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
-  at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
-  // TODO: get this info from qscheme
-  bool is_per_channel = scale.numel() > 1;
-  if (is_per_channel) {
-    module.register_attribute(prefix + "_scale", TensorType::get(), scale);
-    module.register_attribute(prefix + "_zero_point", TensorType::get(), zero_point);
-    module.register_attribute(prefix + "_axis", IntType::get(), tp->elements()[2].toInt());
-  } else {
-    module.register_attribute(prefix + "_scale", FloatType::get(), scale.item<double>());
-    module.register_attribute(prefix + "_zero_point", IntType::get(), zero_point.item<int64_t>());
-  }
-  module.register_attribute(prefix + "_scalar_type", IntType::get(), scalar_type);
-  return is_per_channel;
-}
-
 void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g, Value* self) {
   if (!values_to_qparams_.count(g)) {
     return;
   }
   for (auto& pr : values_to_qparams_.at(g)) {
     auto* v = pr.first;
-    auto qparams_and_scalar_type = pr.second;
-    auto is_per_channel = registerQParams(module, qparams_and_scalar_type, v->debugName());
+    const auto& qparams = pr.second;
+    for (auto& pr : qparams) {
+      const auto& name = pr.first;
+      const auto& qparam = pr.second;
+      module.register_attribute(v->debugName() + name, qparam.type(), qparam);
+    }
+    bool is_per_channel = qparams.at("_scale").isTensor();
     insertQuantDeQuantCall(self, v, is_per_channel);
   }
 }
@@ -748,23 +734,40 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<IValue, IValue> InsertQuantDeQuantHelper::getQParams(
+QParamMap InsertQuantDeQuantHelper::getQParamMap(
     script::Module& module, Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
       observer_name,
-      "getQParams expects the corresponding observer for ",
+      "getQParamMap expects the corresponding observer for ",
       v->debugName(),
       " exists.");
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto get_qparams = observer_module.get_method("get_qparams");
-  IValue qparams = get_qparams(std::vector<IValue>());
-  checkGetQParamsResult(qparams);
+  IValue result = get_qparams(std::vector<IValue>());
+  checkGetQParamsResult(result);
   auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
               "dtype of observer can't be undefined");
-  return std::make_tuple(qparams, scalar_type);
+  auto tp = result.toTuple();
+  at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
+  at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
+  std::unordered_map<std::string, IValue> qparams = {
+    {"_scalar_type", scalar_type},
+  };
+  // TODO: here we use `scale.numel() > 1` to check if it is per
+  // channel quantization, but we should get qscheme from
+  // observer_module and use qscheme to check if it is per channel quantization
+  if (scale.numel() > 1) {
+    qparams["_scale"] = scale;
+    qparams["_zero_point"] = zero_point;
+    qparams["_axis"] = tp->elements()[2].toInt();
+  } else {
+    qparams["_scale"] = scale.item<double>();
+    qparams["_zero_point"] = zero_point.item<int64_t>();
+  }
+  return qparams;
 }
 
 c10::optional<script::Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(

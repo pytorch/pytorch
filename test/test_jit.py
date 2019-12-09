@@ -3008,6 +3008,22 @@ graph(%Ra, %Rb):
 
         self.checkScript(bad_index, (False,))
 
+    def test_constant_prop_aliasing_type(self):
+        @torch.jit.script
+        def foo():
+            return len([1]), len(torch.tensor([2]))
+
+        FileCheck().check_dag("aten::tensor").check_dag("aten::len").run(foo.graph)
+
+        @torch.jit.script
+        def fn():
+            if True:
+                return 1
+            else:
+                return 2
+
+        FileCheck().check_not("prim::If").run(fn.graph)
+
     def test_short_circuit_optimization(self):
         @torch.jit.script
         def const_expressions(x):
@@ -3534,7 +3550,7 @@ graph(%Ra, %Rb):
                 return x
 
         class Test(torch.nn.Module):
-            def forward(self, input=[]):
+            def forward(self, input=[]):  # noqa: B006
                 return input
 
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
@@ -4992,6 +5008,19 @@ a")
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
+        # test re-assignment on imported source
+        str = """
+        def foo(x):
+            # type: (bool)
+            a = float("-inf")
+            if not x:
+                a = float(torch.tensor([5]))
+            return a < 4
+        """
+        cu = torch.jit.CompilationUnit(str)
+        self.assertTrue(cu.foo(True))
+        self.assertFalse(cu.foo(False))
+
     def test_add(self):
         def func(a, b):
             c = a + b
@@ -5640,7 +5669,8 @@ a")
                     self.assertEqual(grad, grad_ref)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Profiling executor fails to recognize that tensors in a list require gradients")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING,
+                     "Profiling executor fails to recognize that tensors in a list require gradients")
     def test_meshgrid(self):
         with enable_profiling_mode():
             @torch.jit.script
@@ -6845,15 +6875,9 @@ a")
                 c1 = 0
             return c1
 
+        FileCheck().check_not("prim::If").run(testNoThrows.graph)
         self.assertEqual(0, testNoThrows(torch.randn(0)))
-        ifs = testNoThrows.graph.findAllNodes("prim::If", recurse=False)
-
-        # three ifs at the top level, and the second one has a nested if for
-        # the or (True or bool(t[1])) expression
-        self.assertTrue(len(ifs) == 3)
-        self.assertTrue(ifs[0].findNode("prim::If") is None)
-        self.assertTrue(ifs[1].findNode("prim::If").findNode("prim::If") is None)
-        self.assertTrue(ifs[2].findNode("prim::If") is None)
+        self.assertEqual(0, testNoThrows(torch.randn([2, 3])))
 
         @torch.jit.script
         def throwsOr(t):
@@ -6969,7 +6993,9 @@ a")
 
         with self.assertRaises(RuntimeError) as cm:
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
+        FileCheck().check("The above operation failed in interpreter") \
+                   .check("Traceback (most recent call last)") \
+                   .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
         global IFace
@@ -7006,7 +7032,9 @@ a")
         with self.assertRaises(RuntimeError) as cm:
             x = f.one(torch.rand(10), torch.rand(9))
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
+        FileCheck().check("The above operation failed in interpreter") \
+                   .check("Traceback (most recent call last)") \
+                   .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_binop_unsupported_error(self):
         with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
@@ -7297,7 +7325,8 @@ a")
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_dtype.graph_for(5, profile_and_replay=True)
             # both should have completed shapes
-            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
+            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut") \
+                       .check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
         else:
             g = test_dtype.graph_for(5)
             # first should have type set second should not
@@ -7310,7 +7339,8 @@ a")
 
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay=True)
-            FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
+            FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut") \
+                       .check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
         else:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
             FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
@@ -9826,7 +9856,6 @@ a")
 
         self.assertFalse(foo())
         scripted = torch.jit.script(foo)
-        FileCheck().check("is_scripting").run(scripted.graph)
         self.assertTrue(scripted())
 
     def test_script_outputs(self):
@@ -10058,10 +10087,10 @@ a")
         @torch.jit.script
         def tensor_unifying(x, y, z):
             # testing dynamic is appropriately set for y and z
-            if True:
-                x, y, z = x, y, z
+            if bool(x):
+                x, y, z = x + 1, y, z
             else:
-                x, y, z = x, x, y
+                x, y, z = x + 1, x, y
 
             return x, y, z
 
@@ -11580,7 +11609,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
                 @torch.jit.script_method  # noqa: B902
-                def forward():
+                def forward():  # noqa: B902
                     return torch.zeros(3, 4)
 
             MethodNoSelf()
@@ -15140,7 +15169,7 @@ a")
             pass
 
         def test_simple(x1):  # noqa: F811
-            return x1 + 5
+            return x1
 
         def invoke_function():
             return test_simple(1.0), test_simple(.5)
@@ -15151,7 +15180,34 @@ a")
         compiled_fns_1 = torch.jit._get_overloads(test_simple)
         compiled_fns_2 = torch.jit._get_overloads(test_simple)
         for a, b in zip(compiled_fns_1, compiled_fns_2):
-            self.assertIs(a, b)
+            self.assertIs(a.graph, b.graph)
+
+        old_func = test_simple
+
+        # testing that new functions added work with caching
+        @torch.jit._overload  # noqa: F811
+        def test_simple(x1):  # noqa: F811
+            # type: (str) -> str
+            pass
+
+        @torch.jit.script
+        def my_func():
+            return old_func("hi")
+
+        # testing new function same qualified name
+        @torch.jit._overload  # noqa: F811
+        def test_simple(a, b):  # noqa: F811
+            # type: (int, int) -> int
+            pass
+
+        def test_simple(a, b):
+            return a + b
+
+        @torch.jit.script
+        def fn():
+            return test_simple(3, 4)
+
+        self.assertEqual(fn(), 7)
 
         # currently we take the default values have to be specified in the
         # overload as well - TODO take them from implementation and apply
@@ -15160,9 +15216,9 @@ a")
         def identity(x1):  # noqa: F811
             # type: (str) -> str
             pass
-
+        #
         @torch.jit._overload  # noqa: F811
-        def identity(x1=1.0):  # noqa: F811
+        def identity(x1):  # noqa: F811
             # type: (float) -> float
             pass
 
@@ -15208,6 +15264,87 @@ a")
         with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
             torch.jit.script(test)
 
+        @torch.jit._overload  # noqa: F811
+        def good_overload(x=1):  # noqa: F811
+            # type: (int) -> (int)
+            pass
+
+        def good_overload(x=1):  # noqa: F811
+            return x
+
+        @torch.jit.script
+        def foo():
+            return good_overload()
+
+        self.assertEqual(foo(), 1)
+
+
+        with self.assertRaisesRegex(Exception, "must equal to the default parameter"):
+            @torch.jit._overload  # noqa: F811
+            def bad_default_on_overload(x, y=2):  # noqa: F811
+                # type: (int, int) -> (int)
+                pass
+
+            def bad_default_on_overload(x, y=1):  # noqa: F811
+                # type: (int, int) -> (int)
+                pass
+
+            @torch.jit.script
+            def test():
+                return bad_default_on_overload(1, 2)
+
+        @torch.jit._overload  # noqa: F811
+        def diff_default(x):  # noqa: F811
+            # type: (int) -> int
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def diff_default(x):  # noqa: F811
+            # type: (str) -> str
+            pass
+
+        def diff_default(x="hi"):  # noqa: F811
+            return x
+
+        def test():
+            return diff_default(), diff_default(2), diff_default("abc")
+
+        self.assertEqual(test(), torch.jit.script(test)())
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params(x):  # noqa: F811
+            # type: (float) -> float
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params(x, y):  # noqa: F811
+            # type: (int, int) -> int
+            pass
+
+        def diff_num_params(x, y=2, z=3):  # noqa: F811
+            # type: (Union[float, int], int, int)
+            return x + y + z
+
+        def test():
+            return diff_num_params(1.0), diff_num_params(1, 2), diff_num_params(1), diff_num_params(1, 2, 3)
+
+        self.assertEqual(test(), torch.jit.script(test)())
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params_no_annot():
+            # type: () -> int
+            pass
+
+        def diff_num_params_no_annot(x=1):    # noqa: F811
+            return x
+
+        def test():
+            return diff_num_params_no_annot(1.0)
+
+        with self.assertRaisesRegex(Exception, "Parameters not specified on the overloaded declaration must have a type annotation"):
+            torch.jit.script(test)
+
+
     def test_function_overloading_isinstance(self):
         @torch.jit._overload  # noqa: F811
         def my_conv(x, y):  # noqa: F811
@@ -15215,7 +15352,7 @@ a")
             pass
 
         @torch.jit._overload  # noqa: F811
-        def my_conv(x, y=2.0):  # noqa: F811
+        def my_conv(x, y):  # noqa: F811
             # type: (float, float) -> (float)
             pass
 
