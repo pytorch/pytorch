@@ -29,6 +29,7 @@ def requires_process_group_agent(message=""):
 
 
 VALUE_FUTURE = concurrent.futures.Future()
+DONE_FUTURE = concurrent.futures.Future()
 
 
 def _stub_construct_rpc_backend_options_handler(
@@ -45,6 +46,11 @@ def _stub_start_rpc_backend_handler(
 
 def set_value(value):
     VALUE_FUTURE.set_result(value)
+
+
+def set_and_check_done(value):
+    VALUE_FUTURE.set_result(value)
+    return DONE_FUTURE.result()
 
 
 # it is used to test python user defined function over rpc
@@ -1160,6 +1166,81 @@ class RpcTest(RpcAgentTestFixture):
 
         # Use another barrier to make sure that UserRRefs are only deleted after
         # checking debug info
+        dist.barrier()
+
+    @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_debug_info(self):
+        from torch.distributed.rpc.api import _agent
+
+        NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
+
+        info = _agent.get_debug_info()
+        self.assertIn("num_pending_requests", info)
+        self.assertIn("thread_pool_size", info)
+        self.assertIn("num_idle_threads", info)
+        self.assertEqual(int(info["num_pending_requests"]), 0)
+        self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
+        self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
+
+        dst_rank = (self.rank + 1) % self.world_size
+        fut = rpc.rpc_async(
+            "worker{}".format(dst_rank),
+            set_and_check_done,
+            args=(dst_rank,)
+        )
+        # blocks until the request arrives
+        self.assertEqual(self.rank, VALUE_FUTURE.result())
+
+        info = _agent.get_debug_info()
+        self.assertIn("num_pending_requests", info)
+        self.assertIn("thread_pool_size", info)
+        self.assertIn("num_idle_threads", info)
+        self.assertEqual(int(info["num_pending_requests"]), 1)
+        self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
+        num_idle_threads = int(info["num_idle_threads"])
+        # as we cannot know for sure whether the send thread has returned, there
+        # might be either 1 or 2 busy threads
+        self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
+
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
+        # add a barrier to make sure the request is not finished before checking
+        # num_pending_requests
+        dist.barrier()
+
+        DONE_FUTURE.set_result(self.rank)
+        self.assertEqual(dst_rank, fut.wait())
+
+        # add a barrier to make sure the dst_rank has finished processing the
+        # request
+        dist.barrier()
+
+        info = _agent.get_debug_info()
+        self.assertIn("num_pending_requests", info)
+        self.assertIn("thread_pool_size", info)
+        self.assertIn("num_idle_threads", info)
+        self.assertEqual(int(info["num_pending_requests"]), 0)
+        self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
+
+        for retry in range(3):
+            # even if the future has completed, there is no guarantee that
+            # the local send/recv threads would have finished. We try three
+            # times. (NB: this might potentially be flaky. If flakiness does
+            # occur, then we have to relax the assert.)
+            info = _agent.get_debug_info()
+            if int(info["num_idle_threads"]) == NUM_THREAD:
+                break
+            time.sleep(0.1)
+        self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
+
+        # add a barrier to make sure SHUTDOWN message is not sent
         dist.barrier()
 
     @dist_init(setup_rpc=False)

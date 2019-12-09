@@ -555,7 +555,12 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
 
 std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
-  /* For now return an empty map, TODO add metrics like send/recv count etc */
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+  }
+  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
+  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
   return metrics;
 }
 
