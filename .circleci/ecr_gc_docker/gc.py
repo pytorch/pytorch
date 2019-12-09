@@ -97,7 +97,8 @@ for repo in repos(client):
             continue
 
         tag = tags[0]
-        if tag.isdigit():
+        # new images build on circle ci use workflow ID as tag, which has 4 "-"
+        if tag.isdigit() or tag.count("-") == 4:
             window = stable_window
         else:
             window = unstable_window
