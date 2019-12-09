@@ -25,7 +25,11 @@ void THNN_(MultiMarginCriterion_updateOutput)(
                "inconsistent target size");
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
-    THCTensor_(resize1d)(state, output, 1);
+    if (reduction == at::Reduction::None) {
+      THCTensor_(resizeAs)(state, output, target);
+    } else {
+      THCTensor_(resize0d)(state, output);
+    }
     if (p == 1)
     {
       cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
@@ -62,7 +66,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
 
     if (reduction == at::Reduction::None)
     {
-      THCTensor_(resize1d)(state, output, input->size(0));
+      THCTensor_(resizeAs)(state, output, target);
       if (p == 1)
       {
         cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
@@ -91,7 +95,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
     else
     {
-      THCTensor_(resize1d)(state, output, 1);
+      THCTensor_(resize0d)(state, output);
       THCTensor *output_ = THCTensor_(newWithSize1d)(state, input->size(0));  // tmp output buffer
       if (p == 1)
       {
@@ -119,7 +123,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
       }
       THCudaCheck(cudaGetLastError());
       float sum = THCTensor_(sumall)(state, output_);
-      THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(sum));
+      THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
       THCTensor_(free)(state, output_);
     }
   }
