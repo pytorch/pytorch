@@ -236,7 +236,9 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   q_params.precision = kPrecision;
 
   Tensor quantized = at::native::empty_like(
-      weight_contig, weight_contig.options().dtype(at::kChar), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      weight_contig, at::kChar, weight_contig.options().layout(), 
+      weight_contig.options().device(), weight_contig.options().pinned_memory(), 
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
   fbgemm::Quantize<int8_t>(
