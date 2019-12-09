@@ -20,15 +20,6 @@ void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, cons
     Tensor self_as_matrix = self.reshape({mat.size(0), 1}).contiguous();
     at::addmm_out(result, self_as_matrix, mat, vec_as_matrix, beta_, alpha_);
     result.resize_({result.size(0)});
-    // TODO: do we need the below code ??
-    if (vec.size(0) == 0 && mat.size(0) != 0) {
-      if (beta == scalar_t(0)) {
-        result.zero_();
-      } else if (beta != scalar_t(1)) {
-        result.mul_(beta);
-      }
-    }
-    // end TODO
     return;
   }
 
