@@ -163,8 +163,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
   return div_out_sparse_zerodim(self, self, value);
 }
 
-// inplace coalesce
-SparseTensor& coalesce_(SparseTensor& tensor) {
+static SparseTensor& coalesce_(SparseTensor& tensor) {
   SparseTensor coalesced = tensor.coalesce();
   tensor._values().resize_as_(coalesced._values());
   tensor._indices().resize_as_(coalesced._indices());
@@ -538,8 +537,6 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   Tensor t_values = t._values().to(commonDtype);
   Tensor s_values = src._values().to(commonDtype);
 
-  std::vector<int64_t> size = t_values.sizes().vec();
-  size[0] = max_nnz;
   Tensor r_buffer = new_values_with_size_of(t_values, max_nnz).zero_();
 
   // NB: relies on nnz test above

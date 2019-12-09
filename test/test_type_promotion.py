@@ -172,7 +172,7 @@ class TestTypePromotion(TestCase):
                 func(x, y).sum().backward()
 
     def _get_test_tensor(self, device, dtype, remove_zeros=False):
-        shape = [10, 10, 10]
+        shape = [5, 5, 5]
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
         elif dtype.is_floating_point:
@@ -187,7 +187,7 @@ class TestTypePromotion(TestCase):
                 tensor[tensor == 0] = 5
         return tensor
 
-    # verifies that torch.<op>(first, second) is the same as 
+    # verifies that torch.<op>(first, second) is the same as
     # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
     @float_double_default_dtype
     def test_many_promotions(self, device):
@@ -210,7 +210,8 @@ class TestTypePromotion(TestCase):
                 if non_contiguous:
                     first = first.transpose(0, 2)
                     second = second.transpose(2, 1)
-                    self.assertNotEqual(first.stride(), second.stride(), "some non-contiguous issues could be missed if tensors have same strides")
+                    self.assertNotEqual(first.stride(), second.stride(),
+                                        "some non-contiguous issues could be missed if tensors have same strides")
 
                 self.assertEqual(not first.is_contiguous(), non_contiguous)
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
@@ -250,7 +251,9 @@ class TestTypePromotion(TestCase):
 
         self.assertRaisesRegex(RuntimeError, "Boolean alpha only supported",
                                lambda: torch.add(1, 1, alpha=True))
-        self.assertEqual(torch.add(torch.tensor(True, device=device), torch.tensor(True, device=device), True), torch.tensor(True, device=device))
+        self.assertEqual(torch.add(torch.tensor(True, device=device),
+                         torch.tensor(True, device=device), True),
+                         torch.tensor(True, device=device))
 
     @float_double_default_dtype
     def test_create_bool_tensors(self, device):
@@ -274,9 +277,13 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.result_type(1, torch.tensor(1, dtype=torch.int, device=device)), torch.int)
         self.assertEqual(torch.result_type(1, 1.), torch.get_default_dtype())
         self.assertEqual(torch.result_type(torch.tensor(1, device=device), 1.), torch.get_default_dtype())
-        self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.long, device=device), torch.tensor([1, 1], dtype=torch.int, device=device)), torch.int)
+        self.assertEqual(torch.result_type(torch.tensor(1, dtype=torch.long, device=device),
+                         torch.tensor([1, 1], dtype=torch.int, device=device)),
+                         torch.int)
         self.assertEqual(torch.result_type(torch.tensor([1., 1.], dtype=torch.float, device=device), 1.), torch.float)
-        self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float, device=device), torch.tensor(1, dtype=torch.double, device=device)), torch.double)
+        self.assertEqual(torch.result_type(torch.tensor(1., dtype=torch.float, device=device),
+                         torch.tensor(1, dtype=torch.double, device=device)),
+                         torch.double)
 
     @float_double_default_dtype
     def test_can_cast(self, device):
@@ -448,7 +455,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(s.is_coalesced(), coalesced)
         self.assertEqual(s.dtype, dtype)
         self.assertEqual(t.dtype, s.dtype)
-        return (t, s)
+        return t, s
 
     def _get_precision(self, dtype, coalesced):
         if dtype == torch.half and not coalesced:
@@ -458,7 +465,8 @@ class TestTypePromotion(TestCase):
             return 5e-2
         if dtype == torch.half:
             return 1e-3
-        return 1e-5
+        # uses default
+        return None
 
     def _test_sparse_op(self, op_name, inplace, dtype1, dtype2, device, coalesced):
         suffix = '_' if inplace else ''
