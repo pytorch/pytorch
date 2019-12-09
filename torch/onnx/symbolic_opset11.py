@@ -469,16 +469,11 @@ def __lshift_(g, self, other):
 
 def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding_d, stride_d):
     # Input is always 4-D (N, C, H, W)
-    # All other input args are int[2]
     # Calculate indices of sliding blocks along spatial dimension
     # Slide kernel over input each dim d:
     # each dimension d ranges from 0 to input[d]+2×padding[d]−dilation[d]×(kernel_size[d]−1)
-    # with steps=stride
-
-    # padding_d = g.op("Cast", padding_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
-    # dilation_d = g.op("Cast", dilation_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
-    # kernel_size_d = g.op("Cast", kernel_size_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
-    # stride_d = g.op("Cast", stride_d, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    # with steps = stride
+    
     blocks_d = g.op("Add", input_d, g.op("Constant", value_t=torch.tensor(padding_d * 2)))
     blocks_d = g.op("Sub", blocks_d, g.op("Constant", value_t=torch.tensor(dilation_d * (kernel_size_d - 1))))
 
@@ -526,7 +521,7 @@ def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
 @parse_args('v', 'is', 'is', 'is', 'is')
 def im2col(g, input, kernel_size, dilation, padding, stride):
     # Input is always 4-D tensor (N, C, H, W)
-    # All other input args are int[2]
+    # All other args are int[2]
 
     input_h = size(g, input, g.op("Constant", value_t=torch.tensor(2)))
     input_w = size(g, input, g.op("Constant", value_t=torch.tensor(3)))
@@ -537,7 +532,7 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     kernel_h, kernel_w = kernel_size[0], kernel_size[1]
 
     blocks_row_indices = _get_im2col_indices_along_dim(g, input_h, kernel_h, dilation_h, padding_h, stride_h)
-    blocks_col_indices = _get_im2col_indices_along_dim(g, input_w, kernel_w, dilation_w, padding_w, stride_h)
+    blocks_col_indices = _get_im2col_indices_along_dim(g, input_w, kernel_w, dilation_w, padding_w, stride_w)
 
     output_shape = _get_im2col_output_shape(g, input, kernel_h, kernel_w)
     padded_input = _get_im2col_padded_input(g, input, padding_h, padding_w)
