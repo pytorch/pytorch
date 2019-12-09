@@ -83,7 +83,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   TORCH_CHECK(
       memory_format != MemoryFormat::Preserve,
       "preserve memory format is unsupported by the contiguous operator");
-
+  std::cout << "Doing restrides during contiguous call " << self.sizes() << " " << self.strides() << " " << memory_format << "\n";
   auto result = at::empty_like(self, self.options(), memory_format);
   return result.copy_(self);
 }

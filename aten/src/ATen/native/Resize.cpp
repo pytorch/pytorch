@@ -25,6 +25,7 @@ Tensor& resize_cpu_(
         "Unsupported memory format",
         memory_format);
     self_->empty_tensor_restride(memory_format);
+    self_->set_channels_last_tag(memory_format == MemoryFormat::ChannelsLast);
   }
   return self;
 }

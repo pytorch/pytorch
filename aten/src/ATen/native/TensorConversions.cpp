@@ -30,6 +30,11 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     return self;
   }
 
+  if (self.dtype() == options.dtype() && self.layout() == options.layout() &&
+      self.device() == options.device() && !copy) {
+        std::cout << "Changing memory format during to_impl " << self.sizes() << " " << self.strides() << " " << memory_format << "\n";
+      }
+
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
