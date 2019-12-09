@@ -473,7 +473,7 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
     # Slide kernel over input each dim d:
     # each dimension d ranges from 0 to input[d]+2×padding[d]−dilation[d]×(kernel_size[d]−1)
     # with steps = stride
-    
+
     blocks_d = g.op("Add", input_d, g.op("Constant", value_t=torch.tensor(padding_d * 2)))
     blocks_d = g.op("Sub", blocks_d, g.op("Constant", value_t=torch.tensor(dilation_d * (kernel_size_d - 1))))
 
