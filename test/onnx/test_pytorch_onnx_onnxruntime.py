@@ -1966,6 +1966,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_im2col(self):
         class Unfold(torch.nn.Module):
             def forward(self, input, kernel_size=[10, 15], dilation=[2, 3], padding=5, stride=3):
