@@ -307,7 +307,7 @@ class DistributedDataParallel(Module):
 
         # Add delay to get around of the tricky deadlock related to pinned mem
         # allocator and distributed backend.
-        time.sleep(3)
+        # time.sleep(3)
 
     def _ddp_init_helper(self):
         """
