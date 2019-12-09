@@ -1222,7 +1222,8 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None
 
             return result, backward
-
+    )",
+    R"(
         def AD_interpolate_backward(grad,
                                     input,
                                     mode: str,
