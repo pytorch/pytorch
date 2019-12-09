@@ -5266,14 +5266,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
-            np_arr = np.array([5], dtype=nptype)
+            scalar = 3
+            np_arr = np.array([scalar], dtype=nptype)
             np_val = np_arr[0]
-            self.assertEqual(torch.Storage(np_val).size(), 5)
+
+            # np integral type can be treated as a python int in native functions with
+            # int parameters:
+            self.assertEqual(torch.ones(5).diag(scalar), torch.ones(5).diag(np_val))
+            self.assertEqual(torch.ones([2, 2, 2, 2]).mean(scalar), torch.ones([2, 2, 2, 2]).mean(np_val))
+
+            # numpy integral type parses like a python int in custom python bindings:
+            self.assertEqual(torch.Storage(np_val).size(), scalar)
 
             tensor = torch.tensor([2], dtype=torch.int)
             tensor[0] = np_val
             self.assertEqual(tensor[0], np_val)
 
+            # Original reported issue, np integral type parses to the correct 
+            # PyTorch integral type when passed for a `Scalar` parameter in
+            # arithmetic operations:
             t = torch.from_numpy(np_arr)
             self.assertEqual((t + np_val).dtype, t.dtype)
             self.assertEqual((np_val + t).dtype, t.dtype)
@@ -6336,13 +6347,17 @@ class TestTorchDeviceType(TestCase):
             for target in (torch.tensor(0, device=device), torch.tensor([0], device=device), torch.tensor([[0]], device=device)):
                 if (input.dim() <= 1 and target.dim() <= 1) or (input.dim() == 2 and target.dim() == 2):
                     output_shape = (target.shape[0],) if target.dim() == 2 else ()
-                    self.assertEqual(output_shape, torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
+                    self.assertEqual(output_shape,
+                                     torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
                     self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean').shape)
                     self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum').shape)
                 else:
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
+                    self.assertRaises(RuntimeError,
+                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
+                    self.assertRaises(RuntimeError,
+                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
+                    self.assertRaises(RuntimeError,
+                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
 
         # multi_margin_loss
         for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
@@ -13089,7 +13104,8 @@ class TestTorchDeviceType(TestCase):
         else:
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
 
-    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, compare_data=True, default_is_preserve=False):
+    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
+                                            compare_data=True, default_is_preserve=False):
         nhwc = input_generator_fn(device)
         # nhwc is not memory dense, but looks like channels last
         nhwc = nhwc[:, :, ::2, ::2]
@@ -13129,7 +13145,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_to(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         def transformation_fn(tensor, **kwargs):
             return tensor.to(dtype=torch.float64, **kwargs)
@@ -13138,7 +13155,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_type(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         def transformation_fn(tensor, **kwargs):
             return tensor.type(torch.float64, **kwargs)
@@ -13147,7 +13165,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_clone(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         def transformation_fn(tensor, **kwargs):
             return tensor.clone(**kwargs)
@@ -13170,7 +13189,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_factory_like_functions_preserve_strides(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         transformation_fns = [
             lambda t, **kwargs: torch.zeros_like(t, **kwargs),
@@ -13187,7 +13207,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_type_shortcuts(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).clamp(0, 1).round().contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).clamp(0, 1) \
+                        .round().contiguous(memory_format=torch.channels_last)
 
         def get_fn(fn_name):
             def transformation_fn(tensor, **kwargs):
@@ -13204,7 +13225,8 @@ class TestTorchDeviceType(TestCase):
 
         # Test 'float' separately to avoid float->float no-op.
         def input_generator_fn_double(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float64).clamp(0, 1).round().contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float64).clamp(0, 1) \
+                        .round().contiguous(memory_format=torch.channels_last)
 
         self._test_memory_format_transformations(device, input_generator_fn_double, get_fn('float'))
 
