@@ -18,12 +18,7 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from .api import (
-        _agent,
-        _init_rpc_backend,
-        _require_initialized,
-        _rref_context_get_debug_info
-    )
+    from .api import _init_rpc_backend, _require_initialized
     from .api import *  # noqa: F401
     import torch.distributed.autograd as dist_autograd
 
@@ -91,6 +86,8 @@ if is_available():
 
     @_require_initialized
     def _get_debug_info():
+        from . import _rref_context_get_debug_info
+        from .api import _agent
         info = _rref_context_get_debug_info()
         info.update(_agent.get_debug_info())
         info.update(dist_autograd._get_debug_info())
