@@ -1,9 +1,8 @@
 #pragma once
 
-#include <torch/cuda.h>
-#include <torch/nn.h>
-#include <torch/optim.h>
-#include <torch/serialization.h>
-#include <torch/tensor.h>
-#include <torch/tensor_list_view.h>
-#include <torch/utils.h>
+#include <torch/all.h>
+
+#ifdef TORCH_API_INCLUDE_EXTENSION_H
+#include <torch/extension.h>
+
+#endif // defined(TORCH_API_INCLUDE_EXTENSION_H)

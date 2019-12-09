@@ -46,6 +46,27 @@ Analysis analyzeNet(const NetDef& net) {
   return analysis;
 }
 
+static void rewriteInput(OperatorDef* op, int i) {
+  auto input = op->input(i);
+  op->set_input(i, input + "_M");
+}
+
+static void rewriteOutput(OperatorDef* op, int i) {
+  auto output = op->output(i);
+  op->set_output(i, output + "_M");
+}
+
+static void insertOutputCopyFromMPSCNNOp(
+    NetDef& predictNet,
+    const std::vector<std::string>& cpu_blobs) {
+  auto* op = predictNet.add_op();
+  op->set_type("CopyFromMPSCNN");
+  for (int i = 0; i < cpu_blobs.size(); ++i) {
+    op->add_input(cpu_blobs[i] + "_M");
+    op->add_output(cpu_blobs[i]);
+  }
+}
+
 NetDef insertInputOutputCopyOps(const NetDef& def) {
   // Do some validation of the outputs. For this version, we require:
   // - a single input (first element of external_input()) is consumed by the
@@ -82,6 +103,8 @@ NetDef insertInputOutputCopyOps(const NetDef& def) {
     op.add_output("__METAL_INPUT_COPY__");
   }
 
+  std::unordered_set<std::string> output_set;
+
   for (auto i = 0; i < def.op_size(); ++i) {
     const auto& ogOp = def.op(i);
     auto op = mdef.add_op();
@@ -90,17 +113,42 @@ NetDef insertInputOutputCopyOps(const NetDef& def) {
       CAFFE_ENFORCE_EQ(op->input(0), def.external_input(0));
       op->set_input(0, "__METAL_INPUT_COPY__");
     }
-    if (i == def.op_size() - 1) {
-      CAFFE_ENFORCE_EQ(op->output(0), def.external_output(0));
-      op->set_output(0, "__METAL_OUTPUT_COPY__");
+    /*
+     * Let's say we have a Blob called "X" that is both the external output
+     * and will be used in the later operators. And it's on Metal. First, we'll
+     * rename the output of the operator to "X_M", therefore all the following
+     * operators that referenced this blob will need to change the input name
+     * and then we will copy "X_M" to CPU as "X" in the end.
+     *
+     */
+    for (auto j = 0; j < op->input_size(); ++j) {
+      if (output_set.find(op->input(j)) != output_set.end()) {
+        rewriteInput(op, j);
+        // we'll add one CopyFromMPSCNN operator in the end
+        // to copy all the output blobs from MPSCNN to CPU
+      }
+    }
+    // if the output is in external output, copy from metal when necessary
+    for (auto j = 0; j < op->output_size(); ++j) {
+      for (auto k = 0; k < def.external_output_size(); ++k) {
+        // Assuming external output blob has unique name, e.g. only version 0
+        // of the blob is used as the output
+        if (op->output(j) == def.external_output(k)) {
+          output_set.insert(op->output(j));
+          // rewrite output to output_M for the operator
+          rewriteOutput(op, j);
+        }
+      }
     }
   }
-  {
-    auto& op = *(mdef.add_op());
-    op.set_type("CopyFromMPSCNN");
-    op.add_input("__METAL_OUTPUT_COPY__");
-    op.add_output(def.external_output(0));
+
+  // We copy all the output from Metal to CPU at once in the end
+  std::vector<std::string> external_outputs;
+  for (int i = 0; i < def.external_output_size(); ++i) {
+    external_outputs.push_back(def.external_output(i));
   }
+  insertOutputCopyFromMPSCNNOp(mdef, external_outputs);
+
   return mdef;
 }
 

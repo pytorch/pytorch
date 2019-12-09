@@ -10,7 +10,7 @@ namespace caffe2 {
 template <class Context>
 class IfOp final : public Operator<Context> {
  public:
-  IfOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit IfOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("then_net"),
@@ -32,12 +32,12 @@ class IfOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE(
-        this->template InputIsType<Tensor<Context>>(0),
+        this->InputIsTensorType(0, Context::GetDeviceType()),
         "Invalid condition in If operator: tensor expected");
 
     const auto& condition = Input(0);
     CAFFE_ENFORCE_EQ(
-        condition.size(),
+        condition.numel(),
         1,
         "Invalid condition tensor in If operator: single value expected");
 

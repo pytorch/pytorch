@@ -1,14 +1,43 @@
 import sys
 import torch
 import torch._C as _C
+from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
+from torch._namedtensor_internals import unzip_namedshape, single_ellipsis_index, is_ellipsis
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
 import weakref
 from torch._six import imap
 from torch._C import _add_docstr
+from numbers import Number
+import functools
 
 
+def _wrap_type_error_to_not_implemented(f):
+    from torch import _six
+    import inspect
+
+    # functools.wraps doesn't work well with methods in python 2
+    method_assignments = ('__name__', '__doc__')
+    assigned = (method_assignments if _six.PY2 and inspect.ismethoddescriptor(f)
+                else functools.WRAPPER_ASSIGNMENTS)
+
+    @functools.wraps(f, assigned=assigned)
+    def wrapped(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except TypeError:
+            return NotImplemented
+    return wrapped
+
+
+# NB: If you subclass Tensor, and want to share the subclassed class
+# across processes, you must also update torch/multiprocessing/reductions.py
+# to define a ForkingPickler serialization mode for the class.
+#
+# NB: If you add a new method to Tensor, you must update
+# torch/__init__.py.in to add a type annotation for your method;
+# otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -17,26 +46,100 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse:
+            if self.is_sparse or self.device.type == 'xla':
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
-                new_tensor = self.new()
-                new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                if self.is_quantized:
+                    if self.qscheme() == torch.per_tensor_affine:
+                        quantizer_params = self.qscheme(), self.q_scale(), self.q_zero_point()
+                    elif self.qscheme() == torch.per_channel_affine:
+                        quantizer_params = self.qscheme(), \
+                            self.q_per_channel_scales(), \
+                            self.q_per_channel_zero_points(), \
+                            self.q_per_channel_axis()
+                    else:
+                        raise RuntimeError("Unsupported qscheme {} in deepcopy".format(self.qscheme()))
+                    new_tensor = torch._utils._rebuild_qtensor(
+                        new_storage,
+                        self.storage_offset(),
+                        self.size(),
+                        self.stride(),
+                        quantizer_params,
+                        self.requires_grad,
+                        self._backward_hooks)
+                else:
+                    new_tensor = self.new()
+                    new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    new_tensor.requires_grad = self.requires_grad
             memo[id(self)] = new_tensor
-            new_tensor.requires_grad = self.requires_grad
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        args = (self.storage(),
-                self.storage_offset(),
-                tuple(self.size()),
-                self.stride(),
-                self.requires_grad,
-                self._backward_hooks)
-        return (torch._utils._rebuild_tensor_v2, args)
+        check_serializing_named_tensor(self)
+        # See Note [Don't serialize hooks]
+        torch.utils.hooks.warn_if_has_hooks(self)
+        # Note: Numpy array is chosen to be the rebuild component for XLA Tensor.
+        # We considered a few options:
+        # 1. CPU tensor can't be used here.
+        #    Otherwise in torch.load CPU storage is reconstructed with randomly
+        #    initialized data, moved onto XLA device, and then storage is updated
+        #    to the serialized content. This works perfectly for CPU/CUDA but not XLA.
+        #    XLA tensor is disconnected with storage so it doesn't get the update.
+        # 2. Python list is not a good fit due to performance reason.
+        #    `tolist()` converts every single element in the tensor into python objects
+        #    and serialize them one by one.
+        if self.device.type == 'xla':
+            args = (self.cpu().numpy(),
+                    self.dtype,
+                    str(self.device),
+                    self.requires_grad)
+            return (torch._utils._rebuild_xla_tensor, args)
+        if self.is_quantized:
+            if self.qscheme() == torch.per_tensor_affine:
+                quantizer_params = (torch.per_tensor_affine,
+                                    self.q_scale(),
+                                    self.q_zero_point())
+            elif self.qscheme() == torch.per_channel_affine:
+                # convert scales and zero points to tuple to avoid recursive calls
+                # when/if we get multi-axis quantized tensors in the future, the shape
+                # is recoverable from the main tensor shape
+                quantizer_params = (torch.per_channel_affine,
+                                    [e.item() for e in self.q_per_channel_scales().reshape(-1)],
+                                    [e.item() for e in self.q_per_channel_zero_points().reshape(-1)],
+                                    self.q_per_channel_axis())
+            else:
+                raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
+            args = (self.storage(),
+                    self.storage_offset(),
+                    tuple(self.size()),
+                    self.stride(),
+                    quantizer_params,
+                    self.requires_grad,
+                    OrderedDict())
+            return (torch._utils._rebuild_qtensor, args)
+        elif self.is_sparse:
+            if self.layout == torch.sparse_coo:
+                args = (self.layout,
+                        (self._indices(),
+                         self._values(),
+                         self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_tensor, args)
+        else:
+            args = (self.storage(),
+                    self.storage_offset(),
+                    tuple(self.size()),
+                    self.stride(),
+                    self.requires_grad,
+                    OrderedDict())  # previously was self._backward_hooks
+            return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
+        # Warning: this method is NOT called when you torch.load() a tensor;
+        # that is managed by _rebuild_tensor_v2
         if not self.is_leaf:
             raise RuntimeError('__setstate__ can be only called on leaf Tensors')
         if len(state) == 4:
@@ -47,6 +150,8 @@ class Tensor(torch._C._TensorBase):
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
+        # The setting of _backward_hooks is expected to be a no-op.
+        # See Note [Don't serialize hooks]
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
@@ -138,7 +243,7 @@ class Tensor(torch._C._TensorBase):
 
         raise RuntimeError(trim(r"""reinforce() was removed.
             Use torch.distributions instead.
-            See http://pytorch.org/docs/master/distributions.html
+            See https://pytorch.org/docs/master/distributions.html
 
             Instead of:
 
@@ -166,9 +271,17 @@ class Tensor(torch._C._TensorBase):
 
     .. note::
 
-      Returned Tensor uses the same data tensor as the original one.
+      Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
+      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
+      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
+      also update the original tensor. Now, these in-place changes will not update the
+      original tensor anymore, and will instead trigger an error.
+      For sparse tensors:
+      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
+      returned tensor will not update the original tensor anymore, and will instead
+      trigger an error.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
@@ -191,17 +304,15 @@ class Tensor(torch._C._TensorBase):
             if var is None:
                 return
             if var._grad is None:
-                var._grad = grad.clone()
+                if grad.is_sparse:
+                    var._grad = grad.clone()
+                else:
+                    var._grad = grad.clone(memory_format=torch.contiguous_format)
             else:
                 var._grad = var._grad + grad
 
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
-
-    def is_pinned(self):
-        r"""Returns true if this tensor resides in pinned memory"""
-        storage = self.storage()
-        return storage.is_pinned() if storage else False
 
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
@@ -219,39 +330,36 @@ class Tensor(torch._C._TensorBase):
         self.storage().share_memory_()
         return self
 
-    def view_as(self, tensor):
-        r"""view_as(other) -> Tensor
-
-        View this tensor as the same size as :attr:`other`.
-        ``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
-
-        Args:
-            other (:class:`torch.Tensor`): The result tensor has the same size
-                as :attr:`other.size()`.
-        """
-        return self.view(tensor.size())
-
-    def argmax(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmax`"""
-        return torch.argmax(self, dim, keepdim)
-
-    def argmin(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmin`"""
-        return torch.argmin(self, dim, keepdim)
-
-    def btrifact(self, info=None, pivot=True):
-        r"""See :func:`torch.btrifact`
-        """
-        if info is not None:
-            warnings.warn("info option in btrifact is deprecated and will be removed in v0.4, "
-                          "consider using btrifact_with_info instead", stacklevel=2)
-            factorization, pivots, _info = super(Tensor, self).btrifact_with_info(pivot=pivot)
-            if info.type() != _info.type():
-                raise ValueError('btrifact expects info to be an IntTenor')
-            info.resize_as_(_info).copy_(_info)
-            return factorization, pivots
+    def __reversed__(self):
+        r"""Reverses the tensor along dimension 0."""
+        if self.dim() == 0:
+            return self
         else:
-            return super(Tensor, self).btrifact(pivot=pivot)
+            return self.flip(0)
+
+    def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
+        r"""See :func:`torch.norm`"""
+        return torch.norm(self, p, dim, keepdim, dtype=dtype)
+
+    def lu(self, pivot=True, get_infos=False):
+        r"""See :func:`torch.lu`"""
+        # If get_infos is True, then we don't need to check for errors and vice versa
+        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
+        if get_infos:
+            return LU, pivots, infos
+        else:
+            return LU, pivots
+
+    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
+             center=True, pad_mode='reflect', normalized=False, onesided=True):
+        r"""See :func:`torch.stft`
+
+        .. warning::
+          This function changed signature at version 0.4.1. Calling with
+          the previous signature may cause error or return incorrect result.
+        """
+        return torch.stft(self, n_fft, hop_length, win_length, window, center,
+                          pad_mode, normalized, onesided)
 
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")
@@ -271,49 +379,22 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
-    def index_add(self, dim, index, tensor):
-        return self.clone().index_add_(dim, index, tensor)
-
-    def index_copy(self, dim, index, tensor):
-        return self.clone().index_copy_(dim, index, tensor)
-
-    def index_fill(self, dim, index, value):
-        return self.clone().index_fill_(dim, index, value)
-
-    def scatter(self, dim, index, source):
-        return self.clone().scatter_(dim, index, source)
-
-    def scatter_add(self, dim, index, source):
-        return self.clone().scatter_add_(dim, index, source)
-
-    def masked_copy(self, mask, tensor):
-        warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
-        return self.masked_scatter(mask, tensor)
-
-    def masked_copy_(self, mask, tensor):
-        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
-        return self.masked_scatter_(mask, tensor)
-
-    def masked_scatter(self, mask, tensor):
-        return self.clone().masked_scatter_(mask, tensor)
-
-    def masked_fill(self, mask, value):
-        return self.clone().masked_fill_(mask, value)
-
-    def unique(self, sorted=False, return_inverse=False):
-        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+    def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
+        r"""Returns the unique elements of the input tensor.
 
         See :func:`torch.unique`
         """
-        output, inverse_indices = self._unique(
-            sorted=sorted, return_inverse=return_inverse)
-        if return_inverse:
-            return output, inverse_indices
-        else:
-            return output
+        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+
+    def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
+        r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+
+        See :func:`torch.unique_consecutive`
+        """
+        return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def __rsub__(self, other):
-        return -self + other
+        return _C._VariableFunctions.rsub(self, other)
 
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
@@ -332,17 +413,20 @@ class Tensor(torch._C._TensorBase):
         return object.__format__(self, format_spec)
 
     def __ipow__(self, other):
-        raise NotImplementedError("in-place pow not implemented")
+        return NotImplemented
 
+    @_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
-        return self.new([other]) ** self
+        return self.new_tensor(other) ** self
 
+    @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
         result = self / other
         if result.dtype.is_floating_point:
             result = result.trunc()
         return result
 
+    @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
         result = other / self
         if result.dtype.is_floating_point:
@@ -351,12 +435,12 @@ class Tensor(torch._C._TensorBase):
 
     __neg__ = _C._TensorBase.neg
 
-    __eq__ = _C._TensorBase.eq
-    __ne__ = _C._TensorBase.ne
-    __lt__ = _C._TensorBase.lt
-    __le__ = _C._TensorBase.le
-    __gt__ = _C._TensorBase.gt
-    __ge__ = _C._TensorBase.ge
+    __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
+    __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
+    __lt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.lt)
+    __le__ = _wrap_type_error_to_not_implemented(_C._TensorBase.le)
+    __gt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.gt)
+    __ge__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ge)
     __abs__ = _C._TensorBase.abs
 
     def __len__(self):
@@ -373,24 +457,38 @@ class Tensor(torch._C._TensorBase):
         # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
+        if torch._C._get_tracing_state():
+            warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
+                          'Passing a tensor of different shape won\'t change the number of '
+                          'iterations executed (and might lead to errors or silently give '
+                          'incorrect results).', category=RuntimeWarning)
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
         return id(self)
 
     def __dir__(self):
+        if self.is_quantized:
+            warnings.warn('Only a small subset of methods are supported for quantized tensors.')
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
         keys = tensor_methods + attrs
+
+        # property only available dense, cuda tensors
+        if (not self.is_cuda) or self.is_sparse:
+            keys.remove("__cuda_array_interface__")
+
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    __array_priority__ = 1000    # prefer Tensor ops over numpy ones
+
     def __array__(self, dtype=None):
         if dtype is None:
-            return self.cpu().numpy()
+            return self.numpy()
         else:
-            return self.cpu().numpy().astype(dtype, copy=False)
+            return self.numpy().astype(dtype, copy=False)
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
@@ -399,5 +497,238 @@ class Tensor(torch._C._TensorBase):
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
         return torch.from_numpy(array)
+
+    def __contains__(self, element):
+        r"""Check if `element` is present in tensor
+
+        Arguments:
+            element (Tensor or scalar): element to be checked
+                for presence in current tensor"
+        """
+        if isinstance(element, (torch.Tensor, Number)):
+            return (element == self).any().item()
+
+        raise RuntimeError(
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s." %
+            type(element)
+        )
+
+    @property
+    def __cuda_array_interface__(self):
+        """Array view description for cuda tensors.
+
+        See:
+        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        """
+
+        # raise AttributeError for unsupported tensors, so that
+        # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
+        if not self.is_cuda:
+            raise AttributeError(
+                "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
+                "If CUDA data is required use tensor.cuda() to copy tensor to device memory." %
+                self.type()
+            )
+
+        if self.is_sparse:
+            raise AttributeError(
+                "Can't get __cuda_array_interface__ on sparse type: %s "
+                "Use Tensor.to_dense() to convert to a dense tensor first." %
+                self.type()
+            )
+
+        # RuntimeError, matching tensor.__array__() behavior.
+        if self.requires_grad:
+            raise RuntimeError(
+                "Can't get __cuda_array_interface__ on Variable that requires grad. "
+                "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
+            )
+
+        # CUDA devices are little-endian and tensors are stored in native byte
+        # order. 1-byte entries are endian-agnostic.
+        typestr = {
+            torch.float16: "<f2",
+            torch.float32: "<f4",
+            torch.float64: "<f8",
+            torch.uint8: "|u1",
+            torch.int8: "|i1",
+            torch.int16: "<i2",
+            torch.int32: "<i4",
+            torch.int64: "<i8",
+        }[self.dtype]
+
+        itemsize = self.storage().element_size()
+
+        shape = tuple(self.shape)
+        if self.is_contiguous():
+            # __cuda_array_interface__ v2 requires the strides to be omitted
+            # (either not set or set to None) for C-contiguous arrays.
+            strides = None
+        else:
+            strides = tuple(s * itemsize for s in self.stride())
+        data_ptr = self.data_ptr() if self.numel() > 0 else 0
+        data = (data_ptr, False)  # read-only is false
+
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=2)
+
+    def refine_names(self, *names):
+        r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
+
+        Refining is a special case of renaming that "lifts" unnamed dimensions.
+        A ``None`` dim can be refined to have any name; a named dim can only be
+        refined to have the same name.
+
+        Because named tensors can coexist with unnamed tensors, refining names
+        gives a nice way to write named-tensor-aware code that works with both
+        named and unnamed tensors.
+
+        :attr:`names` may contain up to one Ellipsis (``...``).
+        The Ellipsis is expanded greedily; it is expanded in-place to fill
+        :attr:`names` to the same length as ``self.dim()`` using names from the
+        corresponding indices of ``self.names``.
+
+        Python 2 does not support Ellipsis but one may use a string literal
+        instead (``'...'``).
+
+        Arguments:
+            names (iterable of str): The desired names of the output tensor. May
+                contain up to one Ellipsis.
+
+        Examples::
+
+            >>> imgs = torch.randn(32, 3, 128, 128)
+            >>> named_imgs = imgs.refine_names('N', 'C', 'H', 'W')
+            >>> named_imgs.names
+            ('N', 'C', 'H', 'W')
+
+            >>> tensor = torch.randn(2, 3, 5, 7, 11)
+            >>> tensor = tensor.refine_names('A', ..., 'B', 'C')
+            >>> tensor.names
+            ('A', None, None, 'B', 'C')
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
+        names = resolve_ellipsis(names, self.names, 'refine_names')
+        return super(Tensor, self).refine_names(names)
+
+    def align_to(self, *names):
+        r"""Permutes the dimensions of the :attr:`self` tensor to match the order
+        specified in :attr:`names`, adding size-one dims for any new names.
+
+        All of the dims of :attr:`self` must be named in order to use this method.
+        The resulting tensor is a view on the original tensor.
+
+        All dimension names of :attr:`self` must be present in :attr:`names`.
+        :attr:`names` may contain additional names that are not in ``self.names``;
+        the output tensor has a size-one dimension for each of those new names.
+
+        :attr:`names` may contain up to one Ellipsis (``...``).
+        The Ellipsis is expanded to be equal to all dimension names of :attr:`self`
+        that are not mentioned in :attr:`names`, in the order that they appear
+        in :attr:`self`.
+
+        Python 2 does not support Ellipsis but one may use a string literal
+        instead (``'...'``).
+
+        Arguments:
+            names (iterable of str): The desired dimension ordering of the
+                output tensor. May contain up to one Ellipsis that is expanded
+                to all unmentioned dim names of :attr:`self`.
+
+        Examples::
+
+            >>> tensor = torch.randn(2, 2, 2, 2, 2, 2)
+            >>> named_tensor = tensor.refine_names('A', 'B', 'C', 'D', 'E', 'F')
+
+            # Move the F and E dims to the front while keeping the rest in order
+            >>> named_tensor.align_to('F', 'E', ...)
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
+        ellipsis_idx = single_ellipsis_index(names, 'align_to')
+        if ellipsis_idx is None:
+            return super(Tensor, self).align_to(names)
+        return super(Tensor, self).align_to(
+            [name for name in names if not is_ellipsis(name)],
+            ellipsis_idx)
+
+    def unflatten(self, dim, namedshape):
+        r"""Unflattens the named dimension :attr:`dim`, viewing it in the shape
+        specified by :attr:`namedshape`.
+
+        Arguments:
+            namedshape: (iterable of ``(name, size)`` tuples).
+
+        Examples::
+
+            >>> flat_imgs = torch.rand(32, 3 * 128 * 128, names=('N', 'features'))
+            >>> imgs = flat_imgs.unflatten('features', (('C', 3), ('H', 128), ('W', 128)))
+            >>> imgs.names, images.shape
+            (('N', 'C', 'H', 'W'), torch.Size([32, 3, 128, 128]))
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
+        names, sizes = unzip_namedshape(namedshape)
+        return super(Tensor, self).unflatten(dim, sizes, names)
+
+    def rename_(self, *names, **rename_map):
+        """In-place version of :meth:`~Tensor.rename`."""
+
+        # Note [rename_ / rename API]
+        # The Python API for these is different from the C++ API. In Python:
+        # 1) tensor.rename(*names) takes a vararglist of names
+        # 2) tensor.rename(**rename_map) takes a map of names to rename.
+        # C++ is static, making it difficult to implement similar behavior.
+        return update_names(self, names, rename_map, inplace=True)
+
+    def rename(self, *names, **rename_map):
+        """Renames dimension names of :attr:`self`.
+
+        There are two main usages:
+
+        ``self.rename(**rename_map)`` returns a view on tensor that has dims
+        renamed as specified in the mapping :attr:`rename_map`.
+
+        ``self.rename(*names)`` returns a view on tensor, renaming all
+        dimensions positionally using :attr:`names`.
+        Use ``self.rename(None)`` to drop names on a tensor.
+
+        One cannot specify both positional args :attr:`names` and keyword args
+        :attr:`rename_map`.
+
+        Examples::
+
+            >>> imgs = torch.rand(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
+            >>> renamed_imgs = imgs.rename(N='batch', C='channels')
+            >>> renamed_imgs.names
+            ('batch', 'channels', 'H', 'W')
+
+            >>> renamed_imgs = imgs.rename(None)
+            >>> renamed_imgs.names
+            (None,)
+
+            >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
+            >>> renamed_imgs.names
+            ('batch', 'channel', 'height', 'width')
+
+        .. warning::
+            The named tensor API is experimental and subject to change.
+
+        """
+        # See Note [rename_ / rename API]
+        return update_names(self, names, rename_map, inplace=False)
+
+    def _update_names(self, names, inplace):
+        # See Note [rename_ / rename API]
+        if inplace:
+            return super(Tensor, self).rename_(names)
+        else:
+            return super(Tensor, self).rename(names)
 
     __module__ = 'torch'

@@ -3,7 +3,7 @@
 # This script helps developers set up the ONNX Caffe2 and PyTorch develop environment on devgpu.
 # It creates an virtualenv instance, and installs all the dependencies in this environment.
 # The script will creates a folder called onnx-dev folder under the $HOME directory.
-# onnx, pytorch and caffe2 are installed seperately.
+# onnx, pytorch and caffe2 are installed separately.
 # Please source $HOME/onnx-dev/.onnx_env_init to initialize the development before starting developing.
 
 
@@ -14,15 +14,16 @@ set -e
 shopt -s expand_aliases
 
 # Proxy setup
-alias with_proxy="HTTPS_PROXY=http://fwdproxy.any:8080 HTTP_PROXY=http://fwdproxy.any:8080 FTP_PROXY=http://fwdproxy.any:8080 https_proxy=http://fwdproxy.any:8080 http_proxy=http://fwdproxy.any:8080 ftp_proxy=http://fwdproxy.any:8080 http_no_proxy='*.facebook.com|*.tfbnw.net|*.fb.com'"
+alias with_proxy="HTTPS_PROXY=http://fwdproxy:8080 HTTP_PROXY=http://fwdproxy:8080 FTP_PROXY=http://fwdproxy:8080 https_proxy=http://fwdproxy:8080 http_proxy=http://fwdproxy:8080 ftp_proxy=http://fwdproxy:8080 http_no_proxy='*.facebook.com|*.tfbnw.net|*.fb.com'"
 
 # Set the variables
 RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
-onnx_root="$HOME/onnx-dev"   # I think hardcoding the onnx root dir is fine, just like fbsource
+onnx_root="$HOME/local/onnx-dev"   # I think hardcoding the onnx root dir is fine, just like fbsource
+onnx_root_link="$HOME/onnx-dev"
 venv="$onnx_root/onnxvenv"
-onnx_init_file="$onnx_root/.onnx_env_init"
+onnx_init_file="$onnx_root_link/.onnx_env_init"
 ccache_root="$onnx_root/ccache"
 ccache_script="$(pwd)/ccache_install.sh"
 sanity_script="$onnx_root/sanity.sh"
@@ -67,6 +68,11 @@ if [ -e "$onnx_root" ]; then
   mv --backup=t -T "$onnx_root" "${onnx_root}.old.$timestamp"
 fi
 mkdir -p "$onnx_root"
+if [ -e "$onnx_root_link"]; then
+  timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
+  mv --backup=t -T "$onnx_root_link" "${onnx_root_link}.old.$timestamp"
+fi
+ln -s "$onnx_root" "$onnx_root_link"
 
 # Set the name of virtualenv instance
 with_proxy virtualenv "$venv"
@@ -84,7 +90,7 @@ touch "$onnx_init_file"
   # shellcheck disable=SC2016
   echo 'export PATH='"$ccache_root"'/lib:/usr/local/cuda/bin:$PATH';
   echo "source $venv/bin/activate";
-  echo 'alias with_proxy="HTTPS_PROXY=http://fwdproxy.any:8080 HTTP_PROXY=http://fwdproxy.any:8080 FTP_PROXY=http://fwdproxy.any:8080 https_proxy=http://fwdproxy.any:8080 http_proxy=http://fwdproxy.any:8080 ftp_proxy=http://fwdproxy.any:8080 http_no_proxy='"'"'*.facebook.com|*.tfbnw.net|*.fb.com'"'"'"'
+  echo 'alias with_proxy="HTTPS_PROXY=http://fwdproxy:8080 HTTP_PROXY=http://fwdproxy:8080 FTP_PROXY=http://fwdproxy:8080 https_proxy=http://fwdproxy:8080 http_proxy=http://fwdproxy:8080 ftp_proxy=http://fwdproxy:8080 http_no_proxy='"'"'*.facebook.com|*.tfbnw.net|*.fb.com'"'"'"'
 } >> "$onnx_init_file"
 chmod u+x "$onnx_init_file"
 
@@ -131,48 +137,15 @@ with_proxy git clone https://github.com/pytorch/pytorch --recursive
 cd "$onnx_root/onnx"
 with_proxy python setup.py develop
 
-# Build PyTorch
+# Build PyTorch and Caffe2
 cd "$onnx_root/pytorch"
 with_proxy pip install -r "requirements.txt"
-with_proxy python setup.py build develop
+with_proxy python setup.py develop
 
-# Build Caffe2
-set +e
-
+# Sanity checks and useful info
 cd "$onnx_root"
 with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/master/scripts/fbcode-dev-setup/onnx_c2_sanity_check.sh -O "$sanity_script"
 chmod u+x "$sanity_script"
-
-cd "$onnx_root/pytorch"
-with_proxy python setup_caffe2.py develop
-caffe2_exit_code=$?
-caffe2_ok=true
-if [ $caffe2_exit_code != 0 ]; then
-  caffe2_ok=false
-fi
-if ! $caffe2_ok; then
-  # Possible failure reasons when building Caffe2
-  ninja_path=$(which ninja)
-  if [[ ! -z "$ninja_path" ]]; then
-    echo "${RED}Warning: ninja is installed at $ninja_path, which may cause Caffe2 building issue!!!${NC}"
-    echo "${RED}Please try to remove the ninja at ${ninja_path}.${NC}"
-  fi
-  echo "${RED}We are almost there, only building Caffe2 fails. We can fix this problem seperately.${NC}"
-  echo "###### Please run the following command before development/fixing the problem: ######"
-  echo "${CYAN}source $onnx_init_file${NC}"
-  echo "#####################################################################################"
-  echo "########## Please run the following command to install Caffe2 seperately:  ##########"
-  echo "${CYAN}cd $onnx_root/pytorch; python setup_caffe2.py develop${NC}"
-  echo "#####################################################################################"
-  echo "########### Please run the following command to check your installation:  ###########"
-  echo "${CYAN}$sanity_script${NC}"
-  echo "#####################################################################################"
-  exit 1
-fi
-
-set -e
-
-# Sanity checks and useful info
 $sanity_script
 
 echo "Congrats, you are ready to rock!!"

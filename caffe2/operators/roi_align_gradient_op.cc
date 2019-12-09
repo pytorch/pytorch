@@ -88,7 +88,8 @@ void ROIAlignBackwardFeature(
     const int sampling_ratio,
     T* bottom_diff,
     const T* bottom_rois,
-    int rois_cols) {
+    int rois_cols,
+    bool continuous_coordinate) {
   DCHECK(rois_cols == 4 || rois_cols == 5);
 
   for (int index = 0; index < nthreads; index++) {
@@ -106,18 +107,23 @@ void ROIAlignBackwardFeature(
     }
 
     // Do not using rounding; this implementation detail is critical
-    T roi_start_w = offset_bottom_rois[0] * spatial_scale;
-    T roi_start_h = offset_bottom_rois[1] * spatial_scale;
-    T roi_end_w = offset_bottom_rois[2] * spatial_scale;
-    T roi_end_h = offset_bottom_rois[3] * spatial_scale;
-    // T roi_start_w = round(offset_bottom_rois[0] * spatial_scale);
-    // T roi_start_h = round(offset_bottom_rois[1] * spatial_scale);
-    // T roi_end_w = round(offset_bottom_rois[2] * spatial_scale);
-    // T roi_end_h = round(offset_bottom_rois[3] * spatial_scale);
+    T roi_offset = continuous_coordinate ? T(0.5) : 0;
+    T roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
+    T roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
+    T roi_end_w = offset_bottom_rois[2] * spatial_scale - roi_offset;
+    T roi_end_h = offset_bottom_rois[3] * spatial_scale - roi_offset;
 
-    // Force malformed ROIs to be 1x1
-    T roi_width = std::max(roi_end_w - roi_start_w, (T)1.);
-    T roi_height = std::max(roi_end_h - roi_start_h, (T)1.);
+    T roi_width = roi_end_w - roi_start_w;
+    T roi_height = roi_end_h - roi_start_h;
+    if (continuous_coordinate) {
+      CAFFE_ENFORCE(
+          roi_width >= 0 && roi_height >= 0,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = std::max(roi_width, (T)1.);
+      roi_height = std::max(roi_height, (T)1.);
+    }
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -190,23 +196,25 @@ bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   // if R has 5 columns, the first column is the index, otherwise 0
   CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0,
+      X.sizes(),
+      at::dtype<float>()); // Gradient of net w.r.t. input to "forward" op (aka
+                           // "gradInput")
 
   // Must zero-out dX before accumulating gradients
   // (TODO): Kaiming - is this safe?
   math::Set<float, CPUContext>(
-      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
 
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     ROIAlignBackwardFeature<float>(
-        dY.size(),
+        dY.numel(),
         dY.data<float>(),
         R.dim32(0),
         spatial_scale_,
@@ -216,9 +224,10 @@ bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
         pooled_height_,
         pooled_width_,
         sampling_ratio_,
-        dX->mutable_data<float>(),
+        dX->template mutable_data<float>(),
         R.data<float>(),
-        R.dim32(1));
+        R.dim32(1),
+        aligned_);
   }
   return true;
 }

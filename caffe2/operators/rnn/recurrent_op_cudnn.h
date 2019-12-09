@@ -32,17 +32,23 @@ template <typename T>
 class RecurrentBaseOp : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  RecurrentBaseOp(const OperatorDef& operator_def, Workspace* ws);
+  template<class... Args> explicit RecurrentBaseOp(Args&&... args)
+  : Operator<CUDAContext>(std::forward<Args>(args)...), cudnn_wrapper_(&context_) {
+      CUDNN_ENFORCE(cudnnCreateDropoutDescriptor(&dropoutDesc_));
+      CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
+      CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
+      CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hxDesc_));
+  }
   virtual ~RecurrentBaseOp();
 
  protected:
   void initialize(
-      const Tensor<CUDAContext>& input,
-      Tensor<CUDAContext>* dropoutStates = nullptr,
+      const Tensor& input,
+      Tensor* dropoutStates = nullptr,
       // If passed, reshapes to the appropriate size
-      Tensor<CUDAContext>* output = nullptr,
-      Tensor<CUDAContext>* hiddenOutput = nullptr,
-      Tensor<CUDAContext>* cellOutput = nullptr);
+      Tensor* output = nullptr,
+      Tensor* hiddenOutput = nullptr,
+      Tensor* cellOutput = nullptr);
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnDropoutDescriptor_t dropoutDesc_;
@@ -56,7 +62,7 @@ class RecurrentBaseOp : public Operator<CUDAContext> {
   std::unique_ptr<detail::TensorDescriptors<T>> xDesc_;
   std::unique_ptr<detail::TensorDescriptors<T>> yDesc_;
 
-  std::vector<TIndex> cachedInputDims_;
+  std::vector<int64_t> cachedInputDims_;
   size_t reserveNbytes_;
   size_t cudnnWsNbytes_;
 
@@ -84,8 +90,9 @@ template <typename T>
 class RecurrentOp : public RecurrentBaseOp<T> {
  public:
   USE_RECURRENT_BASE_FUNCTIONS
-  RecurrentOp(const OperatorDef& operator_def, Workspace* ws)
-      : RecurrentBaseOp<T>(operator_def, ws) {}
+  template <class... Args>
+  explicit RecurrentOp(Args&&... args)
+      : RecurrentBaseOp<T>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override;
 
@@ -100,8 +107,9 @@ template <typename T, RecurrentParamOpMode mode>
 class RecurrentParamAccessOp : public RecurrentBaseOp<T> {
  public:
   USE_RECURRENT_BASE_FUNCTIONS
-  RecurrentParamAccessOp(const OperatorDef& operator_def, Workspace* ws)
-      : RecurrentBaseOp<T>(operator_def, ws) {}
+  template <class... Args>
+  explicit RecurrentParamAccessOp(Args&&... args)
+      : RecurrentBaseOp<T>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override;
 };
@@ -110,8 +118,9 @@ template <typename T>
 class RecurrentGradientOp : public RecurrentBaseOp<T> {
  public:
   USE_RECURRENT_BASE_FUNCTIONS
-  RecurrentGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : RecurrentBaseOp<T>(operator_def, ws) {}
+  template <class... Args>
+  explicit RecurrentGradientOp(Args&&... args)
+      : RecurrentBaseOp<T>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override;
 

@@ -69,14 +69,30 @@ between CPU and GPU or between two GPUs.  Hence, computation will proceed as if
 every operation was executed synchronously.
 
 You can force synchronous computation by setting environment variable
-`CUDA_LAUNCH_BLOCKING=1`.  This can be handy when an error occurs on the GPU.
+``CUDA_LAUNCH_BLOCKING=1``.  This can be handy when an error occurs on the GPU.
 (With asynchronous execution, such an error isn't reported until after the
 operation is actually executed, so the stack trace does not show where it was
 requested.)
 
-As an exception, several functions such as :meth:`~torch.Tensor.copy_` admit
-an explicit :attr:`async` argument, which lets the caller bypass synchronization
-when it is unnecessary.  Another exception is CUDA streams, explained below.
+A consequence of the asynchronous computation is that time measurements without
+synchronizations are not accurate. To get precise measurements, one should either
+call :func:`torch.cuda.synchronize()` before measuring, or use :class:`torch.cuda.Event`
+to record times as following::
+
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+
+    # Run some things here
+
+    end_event.record()
+    torch.cuda.synchronize()  # Wait for the events to be recorded!
+    elapsed_time_ms = start_event.elapsed_time(end_event)
+
+As an exception, several functions such as :meth:`~torch.Tensor.to` and
+:meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument,
+which lets the caller bypass synchronization when it is unnecessary.
+Another exception is CUDA streams, explained below.
 
 CUDA streams
 ^^^^^^^^^^^^
@@ -115,12 +131,46 @@ allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
 ``nvidia-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
-tensors, and use :meth:`~torch.cuda.memory_cached` and
-:meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
-allocator. Calling :meth:`~torch.cuda.empty_cache` can release all **unused**
-cached memory from PyTorch so that those can be used by other GPU applications.
-However, the occupied GPU memory by tensors will not be freed so it can not
-increase the amount of GPU memory available for PyTorch.
+tensors, and use :meth:`~torch.cuda.memory_reserved` and
+:meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory
+managed by the caching allocator. Calling :meth:`~torch.cuda.empty_cache`
+releases all **unused** cached memory from PyTorch so that those can be used
+by other GPU applications. However, the occupied GPU memory by tensors will not
+be freed so it can not increase the amount of GPU memory available for PyTorch.
+
+For more advanced users, we offer more comprehensive memory benchmarking via
+:meth:`~torch.cuda.memory_stats`. We also offer the capability to capture a
+complete snapshot of the memory allocator state via
+:meth:`~torch.cuda.memory_snapshot`, which can help you understand the
+underlying allocation patterns produced by your code.
+
+.. _cufft-plan-cache:
+
+cuFFT plan cache
+----------------
+
+For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
+running FFT methods (e.g., :func:`torch.fft`) on CUDA tensors of same geometry
+with same configuration. Because some cuFFT plans may allocate GPU memory,
+these caches have a maximum capacity.
+
+You may control and query the properties of the cache of current device with
+the following APIs:
+
+* ``torch.backends.cuda.cufft_plan_cache.max_size`` gives the capacity of the
+  cache (default is 4096 on CUDA 10 and newer, and 1023 on older CUDA versions).
+  Setting this value directly modifies the capacity.
+
+* ``torch.backends.cuda.cufft_plan_cache.size`` gives the number of plans
+  currently residing in the cache.
+
+* ``torch.backends.cuda.cufft_plan_cache.clear()`` clears the cache.
+
+To control and query plan caches of a non-default device, you can index the
+``torch.backends.cuda.cufft_plan_cache`` object with either a :class:`torch.device`
+object or a device index, and access one of the above attributes. E.g., to set
+the capacity of the cache for device ``1``, one can write
+``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.
 
 Best practices
 --------------
@@ -233,6 +283,7 @@ also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
 
+.. _cuda-memory-pinning:
 
 Use pinned memory buffers
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -248,8 +299,9 @@ memory. CPU tensors and storages expose a :meth:`~torch.Tensor.pin_memory`
 method, that returns a copy of the object, with data put in a pinned region.
 
 Also, once you pin a tensor or storage, you can use asynchronous GPU copies.
-Just pass an additional ``non_blocking=True`` argument to a :meth:`~torch.Tensor.cuda`
-call. This can be used to overlap data transfers with computation.
+Just pass an additional ``non_blocking=True`` argument to a
+:meth:`~torch.Tensor.to` or a :meth:`~torch.Tensor.cuda` call. This can be used
+to overlap data transfers with computation.
 
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing ``pin_memory=True`` to its constructor.

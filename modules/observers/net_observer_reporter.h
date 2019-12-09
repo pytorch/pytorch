@@ -4,6 +4,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
+#include "observers/macros.h"
 
 namespace caffe2 {
 
@@ -18,6 +19,7 @@ struct PerformanceInformation {
   std::string type = ""; // the type of the operator
   // Measured
   double latency = 0;
+  double cpuMilliseconds = 0;
 };
 
 class CAFFE2_OBSERVER_API NetObserverReporter {

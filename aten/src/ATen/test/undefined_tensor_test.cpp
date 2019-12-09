@@ -1,15 +1,13 @@
-#define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/UndefinedTensor.h"
+#include <ATen/ATen.h>
+#include <c10/core/UndefinedTensorImpl.h>
 #include <string>
-#include "test_seed.h"
 
 using namespace at;
 
-TEST_CASE( "undefined tensor test", "[]" ) {
-  manual_seed(123, at::Backend::CPU);
+TEST(TestUndefined, UndefinedTest) {
+  manual_seed(123);
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;
@@ -17,37 +15,38 @@ TEST_CASE( "undefined tensor test", "[]" ) {
 
   std::stringstream ss;
   ss << und << std::endl;
-  REQUIRE(!und.defined());
-  REQUIRE(std::string("UndefinedTensor") == und.toString());
+  ASSERT_FALSE(und.defined());
+  ASSERT_EQ(std::string("UndefinedType"), und.toString());
 
-  REQUIRE_THROWS_WITH(und.strides(), Catch::Contains("strides"));
-  REQUIRE_THROWS_WITH(und.dim(), Catch::Contains("dim"));
-  REQUIRE_THROWS_WITH([]() {return Tensor();}() = Scalar(5), Catch::Contains("UndefinedType"));
-  REQUIRE_THROWS_WITH(und.unsafeGetTH(true), Catch::Contains("unsafeGetTH"));
-  REQUIRE_THROWS_WITH(und.add(und), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(und.add(ft), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(ft.add(und), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(und.add(5), Catch::Contains("add"));
-  REQUIRE_THROWS_WITH(und.mm(und), Catch::Contains("mm"));
+  ASSERT_ANY_THROW(und.strides());
+  ASSERT_ANY_THROW(und.dim());
+  ASSERT_ANY_THROW([]() { return Tensor(); }() = Scalar(5));
+  ASSERT_ANY_THROW(und.add(und));
+  ASSERT_ANY_THROW(und.add(ft));
+  ASSERT_ANY_THROW(ft.add(und));
+  ASSERT_ANY_THROW(und.add(5));
+  ASSERT_ANY_THROW(und.mm(und));
 
-  und.toType(und.type());
-  REQUIRE_THROWS_WITH(und.toType(ft.type()), Catch::Contains("attempt to copy an undefined tensor"));
-  REQUIRE_THROWS_WITH(ft.toType(und.type()), Catch::Contains("UndefinedType"));
-  und.toType(ScalarType::Undefined);
-  REQUIRE_THROWS_WITH(und.toType(ScalarType::Float), Catch::Contains("toScalarType"));
-  REQUIRE_THROWS_WITH(ft.toType(ScalarType::Undefined), Catch::Contains("UndefinedType"));
+  // public variable API
+  ASSERT_ANY_THROW(und.variable_data());
+  ASSERT_ANY_THROW(und.tensor_data());
+  ASSERT_ANY_THROW(und.is_view());
+  ASSERT_ANY_THROW(und.base());
+  ASSERT_ANY_THROW(und.name());
+  ASSERT_ANY_THROW(und.grad_fn());
+  ASSERT_ANY_THROW(und.remove_hook(0));
+  ASSERT_ANY_THROW(und.register_hook([](const Tensor& x) -> Tensor { return x; }));
 
   // copy_
-  REQUIRE_THROWS_WITH(und.copy_(und), Catch::Contains("copy"));
-  REQUIRE_THROWS_WITH(und.copy_(ft), Catch::Contains("copy"));
-  REQUIRE_THROWS_WITH(ft.copy_(und), Catch::Contains("copy"));
+  ASSERT_ANY_THROW(und.copy_(und));
+  ASSERT_ANY_THROW(und.copy_(ft));
+  ASSERT_ANY_THROW(ft.copy_(und));
 
-  und.toBackend(Backend::Undefined);
-  REQUIRE_THROWS_WITH(und.toBackend(Backend::CPU), Catch::Contains("toBackend"));
-  REQUIRE_THROWS_WITH(ft.toBackend(Backend::Undefined), Catch::Contains("UndefinedType"));
+  ASSERT_ANY_THROW(und.toBackend(Backend::CPU));
+  ASSERT_ANY_THROW(ft.toBackend(Backend::Undefined));
 
   Tensor to_move = ones({1}, CPU(kFloat));
   Tensor m(std::move(to_move));
-  REQUIRE(!to_move.defined());
-  REQUIRE(to_move.get() == UndefinedTensor::singleton());
+  ASSERT_FALSE(to_move.defined());
+  ASSERT_EQ(to_move.unsafeGetTensorImpl(), UndefinedTensorImpl::singleton());
 }

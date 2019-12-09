@@ -18,7 +18,9 @@ fi
 
 # Use ccache if available (this path is where Homebrew installs ccache symlinks)
 if [ "$(uname)" == 'Darwin' ]; then
-  CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+  if [ -n "${CCACHE_WRAPPER_PATH:-}"]; then
+    CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+  fi
   if [ -d "$CCACHE_WRAPPER_PATH" ]; then
     CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
     CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")
@@ -65,7 +67,9 @@ else
 
   # Determine the number of CPUs to build with.
   # If the `CAFFE_MAKE_NCPUS` variable is not specified, use them all.
-  if [ -n "${CAFFE_MAKE_NCPUS}" ]; then
+  if [ -n "${MAX_JOBS}" ]; then
+      CAFFE_MAKE_NCPUS="$MAX_JOBS"
+  elif [ -n "${CAFFE_MAKE_NCPUS}" ]; then
       CAFFE_MAKE_NCPUS="$CAFFE_MAKE_NCPUS"
   elif [ "$(uname)" == 'Darwin' ]; then
       CAFFE_MAKE_NCPUS="$(sysctl -n hw.ncpu)"

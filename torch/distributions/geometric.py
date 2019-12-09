@@ -3,17 +3,18 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, _finfo
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
 class Geometric(Distribution):
     r"""
-    Creates a Geometric distribution parameterized by `probs`, where `probs` is the probability of success of Bernoulli
-    trials. It represents the probability that in k + 1 Bernoulli trials, the first k trials failed, before
-    seeing a success.
+    Creates a Geometric distribution parameterized by :attr:`probs`,
+    where :attr:`probs` is the probability of success of Bernoulli trials.
+    It represents the probability that in :math:`k + 1` Bernoulli trials, the
+    first :math:`k` trials failed, before seeing a success.
 
-    Samples are non-negative integers [0, inf).
+    Samples are non-negative integers [0, :math:`\inf`).
 
     Example::
 
@@ -22,10 +23,11 @@ class Geometric(Distribution):
         tensor([ 2.])
 
     Args:
-        probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
+        probs (Number, Tensor): the probability of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
-    arg_constraints = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     support = constraints.nonnegative_integer
 
     def __init__(self, probs=None, logits=None, validate_args=None):
@@ -43,6 +45,17 @@ class Geometric(Distribution):
         else:
             batch_shape = probs_or_logits.size()
         super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Geometric, _instance)
+        batch_shape = torch.Size(batch_shape)
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(batch_shape)
+        if 'logits' in self.__dict__:
+            new.logits = self.logits.expand(batch_shape)
+        super(Geometric, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def mean(self):
@@ -62,14 +75,20 @@ class Geometric(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
+        tiny = torch.finfo(self.probs.dtype).tiny
         with torch.no_grad():
-            u = self.probs.new(shape).uniform_(_finfo(self.probs).tiny, 1)
+            if torch._C._get_tracing_state():
+                # [JIT WORKAROUND] lack of support for .uniform_()
+                u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
+                u = u.clamp(min=tiny)
+            else:
+                u = self.probs.new(shape).uniform_(tiny, 1)
             return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        value, probs = broadcast_all(value, self.probs.clone())
+        value, probs = broadcast_all(value, self.probs.clone(memory_format=torch.contiguous_format))
         probs[(probs == 1) & (value == 0)] = 0
         return value * (-probs).log1p() + self.probs.log()
 

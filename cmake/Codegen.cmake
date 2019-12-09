@@ -1,9 +1,38 @@
-if (DEFINED ENV{PYTORCH_PYTHON})
-  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
-  set(PYCMD "$ENV{PYTORCH_PYTHON}")
-else()
-  SET(PYCMD "python")
-endif()
+# This ill-named file does a number of things:
+# - Installs Caffe2 header files (this has nothing to do with code generation)
+# - Configures caffe2/core/macros.h
+# - Creates an ATen target for its generated C++ files and adds it
+#   as a dependency
+
+################################################################################
+# Helper functions
+################################################################################
+
+function(filter_list output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if("${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
+
+function(filter_list_exclude output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if(NOT "${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
+
+################################################################################
 
 # ---[ Write the macros file
 configure_file(
@@ -14,35 +43,40 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
+if (NOT INTERN_BUILD_ATEN_OPS)
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
+          DESTINATION include/ATen
+          FILES_MATCHING PATTERN "*.h")
+endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 
 # ---[ ATen specific
-if (BUILD_ATEN)
-  # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
-  # so we need to set these commands here rather than in src/TH
-  IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-    IF(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
-    ELSE(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
-    ENDIF(MSVC)
-  ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
+if (INTERN_BUILD_ATEN_OPS)
+  SET(OPT_FLAG "-O3 ")
+  IF(MSVC)
+    SET(OPT_FLAG "/Ox /fp:strict ")
+  ENDIF()
+  SET(VCOMP_LIB "vcomp")
+
+  IF("${CMAKE_BUILD_TYPE}" MATCHES "Debug")
+    SET(OPT_FLAG " ")
+    SET(VCOMP_LIB "vcompd")
+  ENDIF()
+
   IF(C_AVX_FOUND)
     IF(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${CXX_AVX_FLAGS}")
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
+      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
     ELSE(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${CXX_AVX_FLAGS}")
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX_FLAGS}")
+      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX_FLAGS}")
     ENDIF(MSVC)
   ENDIF(C_AVX_FOUND)
 
   IF(C_AVX2_FOUND)
     IF(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${CXX_AVX2_FLAGS}")
+      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX2 ${CXX_AVX2_FLAGS}")
     ELSE(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${CXX_AVX2_FLAGS}")
+      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX2_FLAGS}")
     ENDIF(MSVC)
   ENDIF(C_AVX2_FOUND)
 
@@ -50,40 +84,38 @@ if (BUILD_ATEN)
     SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   ENDIF()
 
-  FILE(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp")
-
-  IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-    SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
-    SET(VCOMP_LIB "vcomp")
-  ELSE()
-    SET(MSVC_OPT_FLAG " ")
-    SET(VCOMP_LIB "vcompd")
-  ENDIF()
+  FILE(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
 
   LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
-  IF(MSVC)
-    LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}")
-  ELSE(MSVC)
-    LIST(APPEND CPU_CAPABILITY_FLAGS "-O3")
-  ENDIF(MSVC)
+  LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
 
   IF(CXX_AVX_FOUND)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "AVX")
     IF(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}/arch:AVX")
+      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX")
     ELSE(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx")
+      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx")
     ENDIF(MSVC)
   ENDIF(CXX_AVX_FOUND)
 
   IF(CXX_AVX2_FOUND)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
+
+    # Some versions of GCC pessimistically split unaligned load and store
+    # instructions when using the default tuning. This is a bad choice on
+    # new Intel and AMD processors so we disable it when compiling with AVX2.
+    # See https://stackoverflow.com/questions/52626726/why-doesnt-gcc-resolve-mm256-loadu-pd-as-single-vmovupd#tab-top
+    check_cxx_compiler_flag("-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store" COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+    IF(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+      SET(CPU_NO_AVX256_SPLIT_FLAGS "-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store")
+    ENDIF(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+
     LIST(APPEND CPU_CAPABILITY_NAMES "AVX2")
     IF(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2")
+      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
     ELSE(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx2 -mfma")
+      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
     ENDIF(MSVC)
   ENDIF(CXX_AVX2_FOUND)
 
@@ -117,39 +149,46 @@ if (BUILD_ATEN)
 
   FILE(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/*.py")
 
+  set(GEN_ROCM_FLAG)
+  if (USE_ROCM)
+    set(GEN_ROCM_FLAG --rocm)
+  endif()
+
   SET(GEN_COMMAND
-      ${PYCMD} ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_ROCM_FLAG}
       ${cwrap_files}
   )
 
   EXECUTE_PROCESS(
       COMMAND ${GEN_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
-        --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       RESULT_VARIABLE RETURN_VALUE
   )
   if (NOT RETURN_VALUE EQUAL 0)
       message(STATUS ${generated_cpp})
       message(FATAL_ERROR "Failed to get generated_cpp list")
   endif()
+  # FIXME: the file/variable name lists cpp, but these list both cpp and .h files
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
+  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-core core_generated_cpp)
 
   file(GLOB_RECURSE all_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*")
 
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
 
-  add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp}
+  add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp} ${core_generated_cpp}
     COMMAND ${GEN_COMMAND}
-      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
     DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
-  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp})
+  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp} ${core_generated_cpp})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS ${cuda_generated_cpp})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
   add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)

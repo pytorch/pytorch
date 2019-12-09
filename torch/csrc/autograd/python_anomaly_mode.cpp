@@ -1,16 +1,18 @@
-#include "torch/csrc/autograd/python_anomaly_mode.h"
-#include "torch/csrc/python_headers.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <c10/util/Exception.h>
+#include <pybind11/pybind11.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <iostream>
 
 namespace torch { namespace autograd {
 
 void PyAnomalyMetadata::store_stack() {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr mod(PyImport_ImportModule("traceback"));
   if (!mod) {
     throw python_error();
@@ -27,12 +29,13 @@ void PyAnomalyMetadata::store_stack() {
 }
 
 void PyAnomalyMetadata::print_stack() {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   if (!PyDict_Check(dict())) {
     throw std::runtime_error("Anomaly metadata is not a python dictionary.");
   }
 
-  THPObjectPtr stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
+  // PyDict_GetItemString returns a borrowed reference
+  PyObject* stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
   if (!stack) {
     AT_WARN("No forward pass information available. Enable detect anomaly "
             "during forward pass for more information.");
@@ -46,7 +49,7 @@ void PyAnomalyMetadata::print_stack() {
 
   // stack is a list of Python strings ending with newlines. Use join to convert
   // to a single string.
-  THPObjectPtr msg(PyUnicode_Join(empty_string, stack.get()));
+  THPObjectPtr msg(PyUnicode_Join(empty_string, stack));
   if (!msg) {
     throw python_error();
   }

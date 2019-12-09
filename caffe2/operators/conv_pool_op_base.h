@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
 #define CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
 
+#include <algorithm>
 #include <vector>
 
 #include "caffe2/core/context.h"
@@ -28,25 +29,25 @@ template <class Context>
 class ConvPoolOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
-            static_cast<LegacyPadding>(OperatorBase::GetSingleArgument<int>(
+            static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
                 "legacy_pad",
                 LegacyPadding::NOTSET))),
         global_pooling_(
-            OperatorBase::GetSingleArgument<int>("global_pooling", 0)),
-        kernel_(OperatorBase::GetRepeatedArgument<int>("kernels")),
-        dilation_(OperatorBase::GetRepeatedArgument<int>("dilations")),
-        stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
-        pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
+            this->template GetSingleArgument<int>("global_pooling", 0)),
+        kernel_(this->template GetRepeatedArgument<int>("kernels")),
+        dilation_(this->template GetRepeatedArgument<int>("dilations")),
+        stride_(this->template GetRepeatedArgument<int>("strides")),
+        pads_(this->template GetRepeatedArgument<int>("pads")),
         float16_compute_(
-            OperatorBase::GetSingleArgument<bool>("float16_compute", false)),
-        group_(OperatorBase::GetSingleArgument<int>("group", 1)),
+            this->template GetSingleArgument<bool>("float16_compute", false)),
+        group_(this->template GetSingleArgument<int>("group", 1)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+            this->template GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
-            OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
+            this->template GetSingleArgument<int>("shared_buffer", 0)),
         ws_(ws) {
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
@@ -60,32 +61,32 @@ class ConvPoolOpBase : public Operator<Context> {
 
     // Get old arguments values.
     if (OperatorBase::HasArgument("kernel")) {
-      kernel_.resize(2, OperatorBase::GetSingleArgument<int>("kernel", 0));
+      kernel_.resize(2, this->template GetSingleArgument<int>("kernel", 0));
     } else if (
         OperatorBase::HasArgument("kernel_h") &&
         OperatorBase::HasArgument("kernel_w")) {
-      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_h", 0));
-      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_w", 0));
+      kernel_.push_back(this->template GetSingleArgument<int>("kernel_h", 0));
+      kernel_.push_back(this->template GetSingleArgument<int>("kernel_w", 0));
     }
 
     if (OperatorBase::HasArgument("stride")) {
-      stride_.resize(2, OperatorBase::GetSingleArgument<int>("stride", 0));
+      stride_.resize(2, this->template GetSingleArgument<int>("stride", 0));
     } else if (
         OperatorBase::HasArgument("stride_h") &&
         OperatorBase::HasArgument("stride_w")) {
-      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_h", 0));
-      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_w", 0));
+      stride_.push_back(this->template GetSingleArgument<int>("stride_h", 0));
+      stride_.push_back(this->template GetSingleArgument<int>("stride_w", 0));
     }
 
     if (OperatorBase::HasArgument("dilation")) {
-      dilation_.resize(2, OperatorBase::GetSingleArgument<int>("dilation", 0));
+      dilation_.resize(2, this->template GetSingleArgument<int>("dilation", 0));
     } else if (
         OperatorBase::HasArgument("dilation_h") &&
         OperatorBase::HasArgument("dilation_w")) {
       dilation_.push_back(
-          OperatorBase::GetSingleArgument<int>("dilation_h", 0));
+          this->template GetSingleArgument<int>("dilation_h", 0));
       dilation_.push_back(
-          OperatorBase::GetSingleArgument<int>("dilation_w", 0));
+          this->template GetSingleArgument<int>("dilation_w", 0));
     }
 
     if (OperatorBase::HasArgument("pad")) {
@@ -94,7 +95,7 @@ class ConvPoolOpBase : public Operator<Context> {
               legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
-      pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
+      pads_.resize(4, this->template GetSingleArgument<int>("pad", 0));
     } else if (
         OperatorBase::HasArgument("pad_t") &&
         OperatorBase::HasArgument("pad_l") &&
@@ -105,10 +106,10 @@ class ConvPoolOpBase : public Operator<Context> {
               legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_t", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_l", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_b", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_r", 0));
     }
 
     // Fill default values.
@@ -137,7 +138,7 @@ class ConvPoolOpBase : public Operator<Context> {
     }
 
     if (global_pooling_) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE(
             pads_[2 * dim] == 0 && pads_[2 * dim + 1] == 0 &&
                 dilation_[dim] == 1 && stride_[dim] == 1,
@@ -150,7 +151,7 @@ class ConvPoolOpBase : public Operator<Context> {
     // need to clean this up.
     if (operator_def.name().find("Conv") == 0 ||
         operator_def.name().find("Pool") != std::string::npos) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GE(pads_[dim], 0);
         CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
         CAFFE_ENFORCE(
@@ -160,7 +161,7 @@ class ConvPoolOpBase : public Operator<Context> {
       }
     }
 
-    for (int dim = 0; dim < kernel_.size(); ++dim) {
+    for (size_t dim = 0; dim < kernel_.size(); ++dim) {
       CAFFE_ENFORCE_GE(kernel_[dim], 0);
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
@@ -168,14 +169,14 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   // Returns the input image dimensions for the current storage order type.
-  vector<int> GetDims(const Tensor<Context>& input) {
+  vector<int> GetDims(const Tensor& input) {
     vector<int> dims;
     switch (order_) {
       case StorageOrder::NCHW:
-        dims.assign(input.dims().begin() + 2, input.dims().end());
+        dims.assign(input.sizes().begin() + 2, input.sizes().end());
         break;
       case StorageOrder::NHWC:
-        dims.assign(input.dims().begin() + 1, input.dims().end() - 1);
+        dims.assign(input.sizes().begin() + 1, input.sizes().end() - 1);
         break;
       default:
         CAFFE_THROW("Unknown storage order : ", order_);
@@ -184,20 +185,20 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   // Returns the size of the input image for the current storage type.
-  int GetDimsSize(const Tensor<Context>& input) {
+  int GetDimsSize(const Tensor& input) {
     int size = 0;
     switch (order_) {
       case StorageOrder::NCHW:
         size = std::accumulate(
-            input.dims().begin() + 2,
-            input.dims().end(),
+            input.sizes().begin() + 2,
+            input.sizes().end(),
             1,
             std::multiplies<int>());
         break;
       case StorageOrder::NHWC:
         size = std::accumulate(
-            input.dims().begin() + 1,
-            input.dims().end() - 1,
+            input.sizes().begin() + 1,
+            input.sizes().end() - 1,
             1,
             std::multiplies<int>());
         break;
@@ -207,93 +208,127 @@ class ConvPoolOpBase : public Operator<Context> {
     return size;
   }
 
-  // Sets the output size. The output channel is manually provided since
+  // Gets the output size. The output channel is manually provided since
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
   // sizes.
   // Note(jiayq): the templatization of this function is mainly to help
   // implementations that do not use first-class Tensor objects, such as the
   // MKL operator. One can still call this function with dummy
-  // Tensor<CPUContext> objects in order to obtain the sizes.
-  template <typename AlternativeContext>
-  void SetOutputSize(
-      const Tensor<AlternativeContext>& input,
-      Tensor<AlternativeContext>* output,
-      int output_channel) {
-    CAFFE_ENFORCE(input.size() > 0);
-    vector<int> output_dims;
-    int N = input.dim32(0);
-    bool channel_first;
-    InferOutputSize(
-        input.dims(),
+  // Tensor objects in order to obtain the sizes.
+  std::vector<int64_t> GetOutputSize(const Tensor& input, int output_channel) {
+    CAFFE_ENFORCE_GE(input.dim(), 2);
+    const int inner_size = input.size_from_dim(1);
+    CAFFE_ENFORCE_GT(inner_size, 0);
+    std::vector<int64_t> output_dims;
+    InferOutputSize64(
+        input.sizes(),
         output_channel,
         order_,
         global_pooling_,
         legacy_pad_,
-        N,
-        kernel_,
-        output_dims,
         dilation_,
         stride_,
-        pads_,
-        channel_first);
+        &kernel_,
+        &pads_,
+        &output_dims);
+    return output_dims;
+  }
 
-    if (channel_first) {
-      output_dims.insert(output_dims.begin(), {N, output_channel});
-    } else {
-      output_dims.insert(output_dims.begin(), N);
-      output_dims.push_back(output_channel);
-    }
+  void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
+    const int inner_size = input.size_from_dim(1);
+    CAFFE_ENFORCE_GT(inner_size, 0);
+    std::vector<int> output_dims;
+    InferOutputSize(
+        input.sizes(),
+        output_channel,
+        order_,
+        global_pooling_,
+        legacy_pad_,
+        dilation_,
+        stride_,
+        &kernel_,
+        &pads_,
+        &output_dims);
     output->Resize(output_dims);
   }
 
   // Helper function that is also called from OperatorSchema. Modified
   // kernel parameters and output output_dims and channel_first.
-  static inline void InferOutputSize(
-      vector<TIndex> input_dims,
-      int /*output_channel*/,
-      StorageOrder order,
-      bool global_pooling,
-      LegacyPadding legacy_pad,
-      int /*N*/,
-      vector<int>& kernel,
-      vector<int>& output_dims,
-      const vector<int>& dilation,
-      const vector<int>& stride,
-      vector<int>& pads,
-      bool& channel_first) {
-    channel_first = false; // initialized to suppress compiler warning.
-    vector<TIndex> dims;
-    switch (order) {
-      case StorageOrder::NHWC:
-        channel_first = false;
-        dims.assign(input_dims.begin() + 1, input_dims.end() - 1);
-        break;
-      case StorageOrder::NCHW:
-        // Old Caffe order.
-        channel_first = true;
-        dims.assign(input_dims.begin() + 2, input_dims.end());
-        break;
-      default:
-        CAFFE_THROW("Unknown Storage order: ", order);
-    }
-
-    if (global_pooling) {
-      kernel.assign(dims.begin(), dims.end());
-      output_dims.assign(dims.size(), 1);
+  static void InferOutputSize(
+      const at::IntArrayRef& input_dims,
+      const int output_channel,
+      const StorageOrder order,
+      const bool global_pooling,
+      const LegacyPadding legacy_pad,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      std::vector<int>* kernel,
+      std::vector<int>* pads,
+      std::vector<int>* output_dims) {
+    CAFFE_ENFORCE_NE(order, StorageOrder::UNKNOWN);
+    const int ndim = input_dims.size() - 2;
+    output_dims->resize(ndim + 2);
+    output_dims->front() = input_dims.front();
+    if (order == StorageOrder::NCHW) {
+      output_dims->at(1) = output_channel;
     } else {
-      for (int dim = 0; dim < dims.size(); ++dim) {
-        int dim_size = 0;
+      output_dims->back() = output_channel;
+    }
+    const int offset = order == StorageOrder::NCHW ? 2 : 1;
+    if (global_pooling) {
+      std::copy_n(input_dims.cbegin() + offset, ndim, kernel->begin());
+      std::fill_n(output_dims->begin() + offset, ndim, 1LL);
+    } else {
+      for (int i = 0; i < ndim; ++i) {
         ComputeSizeAndPad(
-            dims[dim],
-            stride[dim],
-            kernel[dim],
-            dilation[dim],
+            input_dims[i + offset],
+            stride[i],
+            kernel->at(i),
+            dilation[i],
             legacy_pad,
-            &pads[dim],
-            &pads[dims.size() + dim],
-            &dim_size);
-        output_dims.push_back(dim_size);
+            &pads->at(i),
+            &pads->at(i + ndim),
+            &output_dims->at(i + offset));
+      }
+    }
+  }
+
+  static void InferOutputSize64(
+      const at::IntArrayRef& input_dims,
+      const int output_channel,
+      const StorageOrder order,
+      const bool global_pooling,
+      const LegacyPadding legacy_pad,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      std::vector<int>* kernel,
+      std::vector<int>* pads,
+      std::vector<int64_t>* output_dims) {
+    CAFFE_ENFORCE_NE(order, StorageOrder::UNKNOWN);
+    const int ndim = input_dims.size() - 2;
+    output_dims->resize(ndim + 2);
+    output_dims->front() = input_dims.front();
+    if (order == StorageOrder::NCHW) {
+      output_dims->at(1) = output_channel;
+    } else {
+      output_dims->back() = output_channel;
+    }
+    const int offset = order == StorageOrder::NCHW ? 2 : 1;
+    if (global_pooling) {
+      std::copy_n(input_dims.cbegin() + offset, ndim, kernel->begin());
+      std::fill_n(output_dims->begin() + offset, ndim, 1LL);
+    } else {
+      for (int i = 0; i < ndim; ++i) {
+        ComputeSizeAndPad64(
+            input_dims[i + offset],
+            stride[i],
+            kernel->at(i),
+            dilation[i],
+            legacy_pad,
+            &pads->at(i),
+            &pads->at(i + ndim),
+            &output_dims->at(i + offset));
       }
     }
   }
@@ -319,10 +354,26 @@ class ConvPoolOpBase : public Operator<Context> {
     }
   }
 
-  void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
+  bool HasPad() const {
+    if (kernel_.size() == 2) {
+      return pad_t() > 0 || pad_b() > 0 || pad_l() > 0 || pad_r() > 0;
+    }
+    return std::any_of(
+        pads_.cbegin(), pads_.cend(), [](const int x) { return x > 0; });
+  }
+
+  bool HasStride() const {
+    if (kernel_.size() == 2) {
+      return stride_h() > 1 || stride_w() > 1;
+    }
+    return std::any_of(
+        stride_.cbegin(), stride_.cend(), [](const int x) { return x > 1; });
+  }
+
+  void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
-    if (tensor->size() != data.size()) {
+    if (tensor->numel() != data.size()) {
       tensor->Resize(data.size());
       reset_tensor_device_ = true;
     } else {
@@ -342,11 +393,11 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   template <typename T>
-  void SetBiasMultiplier(const int size, Tensor<Context>* bias_multiplier_) {
-    if (bias_multiplier_->size() != size) {
+  void SetBiasMultiplier(const int size, Tensor* bias_multiplier_) {
+    if (bias_multiplier_->numel() != size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with one.
-      bias_multiplier_->Resize(std::vector<TIndex>{size});
+      bias_multiplier_->Resize(std::vector<int64_t>{size});
       math::Set<T, Context>(
           size,
           static_cast<T>(1),
@@ -357,7 +408,7 @@ class ConvPoolOpBase : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (!global_pooling_) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GT(kernel_[dim], 0);
       }
     }
@@ -394,12 +445,12 @@ class ConvPoolOpBase : public Operator<Context> {
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
     uint64_t N;
-    uint64_t Y_t = 1;
     uint64_t Y_h;
-    uint64_t Y_w;
-    uint64_t kernel_t = 1;
+    uint64_t Y_w = 1;
+    uint64_t Y_t = 1;
     uint64_t kernel_h;
-    uint64_t kernel_w;
+    uint64_t kernel_w = 1;
+    uint64_t kernel_t = 1;
     uint64_t in_channels;
     uint64_t out_channels;
 
@@ -409,18 +460,27 @@ class ConvPoolOpBase : public Operator<Context> {
     N = X.dims(0);
     if (X.dims_size() == 5) {
       // 3D convolution
-      CAFFE_ENFORCE_EQ(order, StorageOrder::NCHW, "Conv3D only supports NCHW");
-      Y_t = Y.dims(2);
-      Y_h = Y.dims(3);
-      Y_w = Y.dims(4);
-      kernel_t = W.dims(2);
-      kernel_h = W.dims(3);
-      kernel_w = W.dims(4);
-      in_channels = W.dims(1);
-      out_channels = W.dims(0);
-    } else {
+      if (order == StorageOrder::NHWC) {
+        Y_t = Y.dims(1);
+        Y_h = Y.dims(2);
+        Y_w = Y.dims(3);
+        kernel_t = W.dims(1);
+        kernel_h = W.dims(2);
+        kernel_w = W.dims(3);
+        in_channels = W.dims(4);
+        out_channels = W.dims(0);
+      } else {
+        Y_t = Y.dims(2);
+        Y_h = Y.dims(3);
+        Y_w = Y.dims(4);
+        kernel_t = W.dims(2);
+        kernel_h = W.dims(3);
+        kernel_w = W.dims(4);
+        in_channels = W.dims(1);
+        out_channels = W.dims(0);
+      }
+    } else if (X.dims_size() == 4) {
       // 2D convolution
-      CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");
       CAFFE_ENFORCE_EQ(W.dims_size(), 4, "Conv2D should have 4D filter tensor");
       if (order == StorageOrder::NHWC) {
         Y_h = Y.dims(1);
@@ -434,6 +494,20 @@ class ConvPoolOpBase : public Operator<Context> {
         Y_w = Y.dims(3);
         kernel_h = W.dims(2);
         kernel_w = W.dims(3);
+        in_channels = W.dims(1);
+        out_channels = W.dims(0);
+      }
+    } else {
+      // 1D convolution
+      CAFFE_ENFORCE_EQ(W.dims_size(), 3, "Conv1D should have 3D filter tensor");
+      if (order == StorageOrder::NHWC) {
+        Y_h = Y.dims(1);
+        kernel_h = W.dims(1);
+        in_channels = W.dims(2);
+        out_channels = W.dims(0);
+      } else {
+        Y_h = Y.dims(2);
+        kernel_h = W.dims(2);
         in_channels = W.dims(1);
         out_channels = W.dims(0);
       }
@@ -461,8 +535,6 @@ class ConvPoolOpBase : public Operator<Context> {
     ArgumentHelper helper(def);
     CAFFE_ENFORCE_GT(in.size(), 0);
     CAFFE_ENFORCE_GT(in[0].dims_size(), 0);
-    int N = in[0].dims(0);
-    bool channel_first;
     vector<int> pads = helper.GetRepeatedArgument<int>("pads");
     vector<int> kernel = helper.GetRepeatedArgument<int>("kernels");
     vector<int> strides = helper.GetRepeatedArgument<int>("strides");
@@ -514,7 +586,7 @@ class ConvPoolOpBase : public Operator<Context> {
     check_and_set_default_value(pads, kernel.size() * 2, 0);
     check_and_set_default_value(dilations, kernel.size(), 1);
 
-    vector<int> output_dims;
+    std::vector<int> output_dims;
     ConvPoolOpBase<CPUContext>::InferOutputSize(
         GetDimsVector(in[0]),
         output_channel,
@@ -522,23 +594,12 @@ class ConvPoolOpBase : public Operator<Context> {
         helper.GetSingleArgument<int>("global_pooling", 0),
         static_cast<LegacyPadding>(
             helper.GetSingleArgument<int>("legacy_pad", LegacyPadding::NOTSET)),
-        N,
-        kernel,
-        output_dims,
         dilations,
         strides,
-        pads,
-        channel_first);
-    vector<TensorShape> out(1);
-    if (channel_first) {
-      output_dims.insert(output_dims.begin(), {N, output_channel});
-    } else {
-      output_dims.push_back(output_channel);
-      output_dims.insert(output_dims.begin(), N);
-    }
-
-    out[0] = CreateTensorShape(output_dims, TensorProto::FLOAT);
-    return out;
+        &kernel,
+        &pads,
+        &output_dims);
+    return {CreateTensorShape(output_dims, TensorProto::FLOAT)};
   }
 
   static std::vector<TensorShape> TensorInferenceForConv(
@@ -676,6 +737,85 @@ class ConvPoolOpBase : public Operator<Context> {
     }
   }
 
+  static inline void ComputeSizeAndPad64(
+      const int in_size,
+      const int stride,
+      const int kernel,
+      const int dilation,
+      LegacyPadding legacy_pad,
+      int* pad_head,
+      int* pad_tail,
+      int64_t* out_size) {
+    const int dkernel = dilation * (kernel - 1) + 1;
+    switch (legacy_pad) {
+      case LegacyPadding::NOTSET:
+        // We will just use the direct padding head and tail values, but we
+        // will verify that they are non-negative.
+        CAFFE_ENFORCE_GE(in_size + *pad_head + *pad_tail, dkernel);
+        *out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head + *pad_tail - dkernel) /
+                stride +
+            1);
+        break;
+      case LegacyPadding::VALID:
+        *pad_head = 0;
+        *pad_tail = 0;
+        *out_size = (in_size - dkernel) / stride + 1;
+        break;
+      case LegacyPadding::SAME: {
+        CAFFE_ENFORCE(
+            1 == dilation, "Dilation not supported for legacy padding.");
+        int legacy_target_size = (in_size + stride - 1) / stride;
+        int pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
+        if (CAFFE2_PAD_HEAD_MORE) {
+          *pad_head = (pad_needed + 1) / 2;
+        } else {
+          *pad_head = pad_needed / 2;
+        }
+        *pad_tail = pad_needed - *pad_head;
+        *out_size = (in_size + pad_needed - dkernel) / stride + 1;
+        break;
+      }
+      case LegacyPadding::CAFFE_LEGACY_POOLING:
+        // This is in order to adapt Caffe's pooling padding case. In this case,
+        // we will only use pad_head and will compute pad_tail to match the
+        // old caffe pooling strategy. Also see caffe2_legacy.proto for more
+        // details.
+        CAFFE_ENFORCE_GE(*pad_head, 0);
+        // Here, notice that caffe casts UP while caffe2 casts DOWN for the
+        // output size computation.
+        *out_size = std::ceil(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
+        // If we have padding, caffe also ensures that the last pooling starts
+        // strictly inside the image (instead of at the padding); otherwise clip
+        // the last.
+        if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
+          --*out_size;
+        }
+        // Now, compare the output size with the standard Caffe2 output size.
+        // The
+        // caffe2 standard output size should always be no larger than the
+        // output
+        // size of caffe.
+        int standard_out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
+        CAFFE_ENFORCE_GE(
+            *out_size,
+            standard_out_size,
+            "This should never happen. If this happens, double check the logic "
+            "above.");
+        if (*out_size > standard_out_size) {
+          LOG(WARNING)
+              << "You are hitting a case where Caffe's legacy padding calculation "
+                 "is hit. This leads to inefficient and sometimes incorrect "
+                 "results. We are keeping this behavior for backward compatibility"
+                 ", but you are strongly recommended to move away from it.";
+        }
+        *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
+        break;
+    }
+  }
+
   // Accessors for 2D conv params.
 
   inline int pad_t() const {
@@ -719,36 +859,38 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
  private:
- inline void AllocateAndCopy(const vector<int>& vec, Tensor<Context>& tensor) {
-      tensor.Resize(vec.size());
-      context_.template Copy<int, CPUContext, Context>(
-          vec.size(), vec.data(), tensor.template mutable_data<int>());
- }
+  inline void AllocateAndCopy(const vector<int>& vec, Tensor& tensor) {
+    tensor.Resize(vec.size());
+    context_.template CopyFromCPU<int>(
+        vec.size(), vec.data(), tensor.template mutable_data<int>());
+  }
 
-#define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
-  USE_OPERATOR_FUNCTIONS(Context);                 \
-  using ConvPoolOpBase<Context>::pads_;            \
-  using ConvPoolOpBase<Context>::pad_t;            \
-  using ConvPoolOpBase<Context>::pad_l;            \
-  using ConvPoolOpBase<Context>::pad_b;            \
-  using ConvPoolOpBase<Context>::pad_r;            \
-  using ConvPoolOpBase<Context>::legacy_pad_;      \
-  using ConvPoolOpBase<Context>::global_pooling_;  \
-  using ConvPoolOpBase<Context>::kernel_;          \
-  using ConvPoolOpBase<Context>::kernel_h;         \
-  using ConvPoolOpBase<Context>::kernel_w;         \
-  using ConvPoolOpBase<Context>::dilation_;        \
-  using ConvPoolOpBase<Context>::dilation_h;       \
-  using ConvPoolOpBase<Context>::dilation_w;       \
-  using ConvPoolOpBase<Context>::stride_;          \
-  using ConvPoolOpBase<Context>::stride_h;         \
-  using ConvPoolOpBase<Context>::stride_w;         \
-  using ConvPoolOpBase<Context>::group_;           \
-  using ConvPoolOpBase<Context>::order_;           \
-  using ConvPoolOpBase<Context>::shared_buffer_;   \
-  using ConvPoolOpBase<Context>::GetDims;          \
-  using ConvPoolOpBase<Context>::GetDimsSize;      \
-  using ConvPoolOpBase<Context>::SetDeviceTensor;  \
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context)     \
+  USE_OPERATOR_FUNCTIONS(Context);                \
+  using ConvPoolOpBase<Context>::pads_;           \
+  using ConvPoolOpBase<Context>::pad_t;           \
+  using ConvPoolOpBase<Context>::pad_l;           \
+  using ConvPoolOpBase<Context>::pad_b;           \
+  using ConvPoolOpBase<Context>::pad_r;           \
+  using ConvPoolOpBase<Context>::legacy_pad_;     \
+  using ConvPoolOpBase<Context>::global_pooling_; \
+  using ConvPoolOpBase<Context>::kernel_;         \
+  using ConvPoolOpBase<Context>::kernel_h;        \
+  using ConvPoolOpBase<Context>::kernel_w;        \
+  using ConvPoolOpBase<Context>::dilation_;       \
+  using ConvPoolOpBase<Context>::dilation_h;      \
+  using ConvPoolOpBase<Context>::dilation_w;      \
+  using ConvPoolOpBase<Context>::stride_;         \
+  using ConvPoolOpBase<Context>::stride_h;        \
+  using ConvPoolOpBase<Context>::stride_w;        \
+  using ConvPoolOpBase<Context>::group_;          \
+  using ConvPoolOpBase<Context>::order_;          \
+  using ConvPoolOpBase<Context>::shared_buffer_;  \
+  using ConvPoolOpBase<Context>::GetDims;         \
+  using ConvPoolOpBase<Context>::GetDimsSize;     \
+  using ConvPoolOpBase<Context>::SetDeviceTensor; \
+  using ConvPoolOpBase<Context>::HasPad;          \
+  using ConvPoolOpBase<Context>::HasStride;       \
   using ConvPoolOpBase<Context>::ws_
 };
 

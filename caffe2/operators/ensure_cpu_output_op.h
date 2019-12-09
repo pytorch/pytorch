@@ -11,13 +11,14 @@ template <class Context>
 class EnsureCPUOutputOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  EnsureCPUOutputOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit EnsureCPUOutputOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
-    if (OperatorBase::InputIsType<TensorCPU>(0)) {
+    if (this->InputIsTensorType(0, CPU)) {
       return CopyWithContext<CPUContext>();
-    } else if (OperatorBase::InputIsType<Tensor<Context>>(0)) {
+    } else if (this->InputIsTensorType(0, Context::GetDeviceType())) {
       // CUDA Context will go this branch
       return CopyWithContext<Context>();
     } else {
@@ -32,15 +33,15 @@ class EnsureCPUOutputOp : public Operator<Context> {
   template <class InputContext>
   bool CopyWithContext() {
     // Output is always on CPU
-    auto* output = OperatorBase::Output<TensorCPU>(0);
-    auto& input = OperatorBase::Input<Tensor<InputContext>>(0);
+    auto* output = this->template Output<Tensor>(0, CPU);
+    auto& input = this->template Input<Tensor>(0, InputContext::GetDeviceType());
     output->ResizeLike(input);
-    context_.template CopyItems<InputContext, CPUContext>(
-        input.meta(),
-        input.size(),
+    context_.CopyItemsToCPU(
+        input.dtype(),
+        input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
-
+        output->raw_mutable_data(input.dtype()));
+    context_.FinishDeviceComputation();
     return true;
   }
 };

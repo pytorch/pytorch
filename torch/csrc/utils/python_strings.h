@@ -1,9 +1,9 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <stdexcept>
 #include <string>
-#include "object_ptr.h"
+#include <torch/csrc/utils/object_ptr.h>
 
 // Utilities for handling Python strings. Note that PyString, when defined, is
 // the same as PyBytes.
@@ -55,5 +55,31 @@ inline PyObject* THPUtils_packString(const std::string& str) {
   return PyString_FromStringAndSize(str.c_str(), str.size());
 #else
   return PyUnicode_FromStringAndSize(str.c_str(), str.size());
+#endif
+}
+
+inline PyObject* THPUtils_internString(const std::string& str) {
+#if PY_MAJOR_VERSION == 2
+  return PyString_InternFromString(str.c_str());
+#else
+  return PyUnicode_InternFromString(str.c_str());
+#endif
+}
+
+// Precondition: THPUtils_checkString(obj) must be true
+inline bool THPUtils_isInterned(PyObject* obj) {
+#if PY_MAJOR_VERSION == 2
+  return PyString_CHECK_INTERNED(obj);
+#else
+  return PyUnicode_CHECK_INTERNED(obj);
+#endif
+}
+
+// Precondition: THPUtils_checkString(obj) must be true
+inline void THPUtils_internStringInPlace(PyObject** obj) {
+#if PY_MAJOR_VERSION == 2
+  PyString_InternInPlace(obj);
+#else
+  PyUnicode_InternInPlace(obj);
 #endif
 }

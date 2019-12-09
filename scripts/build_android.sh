@@ -21,8 +21,14 @@
 
 set -e
 
-CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
+# Android specific flags
+if [ -z "$ANDROID_ABI" ]; then
+  ANDROID_ABI="armeabi-v7a with NEON"
+fi
+ANDROID_NATIVE_API_LEVEL="21"
+echo "Build with ANDROID_ABI[$ANDROID_ABI], ANDROID_NATIVE_API_LEVEL[$ANDROID_NATIVE_API_LEVEL]"
 
+CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 if [ -z "$ANDROID_NDK" ]; then
   echo "ANDROID_NDK not set; please set it to the Android NDK directory"
   exit 1
@@ -33,29 +39,45 @@ if [ ! -d "$ANDROID_NDK" ]; then
   exit 1
 fi
 
+ANDROID_NDK_PROPERTIES="$ANDROID_NDK/source.properties"
+[ -f "$ANDROID_NDK_PROPERTIES" ] && ANDROID_NDK_VERSION=$(sed -n 's/^Pkg.Revision[^=]*= *\([0-9]*\)\..*$/\1/p' "$ANDROID_NDK_PROPERTIES")
+
 echo "Bash: $(/bin/bash --version | head -1)"
 echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
-
-# Build protobuf from third_party so we have a host protoc binary.
-echo "Building protoc"
-$CAFFE2_ROOT/scripts/build_host_protoc.sh
+echo "Android NDK version: $ANDROID_NDK_VERSION"
 
 # Now, actually build the Android target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
+INSTALL_PREFIX=${BUILD_ROOT}/install
 mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 
 CMAKE_ARGS=()
 
+if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
+  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+  # custom build with selected ops
+  if [ -n "${SELECTED_OP_LIST}" ]; then
+    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+  fi
+else
+  # Build protobuf from third_party so we have a host protoc binary.
+  echo "Building protoc"
+  $CAFFE2_ROOT/scripts/build_host_protoc.sh
+  # Use locally built protoc because we'll build libprotobuf for the
+  # target architecture and need an exact version match.
+  CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+fi
+
 # If Ninja is installed, prefer it to Make
 if [ -x "$(command -v ninja)" ]; then
   CMAKE_ARGS+=("-GNinja")
 fi
-
-# Use locally built protoc because we'll build libprotobuf for the
-# target architecture and need an exact version match.
-CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
 
 # Use android-cmake to build Android project from CMake.
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
@@ -65,7 +87,11 @@ CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
-CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=gcc")
+if (( "${ANDROID_NDK_VERSION:-0}" < 18 )); then
+  CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=gcc")
+else
+  CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=clang")
+fi
 # Disable unused dependencies
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
@@ -74,7 +100,6 @@ CMAKE_ARGS+=("-DUSE_LMDB=OFF")
 CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_OPENMP=OFF")
-
 # Only toggle if VERBOSE=1
 if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
@@ -82,24 +107,31 @@ fi
 
 # Android specific flags
 CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
-CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON")
-CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=21")
+CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
+CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=$ANDROID_NATIVE_API_LEVEL")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
-# TODO: As the toolchain file doesn't support NEON-FP16 extension,
-# we disable USE_MOBILE_OPENGL for now, it will be re-enabled in the future.
-CMAKE_ARGS+=("-DUSE_MOBILE_OPENGL=OFF")
+
+if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
+  CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
+fi
 
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
 cmake "$CAFFE2_ROOT" \
-    -DCMAKE_INSTALL_PREFIX=../install \
+    -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=Release \
     "${CMAKE_ARGS[@]}"
 
 # Cross-platform parallel build
-if [ "$(uname)" == "Darwin" ]; then
-  cmake --build . -- "-j$(sysctl -n hw.ncpu)"
-else
-  cmake --build . -- "-j$(nproc)"
+if [ -z "$MAX_JOBS" ]; then
+  if [ "$(uname)" == 'Darwin' ]; then
+    MAX_JOBS=$(sysctl -n hw.ncpu)
+  else
+    MAX_JOBS=$(nproc)
+  fi
 fi
+
+echo "Will install headers and libs to $INSTALL_PREFIX for further Android project usage."
+cmake --build . --target install -- "-j${MAX_JOBS}"
+echo "Installation completed, now you can copy the headers/libs from $INSTALL_PREFIX to your Android project directory."

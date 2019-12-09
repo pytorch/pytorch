@@ -1,9 +1,9 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCThrustAllocator.cuh"
-#include "THCApply.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCThrustAllocator.cuh>
+#include <THC/THCApply.cuh>
 
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
@@ -25,9 +25,9 @@ template <typename T>
 inline __host__ __device__ T safe_log(T a) {
   if (a == 0.)
   {
-    return THCNumerics<T>::log(eps<T>());
+    return std::log(eps<T>());
   }
-  return THCNumerics<T>::log(a);
+  return std::log(a);
 }
 
 template <typename Dtype, typename Acctype>
@@ -130,5 +130,5 @@ struct bce_updateGradInput_functor_weights
   }
 };
 
-#include "generic/BCECriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/BCECriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>

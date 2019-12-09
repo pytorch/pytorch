@@ -10,14 +10,14 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/create_scope_op.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
 template <class Context>
 class DoOp final : public Operator<Context> {
  public:
-  DoOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DoOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws), parent_ws_(ws) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("net"),
@@ -55,9 +55,9 @@ class DoOp final : public Operator<Context> {
           outer_blobs_idx[blob_idx] >= 0 &&
               outer_blobs_idx[blob_idx] < outer_blob_names.size(),
           "Invalid blob bindings: outer blob index (" +
-              caffe2::to_string(outer_blobs_idx[blob_idx]) + ", inner name: " +
+              c10::to_string(outer_blobs_idx[blob_idx]) + ", inner name: " +
               inner_blobs[blob_idx] + ") is out of bounds [0, " +
-              caffe2::to_string(outer_blob_names.size() - 1) + "]");
+              c10::to_string(outer_blob_names.size() - 1) + "]");
       const auto& outer_name = outer_blob_names[outer_blobs_idx[blob_idx]];
       CAFFE_ENFORCE(
           !used_outer_names.count(outer_name),
@@ -78,7 +78,7 @@ class DoOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto* ws_stack =
-        OperatorBase::Output<detail::WorkspaceStack>(OutputSize() - 1);
+        this->template Output<detail::WorkspaceStack>(OutputSize() - 1);
     std::shared_ptr<Workspace> net_workspace;
     if (is_gradient_op_) {
       net_workspace =

@@ -2,117 +2,27 @@ from __future__ import print_function
 import sys
 import os
 import re
-import math
 import shutil
 import random
 import tempfile
 import unittest
-import traceback
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
-import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-from torch.utils.trainer import Trainer
-from torch.utils.trainer.plugins import *
-from torch.utils.trainer.plugins.plugin import Plugin
-from torch.autograd._functions.utils import prepare_onnx_paddings
+import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS, IS_PPC
+from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
+from common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase, run_tests, download_file
-
-try:
-    import cffi
-    HAS_CFFI = True
-except ImportError:
-    HAS_CFFI = False
-
-
-if HAS_CFFI:
-    from torch.utils.ffi import create_extension
-
-
-class SimplePlugin(Plugin):
-
-    def __init__(self, interval):
-        super(SimplePlugin, self).__init__(interval)
-        self.trainer = None
-        self.num_iteration = 0
-        self.num_epoch = 0
-        self.num_batch = 0
-        self.num_update = 0
-
-    def register(self, trainer):
-        self.trainer = trainer
-
-    def iteration(self, *args):
-        self.iteration_args = args
-        self.num_iteration += 1
-
-    def epoch(self, *args):
-        self.epoch_args = args
-        self.num_epoch += 1
-
-    def batch(self, *args):
-        self.batch_args = args
-        self.num_batch += 1
-
-    def update(self, *args):
-        self.update_args = args
-        self.num_update += 1
-
-
-class ModelMock(object):
-
-    def __init__(self):
-        self.num_calls = 0
-        self.output = torch.ones(1, 1, requires_grad=True)
-
-    def __call__(self, i):
-        self.num_calls += 1
-        return self.output * 2
-
-
-class CriterionMock(object):
-
-    def __init__(self):
-        self.num_calls = 0
-
-    def __call__(self, out, target):
-        self.num_calls += 1
-        return out
-
-
-class OptimizerMock(object):
-    max_evals = 5
-    min_evals = 1
-
-    def __init__(self):
-        self.num_steps = 0
-        self.num_evals = 0
-
-    def step(self, closure):
-        for i in range(random.randint(self.min_evals, self.max_evals)):
-            loss = closure()
-            self.num_evals += 1
-        self.num_steps += 1
-
-    def zero_grad(self):
-        pass
-
-
-class DatasetMock(object):
-
-    def __iter__(self):
-        for i in range(10):
-            yield torch.randn(2, 10), torch.randperm(10)[:2]
-
-    def __len__(self):
-        return 10
+from common_utils import TestCase, run_tests
 
 
 class RandomDatasetMock(object):
@@ -125,6 +35,48 @@ class RandomDatasetMock(object):
 
 
 class TestCheckpoint(TestCase):
+
+    # This runs checkpoint_sequential on each of the nets in
+    # module_lists_to_compare, and compares them against the uncheckpointed model.
+    # To compare, it checks outputs as well as input gradients and parameter gradients
+    def _check_checkpoint_sequential(
+        self,
+        model,
+        module_lists_to_compare,
+        num_chunks,
+        input,
+    ):
+
+        # not checkpointed
+        out = model(input)
+        out_not_checkpointed = out.detach().clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_not_checkpointed = {
+            name: param.grad.detach().clone()
+            for name, param in model.named_parameters()
+        }
+        input_grad_not_checkpointed = input.grad.detach().clone()
+        for model_to_compare in module_lists_to_compare:
+            # checkpointed model by passing list of modules
+            detached = input.detach()
+            detached.requires_grad = True
+
+            # pass list of modules to checkpoint
+            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
+            out_checkpointed = out.detach().clone()
+            model.zero_grad()
+            out.sum().backward()
+            grad_checkpointed = {
+                name: param.grad.detach().clone()
+                for name, param in model.named_parameters()
+            }
+            input_grad_checkpointed = detached.grad.detach().clone()
+            # compare outputs as well as the gradients of input and parameters
+            self.assertEqual(out_checkpointed, out_not_checkpointed)
+            self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
+            for name in grad_checkpointed:
+                self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
@@ -185,55 +137,133 @@ class TestCheckpoint(TestCase):
             nn.ReLU()
         )
 
-        x = torch.randn(1, 100, requires_grad=True)
+        # Compare uncheckpointed model with its checkpointed counterparts
+        # In addition to running checkpoint_sequential on the nn.Sequential
+        # instance, we also run the function on the list of functions within
+        # the module.
+        self._check_checkpoint_sequential(
+            model,
+            [list(model.children()), model],
+            2,
+            torch.randn(1, 100, requires_grad=True)
+        )
 
-        # not checkpointed
-        out = model(x)
-        out_not_checkpointed = out.data.clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_not_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_not_checkpointed[name] = param.grad.data.clone()
-        input_grad = x.grad.data.clone()
+    def test_checkpoint_module_list(self):
+        class ModuleListNet(nn.Module):
+            def __init__(self):
+                super(ModuleListNet, self).__init__()
+                module_list = [
+                    nn.Linear(100, 50),
+                    nn.ReLU(),
+                    nn.Linear(50, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 5),
+                    nn.ReLU(),
+                ]
+                self.module_list = nn.ModuleList(module_list)
 
-        # checkpointed model by passing list of modules
-        chunks = 2
-        modules = list(model.children())
-        input_var = x.detach()
-        input_var.requires_grad = True
-        # pass list of modules to checkpoint
-        out = checkpoint_sequential(modules, chunks, input_var)
-        out_checkpointed = out.data.clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_checkpointed[name] = param.grad.data.clone()
-        checkpoint_input_grad = input_var.grad.data.clone()
-        # compare the output, input and parameters gradients
-        self.assertEqual(out_checkpointed, out_not_checkpointed)
-        self.assertEqual(input_grad, checkpoint_input_grad)
-        for name in grad_checkpointed:
-            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+            def forward(self, input):
+                for layer in self.module_list:
+                    input = layer(input)
+                return input
 
-        # checkpointed by passing sequential directly
-        input_var1 = x.detach()
-        input_var1.requires_grad = True
-        # pass the sequential itself
-        out = checkpoint_sequential(model, 2, input_var1)
-        out_checkpointed = out.data.clone()
-        model.zero_grad()
+        model = ModuleListNet()
+
+        # Compare uncheckpointed model with its checkpointed counterparts.
+        self._check_checkpoint_sequential(
+            model,
+            [list(model.module_list.children()), model.module_list],
+            2,
+            torch.randn(1, 100, requires_grad=True),
+        )
+
+    def test_checkpoint_sequential_deprecated_multiple_args(self):
+        class Two(nn.Module):
+            def forward(self, a, b):
+                return a, b
+
+        model = nn.Sequential(Two())
+        a = torch.randn(1, 100, requires_grad=True)
+        b = torch.randn(1, 100, requires_grad=True)
+
+        with self.assertRaises(TypeError):
+            checkpoint_sequential(model, 1, a, b)
+
+    def test_checkpoint_sequential_deprecated_no_args(self):
+        class Noop(nn.Module):
+            def forward(self):
+                pass
+
+        model = nn.Sequential(Noop())
+
+        with self.assertRaises(TypeError):
+            checkpoint_sequential(model, 1)
+
+    def test_checkpoint_rng_cpu(self):
+        for _ in range(5):
+            inp = torch.randn(20000, device='cpu').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    def test_checkpoint_rng_cuda(self):
+        for _ in range(5):
+            inp = torch.randn(20000, device='cuda').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.cuda.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.cuda.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    def test_checkpoint_non_tensor(self):
+
+        def run_fn(tensor1, tensor2):
+            if tensor2 is None:
+                return tensor1
+            return tensor1 + tensor2
+
+        input_var = torch.randn(1, 100, requires_grad=True)
+        out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
-        grad_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_checkpointed[name] = param.grad.data.clone()
-        checkpoint_input_grad = input_var1.grad.data.clone()
-        # compare the output, input and parameters gradients
-        self.assertEqual(out_checkpointed, out_not_checkpointed)
-        self.assertEqual(input_grad, checkpoint_input_grad)
-        for name in grad_checkpointed:
-            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
 
 class TestDataLoader(TestCase):
@@ -289,245 +319,13 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(list(dataiter)), 1)
 
 
-class TestTrainer(TestCase):
-
-    intervals = [
-        [(1, 'iteration')],
-        [(1, 'epoch')],
-        [(1, 'batch')],
-        [(1, 'update')],
-        [(5, 'iteration')],
-        [(5, 'epoch')],
-        [(5, 'batch')],
-        [(5, 'update')],
-        [(1, 'iteration'), (1, 'epoch')],
-        [(5, 'update'), (1, 'iteration')],
-        [(2, 'epoch'), (1, 'batch')],
-    ]
-
-    def setUp(self):
-        self.optimizer = OptimizerMock()
-        self.trainer = Trainer(ModelMock(), CriterionMock(),
-                               self.optimizer, DatasetMock())
-        self.num_epochs = 3
-        self.dataset_size = len(self.trainer.dataset)
-        self.num_iters = self.num_epochs * self.dataset_size
-
-    def test_register_plugin(self):
-        for interval in self.intervals:
-            simple_plugin = SimplePlugin(interval)
-            self.trainer.register_plugin(simple_plugin)
-            self.assertEqual(simple_plugin.trainer, self.trainer)
-
-    def test_optimizer_step(self):
-        self.trainer.run(epochs=1)
-        self.assertEqual(self.trainer.optimizer.num_steps, 10)
-
-    def test_plugin_interval(self):
-        for interval in self.intervals:
-            self.setUp()
-            simple_plugin = SimplePlugin(interval)
-            self.trainer.register_plugin(simple_plugin)
-            self.trainer.run(epochs=self.num_epochs)
-            units = {
-                ('iteration', self.num_iters),
-                ('epoch', self.num_epochs),
-                ('batch', self.num_iters),
-                ('update', self.num_iters)
-            }
-            for unit, num_triggers in units:
-                call_every = None
-                for i, i_unit in interval:
-                    if i_unit == unit:
-                        call_every = i
-                        break
-                if call_every:
-                    expected_num_calls = math.floor(num_triggers / call_every)
-                else:
-                    expected_num_calls = 0
-                num_calls = getattr(simple_plugin, 'num_' + unit)
-                self.assertEqual(num_calls, expected_num_calls, 0)
-
-    def test_model_called(self):
-        self.trainer.run(epochs=self.num_epochs)
-        num_model_calls = self.trainer.model.num_calls
-        num_crit_calls = self.trainer.criterion.num_calls
-        self.assertEqual(num_model_calls, num_crit_calls)
-        for num_calls in [num_model_calls, num_crit_calls]:
-            lower_bound = OptimizerMock.min_evals * self.num_iters
-            upper_bound = OptimizerMock.max_evals * self.num_iters
-            self.assertEqual(num_calls, self.trainer.optimizer.num_evals)
-            self.assertLessEqual(lower_bound, num_calls)
-            self.assertLessEqual(num_calls, upper_bound)
-
-    def test_model_gradient(self):
-        self.trainer.run(epochs=self.num_epochs)
-        output_var = self.trainer.model.output
-        expected_grad = torch.ones(1, 1) * 2 * self.optimizer.num_evals
-        self.assertEqual(output_var.grad.data, expected_grad)
-
-
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
 class TestFFI(TestCase):
-
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp()
-        os.chdir(self.tmpdir)
-        sys.path.append(self.tmpdir)
-
-    def tearDown(self):
-        shutil.rmtree(self.tmpdir)
-
-    @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
-    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
-    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
-    def test_cpu(self):
-        create_extension(
-            name='test_extensions.cpulib',
-            headers=[test_dir + '/ffi/src/cpu/lib.h'],
-            sources=[
-                test_dir + '/ffi/src/cpu/lib1.c',
-                test_dir + '/ffi/src/cpu/lib2.c',
-            ],
-            verbose=False,
-        ).build()
-        from test_extensions import cpulib
-        tensor = torch.ones(2, 2).float()
-
-        cpulib.good_func(tensor, 2, 1.5)
-        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
-
-        new_tensor = cpulib.new_tensor(4)
-        self.assertEqual(new_tensor, torch.ones(4, 4) * 4)
-
-        f = cpulib.int_to_float(5)
-        self.assertIs(type(f), float)
-
-        self.assertRaises(TypeError,
-                          lambda: cpulib.good_func(tensor.double(), 2, 1.5))
-        self.assertRaises(torch.FatalError,
-                          lambda: cpulib.bad_func(tensor, 2, 1.5))
-
-    @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
-    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
-    def test_gpu(self):
-        create_extension(
-            name='gpulib',
-            headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
-            sources=[
-                test_dir + '/ffi/src/cuda/cudalib.c',
-            ],
-            with_cuda=True,
-            verbose=False,
-        ).build()
-        import gpulib
-        tensor = torch.ones(2, 2).float()
-
-        gpulib.good_func(tensor, 2, 1.5)
-        self.assertEqual(tensor, torch.ones(2, 2) * 2 + 1.5)
-
-        ctensor = tensor.cuda().fill_(1)
-        gpulib.cuda_func(ctensor, 2, 1.5)
-        self.assertEqual(ctensor, torch.ones(2, 2) * 2 + 1.5)
-
-        self.assertRaises(TypeError,
-                          lambda: gpulib.cuda_func(tensor, 2, 1.5))
-        self.assertRaises(TypeError,
-                          lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
-
-
-class TestLuaReader(TestCase):
-
-    @staticmethod
-    def _module_test(name, test):
-        def do_test(self):
-            module = test['module']
-            input = test['input']
-            grad_output = test['grad_output']
-            if hasattr(self, '_transform_' + name):
-                input = getattr(self, '_transform_' + name)(input)
-            output = module.forward(input)
-            module.zeroGradParameters()
-            grad_input = module.backward(input, grad_output)
-            self.assertEqual(output, test['output'])
-            self.assertEqual(grad_input, test['grad_input'])
-            if module.parameters() is not None:
-                params, d_params = module.parameters()
-                self.assertEqual(params, test['params'])
-                self.assertEqual(d_params, test['d_params'])
-            else:
-                self.assertFalse('params' in test and test['params'])
-                self.assertFalse('params' in test and test['d_params'])
-        return do_test
-
-    @staticmethod
-    def _criterion_test(name, test):
-        def do_test(self):
-            module = test['module']
-            input = test['input']
-            if name == 'L1Cost':
-                target = None
-            else:
-                target = test['target']
-            if hasattr(self, '_transform_' + name):
-                input, target = getattr(self, '_transform_' + name)(input, target)
-
-            output = module.forward(input, target)
-            grad_input = module.backward(input, target)
-            self.assertEqual(output, test['loss'])
-            self.assertEqual(grad_input, test['grad_input'])
-        return do_test
-
-    @classmethod
-    def init(cls):
-        try:
-            path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
-        except unittest.SkipTest:
-            return
-        long_size = 8 if sys.platform == 'win32' else None
-        tests = load_lua(path, long_size=long_size)
-        for name, test in tests['modules'].items():
-            if name == "HardShrink":
-                continue
-            test_name = 'test_' + name.replace('nn.', '')
-            setattr(cls, test_name, cls._module_test(name, test))
-        for name, test in tests['criterions'].items():
-            if name == "HardShrink":
-                continue
-            test_name = 'test_' + name.replace('nn.', '')
-            setattr(cls, test_name, cls._criterion_test(name, test))
-
-    def _transform_Index(self, input):
-        return [input[0], input[1].sub(1)]
-
-    def _transform_LookupTable(self, input):
-        return input.sub(1)
-
-    def _transform_MultiLabelMarginCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ClassNLLCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_SpatialClassNLLCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ClassSimplexCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_CrossEntropyCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ParallelCriterion(self, input, target):
-        return input, [target[0].sub(1), target[1]]
-
-    def _transform_MultiCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_MultiMarginCriterion(self, input, target):
-        return input, target.sub(1)
+    def test_deprecated(self):
+        with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
+            from torch.utils.ffi import create_extension  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -535,9 +333,9 @@ class TestBottleneck(TestCase):
     def _run(self, command):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
-        from common import PY3
+        from common_utils import PY3
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
         output, err = p.communicate()
         rc = p.returncode
@@ -615,6 +413,7 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
@@ -630,70 +429,16 @@ from torch.utils.collect_env import get_pretty_env_info
 
 
 class TestCollectEnv(TestCase):
-
-    def _build_env_to_expect(self, build_env):
-        return 'expect/TestCollectEnv.test_{}.expect'.format(
-            build_env.replace('.', '').replace('-', '_'))
-
-    def _preprocess_info_for_test(self, info_output):
-        # Remove the version hash
-        version_hash_regex = re.compile(r'(a\d+)\+\w+')
-        result = re.sub(version_hash_regex, r'\1', info_output).strip()
-
-        # Substitutions to lower the specificity of the versions listed
-        substitutions = [
-            (r'(?<=CUDA used to build PyTorch: )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
-            (r'(?<=CUDA runtime version: )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
-            (r'(?<=Ubuntu )(\d+)\.(\d+)\.(\d+) ', r'\1.\2.X '),
-            (r'(?<=CMake version: version )(\d+)\.(\d+)\.(\d+)', r'\1.\2.X'),
-            (r'(?<=Nvidia driver version: )(\d+)\.(\d+)', r'\1.X'),
-            (r'(?<=Mac OSX )(\d+)\.(\d+).(\d+)', r'\1.\2.X'),
-            (r'(?<=numpy \()(\d+)\.(\d+).(\d+)', r'\1.\2.X'),
-        ]
-
-        for regex, substitute in substitutions:
-            result = re.sub(regex, substitute, result)
-        return result
-
-    def assertExpectedOutput(self, info_output, build_env):
-        processed_info = self._preprocess_info_for_test(info_output)
-        expect_filename = self._build_env_to_expect(build_env)
-
-        ci_warning = ('This test will error out if the CI config was recently '
-                      'updated. If this is the case, please update the expect '
-                      'files to match the CI machines\' system config.')
-
-        with open(expect_filename, 'r') as f:
-            expected_info = f.read().strip()
-            self.assertEqual(ci_warning + '\n' + processed_info,
-                             ci_warning + '\n' + expected_info, ci_warning)
-
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count('\n') >= 17)
-
-    @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
-    def test_expect(self):
-        info_output = get_pretty_env_info()
-
-        ci_build_envs = [
-            'pytorch-linux-trusty-py2.7',
-            'pytorch-linux-xenial-cuda9-cudnn7-py3',
-            'pytorch-macos-10.13-py3',
-            'pytorch-win-ws2016-cuda9-cudnn7-py3'
-        ]
-        build_env = os.environ['BUILD_ENVIRONMENT']
-        if build_env not in ci_build_envs:
-            return
-
-        self.assertExpectedOutput(info_output, build_env)
 
 
 class TestONNXUtils(TestCase):
     def test_prepare_onnx_paddings(self):
         sizes = [2, 3, 4]
         pad = [1, 2, 3, 4]
-        paddings = prepare_onnx_paddings(len(sizes), pad)
+        paddings = _prepare_onnx_paddings(len(sizes), pad)
         self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
 
     def test_check_onnx_broadcast(self):
@@ -749,7 +494,78 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
+def sum_of_state_dict(state_dict):
+    s = 0
+    for _, v in state_dict.items():
+        s += v.sum()
+    return s
+
+SUM_OF_HUB_EXAMPLE = 431080
+TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
+
+@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
+class TestHub(TestCase):
+    def test_load_from_github(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_load_from_branch(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example:ci/test_slash',
+            'mnist',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_set_dir(self):
+        temp_dir = tempfile.gettempdir()
+        hub.set_dir(temp_dir)
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
+        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
+
+    def test_list_entrypoints(self):
+        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
+        self.assertObjectIn('mnist', entry_lists)
+
+    def test_download_url_to_file(self):
+        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
+        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
+        loaded_state = torch.load(temp_file)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_load_state_dict_from_url(self):
+        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
+        self.assertEqual(sum_of_state_dict(loaded_state),
+                         SUM_OF_HUB_EXAMPLE)
+
+    def test_load_zip_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+
+class TestHipify(TestCase):
+    def test_import_hipify(self):
+        from torch.utils.hipify import hipify_python # noqa
+
+
 if __name__ == '__main__':
-    from torch.utils.serialization import load_lua
-    TestLuaReader.init()
     run_tests()

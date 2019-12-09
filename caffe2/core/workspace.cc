@@ -9,9 +9,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/plan_executor.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_print_blob_sizes_at_exit,
     false,
     "If true, workspace destructor will print all blob shapes");
@@ -28,14 +28,11 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(s);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     if (shape_fun) {
-      bool shares_data = false;
       size_t capacity;
       DeviceOption _device;
-      auto shape = shape_fun(b->GetRaw(), &shares_data, &capacity, &_device);
-      if (shares_data) {
-        // Blobs sharing data do not actually take any memory
-        capacity = 0;
-      }
+      auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
+      // NB: currently it overcounts capacity of shared storages
+      // TODO: fix it after the storage sharing is merged
       cumtotal += capacity;
       blob_sizes.push_back(make_pair(capacity, s));
     }
@@ -55,11 +52,10 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(sb.second);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     CHECK(shape_fun != nullptr);
-    bool _shares_data = false;
     size_t capacity;
     DeviceOption _device;
 
-    auto shape = shape_fun(b->GetRaw(), &_shares_data, &capacity, &_device);
+    auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
     std::stringstream ss;
     ss << sb.second << ";";
     for (const auto d : shape) {
@@ -310,6 +306,11 @@ ThreadPool* Workspace::GetThreadPool() {
     thread_pool_ = ThreadPool::defaultThreadPool();
   }
   return thread_pool_.get();
+}
+
+std::shared_ptr<Workspace::Bookkeeper> Workspace::bookkeeper() {
+  static auto shared = std::make_shared<Workspace::Bookkeeper>();
+  return shared;
 }
 
 } // namespace caffe2

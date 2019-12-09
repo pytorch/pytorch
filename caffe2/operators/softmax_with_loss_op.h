@@ -11,13 +11,17 @@ namespace caffe2 {
 template <typename T, class Context>
 class SoftmaxWithLossOp final : public Operator<Context> {
  public:
-  SoftmaxWithLossOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
+  template <class... Args>
+  explicit SoftmaxWithLossOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        label_prob_mode_(
+            this->template GetSingleArgument<int>("label_prob", 0)),
+        average_by_batch_size_(
+            this->template GetSingleArgument<int>("average_by_batch_size", 0)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -29,28 +33,34 @@ class SoftmaxWithLossOp final : public Operator<Context> {
  protected:
   float scale_;
   int label_prob_mode_;
+  int average_by_batch_size_;
   StorageOrder order_;
   int axis_;
 
-  Tensor<Context> losses_; // Per example loss
-  Tensor<Context> rowmax_; // per example row max
-  Tensor<Context> weights_; // unignored weights
-  Tensor<Context> sum_multiplier_; // Vector of ones for summing via dot prod
-  Tensor<Context> total_weight_ptr_;
-  Tensor<Context> scratch_;
+  Tensor losses_; // Per example loss
+  Tensor rowmax_; // per example row max
+  Tensor weights_; // unignored weights
+  Tensor sum_multiplier_; // Vector of ones for summing via dot prod
+  Tensor total_weight_ptr_;
+  // passed to a function
+  Tensor scratch_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
 class SoftmaxWithLossGradientOp final : public Operator<Context> {
  public:
-  SoftmaxWithLossGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        label_prob_mode_(OperatorBase::GetSingleArgument<int>("label_prob", 0)),
+  template <class... Args>
+  explicit SoftmaxWithLossGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        label_prob_mode_(
+            this->template GetSingleArgument<int>("label_prob", 0)),
+        average_by_batch_size_(
+            this->template GetSingleArgument<int>("average_by_batch_size", 0)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        only_loss_(OperatorBase::GetSingleArgument<bool>("only_loss", false)),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        only_loss_(this->template GetSingleArgument<bool>("only_loss", false)),
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -62,13 +72,15 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
  protected:
   float scale_;
   int label_prob_mode_;
-  Tensor<Context> sum_multiplier_;
-  Tensor<Context> weights_; // unignored weights
-  Tensor<Context> total_weight_ptr_;
+  int average_by_batch_size_;
+  // not used?
+  Tensor sum_multiplier_{Context::GetDeviceType()};
+  Tensor weights_; // unignored weights
+  Tensor total_weight_ptr_;
   StorageOrder order_;
   bool only_loss_;
   int axis_;
-  Tensor<Context> scratch_;
+  Tensor scratch_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

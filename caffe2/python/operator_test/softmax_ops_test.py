@@ -2,21 +2,23 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 import unittest
 
 
-class TestSoftmaxOps(hu.HypothesisTestCase):
+class TestSoftmaxOps(serial.SerializedTestCase):
 
-    @given(n=st.sampled_from([0, 2, 4, 71, 103]),
-           D=st.sampled_from([4, 8, 64, 79, 256, 333]),
-           engine=st.sampled_from([None, 'CUDNN']),
-           **hu.gcs)
+    @serial.given(n=st.sampled_from([0, 2, 4, 71, 103]),
+                  D=st.sampled_from([0, 4, 8, 64, 79, 256, 333]),
+                  engine=st.sampled_from([None, 'CUDNN']),
+                  **hu.gcs)
     def test_softmax(self, n, D, engine, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -27,6 +29,10 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         def label_softmax(X):
             probs = np.zeros((n, D))
             rowmax = np.zeros(n)
+
+            if D == 0:
+                return [probs]
+
             for i in range(n):
                 rowmax[i] = max(X[i, ])
                 # We need to subtract the max to avoid numerical issues
@@ -51,10 +57,10 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             reference=label_softmax,
         )
 
-    @given(n=st.sampled_from([0, 2, 4, 71, 103, 555, 751, 1201]),
-           D=st.sampled_from([4, 8, 64, 79, 256, 333, 1000]),
-           engine=st.sampled_from([None, 'CUDNN']),
-           **hu.gcs)
+    @serial.given(n=st.sampled_from([0, 2, 4, 71, 103, 555, 751, 1201]),
+                  D=st.sampled_from([0, 4, 8, 64, 79, 256, 333, 1000]),
+                  engine=st.sampled_from([None, 'CUDNN']),
+                  **hu.gcs)
     def test_softmax_grad(self, n, D, engine, gc, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -134,8 +140,8 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(2, 10), D=st.integers(4, 16),
-           only_loss=st.booleans(), **hu.gcs)
+    @serial.given(n=st.integers(2, 10), D=st.integers(4, 16),
+                  only_loss=st.booleans(), **hu.gcs)
     def test_softmax_with_loss(self, n, D, gc, only_loss, dc):
         # n = number of examples, D = |labels|
         # Initialize X and add 1e-2 for numerical stability
@@ -449,7 +455,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X, label, weights], 0, [1], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(2, 5), D=st.integers(2, 4),
+    @serial.given(n=st.integers(2, 5), D=st.integers(2, 4),
            weighted=st.booleans(), **hu.gcs)
     def test_spatial_softmax_with_loss(self, n, D, weighted, gc, dc):
         # n = number of examples, D = |labels|
@@ -624,7 +630,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
                 "SpatialSoftmaxWithLoss",
                 ["X_gpu", "label_gpu"],
                 ["probs_gpu", "avgloss_gpu"],
-                device_option=core.DeviceOption(caffe2_pb2.CUDA, 0)
+                device_option=core.DeviceOption(workspace.GpuDeviceType, 0)
             )
 
             cpuop = core.CreateOperator(
@@ -647,7 +653,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             # Initialize label. Some of the labels are (-1), i.e "DONT CARE"
             label = (np.random.rand(n, H, W) * (D + 1)).astype(np.int32) - 1
 
-            gpu0 = core.DeviceOption(caffe2_pb2.CUDA, 0)
+            gpu0 = core.DeviceOption(workspace.GpuDeviceType, 0)
             workspace.FeedBlob("X_cpu", X)
             workspace.FeedBlob("label_cpu", label)
             workspace.FeedBlob("X_gpu", X, device_option=gpu0)

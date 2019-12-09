@@ -1,8 +1,13 @@
-#include "torch/csrc/python_headers.h"
+#pragma once
 
-namespace torch { namespace jit { namespace script {
+#include <torch/csrc/python_headers.h>
 
-void initTreeViewBindings(PyObject *module);
+namespace torch {
+namespace jit {
+namespace script {
 
-}}} // namespace torch::jit::script
+void initTreeViewBindings(PyObject* module);
 
+}
+} // namespace jit
+} // namespace torch

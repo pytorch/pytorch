@@ -62,12 +62,12 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
       if ( APPLE )
         find_library(${_prefix}_${_library}_LIBRARY
           NAMES ${_library}
-          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
+          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /opt/OpenBLAS/lib /usr/lib/aarch64-linux-gnu
           ENV DYLD_LIBRARY_PATH )
       else ( APPLE )
         find_library(${_prefix}_${_library}_LIBRARY
           NAMES ${_library}
-          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
+          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /opt/OpenBLAS/lib /usr/lib/aarch64-linux-gnu
           ENV LD_LIBRARY_PATH )
       endif( APPLE )
       mark_as_advanced(${_prefix}_${_library}_LIBRARY)
@@ -103,6 +103,34 @@ if((NOT BLAS_LIBRARIES)
     SET(BLAS_INCLUDE_DIR ${MKL_INCLUDE_DIR})
     SET(BLAS_VERSION ${MKL_VERSION})
   ENDIF(MKL_FOUND)
+endif()
+
+# Apple BLAS library?
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "accelerate")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "Accelerate")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "accelerate")
+    set(BLAS_IS_ACCELERATE 1)
+  endif (BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "veclib")))
+  check_fortran_libraries(
+    BLAS_LIBRARIES
+    BLAS
+    sgemm
+    ""
+    "vecLib")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "veclib")
+  endif (BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -183,31 +211,17 @@ if((NOT BLAS_LIBRARIES)
   endif (BLAS_LIBRARIES)
 endif()
 
-# Apple BLAS library?
 if((NOT BLAS_LIBRARIES)
-    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "accelerate")))
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "FLAME")))
+  # FLAME's blis library (https://github.com/flame/blis)
   check_fortran_libraries(
   BLAS_LIBRARIES
   BLAS
   sgemm
   ""
-  "Accelerate")
+  "blis")
   if (BLAS_LIBRARIES)
-    set(BLAS_INFO "accelerate")
-    set(BLAS_IS_ACCELERATE 1)
-  endif (BLAS_LIBRARIES)
-endif()
-
-if((NOT BLAS_LIBRARIES)
-    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "veclib")))
-  check_fortran_libraries(
-    BLAS_LIBRARIES
-    BLAS
-    sgemm
-    ""
-    "vecLib")
-  if (BLAS_LIBRARIES)
-    set(BLAS_INFO "veclib")
+    set(BLAS_INFO "FLAME")
   endif (BLAS_LIBRARIES)
 endif()
 
@@ -290,6 +304,7 @@ int main() {
   ELSE (BLAS_USE_CBLAS_DOT)
     SET(BLAS_USE_CBLAS_DOT FALSE)
   ENDIF (BLAS_USE_CBLAS_DOT)
+  SET(CMAKE_REQUIRED_LIBRARIES)
 ENDIF(BLAS_LIBRARIES)
 
 # epilogue

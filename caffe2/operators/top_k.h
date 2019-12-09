@@ -12,11 +12,11 @@ class TopKOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  TopKOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TopKOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "k", k_, -1),
         OP_SINGLE_ARG(int, "axis", axis_, -1) {
-    CAFFE_ENFORCE(k_ >= 1, "k argument must be >= 1");
   }
 
   ~TopKOp() {}
@@ -33,8 +33,9 @@ class TopKGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  TopKGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TopKGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, -1) {}
 
   ~TopKGradientOp() {}

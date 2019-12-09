@@ -9,6 +9,8 @@ namespace caffe2 {
 
 namespace {
 
+using c10::cuda::compat::abs;
+
 template <typename T>
 inline __host__ __device__ T SquareCUDA(const T x) {
   return x * x;

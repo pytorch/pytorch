@@ -2,9 +2,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
@@ -152,6 +154,42 @@ def bbox_transform_rotated(
     return pred_boxes
 
 
+def clip_tiled_boxes_rotated(boxes, im_shape, angle_thresh=1.0):
+    """
+    Similar to clip_tiled_boxes but for rotated boxes with angle info.
+    Only clips almost horizontal boxes within angle_thresh. The rest are
+    left unchanged.
+    """
+    assert (
+        boxes.shape[1] % 5 == 0
+    ), "boxes.shape[1] is {:d}, but must be divisible by 5.".format(
+        boxes.shape[1]
+    )
+
+    (H, W) = im_shape[:2]
+
+    # Filter boxes that are almost upright within angle_thresh tolerance
+    idx = np.where(np.abs(boxes[:, 4::5]) <= angle_thresh)
+    idx5 = idx[1] * 5
+    # convert to (x1, y1, x2, y2)
+    x1 = boxes[idx[0], idx5] - (boxes[idx[0], idx5 + 2] - 1) / 2.0
+    y1 = boxes[idx[0], idx5 + 1] - (boxes[idx[0], idx5 + 3] - 1) / 2.0
+    x2 = boxes[idx[0], idx5] + (boxes[idx[0], idx5 + 2] - 1) / 2.0
+    y2 = boxes[idx[0], idx5 + 1] + (boxes[idx[0], idx5 + 3] - 1) / 2.0
+    # clip
+    x1 = np.maximum(np.minimum(x1, W - 1), 0)
+    y1 = np.maximum(np.minimum(y1, H - 1), 0)
+    x2 = np.maximum(np.minimum(x2, W - 1), 0)
+    y2 = np.maximum(np.minimum(y2, H - 1), 0)
+    # convert back to (xc, yc, w, h)
+    boxes[idx[0], idx5] = (x1 + x2) / 2.0
+    boxes[idx[0], idx5 + 1] = (y1 + y2) / 2.0
+    boxes[idx[0], idx5 + 2] = x2 - x1 + 1
+    boxes[idx[0], idx5 + 3] = y2 - y1 + 1
+
+    return boxes
+
+
 def generate_rois_rotated(roi_counts, im_dims):
     rois = generate_rois(roi_counts, im_dims)
     # [batch_id, ctr_x, ctr_y, w, h, angle]
@@ -161,18 +199,19 @@ def generate_rois_rotated(roi_counts, im_dims):
     rotated_rois[:, 2] = (rois[:, 2] + rois[:, 4]) / 2.  # ctr_y = (y1 + y2) / 2
     rotated_rois[:, 3] = rois[:, 3] - rois[:, 1] + 1.0  # w = x2 - x1 + 1
     rotated_rois[:, 4] = rois[:, 4] - rois[:, 2] + 1.0  # h = y2 - y1 + 1
-    rotated_rois[:, 5] = np.random.uniform(0.0, 360.0)  # angle in degrees
+    rotated_rois[:, 5] = np.random.uniform(-90.0, 90.0)  # angle in degrees
     return rotated_rois
 
 
-class TestBBoxTransformOp(hu.HypothesisTestCase):
-    @given(
+class TestBBoxTransformOp(serial.SerializedTestCase):
+    @serial.given(
         num_rois=st.integers(1, 10),
         num_classes=st.integers(1, 10),
         im_dim=st.integers(100, 600),
         skip_batch_id=st.booleans(),
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
+        clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
         **hu.gcs_cpu_only
     )
     def test_bbox_transform(
@@ -183,6 +222,7 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
         skip_batch_id,
         rotated,
         angle_bound_on,
+        clip_angle_thresh,
         gc,
         dc,
     ):
@@ -202,14 +242,16 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
 
         def bbox_transform_ref(rois, deltas, im_info):
             boxes = rois if rois.shape[1] == box_dim else rois[:, 1:]
+            im_shape = im_info[0, 0:2]
             if rotated:
                 box_out = bbox_transform_rotated(
                     boxes, deltas, angle_bound_on=angle_bound_on
                 )
-                # No clipping for rotated boxes
+                box_out = clip_tiled_boxes_rotated(
+                    box_out, im_shape, angle_thresh=clip_angle_thresh
+                )
             else:
                 box_out = bbox_transform(boxes, deltas)
-                im_shape = im_info[0, 0:2]
                 box_out = clip_tiled_boxes(box_out, im_shape)
             return [box_out]
 
@@ -221,6 +263,7 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
             correct_transform_coords=True,
             rotated=rotated,
             angle_bound_on=angle_bound_on,
+            clip_angle_thresh=clip_angle_thresh,
         )
 
         self.assertReferenceChecks(
@@ -235,10 +278,18 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
         num_classes=st.integers(1, 10),
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
+        clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
         **hu.gcs_cpu_only
     )
     def test_bbox_transform_batch(
-        self, roi_counts, num_classes, rotated, angle_bound_on, gc, dc
+        self,
+        roi_counts,
+        num_classes,
+        rotated,
+        angle_bound_on,
+        clip_angle_thresh,
+        gc,
+        dc,
     ):
         """
         Test with rois for multiple images in a batch
@@ -266,14 +317,16 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
                     continue
                 cur_boxes = rois[offset : offset + num_rois, 1:]
                 cur_deltas = deltas[offset : offset + num_rois]
+                im_shape = im_info[i, 0:2]
                 if rotated:
                     cur_box_out = bbox_transform_rotated(
                         cur_boxes, cur_deltas, angle_bound_on=angle_bound_on
                     )
-                    # No clipping for rotated boxes
+                    cur_box_out = clip_tiled_boxes_rotated(
+                        cur_box_out, im_shape, angle_thresh=clip_angle_thresh
+                    )
                 else:
                     cur_box_out = bbox_transform(cur_boxes, cur_deltas)
-                    im_shape = im_info[i, 0:2]
                     cur_box_out = clip_tiled_boxes(cur_box_out, im_shape)
                 box_out.append(cur_box_out)
                 offset += num_rois
@@ -292,6 +345,7 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
             correct_transform_coords=True,
             rotated=rotated,
             angle_bound_on=angle_bound_on,
+            clip_angle_thresh=clip_angle_thresh,
         )
 
         self.assertReferenceChecks(

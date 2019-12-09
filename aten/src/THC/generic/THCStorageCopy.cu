@@ -1,21 +1,16 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorageCopy.cu"
+#define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cu"
 #else
-
-void THCStorage_(rawCopy)(THCState *state, THCStorage *self, real *src)
-{
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self), src, self->size * sizeof(real), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
-}
 
 // conversions are delegated to THCTensor implementation
 #define THC_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC,TYPECUDA)                                 \
 void THCStorage_(copyCuda##TYPEC)(THCState *state, THCStorage *self, struct THCuda##TYPECUDA##Storage *src)  \
 {                                                                                       \
-  THArgCheck(self->size == src->size, 2, "size does not match");                        \
-  THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->size, 1);  \
+  THArgCheck(self->numel() == src->numel(), 2, "size does not match");                        \
+  THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->numel(), 1);  \
   struct THCuda##TYPECUDA##Tensor* srcTensor =                                          \
-      THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->size, 1);           \
-  THCTensor_(copyCuda##TYPEC)(state, selfTensor, srcTensor);                            \
+      THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->numel(), 1);           \
+  THCTensor_(copy)(state, selfTensor, srcTensor);                            \
   THCuda##TYPECUDA##Tensor_free(state, srcTensor);                                      \
   THCTensor_(free)(state, selfTensor);                                                  \
 }
@@ -27,9 +22,9 @@ THC_CUDA_STORAGE_IMPLEMENT_COPY(Int,Int)
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Long,Long)
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Float,)  // i.e. float
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Double,Double)
-#ifdef CUDA_HALF_TENSOR
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Half,Half)
-#endif
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Bool,Bool)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(BFloat16,BFloat16)
 
 #undef THC_CUDA_STORAGE_IMPLEMENT_COPY
 

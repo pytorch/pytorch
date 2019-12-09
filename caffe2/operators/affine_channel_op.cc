@@ -21,6 +21,8 @@ void AffineChannelScaleBiasBackwardNCHW(
   const int stride = C * HxW;
   EigenVectorArrayMap<T> dscale_arr(dscale, C);
   EigenVectorArrayMap<T> dbias_arr(dbias, C);
+  dscale_arr.setZero();
+  dbias_arr.setZero();
   for (int i = 0; i < N; ++i) {
     ConstEigenArrayMap<T> dY_arr(dY_ptr, HxW, C);
     ConstEigenArrayMap<T> X_arr(X_ptr, HxW, C);
@@ -52,11 +54,11 @@ template <>
 bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
   const auto& scale = is_learnable_ ? Input(2) : Input(1);
-  auto* dX = Output(0);
-  dX->ResizeLike(dY);
+
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int N = dY.dim32(0);
   const int C = dY.dim32(1);
-  const int HxW = dY.size() / (N * C);
+  const int HxW = dY.numel() / (N * C);
   const float* dY_data = dY.data<float>();
   const float* scale_data = scale.data<float>();
   const std::array<int, 3> X_dims = {N, C, HxW};
@@ -68,23 +70,22 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       scale_dims.data(),
       dY_data,
       scale_data,
-      dX->mutable_data<float>(),
+      dX->template mutable_data<float>(),
       &context_);
   if (is_learnable_) {
     const auto& X = Input(1);
     const float* X_data = X.data<float>();
-    auto* dscale = Output(1);
-    auto* dbias = Output(2);
-    dscale->ResizeLike(scale);
-    dbias->ResizeLike(scale);
+
+    auto* dscale = Output(1, scale.sizes(), at::dtype<float>());
+    auto* dbias = Output(2, scale.sizes(), at::dtype<float>());
     AffineChannelScaleBiasBackwardNCHW<float>(
         N,
         C,
         HxW,
         dY_data,
         X_data,
-        dscale->mutable_data<float>(),
-        dbias->mutable_data<float>());
+        dscale->template mutable_data<float>(),
+        dbias->template mutable_data<float>());
   }
   return true;
 }
@@ -93,33 +94,37 @@ template <>
 bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
   const auto& scale = is_learnable_ ? Input(2) : Input(1);
-  auto* dX = Output(0);
-  dX->ResizeLike(dY);
-  const int ndim = dY.ndim();
+
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
+  const int ndim = dY.dim();
   const int C = dY.dim32(ndim - 1);
-  const int rows = dY.size() / C;
+  const int rows = dY.numel() / C;
   const int cols = C;
   const float* dY_data = dY.data<float>();
   const float* scale_data = scale.data<float>();
   math::RowwiseMul<float, CPUContext>(
-      rows, cols, dY_data, scale_data, dX->mutable_data<float>(), &context_);
+      rows,
+      cols,
+      dY_data,
+      scale_data,
+      dX->template mutable_data<float>(),
+      &context_);
   if (is_learnable_) {
     const auto& X = Input(1);
     const float* X_data = X.data<float>();
     const int N = X.dim32(0);
     const int HxW = rows / N;
-    auto* dscale = Output(1);
-    auto* dbias = Output(2);
-    dscale->ResizeLike(scale);
-    dbias->ResizeLike(scale);
+
+    auto* dscale = Output(1, scale.sizes(), at::dtype<float>());
+    auto* dbias = Output(2, scale.sizes(), at::dtype<float>());
     AffineChannelScaleBiasBackwardNHWC<float>(
         N,
         C,
         HxW,
         dY_data,
         X_data,
-        dscale->mutable_data<float>(),
-        dbias->mutable_data<float>());
+        dscale->template mutable_data<float>(),
+        dbias->template mutable_data<float>());
   }
   return true;
 }

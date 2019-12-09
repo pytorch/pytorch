@@ -23,24 +23,24 @@ namespace {
 template <typename T, int kHeapSize, bool kSelectMax = true>
 void RunHeapSelectionImpl(
     const T* input,
-    const TIndex outer_size,
-    const TIndex inner_size,
+    const int64_t outer_size,
+    const int64_t inner_size,
     const int k,
     T* values,
-    TIndex* indices,
+    int64_t* indices,
     CUDAContext* context) {
   constexpr int kBlockSize = 256;
   constexpr int kNumWarps = kBlockSize / kWarpSize;
-  constexpr int smem = kNumWarps * kHeapSize * (sizeof(T) + sizeof(TIndex));
+  constexpr int smem = kNumWarps * kHeapSize * (sizeof(T) + sizeof(int64_t));
   constexpr T kInitVal = kSelectMax ? std::numeric_limits<T>::lowest()
                                     : std::numeric_limits<T>::max();
-  selectRowsViaHeap<T, TIndex, TIndex, kBlockSize, kHeapSize, kSelectMax>
+  selectRowsViaHeap<T, int64_t, int64_t, kBlockSize, kHeapSize, kSelectMax>
       <<<outer_size, kBlockSize, smem, context->cuda_stream()>>>(
           input,
           values,
           indices,
           kInitVal,
-          std::numeric_limits<TIndex>::max(),
+          std::numeric_limits<int64_t>::max(),
           outer_size,
           inner_size,
           k);
@@ -49,16 +49,16 @@ void RunHeapSelectionImpl(
 template <typename T, bool kSelectMax = true>
 void RunRadixSelectionImpl(
     const T* input,
-    const TIndex outer_size,
-    const TIndex inner_size,
+    const int64_t outer_size,
+    const int64_t inner_size,
     const int k,
     T* values,
-    TIndex* indices,
+    int64_t* indices,
     CUDAContext* context) {
   const int block = std::min(
-      math::roundUp(static_cast<int>(inner_size), kWarpSize),
+      math::RoundUp(static_cast<int>(inner_size), kWarpSize),
       CAFFE_CUDA_NUM_THREADS);
-  gatherTopK<T, kSelectMax, TIndex>
+  gatherTopK<T, kSelectMax, int64_t>
       <<<outer_size, block, 0, context->cuda_stream()>>>(
           input, inner_size, k, outer_size, values, indices);
   // Unfortunately the output is not currently sorted, and there is no batch
@@ -77,11 +77,11 @@ void RunRadixSelectionImpl(
 template <typename T>
 void RunTopKOnLastDimCUDAImpl(
     const T* input,
-    const TIndex outer_size,
-    const TIndex inner_size,
+    const int64_t outer_size,
+    const int64_t inner_size,
     const int k,
     T* values,
-    TIndex* indices,
+    int64_t* indices,
     CUDAContext* context) {
   // If k is small, uses heap selection, otherwise uses radix selection.
   if (k < 32) {
@@ -100,18 +100,18 @@ void RunTopKOnLastDimCUDAImpl(
 }
 
 __global__ void FlattenIndicesCUDAKernel(
-    const TIndex* src,
-    const TIndex size,
-    const TIndex stride,
-    const TIndex n,
+    const int64_t* src,
+    const int64_t size,
+    const int64_t stride,
+    const int64_t n,
     const int k,
-    TIndex* dst) {
+    int64_t* dst) {
   CUDA_1D_KERNEL_LOOP(i, size) {
     if (src[i] < 0) {
       continue;
     }
-    const TIndex x = i / stride / k;
-    const TIndex y = i % stride;
+    const int64_t x = i / stride / k;
+    const int64_t y = i % stride;
 #if __CUDA_ARCH__ >= 350
     dst[i] = __ldg(src + i) * stride + x * n * stride + y;
 #else
@@ -123,18 +123,18 @@ __global__ void FlattenIndicesCUDAKernel(
 template <typename T>
 __global__ void SetTopKGradientCUDAKernel(
     const T* values,
-    const TIndex* indices,
-    const TIndex size,
-    const TIndex stride,
-    const TIndex n,
+    const int64_t* indices,
+    const int64_t size,
+    const int64_t stride,
+    const int64_t n,
     const int k,
     T* dst) {
   CUDA_1D_KERNEL_LOOP(i, size) {
     if (indices[i] < 0) {
       continue;
     }
-    const TIndex x = i / stride / k;
-    const TIndex y = i % stride;
+    const int64_t x = i / stride / k;
+    const int64_t y = i % stride;
 #if __CUDA_ARCH__ >= 350
     dst[__ldg(indices + i) * stride + x * n * stride + y] = __ldg(values + i);
 #else
@@ -166,18 +166,18 @@ class TopKCudaOp : public Operator<Context> {
   int axis_;
 
   // Buffers for CUDAContext.
-  Tensor<Context> input_transposed_buffer_;
-  Tensor<Context> values_transposed_buffer_;
-  Tensor<Context> indices_transposed_buffer_;
+  Tensor input_transposed_buffer_;
+  Tensor values_transposed_buffer_;
+  Tensor indices_transposed_buffer_;
 
   // Shape tensors on device for CUDAContext.
-  Tensor<Context> input_dims_device_;
-  Tensor<Context> input_transposed_dims_device_;
-  Tensor<Context> input_axes_device_;
+  Tensor input_dims_device_{CUDA};
+  Tensor input_transposed_dims_device_{CUDA};
+  Tensor input_axes_device_{CUDA};
 
-  Tensor<Context> output_dims_device_;
-  Tensor<Context> output_transposed_dims_device_;
-  Tensor<Context> output_transposed_axes_device_;
+  Tensor output_dims_device_{CUDA};
+  Tensor output_transposed_dims_device_{CUDA};
+  Tensor output_transposed_axes_device_{CUDA};
 };
 
 template <typename T, typename Context>
@@ -187,7 +187,7 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  const std::vector<TIndex>& input_dims = input.dims();
+  at::IntArrayRef input_dims = input.sizes();
   if (axis_ == -1) {
     axis_ = input_dims.size() - 1;
   }
@@ -195,42 +195,41 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   CAFFE_ENFORCE_LT(axis_, input_dims.size());
 
   const bool need_transpose = axis_ < input_dims.size() - 1;
-  std::vector<TIndex> output_dims = input_dims;
+  std::vector<int64_t> output_dims = input_dims.vec();
   output_dims[axis_] = k_;
-  const TIndex prev_size = std::accumulate(
+  const int64_t prev_size = std::accumulate(
       input_dims.cbegin(),
       input_dims.cbegin() + axis_,
-      TIndex(1),
-      std::multiplies<TIndex>());
-  const TIndex next_size = std::accumulate(
+      int64_t(1),
+      std::multiplies<int64_t>());
+  const int64_t next_size = std::accumulate(
       input_dims.cbegin() + axis_ + 1,
       input_dims.cend(),
-      TIndex(1),
-      std::multiplies<TIndex>());
-  const TIndex outer_size = input.size() / input_dims[axis_];
-  const TIndex inner_size = input_dims[axis_];
+      int64_t(1),
+      std::multiplies<int64_t>());
+  const int64_t outer_size = input.numel() / input_dims[axis_];
+  const int64_t inner_size = input_dims[axis_];
 
   values->Resize(output_dims);
   indices->Resize(output_dims);
   if (flatten_indices != nullptr) {
-    flatten_indices->Resize(indices->size());
+    flatten_indices->Resize(indices->numel());
   }
   const T* input_data = input.template data<T>();
   T* values_data = values->template mutable_data<T>();
-  TIndex* indices_data = indices->template mutable_data<TIndex>();
-  TIndex* flatten_indices_data = flatten_indices == nullptr
+  int64_t* indices_data = indices->template mutable_data<int64_t>();
+  int64_t* flatten_indices_data = flatten_indices == nullptr
       ? nullptr
-      : flatten_indices->template mutable_data<TIndex>();
+      : flatten_indices->template mutable_data<int64_t>();
 
   if (need_transpose) {
     const std::array<int, 3> dims = {static_cast<int>(prev_size),
                                      static_cast<int>(inner_size),
                                      static_cast<int>(next_size)};
     const std::array<int, 3> axes = {0, 2, 1};
-    input_transposed_buffer_.Resize(
-        std::vector<TIndex>{outer_size, inner_size});
-    values_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
-    indices_transposed_buffer_.Resize(std::vector<TIndex>{outer_size, k_});
+    ReinitializeTensor(&input_transposed_buffer_,  std::vector<int64_t>{outer_size, inner_size}, at::dtype<T>().device(CUDA));
+    ReinitializeTensor(&values_transposed_buffer_, std::vector<int64_t>{outer_size, k_}, at::dtype<T>().device(CUDA));
+    ReinitializeTensor(&indices_transposed_buffer_, std::vector<int64_t>{outer_size, k_}, at::dtype<int64_t>().device(CUDA));
     math::Transpose(
         3,
         dims.data(),
@@ -240,16 +239,16 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
         &context_);
     input_data = input_transposed_buffer_.template data<T>();
     values_data = values_transposed_buffer_.template mutable_data<T>();
-    indices_data = indices_transposed_buffer_.template mutable_data<TIndex>();
+    indices_data = indices_transposed_buffer_.template mutable_data<int64_t>();
   }
 
   // init values as the default value
-  math::Set<T, CUDAContext>(values->size(), T(0), values_data, &context_);
-  math::Set<TIndex, CUDAContext>(
-      indices->size(), TIndex(-1), indices_data, &context_);
+  math::Set<T, CUDAContext>(values->numel(), T(0), values_data, &context_);
+  math::Set<int64_t, CUDAContext>(
+      indices->numel(), int64_t(-1), indices_data, &context_);
   if (flatten_indices_data != nullptr) {
-    math::Set<TIndex, CUDAContext>(
-        flatten_indices->size(), TIndex(-1), flatten_indices_data, &context_);
+    math::Set<int64_t, CUDAContext>(
+        flatten_indices->numel(), int64_t(-1), flatten_indices_data, &context_);
   }
 
   RunTopKOnLastDimCUDAImpl<T>(
@@ -275,24 +274,24 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
         3,
         dims.data(),
         axes.data(),
-        indices_transposed_buffer_.template data<TIndex>(),
-        indices->template mutable_data<TIndex>(),
+        indices_transposed_buffer_.template data<int64_t>(),
+        indices->template mutable_data<int64_t>(),
         &context_);
   }
 
   // Flatten the indices if needed.
   if (flatten_indices != nullptr) {
     FlattenIndicesCUDAKernel<<<
-        CAFFE_GET_BLOCKS(indices->size()),
+        CAFFE_GET_BLOCKS(indices->numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        indices->template data<TIndex>(),
-        indices->size(),
+        indices->template data<int64_t>(),
+        indices->numel(),
         next_size,
         inner_size,
         k_,
-        flatten_indices->template mutable_data<TIndex>());
+        flatten_indices->template mutable_data<int64_t>());
   }
   return true;
 }
@@ -322,8 +321,8 @@ bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  const std::vector<TIndex>& values_dims = values.dims();
-  const std::vector<TIndex>& origin_dims = original_input.dims();
+  at::IntArrayRef values_dims = values.sizes();
+  at::IntArrayRef origin_dims = original_input.sizes();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   T* output_data = output->template mutable_data<T>();
@@ -332,18 +331,18 @@ bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
   }
   const int k = values_dims[axis_];
   math::Set<T, Context>(output->size(), T(0), output_data, &context_);
-  const TIndex stride = std::accumulate(
+  const int64_t stride = std::accumulate(
       values_dims.cbegin() + axis_ + 1,
       values_dims.cend(),
-      TIndex(1),
-      std::multiplies<TIndex>());
+      int64_t(1),
+      std::multiplies<int64_t>());
   SetTopKGradientCUDAKernel<<<
       CAFFE_GET_BLOCKS(indices.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
       values.template data<T>(),
-      indices.template data<TIndex>(),
+      indices.template data<int64_t>(),
       values.size(),
       stride,
       origin_dims[axis_],

@@ -1,52 +1,17 @@
 #ifndef THC_TENSORMATH_COMPARET_CUH
 #define THC_TENSORMATH_COMPARET_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCNumerics.cuh"
-#include "THCReduce.cuh"
-
-template <typename T, typename TOut>
-struct TensorLTOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::lt(*a, *b));
-  }
-};
-
-template <typename T, typename TOut>
-struct TensorGTOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::gt(*a, *b));
-  }
-};
-
-template <typename T, typename TOut>
-struct TensorLEOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::le(*a, *b));
-  }
-};
-
-template <typename T, typename TOut>
-struct TensorGEOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ge(*a, *b));
-  }
-};
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduce.cuh>
 
 template <typename T, typename TOut>
 struct TensorEQOp {
   __device__ inline void operator()(TOut* out, T* a, T* b) {
     *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::eq(*a, *b));
-  }
-};
-
-template <typename T, typename TOut>
-struct TensorNEOp {
-  __device__ inline void operator()(TOut* out, T* a, T* b) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ne(*a, *b));
   }
 };
 
@@ -56,9 +21,7 @@ void THC_logicalTensor(THCState *state,
                        TensorType *src1,
                        TensorType *src2,
                        Op op) {
-  THLongStorage* st = THCTensor_newSizeOf(state, src1);
-  THCTensor_resize(state, self_, st, NULL);
-  THLongStorage_free(st);
+  THCTensor_resize(state, self_, src1->sizes(), {});
 
   THArgCheck(THCTensor_nElement(state, src1) ==
              THCTensor_nElement(state, src2), 3,

@@ -7,12 +7,14 @@ from caffe2.python import core, workspace
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import itertools as it
+import unittest
 
 
-class TestReduceOps(hu.HypothesisTestCase):
+class TestReduceOps(serial.SerializedTestCase):
     def run_reduce_op_test_impl(
             self, op_name, X, axes, keepdims, ref_func, gc, dc):
         if axes is None:
@@ -54,8 +56,9 @@ class TestReduceOps(hu.HypothesisTestCase):
                 self.run_reduce_op_test_impl(
                     op_name, X, axes, keepdims, ref_func, gc, dc)
 
-    @given(X=hu.tensor(max_dim=3, dtype=np.float32), keepdims=st.booleans(),
-           num_axes=st.integers(1, 3), **hu.gcs)
+    @serial.given(
+        X=hu.tensor(max_dim=3, dtype=np.float32), keepdims=st.booleans(),
+        num_axes=st.integers(1, 3), **hu.gcs)
     def test_reduce_min(self, X, keepdims, num_axes, gc, dc):
         X_dims = X.shape
         X_size = X.size
@@ -65,8 +68,9 @@ class TestReduceOps(hu.HypothesisTestCase):
         self.run_reduce_op_test(
             "ReduceMin", X, keepdims, num_axes, np.min, gc, dc)
 
-    @given(X=hu.tensor(max_dim=3, dtype=np.float32), keepdims=st.booleans(),
-           num_axes=st.integers(1, 3), **hu.gcs)
+    @serial.given(
+        X=hu.tensor(max_dim=3, dtype=np.float32), keepdims=st.booleans(),
+        num_axes=st.integers(1, 3), **hu.gcs)
     def test_reduce_max(self, X, keepdims, num_axes, gc, dc):
         X_dims = X.shape
         X_size = X.size
@@ -84,14 +88,42 @@ class TestReduceOps(hu.HypothesisTestCase):
         self.run_reduce_op_test(
             "ReduceSum", X, keepdims, num_axes, np.sum, gc, dc)
 
-    @given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
+    @serial.given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
            num_axes=st.integers(1, 4), **hu.gcs)
     def test_reduce_mean(self, X, keepdims, num_axes, gc, dc):
         self.run_reduce_op_test(
             "ReduceMean", X, keepdims, num_axes, np.mean, gc, dc)
 
+    @given(n=st.integers(1, 3), m=st.integers(1, 3), k=st.integers(1, 3),
+           keepdims=st.booleans(), num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
+    def test_reduce_l1(self, n, m, k, keepdims, num_axes, gc, dc):
+        X = np.arange(n * m * k, dtype=np.float32) - 0.5
+        np.random.shuffle(X)
+        X = X.reshape((m, n, k))
+        self.run_reduce_op_test(
+            "ReduceL1", X, keepdims, num_axes, getNorm(1), gc, dc)
 
-class TestReduceFrontReductions(hu.HypothesisTestCase):
+    @serial.given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           keepdims=st.booleans(), num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
+    def test_reduce_l2(self, n, m, k, keepdims, num_axes, gc, dc):
+        X = np.random.randn(n, m, k).astype(np.float32)
+        self.run_reduce_op_test(
+            "ReduceL2", X, keepdims, num_axes, getNorm(2), gc, dc)
+
+
+def getNorm(p):
+    if p == 1:
+        def norm(X, axis, keepdims):
+            return np.sum(np.abs(X), axis=axis, keepdims=keepdims)
+    elif p == 2:
+        def norm(X, axis, keepdims):
+            return np.sqrt(np.sum(np.power(X, 2), axis=axis, keepdims=keepdims))
+    else:
+        raise RuntimeError("Only L1 and L2 norms supported")
+    return norm
+
+
+class TestReduceFrontReductions(serial.SerializedTestCase):
     def grad_variant_input_test(self, grad_op_name, X, ref, num_reduce_dim):
         workspace.ResetWorkspace()
 
@@ -172,7 +204,7 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
         self.assertGradientChecks(
             device, op, in_data, 0, [0], stepsize=1e-2, threshold=1e-2)
 
-    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_front_sum(self, num_reduce_dim, gc, dc):
         X = np.random.rand(7, 4, 3, 5).astype(np.float32)
 
@@ -237,7 +269,7 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             "ReduceFrontSum", ref_sum, [X, lengths], ["input", "lengths"],
             num_reduce_dim, gc)
 
-    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_front_mean(self, num_reduce_dim, gc, dc):
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
@@ -268,7 +300,7 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             "ReduceFrontMean", ref_mean, [X, lengths], ["input", "lengths"],
             num_reduce_dim, gc)
 
-    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_front_max(self, num_reduce_dim, gc, dc):
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
@@ -297,7 +329,7 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             "ReduceFrontMax", num_reduce_dim, gc, dc, [X, lengths],
             ["X", "lengths"], ref_max)
 
-    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_back_max(self, num_reduce_dim, gc, dc):
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
@@ -358,7 +390,7 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             "ReduceBackSum", ref_sum, [X, lengths], ["input", "lengths"],
             num_reduce_dim, gc)
 
-    @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
+    @serial.given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_back_mean(self, num_reduce_dim, dc, gc):
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 

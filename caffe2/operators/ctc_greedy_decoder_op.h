@@ -10,12 +10,11 @@ template <class Context>
 class CTCGreedyDecoderOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CTCGreedyDecoderOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
-    if (OperatorBase::HasArgument("merge_repeated")) {
-      merge_repeated_ =
-          OperatorBase::GetSingleArgument<bool>("merge_repeated", true);
-    }
+  template <class... Args>
+  explicit CTCGreedyDecoderOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
+    merge_repeated_ =
+        this->template GetSingleArgument<bool>("merge_repeated", true);
   }
 
   bool RunOnDevice() override;

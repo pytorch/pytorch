@@ -10,10 +10,11 @@ from future.utils import viewitems, viewkeys
 from hypothesis import assume, given, settings, HealthCheck
 import hypothesis.strategies as st
 import unittest
+import os
 
 from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.proto.caffe2_pb2 import TensorProto
+from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -323,7 +324,7 @@ class TestOperators(hu.HypothesisTestCase):
                      "Skipping test due to no gpu present.")
     @given(hidden_size=st.integers(min_value=1, max_value=3),
            num_layers=st.integers(min_value=1, max_value=3),
-           bidirectional=st.just(False),  # TODO
+           bidirectional=st.booleans(),
            rnn_mode=st.sampled_from(["lstm"]),   # TODO: "gru"
            input_mode=st.sampled_from(["linear"]),
            dropout=st.floats(min_value=1.0, max_value=1.0),
@@ -332,13 +333,23 @@ class TestOperators(hu.HypothesisTestCase):
            D=st.integers(min_value=1, max_value=4))
     def test_recurrent(self, hidden_size, num_layers, bidirectional, rnn_mode,
                        input_mode, dropout, T, N, D):
-
+        #there's a bug in miopen for N=1 which would be resolved in the next release.
+        if workspace.has_hip_support:
+            assume(N>1)
         # Random seed, this one happens to pass
         seed = 1234
         np.random.seed(seed)
-
+        # set device option
+        if workspace.has_hip_support:
+           device_option = hu.hip_do
+           engine = 'MIOPEN'
+        else:
+           device_option = hu.gpu_do
+           engine = 'CUDNN'
         input_weight_size = hidden_size * D
         upper_layer_input_weight_size = hidden_size * hidden_size
+        if bidirectional:
+            upper_layer_input_weight_size *= 2
         recurrent_weight_size = hidden_size * hidden_size
         input_bias_size = hidden_size
         recurrent_bias_size = hidden_size
@@ -352,7 +363,7 @@ class TestOperators(hu.HypothesisTestCase):
         total_sz *= num_directions
 
         W = np.random.rand(total_sz).astype(np.float32)
-        self.ws.create_blob("WEIGHT").feed(W, device_option=hu.gpu_do)
+        self.ws.create_blob("WEIGHT").feed(W, device_option=device_option)
 
         op = core.CreateOperator(
             "Recurrent",
@@ -366,9 +377,9 @@ class TestOperators(hu.HypothesisTestCase):
             input_mode=input_mode,
             num_layers=num_layers,
             seed=seed,
-            engine="CUDNN")
+            engine=engine)
         X = np.random.randn(T, N, D).astype(np.float32)
-        self.ws.create_blob("INPUT").feed(X, device_option=hu.gpu_do)
+        self.ws.create_blob("INPUT").feed(X, device_option=device_option)
         W = self.ws.blobs["WEIGHT"].fetch()
         H = np.random.randn(
             num_layers, N, hidden_size * num_directions).astype(
@@ -380,10 +391,9 @@ class TestOperators(hu.HypothesisTestCase):
         inputs = [X, H, C, W]
         input_idxs = [i for (i, _) in enumerate(inputs)] \
             if rnn_mode == "lstm" else [0, 1, 3]  # ignore C
-
         for input_idx in input_idxs:
             self.assertGradientChecks(
-                hu.gpu_do, op, inputs, input_idx, [0],
+                device_option, op, inputs, input_idx, [0],
                 stepsize=0.01, threshold=0.01)
 
     @given(ndim=st.integers(1, 4),
@@ -630,7 +640,7 @@ class TestOperators(hu.HypothesisTestCase):
            beta=st.floats(min_value=0.1, max_value=0.9),
            lambda1=st.floats(min_value=0.001, max_value=0.1),
            lambda2=st.floats(min_value=0.001, max_value=0.1),
-           engine=st.sampled_from([None]),
+           engine=st.sampled_from([None, "SIMD"]),
            **hu.gcs_cpu_only)
     def test_gftrl_sgd(self, inputs, in_place, alpha, beta, lambda1, lambda2,
                       engine, gc, dc):
@@ -1515,8 +1525,8 @@ class TestOperators(hu.HypothesisTestCase):
            net_type=st.sampled_from(
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support else [])),
-           do=st.sampled_from(hu.device_options))
-    def test_dag_net_forking(self, net_type, num_workers, do):
+           **hu.gcs)
+    def test_dag_net_forking(self, net_type, num_workers, gc, dc):
         from caffe2.python.model_helper import ModelHelper
         from caffe2.python import brew
         m = ModelHelper(name="test_model")
@@ -1549,8 +1559,8 @@ class TestOperators(hu.HypothesisTestCase):
         m.net.SquaredL2Distance(["0_0", "label"], "xent")
         m.net.AveragedLoss("xent", "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(do)
-        m.param_init_net.Proto().device_option.CopyFrom(do)
+        m.Proto().device_option.CopyFrom(gc)
+        m.param_init_net.Proto().device_option.CopyFrom(gc)
 
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
@@ -1566,10 +1576,10 @@ class TestOperators(hu.HypothesisTestCase):
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
                 self.ws.create_blob("label").feed(
                     np.random.randn(n, d).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
             self.ws.run(m.net)
             gradients = [
                 self.ws.blobs[str(input_to_grad[input_blob])].fetch()
@@ -1582,9 +1592,7 @@ class TestOperators(hu.HypothesisTestCase):
             self.assertAlmostEqual(np.sum(np.square(output)), 91.81752,
                                    delta=1e-2)
 
-    @given(input=hu.tensor(min_dim=2, max_dim=6, dtype=np.int32,
-                           elements=st.integers(min_value=0,
-                                                max_value=2**32 - 1)),
+    @given(input=hu.tensor(min_dim=2, max_dim=6),
            slice_dim=st.integers(),
            a=st.integers(),
            b=st.integers(),
@@ -1615,6 +1623,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [input, start_vec, end_vec],
                                    slice_ref)
+        self.assertGradientChecks(gc, op, [input, start_vec, end_vec], 0, [0])
 
     @given(data=hu.tensor(), **hu.gcs_cpu_only)
     def test_shape(self, data, gc, dc):
@@ -1629,13 +1638,13 @@ class TestOperators(hu.HypothesisTestCase):
         op = core.CreateOperator("Shape", ["data"], ["shape"], axes=axes)
         self.assertReferenceChecks(gc, op, [data, axes], shape_ref)
 
-    @given(data=hu.tensor(), **hu.gcs_cpu_only)
-    def test_has_elements(self, data, gc, dc):
-        op = core.CreateOperator("HasElements", ["data"], ["has_elements"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) > 0, ))
+    @given(x=hu.tensor(), y=hu.tensor(), **hu.gcs_cpu_only)
+    def test_has_elements(self, x, y, gc, dc):
+        op = core.CreateOperator("HasElements", ["x", "y"], ["has_elements"])
+        self.assertReferenceChecks(gc, op, [x, y], lambda x, y: (len(x) > 0 or len(y) > 0, ))
 
-        op = core.CreateOperator("IsEmpty", ["data"], ["is_empty"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) == 0, ))
+        op = core.CreateOperator("IsEmpty", ["x"], ["is_empty"])
+        self.assertReferenceChecks(gc, op, [x], lambda x: (len(x) == 0, ))
 
     @given(initial_iters=st.integers(0, 100),
            max_iters=st.integers(0, 100))
@@ -1807,7 +1816,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         to = _NUMPY_TYPE_TO_ENUM[dst]
         if use_name:
-            to = TensorProto.DataType.Name(to).lower()
+            to = caffe2_pb2.TensorProto.DataType.Name(to).lower()
         op = core.CreateOperator('Cast', ["X"], ["Y"], to=to)
         self.assertDeviceChecks(dc, op, [a], [0])
         out, = self.assertReferenceChecks(gc, op, [a], ref)
@@ -1829,7 +1838,7 @@ class TestOperators(hu.HypothesisTestCase):
         # error increases dramtically when input is close to 0 or 1
         # and it will fail the test.
         # So we only run gradient test in the range of (0.01, 0.99)
-        # very occationally, test may fail due to random accumulated error
+        # very occasionally, test may fail due to random accumulated error
         # reduce test range to (0.02, 0.98) will improve test stability
         op = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps)
         self.assertDeviceChecks(dc, op, [a], [0])
@@ -2212,46 +2221,16 @@ class TestOperators(hu.HypothesisTestCase):
         for blob, arr in feeds:
             np.testing.assert_array_equal(ws.blobs[blob].fetch(), arr)
 
-    @given(sizes=st.lists(st.integers(1, 100), min_size=1),
-           in_place=st.booleans(),
-           **hu.gcs)
-    def test_unsafe_coalesce(self, sizes, in_place, gc, dc):
-        gAlignment = 32
-        Xs = [np.random.randn(size)
-              .astype(np.random.choice([np.float32, np.float64, np.uint8]))
-              for size in sizes]
-        op = core.CreateOperator(
-            "UnsafeCoalesce",
-            ["X_{}".format(i) for i, _ in enumerate(sizes)],
-            [("X_{}" if in_place else "Y_{}").format(i)
-             for i, _ in enumerate(sizes)] + ["coalesced"])
-        self.assertDeviceChecks(dc, op, Xs, list(range(len(sizes) + 1)))
-
-        def unsafe_coalesce(*xs):
-            def to_uint8(x):
-                x_aligned_bytes = ((x.nbytes + gAlignment - 1) // gAlignment) \
-                    * gAlignment
-                x_aligned = np.zeros(
-                    shape=(x_aligned_bytes // x.dtype.itemsize, ),
-                    dtype=x.dtype)
-                x_aligned[:x.size] = x
-                x_cast = np.fromstring(x_aligned.tobytes(), dtype='<u1')
-                return x_cast
-            flat = [to_uint8(x) for x in xs]
-            coalesced = np.concatenate(flat)
-            return list(xs) + [coalesced]
-        self.assertReferenceChecks(gc, op, Xs, unsafe_coalesce)
-
     @given(inp=_dtypes().flatmap(lambda dt: _tensor_and_indices(
         elements=st.floats(min_value=0, max_value=1), dtype=dt)),
         **hu.gcs)
     def test_sparse_to_dense(self, inp, gc, dc):
         first_dim, X, I = inp
-        if X.dtype != np.dtype('float32') and gc.device_type == 1:
+        if X.dtype != np.dtype('float32') and gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP} :
             # Cuda only support 32 bit float
             print("Bailout {}".format(X.dtype))
             return
-        if gc.device_type == 1:
+        if gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}:
             # Cuda version only support int32
             I = I.astype(np.int32)
 

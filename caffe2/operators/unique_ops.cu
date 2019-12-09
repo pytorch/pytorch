@@ -21,6 +21,7 @@
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
+#include <thrust/version.h>
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
@@ -53,28 +54,25 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
   auto& inputTensor = Input(0);
   // use dim32 to enforce that it's fine to have remapping of type int
   int N = inputTensor.dim32(0);
-  CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
-  auto* uniqueTensor = Output(UNIQUE);
+  CAFFE_ENFORCE_EQ(inputTensor.dim(), 1, "Input should be a vector");
 
   int* remapping = nullptr;
   if (REMAPPING < OutputSize()) {
-    auto* remappingTensor = Output(REMAPPING);
-    remappingTensor->ResizeLike(inputTensor);
+    auto* remappingTensor =
+        Output(REMAPPING, inputTensor.sizes(), at::dtype<int>());
     remapping = remappingTensor->template mutable_data<int>();
   }
 
   if (N <= 0) {
     // if the input is empty, we have nothing to do, not even launch kernel.
-    uniqueTensor->Resize(0);
-    T* unique = uniqueTensor->template mutable_data<T>();
+    /* auto* uniqueTensor = */ Output(UNIQUE, {0}, at::dtype<T>());
     return true;
   }
 
   const T* input = inputTensor.template data<T>();
-  thrust_unique_buffer_.Resize(N);
+  ReinitializeTensor(&thrust_unique_buffer_, {N}, at::dtype<T>().device(CUDA));
   auto* buffer = thrust_unique_buffer_.template mutable_data<T>();
-  context_.template CopyItems<CUDAContext, CUDAContext>(
-      inputTensor.meta(), N, input, buffer);
+  context_.CopyItemsSameDevice(inputTensor.meta(), N, input, buffer);
 
   // Create two vectors of {0, 1, ..., N-1} on CUDA device
   thrust::device_vector<int> order1(N), order2(N);
@@ -113,10 +111,9 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
       order2.begin());
   int K = new_last.first - buffer;
 
-  uniqueTensor->Resize(K);
+  auto* uniqueTensor = Output(UNIQUE, {K}, at::dtype<T>());
   T* unique = uniqueTensor->template mutable_data<T>();
-  context_.template CopyItems<CUDAContext, CUDAContext>(
-      thrust_unique_buffer_.meta(), K, buffer, unique);
+  context_.CopyItemsSameDevice(thrust_unique_buffer_.meta(), K, buffer, unique);
 
   // Compute the remapping. For example, for the number 1, if we look at
   // order2[0] and order2[1], we know that input2[0:2) are all 1. They are all

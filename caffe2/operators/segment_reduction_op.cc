@@ -2,6 +2,46 @@
 
 namespace caffe2 {
 
+OpSchema::Cost CostInferenceForSparseLengths(
+    const OperatorDef& def,
+    const vector<TensorShape>& inputs,
+    bool use_weight) {
+  int min_num_of_inputs = 3 + use_weight;
+  CAFFE_ENFORCE_GE(
+      inputs.size(),
+      min_num_of_inputs,
+      def.type() + " requires at least " + c10::to_string(min_num_of_inputs));
+
+  const TensorShape data = inputs[0];
+  const TensorShape indices = inputs[1 + use_weight];
+  const TensorShape lengths = inputs[2 + use_weight];
+
+  OpSchema::Cost c;
+  CAFFE_ENFORCE_GT(data.dims_size(), 0, "data requires at least 1 dimension");
+  uint64_t N = data.dims(0);
+  if (N == 0) {
+    return c;
+  }
+  uint64_t D = nElemFromDim(data, 1);
+  CAFFE_ENFORCE_GT(
+      lengths.dims_size(), 0, "lengths requires at least 1 dimension");
+  uint64_t M = lengths.dims(0);
+  uint64_t indices_size = nElemFromDim(indices);
+
+  c.flops = indices_size * D;
+  c.bytes_read = indices_size *
+          (D * sizeof(data.data_type()) + sizeof(indices.data_type())) +
+      M * sizeof(lengths.data_type());
+  c.params_bytes = N * D * sizeof(data.data_type());
+  if (use_weight) {
+    const TensorShape weights = inputs[1];
+    c.flops += indices_size * D;
+    c.bytes_read += indices_size * sizeof(weights.data_type());
+  }
+
+  return c;
+}
+
 // registering 5 input gradient with main output
 // gradient of SparseLengthsWeightedSum
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
@@ -10,6 +50,7 @@ OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
 REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient,
     AbstractLengthsWithMainInputGradientOp<
+        float,
         float,
         int,
         CPUContext,
@@ -294,22 +335,18 @@ OUTPUT:
 template <typename Def>
 string FormatDoc() {
   string doc = Def::doc;
-  ReplaceAll(doc, "{op}", Def::OpDef::name);
-  ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
-  if (strcmp(Def::OpDef::name,"Max") == 0){
-    ReplaceAll(doc, "{extra}", kLengthsMaxExtra);
-  }
-  else if (strcmp(Def::OpDef::name,"Mean") == 0){
-    ReplaceAll(doc, "{extra}", kLengthsMeanExtra);
-  }
-  else if (strcmp(Def::OpDef::name,"Sum") == 0){
-    ReplaceAll(doc, "{extra}", kLengthsSumExtra);
-  }
-  else if (strcmp(Def::OpDef::name,"WeightedSum") == 0){
-    ReplaceAll(doc, "{extra}", kLengthsWeightedSumExtra);
-  }
-  else{
-    ReplaceAll(doc, "{extra}", " ");
+  c10::ReplaceAll(doc, "{op}", Def::OpDef::name);
+  c10::ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
+  if (strcmp(Def::OpDef::name, "Max") == 0) {
+    c10::ReplaceAll(doc, "{extra}", kLengthsMaxExtra);
+  } else if (strcmp(Def::OpDef::name, "Mean") == 0) {
+    c10::ReplaceAll(doc, "{extra}", kLengthsMeanExtra);
+  } else if (strcmp(Def::OpDef::name, "Sum") == 0) {
+    c10::ReplaceAll(doc, "{extra}", kLengthsSumExtra);
+  } else if (strcmp(Def::OpDef::name, "WeightedSum") == 0) {
+    c10::ReplaceAll(doc, "{extra}", kLengthsWeightedSumExtra);
+  } else {
+    c10::ReplaceAll(doc, "{extra}", " ");
   }
   return doc;
 }
@@ -330,6 +367,7 @@ constexpr bool equal(
 
 // Helper macro when the main op is defined elsewhere, and we only need to
 // define the schema, and the gradient op.
+// TODO: enable input fillers
 #define REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(                            \
     segment_name, gradient_name, ...)                                         \
   static_assert(                                                              \
@@ -345,13 +383,15 @@ constexpr bool equal(
   OPERATOR_SCHEMA(segment_name)                                               \
       .NumInputs(__VA_ARGS__::ForwardOp::kNumInputs)                          \
       .NumOutputs(1)                                                          \
+      .DisallowInputFillers()                                                 \
       .SetDoc(FormatDoc<__VA_ARGS__>())                                       \
       .Output(0, "OUTPUT", "Aggregated tensor")                               \
       .FillUsing(__VA_ARGS__::PopulateSchema);                                \
   REGISTER_CPU_OPERATOR_STR(string(#gradient_name), __VA_ARGS__::BackwardOp); \
   OPERATOR_SCHEMA(gradient_name)                                              \
       .NumInputs(__VA_ARGS__::BackwardOp::kNumInputs)                         \
-      .NumOutputs(1);                                                         \
+      .NumOutputs(1)                                                          \
+      .DisallowInputFillers();                                                \
   REGISTER_GRADIENT_STR(string(#segment_name), __VA_ARGS__::GetGradient)
 
 #define REGISTER_SEGMENT_DEF(segment_name, gradient_name, ...)               \
@@ -468,37 +508,6 @@ REGISTER_SEGMENT_DEF(
     LengthsWeightedSumGradient,
     AbstractLengthsDef<float, int, CPUContext, WeightedSumReducerDef, false>);
 
-// SparseLengths[Sum,WeightedSum,Mean] are now implemented separately,
-// so we only rely to the historical implementation for the backward + schema.
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    SparseLengthsSum,
-    SparseLengthsSumGradient,
-    AbstractSparseLengthsDef<
-        float,
-        int,
-        CPUContext,
-        SumReducerDef,
-        true /*GradientNeedIndices*/>)
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    SparseLengthsWeightedSum,
-    SparseLengthsWeightedSumGradient,
-    AbstractSparseLengthsDef<
-        float,
-        int,
-        CPUContext,
-        WeightedSumReducerDef,
-        true /*GradientNeedIndices*/>)
-
-REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
-    SparseLengthsMean,
-    SparseLengthsMeanGradient,
-    AbstractSparseLengthsDef<
-        float,
-        int,
-        CPUContext,
-        MeanReducerDef,
-        true /*GradientNeedIndices*/>)
-
 // Auxiliary output gradients are currently implemented only for Lengths version
 #define REGISTER_GRADIENT_WITH_MAIN_INPUT(gradient_name, ...)        \
   static_assert(                                                     \
@@ -570,3 +579,36 @@ REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(
     LengthsMaxWithMainInputAndForwardOutputGradient,
     AbstractLengthsDef<float, int, CPUContext, MaxReducerDef>);
 } // namespace caffe2
+
+// Macro doesn't like comma
+using LengthsSumCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::SumReducerDef,
+    true>::ForwardOp;
+using LengthsMeanCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::MeanReducerDef,
+    true>::ForwardOp;
+using LengthsMaxCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::MaxReducerDef,
+    true>::ForwardOp;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsSum,
+    "_caffe2::LengthsSum(Tensor data, Tensor lengths) -> Tensor",
+    LengthsSumCPUOp);
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsMean,
+    "_caffe2::LengthsMean(Tensor data, Tensor lengths) -> Tensor",
+    LengthsMeanCPUOp);
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsMax,
+    "_caffe2::LengthsMax(Tensor data, Tensor lengths) -> Tensor",
+    LengthsMaxCPUOp);

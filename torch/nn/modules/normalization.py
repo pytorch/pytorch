@@ -2,8 +2,9 @@ import torch
 import numbers
 from torch.nn.parameter import Parameter
 from .module import Module
-from .batchnorm import _BatchNorm
+from ._functions import CrossMapLRN2d as _cross_map_lrn2d
 from .. import functional as F
+from .. import init
 
 
 class LocalResponseNorm(Module):
@@ -22,8 +23,8 @@ class LocalResponseNorm(Module):
         k: additive factor. Default: 1
 
     Shape:
-        - Input: :math:`(N, C, ...)`
-        - Output: :math:`(N, C, ...)` (same shape as input)
+        - Input: :math:`(N, C, *)`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 
@@ -34,8 +35,9 @@ class LocalResponseNorm(Module):
         >>> output_4d = lrn(signal_4d)
 
     """
+    __constants__ = ['size', 'alpha', 'beta', 'k']
 
-    def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
+    def __init__(self, size, alpha=1e-4, beta=0.75, k=1.):
         super(LocalResponseNorm, self).__init__()
         self.size = size
         self.alpha = alpha
@@ -60,8 +62,8 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input):
-        return self._backend.CrossMapLRN2d(self.size, self.alpha, self.beta,
-                                           self.k)(input)
+        return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta,
+                                      self.k)
 
     def extra_repr(self):
         return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
@@ -94,14 +96,15 @@ class LayerNorm(Module):
             of size
 
             .. math::
-                [* \times \text{normalized_shape}[0] \times \text{normalized_shape}[1]
-                    \times \ldots \times \text{normalized_shape}[-1]]
+                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
+                    \times \ldots \times \text{normalized\_shape}[-1]]
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters. Default: ``True``
+            has learnable per-element affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`
@@ -123,11 +126,13 @@ class LayerNorm(Module):
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
+    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps', 'elementwise_affine']
+
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
-        self.normalized_shape = torch.Size(normalized_shape)
+        self.normalized_shape = tuple(normalized_shape)
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
@@ -140,8 +145,8 @@ class LayerNorm(Module):
 
     def reset_parameters(self):
         if self.elementwise_affine:
-            self.weight.data.fill_(1)
-            self.bias.data.zero_()
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
 
     def forward(self, input):
         return F.layer_norm(
@@ -162,7 +167,7 @@ class GroupNorm(Module):
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated
     separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
-    per-channel affine transform parameter vectorss of size :attr:`num_channels` if
+    per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
 
     This layer uses statistics computed from input data in both training and
@@ -173,11 +178,12 @@ class GroupNorm(Module):
         num_channels (int): number of channels expected in input
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         affine: a boolean value that when set to ``True``, this module
-            has learnable per-channel affine parameters. Default: ``True``
+            has learnable per-channel affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
 
     Shape:
-        - Input: :math:`(N, num\_channels, *)`
-        - Output: :math:`(N, num\_channels, *)` (same shape as input)
+        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 
@@ -193,6 +199,9 @@ class GroupNorm(Module):
 
     .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
+    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine', 'weight',
+                     'bias']
+
     def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
         super(GroupNorm, self).__init__()
         self.num_groups = num_groups
@@ -209,8 +218,8 @@ class GroupNorm(Module):
 
     def reset_parameters(self):
         if self.affine:
-            self.weight.data.fill_(1)
-            self.bias.data.zero_()
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
 
     def forward(self, input):
         return F.group_norm(

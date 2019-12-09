@@ -1,56 +1,57 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
-#include <torch/tensor.h>
-
-#include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
+#include <torch/optim/serialize.h>
+#include <torch/types.h>
 
 #include <utility>
 #include <vector>
 
 namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
+
+namespace torch {
 namespace optim {
 
-struct AdagradOptions {
+struct TORCH_API AdagradOptions {
   AdagradOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, lr_decay) = 0;
   TORCH_ARG(double, weight_decay) = 0;
 };
 
-class Adagrad : public Optimizer {
+class TORCH_API Adagrad : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit Adagrad(
       ParameterContainer&& parameters,
-      const AdagradOptions& options)
+      const AdagradOptions& options_)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
-        sum_(zero_buffers_like(parameters_)),
-        step_(parameters_.size(), 0) {}
+        options(options_) {}
 
   void step() override;
 
-  const AdagradOptions& options() const noexcept;
+  AdagradOptions options;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-    ar(CEREAL_NVP(sum_));
-    ar(CEREAL_NVP(step_));
-  }
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
+
+  std::vector<Tensor> sum_buffers;
+  std::vector<int64_t> step_buffers;
 
  private:
-  friend class cereal::access;
-  Adagrad() : options_(0) {}
+  Adagrad() : options(0) {}
 
-  AdagradOptions options_;
-
-  std::vector<Tensor> sum_;
-  std::vector<double> step_;
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    _TORCH_OPTIM_SERIALIZE(sum_buffers);
+    _TORCH_OPTIM_SERIALIZE(step_buffers);
+  }
 };
 } // namespace optim
 } // namespace torch

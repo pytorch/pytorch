@@ -9,17 +9,17 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/onnx/onnx_exporter.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "onnx/onnx_pb.h"
 
 namespace caffe2 {
 
-void BuildInitializationList(
+CAFFE2_API void BuildInitializationList(
     Workspace* ws,
     ::ONNX_NAMESPACE::GraphProto* g,
     std::unordered_set<std::string>* initialization_list);
 
-class TensorRTTransformer {
+class CAFFE2_API TensorRTTransformer {
  public:
   TensorRTTransformer(
       size_t max_batch_size,

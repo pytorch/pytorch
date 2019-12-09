@@ -14,7 +14,7 @@
 #include <mutex>
 
 #include "caffe2/core/common.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 namespace caffe2 {
 
@@ -23,13 +23,9 @@ namespace caffe2 {
  * different modules. Currently, we only store the name and a simple
  * description of what this module does.
  */
-class ModuleSchema {
+class CAFFE2_API ModuleSchema {
  public:
   ModuleSchema(const char* name, const char* description);
-
- private:
-  const char* name_;
-  const char* description_;
 };
 
 
@@ -45,12 +41,12 @@ class ModuleSchema {
  *       the reason we do not include ".so" is for cross-platform compatibility
  *       on platforms like mac os.
  */
-const CaffeMap<string, const ModuleSchema*>& CurrentModules();
+CAFFE2_API const CaffeMap<string, const ModuleSchema*>& CurrentModules();
 
 /**
  * @brief Checks whether a module is already present in the current binary.
  */
-bool HasModule(const string& name);
+CAFFE2_API bool HasModule(const string& name);
 
 /**
  * @brief Load a module.
@@ -60,7 +56,7 @@ bool HasModule(const string& name);
  *       full path option to only experimental modules.
  *   filename: (optional) a filename that serves as a hint to load the module.
  */
-void LoadModule(const string& name, const string& filename="");
+CAFFE2_API void LoadModule(const string& name, const string& filename="");
 
 
 #define CAFFE2_MODULE(name, description)                                    \

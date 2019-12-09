@@ -1,8 +1,8 @@
-#include "THMemoryFile.h"
-#include "THStorage.hpp"
-#include "THFilePrivate.h"
-#include "THDiskFile.h"
-#include "stdint.h"
+#include <TH/THMemoryFile.h>
+#include <TH/THStorageFunctions.hpp>
+#include <TH/THFilePrivate.h>
+#include <TH/THDiskFile.h>
+#include <stdint.h>
 
 #ifndef _WIN32
 #include <sys/types.h>
@@ -14,7 +14,7 @@ typedef struct THMemoryFile__
     THCharStorage *storage;
     ssize_t size;
     ssize_t position;
-	int longSize;
+        int longSize;
 
 } THMemoryFile;
 
@@ -56,7 +56,7 @@ static void THMemoryFile_grow(THMemoryFile *self, ssize_t size)
     return;
   else
   {
-    if(size < self->storage->size) /* note the "<" and not "<=" */
+    if(size < self->storage->numel()) /* note the "<" and not "<=" */
     {
       self->size = size;
       THCharStorage_data(self->storage)[self->size] = '\0';
@@ -64,10 +64,10 @@ static void THMemoryFile_grow(THMemoryFile *self, ssize_t size)
     }
   }
 
-  missingSpace = size-self->storage->size+1; /* +1 for the '\0' */
-  THCharStorage_resize(self->storage, (self->storage->size/2 > missingSpace ?
-                                       self->storage->size + (self->storage->size/2)
-                                       : self->storage->size + missingSpace));
+  missingSpace = size-self->storage->numel()+1; /* +1 for the '\0' */
+  THCharStorage_resize(self->storage, (self->storage->numel()/2 > missingSpace ?
+                                       self->storage->numel() + (self->storage->numel()/2)
+                                       : self->storage->numel() + missingSpace));
 }
 
 static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
@@ -188,12 +188,12 @@ static int THMemoryFile_mode(const char *mode, int *isReadable, int *isWritable)
         while (1)                                                       \
         {                                                               \
           ASCII_WRITE_ELEM;                                             \
-          if( (nByteWritten > -1) && (nByteWritten < mfself->storage->size-mfself->position) ) \
+          if( (nByteWritten > -1) && (nByteWritten < mfself->storage->numel()-mfself->position) ) \
           {                                                             \
             mfself->position += nByteWritten;                           \
             break;                                                      \
           }                                                             \
-          THMemoryFile_grow(mfself, mfself->storage->size + (mfself->storage->size/2) + 2); \
+          THMemoryFile_grow(mfself, mfself->storage->numel() + (mfself->storage->numel()/2) + 2); \
         }                                                               \
         if(mfself->file.isAutoSpacing)                                  \
         {                                                               \
@@ -297,7 +297,7 @@ static void THMemoryFile_free(THFile *self)
 
 /* READ_WRITE_METHODS(bool, Bool, */
 /*                    int value = 0; int ret = sscanf((char*) THCharStorage_data(mfself->storage)+mfself->position, "%d%n", &value, &nByteRead); data[i] = (value ? 1 : 0), */
-/*                    int value = (data[i] ? 1 : 0); nByteWritten = snprintf(THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->size-mfself->position, "%d", value), */
+/*                    int value = (data[i] ? 1 : 0); nByteWritten = snprintf(THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%d", value), */
 /*                    1) */
 
 READ_WRITE_METHODS(uint8_t, Byte,
@@ -307,7 +307,7 @@ READ_WRITE_METHODS(uint8_t, Byte,
                    nread = ret; \
                    i = n-1; \
                    memmove(data, THCharStorage_data(mfself->storage)+mfself->position, nByteRead),
-                   nByteWritten = (n < mfself->storage->size-mfself->position ? n : -1); \
+                   nByteWritten = (n < mfself->storage->numel()-mfself->position ? n : -1); \
                    i = n-1; \
                    if(nByteWritten > -1)
                      memmove(THCharStorage_data(mfself->storage)+mfself->position, data, nByteWritten),
@@ -322,7 +322,7 @@ READ_WRITE_METHODS(int8_t, Char,
                    nread = ret; \
                    i = n-1; \
                    memmove(data, THCharStorage_data(mfself->storage)+mfself->position, nByteRead),
-                   nByteWritten = (n < mfself->storage->size-mfself->position ? n : -1); \
+                   nByteWritten = (n < mfself->storage->numel()-mfself->position ? n : -1); \
                    i = n-1; \
                    if(nByteWritten > -1)
                      memmove(THCharStorage_data(mfself->storage)+mfself->position, data, nByteWritten),
@@ -330,29 +330,29 @@ READ_WRITE_METHODS(int8_t, Char,
 
 READ_WRITE_METHODS(int16_t, Short,
                    int nByteRead_; int ret = sscanf((char*) THCharStorage_data(mfself->storage)+mfself->position, "%hd%n", &data[i], &nByteRead_); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
-                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->size-mfself->position, "%hd", data[i]),
+                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%hd", data[i]),
                    1)
 
 READ_WRITE_METHODS(int32_t, Int,
                    int nByteRead_; int ret = sscanf((char*) THCharStorage_data(mfself->storage)+mfself->position, "%d%n", &data[i], &nByteRead_); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
-                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->size-mfself->position, "%d", data[i]),
+                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%d", data[i]),
                    1)
 
 READ_WRITE_METHODS(float, Float,
                    int nByteRead_; int ret = sscanf((char*) THCharStorage_data(mfself->storage)+mfself->position, "%g%n", &data[i], &nByteRead_); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
-                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->size-mfself->position, "%.9g", data[i]),
+                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%.9g", data[i]),
                    1)
 
-READ_WRITE_METHODS(THHalf, Half,
+READ_WRITE_METHODS(at::Half, Half,
                    int nByteRead_; float buf; \
                    int ret = sscanf((char*) THCharStorage_data(mfself->storage)+mfself->position, "%g%n", &buf, &nByteRead_); \
-                   data[i] = TH_float2half(buf); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
-                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->size-mfself->position, "%.9g", TH_half2float(data[i])),
+                   data[i] = static_cast<at::Half>(buf); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
+                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%.9g", static_cast<float>(data[i])),
                    1)
 
 READ_WRITE_METHODS(double, Double,
                    int nByteRead_; int ret = sscanf((char*) THCharStorage_data(mfself->storage)+mfself->position, "%lg%n", &data[i], &nByteRead_); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
-                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->size-mfself->position, "%.17g", data[i]),
+                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%.17g", data[i]),
                    1)
 
 static ssize_t THMemoryFile_readLong(THFile *self, int64_t *data, ssize_t n)
@@ -491,13 +491,13 @@ static ssize_t THMemoryFile_writeLong(THFile *self, int64_t *data, ssize_t n)
       ssize_t nByteWritten;
       while (1)
       {
-        nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->size-mfself->position, "%" PRId64, data[i]);
-        if( (nByteWritten > -1) && (nByteWritten < mfself->storage->size-mfself->position) )
+        nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%" PRId64, data[i]);
+        if( (nByteWritten > -1) && (nByteWritten < mfself->storage->numel()-mfself->position) )
         {
           mfself->position += nByteWritten;
           break;
         }
-        THMemoryFile_grow(mfself, mfself->storage->size + (mfself->storage->size/2) + 2);
+        THMemoryFile_grow(mfself, mfself->storage->numel() + (mfself->storage->numel()/2) + 2);
       }
       if(mfself->file.isAutoSpacing)
       {
@@ -654,7 +654,7 @@ THFile *THMemoryFile_newWithStorage(THCharStorage *storage, const char *mode)
 
   if(storage)
   {
-    THArgCheck(THCharStorage_data(storage)[storage->size-1] == '\0', 1, "provided CharStorage must be terminated by 0");
+    THArgCheck(THCharStorage_data(storage)[storage->numel()-1] == '\0', 1, "provided CharStorage must be terminated by 0");
     THArgCheck(THMemoryFile_mode(mode, &isReadable, &isWritable), 2, "file mode should be 'r','w' or 'rw'");
     THCharStorage_retain(storage);
   }
@@ -668,7 +668,7 @@ THFile *THMemoryFile_newWithStorage(THCharStorage *storage, const char *mode)
   mfself = static_cast<THMemoryFile*>(THAlloc(sizeof(THMemoryFile)));
 
   mfself->storage = storage;
-  mfself->size = (storage ? storage->size-1 : 0);
+  mfself->size = (storage ? storage->numel()-1 : 0);
   mfself->position = 0;
   mfself->longSize = 0;
 

@@ -5,8 +5,40 @@ namespace caffe2 {
 template <>
 void LoadOp<CPUContext>::SetCurrentDevice(BlobProto* proto) {
   if (proto->has_tensor()) {
-    proto->mutable_tensor()->mutable_device_detail()->set_device_type(CPU);
+    proto->mutable_tensor()->clear_device_detail();
+    proto->mutable_tensor()->mutable_device_detail()->set_device_type(
+        PROTO_CPU);
   }
+}
+
+template <int VALUE_TYPE = TensorProto_DataType_FLOAT>
+std::vector<TensorShape> LoadTensorInference(
+    const OperatorDef& def,
+    const vector<TensorShape>& /* unused */) {
+  ArgumentHelper helper(def);
+  auto shape = helper.GetRepeatedArgument<int64_t>("shape");
+  vector<TensorShape> out;
+  // Currently load op supports only shape.
+  // TODO: We have to extend it to support shapes vector.
+  // Since it support just one shape, we return
+  // the right shape information only when there is just one blob loaded.
+  // Otherwise, we return unknown TensorShapes.
+  if (def.output_size() == 1 && shape.size() > 0) {
+    TensorShape ts;
+    ts.set_data_type(static_cast<TensorProto_DataType>(
+        helper.GetSingleArgument<int>("dtype", VALUE_TYPE)));
+    for (auto d : shape) {
+      ts.add_dims(d);
+    }
+    out.push_back(ts);
+  } else {
+    for (int i = 0; i < def.output_size(); i++) {
+      TensorShape ts;
+      ts.set_unknown_shape(true);
+      out.push_back(ts);
+    }
+  }
+  return out;
 }
 
 REGISTER_CPU_OPERATOR(DBExists, DBExistsOp<CPUContext>);
@@ -68,6 +100,7 @@ print("exists:", workspace.FetchBlob("exists"))
 OPERATOR_SCHEMA(Load)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
+    .TensorInferenceFunction(LoadTensorInference<>)
     .SetDoc(R"DOC(
 The Load operator loads a set of serialized blobs from a db or multiple dbs. It
 takes $[0, \infty)$ number of inputs and $[0, \infty)$ number of outputs, using
@@ -222,6 +255,9 @@ workspace.RunOperatorOnce(op)
     "of the workspace.")
     .Arg("db_type", "*(type: string)* Type of db to save (options: \"lmdb\", "
     "\"leveldb\", \"minidb\").")
+    .Arg("chunk_size", "*(type: string; default: kDefaultChunkSize)* The chunk "
+    "size to split tensor data into. If not set, caffe2_tensor_chunk_size will "
+    "be used")
     .Input(0, "X", "*(type: Tensor)* Input tensor(s).");
 
 OPERATOR_SCHEMA(Checkpoint)

@@ -1,7 +1,7 @@
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
-#ifdef _OPENMP
-#include <omp.h>
+#ifdef __cplusplus
+#include <c10/core/CPUAllocator.h>
 #endif
 
 #ifndef TH_HAVE_THREAD
@@ -20,18 +20,10 @@
 #include <malloc/malloc.h>
 #endif
 
-#ifdef TH_BLAS_MKL
-// this is the C prototype, while mkl_set_num_threads is the fortran prototype
-TH_EXTERNC void MKL_Set_Num_Threads(int);
-// this is the C prototype, while mkl_get_max_threads is the fortran prototype
-TH_EXTERNC int  MKL_Get_Max_Threads(void);
-#endif
-
 /* Torch Error Handling */
 static void defaultErrorHandlerFunction(const char *msg, void *data)
 {
-  printf("$ Error: %s\n", msg);
-  exit(-1);
+  throw std::runtime_error(msg);
 }
 
 static THErrorHandlerFunction defaultErrorHandler = defaultErrorHandlerFunction;
@@ -88,11 +80,9 @@ void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data)
 /* Torch Arg Checking Handling */
 static void defaultArgErrorHandlerFunction(int argNumber, const char *msg, void *data)
 {
-  if(msg)
-    printf("$ Invalid argument %d: %s\n", argNumber, msg);
-  else
-    printf("$ Invalid argument %d\n", argNumber);
-  exit(-1);
+  std::stringstream new_error;
+  new_error << "invalid argument " << argNumber << ": " << msg;
+  throw std::runtime_error(new_error.str());
 }
 
 static THArgErrorHandlerFunction defaultArgErrorHandler = defaultArgErrorHandlerFunction;
@@ -158,52 +148,12 @@ void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
   torchGCData = data;
 }
 
-static void* THAllocInternal(ptrdiff_t size)
-{
-  void *ptr;
-
-  if (size > 5120)
-  {
-#if (defined(__unix) || defined(__APPLE__)) && (!defined(DISABLE_POSIX_MEMALIGN))
-    if (posix_memalign(&ptr, 64, size) != 0)
-      ptr = NULL;
-/*
-#elif defined(_WIN32)
-    ptr = _aligned_malloc(size, 64);
-*/
-#else
-    ptr = malloc(size);
-#endif
-  }
-  else
-  {
-    ptr = malloc(size);
-  }
-
-  return ptr;
-}
-
 void* THAlloc(ptrdiff_t size)
 {
-  void *ptr;
-
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
 
-  if(size == 0)
-    return NULL;
-
-  ptr = THAllocInternal(size);
-
-  if(!ptr && torchGCFunction) {
-    torchGCFunction(torchGCData);
-    ptr = THAllocInternal(size);
-  }
-
-  if(!ptr)
-    THError("$ Torch: not enough memory: you tried to allocate %dGB. Buy new RAM!", size/1073741824);
-
-  return ptr;
+  return c10::alloc_cpu(size);
 }
 
 void* THRealloc(void *ptr, ptrdiff_t size)
@@ -235,75 +185,10 @@ void* THRealloc(void *ptr, ptrdiff_t size)
 
 void THFree(void *ptr)
 {
-  free(ptr);
+  c10::free_cpu(ptr);
 }
 
-double THLog10(const double x)
-{
-  return log10(x);
-}
-
-double THLog1p(const double x)
-{
-#if (defined(_MSC_VER) || defined(__MINGW32__))
-  volatile double y = 1 + x;
-  return log(y) - ((y-1)-x)/y ;  /* cancels errors with IEEE arithmetic */
-#else
-  return log1p(x);
-#endif
-}
-
-double THLog2(const double x)
-{
-  return log2(x);
-}
-
-double THExpm1(const double x)
-{
-  return expm1(x);
-}
-
-void THSetNumThreads(int num_threads)
-{
-#ifdef _OPENMP
-  omp_set_num_threads(num_threads);
-#endif
-#ifdef TH_BLAS_MKL
-  MKL_Set_Num_Threads(num_threads);
-#endif
-
-}
-
-int THGetNumThreads(void)
-{
-#ifdef _OPENMP
-  return omp_get_max_threads();
-#else
-  return 1;
-#endif
-}
-
-int THGetNumCores(void)
-{
-#ifdef _OPENMP
-  return omp_get_num_procs();
-#else
-  return 1;
-#endif
-}
-
-TH_API void THInferNumThreads(void)
-{
-#if defined(_OPENMP) && defined(TH_BLAS_MKL)
-  // If we are using MKL an OpenMP make sure the number of threads match.
-  // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
-  // size of the OpenMP thread pool, resulting in worse performance (and memory
-  // leaks in GCC 5.4)
-  omp_set_num_threads(MKL_Get_Max_Threads());
-#endif
-}
-
-TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
+THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;
   char *str = buf.str;

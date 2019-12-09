@@ -1,10 +1,13 @@
-#include "THCUNN.h"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCApply.cuh>
-#include "common.h"
+#include <THCUNN/common.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <curand.h>
 #include <curand_kernel.h>
+#include <curand_philox4x32_x.h>
+#include <utility>
 
 // copied from cutorch/lib/THC/THCTensorRandom.cu
 #define MAX_NUM_BLOCKS 64
@@ -12,34 +15,38 @@
 #define NUM_BLOCKS(n) min((int)THCCeilDiv(n, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
 template<typename T>
-inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
-
-#ifdef CUDA_HALF_TENSOR
-template <>
-inline half __device__ curand_uniform_type<half>(curandStateMtgp32 *state) {
-  return ScalarConvert<float, half>::to(curand_uniform(state));
-}
-#endif
+inline T __device__ curand_uniform_type(curandStatePhilox4_32_10_t *state);
 
 template <>
-inline float __device__ curand_uniform_type<float>(curandStateMtgp32 *state) {
-  return curand_uniform(state);
+inline THHalf __device__ curand_uniform_type<THHalf>(curandStatePhilox4_32_10_t *state) {
+  auto rand = curand_uniform4(state);
+  return ScalarConvert<float, THHalf>::to(rand.x);
 }
 
 template <>
-inline double __device__ curand_uniform_type<double>(curandStateMtgp32 *state) {
-  return curand_uniform_double(state);
+inline float __device__ curand_uniform_type<float>(curandStatePhilox4_32_10_t *state) {
+  auto rand = curand_uniform4(state);
+  return rand.x;
+}
+
+template <>
+inline double __device__ curand_uniform_type<double>(curandStatePhilox4_32_10_t *state) {
+  auto rand = curand_uniform2_double(state);
+  return rand.x;
 }
 
 template <typename T>
-__global__ void rreluUpdateOutputTrain(int n, curandStateMtgp32 *state,
+__global__ void rreluUpdateOutputTrain(int n, std::pair<uint64_t, uint64_t> seeds,
   T *input, T* noise, T *output, double a, double b)
 {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  curandStatePhilox4_32_10_t state;
+  curand_init(seeds.first, idx, seeds.second, &state);
   CUDA_KERNEL_LOOP(i, n)
   {
     if (input[i] <= 0)
     {
-      T r = curand_uniform_type<T>(&state[blockIdx.x]);
+      T r = curand_uniform_type<T>(&state);
       r = ScalarConvert<double, T>::to(r * (b-a) + a);
       output[i] = input[i] * r;
       noise[i] = r;
@@ -120,5 +127,5 @@ struct RReLUupdateGradInputEvalIP_functor
   }
 };
 
-#include "generic/RReLU.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/RReLU.cu>
+#include <THC/THCGenerateFloatTypes.h>

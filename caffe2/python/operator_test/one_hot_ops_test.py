@@ -7,6 +7,7 @@ from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
@@ -25,8 +26,8 @@ def _one_hots():
                 max_size=sum(x[1]))))
 
 
-class TestOneHotOps(hu.HypothesisTestCase):
-    @given(
+class TestOneHotOps(serial.SerializedTestCase):
+    @serial.given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.int32,
             elements=st.integers(min_value=0, max_value=10)),
@@ -56,7 +57,7 @@ class TestOneHotOps(hu.HypothesisTestCase):
         op = core.CreateOperator('BatchOneHot', ["X", "LENS", "VALS"], ["Y"])
         self.assertReferenceChecks(gc, op, [x, lens, vals], ref)
 
-    @given(
+    @serial.given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.float32,
             elements=st.integers(min_value=-5, max_value=5)),
@@ -108,7 +109,7 @@ class TestOneHotOps(hu.HypothesisTestCase):
                                  ["X", "LENS", "BOUNDARIES"], ["Y"])
         self.assertReferenceChecks(gc, op, [x, lens, boundaries], ref)
 
-    @given(
+    @serial.given(
         hot_indices=hu.tensor(
             min_dim=1, max_dim=1, dtype=np.int64,
             elements=st.integers(min_value=0, max_value=42)),
@@ -134,7 +135,7 @@ class TestOneHotOps(hu.HypothesisTestCase):
             one_hot_ref,
             input_device_options={'size': core.DeviceOption(caffe2_pb2.CPU)})
 
-    @given(hot_indices=_one_hots())
+    @serial.given(hot_indices=_one_hots())
     def test_segment_one_hot(self, hot_indices):
         index_size, lengths, indices = hot_indices
 

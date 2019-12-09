@@ -1,11 +1,9 @@
 #include <gtest/gtest.h>
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/net.h"
-#include "caffe2/core/net_dag.h"
+#include "caffe2/core/net_async_base.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
-
-CAFFE2_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -34,11 +32,11 @@ class NetTestDummyOp final : public OperatorBase {
 
   // Simulate CUDA operator behavior
   bool HasAsyncPart() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
   bool SupportsAsyncScheduling() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
  protected:
@@ -79,10 +77,6 @@ void checkChainingAndRun(
   CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
-
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
@@ -124,7 +118,7 @@ TEST(NetTest, DISABLED_ChainingForDifferentDevices) {
           type: "NetTestDummy"
           device_option {
             device_type: 1
-            cuda_gpu_id: 1
+            device_id: 1
           }
         }
 )DOC";

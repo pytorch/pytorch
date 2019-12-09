@@ -1,12 +1,12 @@
-#include "Size.h"
+#include <torch/csrc/Size.h>
 
 #include <string>
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/python_tuples.h"
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_tuples.h>
 
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/jit/tracer.h"
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/jit/tracer.h>
 
 struct THPSize {
   PyTupleObject tuple;
@@ -14,7 +14,7 @@ struct THPSize {
 
 PyObject * THPSize_New(const torch::autograd::Variable& var)
 {
-  if (!torch::jit::tracer::isTracing(var)) {
+  if (!torch::jit::tracer::isTracing()) {
     auto sizes = var.sizes();
     return THPSize_NewFromSizes(var.dim(), sizes.data());
   }
@@ -38,22 +38,23 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
   return self.release();
 }
 
-static bool isTracedVar(PyObject *item) {
+static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
   auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
-  return torch::jit::tracer::isTracing(var);
+  return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
+  HANDLE_TH_ERRORS
   THPObjectPtr self(PyTuple_Type.tp_new(type, args, kwargs));
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
-      if (isTracedVar(item)) {
+      if (THPUtils_checkLong(item)) {
         continue;
       }
-      if (THPUtils_checkLong(item)) {
+      if (torch::jit::tracer::isTracing() && isTracedZeroDimVar(item)) {
         continue;
       }
       // item.__index__() works with 0-dim tensors and tensors with one element
@@ -72,6 +73,7 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
     }
   }
   return self.release();
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPSize_repr(THPSize *self)
@@ -95,9 +97,9 @@ template<typename FnType, FnType fn, typename ...Args>
 static PyObject* wrap_tuple_fn(Args ... args)
 {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));
-  if (!result) return NULL;
+  if (!result) return nullptr;
   if (PyTuple_Check(result.get())) {
-    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), NULL);
+    return PyObject_CallFunctionObjArgs((PyObject*)&THPSizeType, result.get(), nullptr);
   }
   return result.release();
 }
@@ -115,65 +117,108 @@ namespace {
 
 
 static PySequenceMethods THPSize_as_sequence = {
-  PyTuple_Type.tp_as_sequence->sq_length,
+  nullptr,                                          /* sq_length */
   wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
   wrap_tuple_fn<decltype(&sq_repeat), &sq_repeat>,
-  PyTuple_Type.tp_as_sequence->sq_item,
+  nullptr,                                          /* sq_item */
 #if PY_MAJOR_VERSION == 2
   wrap_tuple_fn<decltype(&sq_slice), &sq_slice>,
 #else
-  0,                                          /* sq_slice */
+  nullptr,                                          /* sq_slice */
 #endif
-  0,                                          /* sq_ass_item */
-  0,                                          /* sq_ass_slice */
-  PyTuple_Type.tp_as_sequence->sq_contains
+  nullptr,                                          /* sq_ass_item */
+  nullptr,                                          /* sq_ass_slice */
+  nullptr                                           /* sq_contains */
 };
 
 static PyMappingMethods THPSize_as_mapping = {
-    PyTuple_Type.tp_as_mapping->mp_length,
+    nullptr,                                        /* mp_length */
     wrap_tuple_fn<decltype(&mp_subscript), &mp_subscript>,
-    0
+    nullptr
+};
+
+static PyObject *THPSize_numel(THPSize *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  int64_t numel = 1;
+  for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
+    numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
+  }
+  return THPUtils_packInt64(numel);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *THPSize_reduce(THPSize *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  auto ret = THPObjectPtr{PyTuple_New(2)};
+  if (!ret) throw python_error();
+
+  auto obj = (PyObject*)(&THPSizeType);
+  Py_INCREF(&THPSizeType);
+  PyTuple_SET_ITEM(ret.get(), 0, obj);
+
+  THPObjectPtr t(PyTuple_New(PyTuple_Size((PyObject*)self)));
+  if (!t) throw python_error();
+  for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
+    auto d = PyTuple_GET_ITEM(self, i);
+    Py_INCREF(d);
+    PyTuple_SET_ITEM(t.get(), i, d);
+  }
+
+  THPObjectPtr dims(Py_BuildValue("(O)", t.get()));
+  if (!dims) throw python_error();
+  PyTuple_SET_ITEM(ret.get(), 1, dims.release());
+
+  return ret.release();
+  END_HANDLE_TH_ERRORS
+}
+
+static PyMethodDef THPSize_methods[] = {
+  {"numel",       (PyCFunction)THPSize_numel,       METH_NOARGS,  nullptr},
+  {"__reduce__",  (PyCFunction)THPSize_reduce,      METH_NOARGS,  nullptr},
+  {nullptr}
 };
 
 
 PyTypeObject THPSizeType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.Size",                          /* tp_name */
   sizeof(THPSize),                       /* tp_basicsize */
   0,                                     /* tp_itemsize */
-  0,                                     /* tp_dealloc */
-  0,                                     /* tp_print */
-  0,                                     /* tp_getattr */
-  0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
+  nullptr,                               /* tp_dealloc */
+  0,                                     /* tp_vectorcall_offset */
+  nullptr,                               /* tp_getattr */
+  nullptr,                               /* tp_setattr */
+  nullptr,                               /* tp_reserved */
   (reprfunc)THPSize_repr,                /* tp_repr */
-  0,                                     /* tp_as_number */
+  nullptr,                               /* tp_as_number */
   &THPSize_as_sequence,                  /* tp_as_sequence */
   &THPSize_as_mapping,                   /* tp_as_mapping */
-  0,                                     /* tp_hash  */
-  0,                                     /* tp_call */
-  0,                                     /* tp_str */
-  0,                                     /* tp_getattro */
-  0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
+  nullptr,                               /* tp_hash  */
+  nullptr,                               /* tp_call */
+  nullptr,                               /* tp_str */
+  nullptr,                               /* tp_getattro */
+  nullptr,                               /* tp_setattro */
+  nullptr,                               /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  NULL,                                  /* tp_doc */
-  0,                                     /* tp_traverse */
-  0,                                     /* tp_clear */
-  0,                                     /* tp_richcompare */
+  nullptr,                               /* tp_doc */
+  nullptr,                               /* tp_traverse */
+  nullptr,                               /* tp_clear */
+  nullptr,                               /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  0,                                     /* tp_iter */
-  0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
-  0,                                     /* tp_members */
-  0,                                     /* tp_getset */
+  nullptr,                               /* tp_iter */
+  nullptr,                               /* tp_iternext */
+  THPSize_methods,                       /* tp_methods */
+  nullptr,                               /* tp_members */
+  nullptr,                               /* tp_getset */
   &PyTuple_Type,                         /* tp_base */
-  0,                                     /* tp_dict */
-  0,                                     /* tp_descr_get */
-  0,                                     /* tp_descr_set */
+  nullptr,                               /* tp_dict */
+  nullptr,                               /* tp_descr_get */
+  nullptr,                               /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  0,                                     /* tp_init */
-  0,                                     /* tp_alloc */
+  nullptr,                               /* tp_init */
+  nullptr,                               /* tp_alloc */
   THPSize_pynew,                         /* tp_new */
 };
 

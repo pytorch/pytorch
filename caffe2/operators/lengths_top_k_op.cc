@@ -9,37 +9,34 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
   int N = Y.dim32(0);
   const T* X_data = X.template data<T>();
   const int* input_len = Y.template data<int>();
-  auto* output_topk_values = Output(TOPK_VALUES_OUT);
-  auto* output_topk_indices = Output(TOPK_INDICES_OUT);
 
-  output_topk_values->Resize(N * k_);
-  output_topk_indices->Resize(N * k_);
-  std::vector<int> output_dims = std::vector<int>({N, k_});
-  output_topk_values->Reshape(output_dims);
-  output_topk_indices->Reshape(output_dims);
+  auto output_dims = std::vector<int64_t>({N, k_});
+  auto* output_topk_values = Output(TOPK_VALUES_OUT, output_dims, at::dtype<T>());
+  auto* output_topk_indices =
+      Output(TOPK_INDICES_OUT, output_dims, at::dtype<int>());
   T* output_topk_values_data = output_topk_values->template mutable_data<T>();
   int* output_topk_indices_data =
       output_topk_indices->template mutable_data<int>();
 
-  auto cmp = [](std::pair<T, TIndex>& lhs, std::pair<T, TIndex>& rhs) {
+  auto cmp = [](std::pair<T, int64_t>& lhs, std::pair<T, int64_t>& rhs) {
     return lhs.first > rhs.first ||
         (lhs.first == rhs.first && lhs.second < rhs.second);
   };
 
   // Sort preserving indices
   int next_index = 0;
-  for (TIndex i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < N; ++i) {
     // Build a min-heap, the heap element is pair of (value, idx)
     // the top of the heap is the smallest value
     std::priority_queue<
-        std::pair<T, TIndex>,
-        std::vector<std::pair<T, TIndex>>,
+        std::pair<T, int64_t>,
+        std::vector<std::pair<T, int64_t>>,
         decltype(cmp)>
         p_queue(cmp);
 
     // Maintain the size of heap to be less or equal to k_, so the
     // heap will hold the k_ largest values
-    for (TIndex j = 0; j < input_len[i]; ++j) {
+    for (int64_t j = 0; j < input_len[i]; ++j) {
       const auto value = X_data[next_index++];
       if (p_queue.size() < k_ || value > p_queue.top().first) {
         p_queue.push(std::make_pair(value, j));
@@ -50,7 +47,7 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
     }
 
     int last_index = p_queue.size();
-    for (TIndex j = 0; j < k_; ++j) {
+    for (int64_t j = 0; j < k_; ++j) {
       if (p_queue.size() > 0) {
         auto& pqElem = p_queue.top();
         output_topk_values_data[i * k_ + last_index - j - 1] = pqElem.first;
@@ -69,15 +66,14 @@ bool LengthsTopKOp<T, Context>::RunOnDevice() {
 template <typename T, class Context>
 bool LengthsTopKGradientOp<T, Context>::RunOnDevice() {
   auto& input_len = Input(LENGTH_IN);
-  int N = input_len.size();
+  int N = input_len.numel();
   auto& input_indices = Input(INDICES_IN);
-  CAFFE_ENFORCE_GE(input_indices.ndim(), 2, "input dim must be >= 2");
+  CAFFE_ENFORCE_GE(input_indices.dim(), 2, "input dim must be >= 2");
   CAFFE_ENFORCE_EQ(
-      input_indices.size(), N * k_, "input_indices shape is not correct");
+      input_indices.numel(), N * k_, "input_indices shape is not correct");
   auto& input_topk = Input(DER_TOPK_IN);
   CAFFE_ENFORCE_EQ(
-      input_topk.size(), N * k_, "input_topk shape is not correct");
-  auto* X_out = Output(DER_X_OUT);
+      input_topk.numel(), N * k_, "input_topk shape is not correct");
 
   const int* input_len_data = input_len.template data<int>();
   const int* input_indices_data = input_indices.template data<int>();
@@ -87,9 +83,7 @@ bool LengthsTopKGradientOp<T, Context>::RunOnDevice() {
   for (int i = 0; i < N; i++) {
     num_indices += input_len_data[i];
   }
-  X_out->Resize(num_indices);
-  std::vector<int> output_dims = std::vector<int>({num_indices});
-  X_out->Reshape(output_dims);
+  auto* X_out = Output(DER_X_OUT, {num_indices}, at::dtype<T>());
   T* X_out_data = X_out->template mutable_data<T>();
   math::Set<T, Context>(num_indices, 0.0, X_out_data, &context_);
 

@@ -415,8 +415,8 @@ class TestShapeInference(test_util.TestCase):
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
-        net.Concat(["C", "D"], ["E"], order="NCHW")
-        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
         (shapes, types) = workspace.InferShapesAndTypes(
             [net],
             {
@@ -430,6 +430,36 @@ class TestShapeInference(test_util.TestCase):
         self.assertEqual(shapes['splits'], [2])
         self.assertEqual(shapes['E'], [10, 23, 9, 10])
         self.assertEqual(shapes['G'], [10, 23, 9, 2, 10])
+
+    def testConcatInt32(self):
+        net = core.Net("concat")
+
+        net.Concat(["A", "B"], ["C", "splits"], axis=1)
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
+        (shapes, types) = workspace.InferShapesAndTypes(
+            [net],
+            blob_dimensions={
+                'A': [10, 12, 9, 10],
+                'B': [10, 9, 9, 10],
+                'D': [10, 2, 9, 10],
+                'F': [10, 23, 9, 10]
+            },
+            blob_types={
+                'A': core.DataType.INT32,
+                'B': core.DataType.INT32,
+                'D': core.DataType.INT32,
+                'F': core.DataType.INT32,
+            }
+        )
+        self.assertEqual(shapes['C'], [10, 21, 9, 10])
+        self.assertEqual(shapes['splits'], [2])
+        self.assertEqual(shapes['E'], [10, 23, 9, 10])
+        self.assertEqual(shapes['G'], [10, 23, 9, 2, 10])
+        self.assertEqual(types['C'], core.DataType.INT32)
+        self.assertEqual(types['splits'], core.DataType.INT32)
+        self.assertEqual(types['E'], core.DataType.INT32)
+        self.assertEqual(types['G'], core.DataType.INT32)
 
     def testSqueeze(self):
         net = core.Net("sq")
@@ -488,11 +518,48 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testInt8Conversion(self):
-        model = model_helper.ModelHelper(name="int8_conversion_test")
+        model = model_helper.ModelHelper(name="fp32_int8_conversion_test")
         model.FloatToFused8BitRowwiseQuantized('x', 'x_8bit')
         model.Fused8BitRowwiseQuantizedToFloat('x_8bit', 'x_recovered')
         workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float32))
         self.InferTensorRunAndCompare(model)
+        x = workspace.FetchBlob('x')
+        x_recovered = workspace.FetchBlob('x_recovered')
+        # TODO: find a tighter bound
+        assert(np.allclose(x, x_recovered, atol=1e-2))
+
+    def testHalfInt8Conversion(self):
+        model = model_helper.ModelHelper(name="fp16_int8_conversion_test")
+        model.HalfFloatToFused8BitRowwiseQuantized('x', 'x_8bit')
+        model.Fused8BitRowwiseQuantizedToHalfFloat('x_8bit', 'x_recovered')
+        workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float16))
+        self.InferTensorRunAndCompare(model)
+        x = workspace.FetchBlob('x')
+        x_recovered = workspace.FetchBlob('x_recovered')
+        # TODO: find a tighter bound
+        assert(np.allclose(x, x_recovered, atol=1e-2))
+
+    def testLearningRateOp(self):
+        net = core.Net("lr_test")
+        iteration = net.ConstantFill(
+            [],
+            "iteration",
+            shape=[1],
+            value=0,
+            dtype=core.DataType.INT64,
+        )
+        lr = net.LearningRate(
+            [iteration],
+            net.NextScopedBlob("weight_decay"),
+            base_lr=0.5,
+            policy="constantWarmup",
+            multiplier=0.0,
+            num_iter=0,
+        )
+        (shapes, types) = workspace.InferShapesAndTypes(
+            [net],
+        )
+        self.assertEqual(shapes['weight_decay'], [1])
 
     def testShapeOp(self):
         model = model_helper.ModelHelper(name="shape_op_test")

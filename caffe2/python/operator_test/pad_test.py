@@ -2,16 +2,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
-import hypothesis.strategies as st
-import unittest
-import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
 from hypothesis import given
+import hypothesis.strategies as st
+import numpy as np
+import unittest
 
 
-class TestPad(hu.HypothesisTestCase):
-    @given(pad_t=st.integers(-5, 0),
+class TestPad(serial.SerializedTestCase):
+    @serial.given(pad_t=st.integers(-5, 0),
            pad_l=st.integers(-5, 0),
            pad_b=st.integers(-5, 0),
            pad_r=st.integers(-5, 0),

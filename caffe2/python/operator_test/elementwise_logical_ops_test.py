@@ -4,10 +4,10 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
-
 import numpy as np
 import unittest
 
@@ -21,7 +21,7 @@ def rowmux(select_vec, left, right):
     return mux(select, left, right)
 
 
-class TestWhere(hu.HypothesisTestCase):
+class TestWhere(serial.SerializedTestCase):
 
     def test_reference(self):
         self.assertTrue((
@@ -35,7 +35,7 @@ class TestWhere(hu.HypothesisTestCase):
                                         [[3], [4]])[0]
         ).all())
 
-    @given(N=st.integers(min_value=1, max_value=10),
+    @serial.given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs_cpu_only)
     def test_where(self, N, gc, dc, engine):
@@ -107,9 +107,9 @@ class TestRowWhere(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [C, X, Y], rowmux)
 
 
-class TestIsMemberOf(hu.HypothesisTestCase):
+class TestIsMemberOf(serial.SerializedTestCase):
 
-    @given(N=st.integers(min_value=1, max_value=10),
+    @serial.given(N=st.integers(min_value=1, max_value=10),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs_cpu_only)
     def test_is_member_of(self, N, gc, dc, engine):

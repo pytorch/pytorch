@@ -1,5 +1,9 @@
 #include "caffe2/operators/distance_op.h"
 #include "caffe2/utils/eigen_utils.h"
+#ifdef CAFFE2_USE_MKLDNN
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
 
 namespace caffe2 {
 
@@ -7,15 +11,15 @@ template<>
 bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
-  auto* distance = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  distance->Resize(N);
-  int D = N > 0 ? X.size() / N : 0;
-  float* distance_data = distance->mutable_data<float>();
+  int N = X.dim() > 0 ? X.dim32(0) : 1;
+  auto* distance = Output(0, {N}, at::dtype<float>());
+  int D = N > 0 ? X.numel() / N : 0;
+  float* distance_data = distance->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   for (int i = 0; i < N; ++i) {
@@ -35,20 +39,20 @@ template <>
 bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
-  auto* distance = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  distance->Resize(N);
-  int D = N > 0 ? X.size() / N : 0;
+  int N = X.dim() > 0 ? X.dim32(0) : 1;
+  auto* distance = Output(0, {N}, at::dtype<float>());
+  int D = N > 0 ? X.numel() / N : 0;
 
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
 
   for (int i = 0; i < N; ++i) {
-    (distance->mutable_data<float>())[i] =
+    (distance->template mutable_data<float>())[i] =
         (ConstEigenVectorMap<float>(X_data + i * D, D).array() -
          ConstEigenVectorMap<float>(Y_data + i * D, D).array())
             .abs()
@@ -62,22 +66,21 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dDistance = Input(2);
-  auto* dX = Output(0);
-  auto* dY = Output(1);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  int D = N > 0 ? X.size() / N : 0;
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+  int N = X.dim() > 0 ? X.dim32(0) : 1;
+  int D = N > 0 ? X.numel() / N : 0;
+  CAFFE_ENFORCE(X.dim() == Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
   }
-  CAFFE_ENFORCE(dDistance.ndim() == 1);
+  CAFFE_ENFORCE(dDistance.dim() == 1);
   CAFFE_ENFORCE(dDistance.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  auto* dY = Output(1, Y.sizes(), at::dtype<float>());
 
   for (int i = 0; i < N; ++i) {
     auto offset = i * D;
@@ -86,14 +89,18 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
           (X.data<float>())[offset + j] - (Y.data<float>())[offset + j];
       const float kEps = 1e-12f;
       if (temp < -kEps) {
-        dX->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[i];
-        dY->mutable_data<float>()[offset + j] = (dDistance.data<float>())[i];
+        dX->template mutable_data<float>()[offset + j] =
+            -(dDistance.data<float>())[i];
+        dY->template mutable_data<float>()[offset + j] =
+            (dDistance.data<float>())[i];
       } else if (temp > kEps) {
-        dX->mutable_data<float>()[offset + j] = (dDistance.data<float>())[i];
-        dY->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[i];
+        dX->template mutable_data<float>()[offset + j] =
+            (dDistance.data<float>())[i];
+        dY->template mutable_data<float>()[offset + j] =
+            -(dDistance.data<float>())[i];
       } else {
-        dX->mutable_data<float>()[offset + j] = 0;
-        dY->mutable_data<float>()[offset + j] = 0;
+        dX->template mutable_data<float>()[offset + j] = 0;
+        dY->template mutable_data<float>()[offset + j] = 0;
       }
     }
   }
@@ -104,15 +111,15 @@ template <>
 bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(COS_OUT);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  const int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  const int N = X.dim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
-  result->Resize(N);
-  float* result_data = result->mutable_data<float>();
+  auto* result = Output(COS_OUT, {N}, at::dtype<float>());
+  float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   float X2, Y2;
@@ -135,18 +142,17 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto& dCos = Input(DER_COS_IN);
-  auto* dX = Output(DER_X_OUT);
-  auto* dY = Output(DER_Y_OUT);
-  const int N = X.ndim() > 0 ? X.dim32(0) : 1;
+
+  const int N = X.dim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+  CAFFE_ENFORCE(X.dim() == Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
   }
-  CAFFE_ENFORCE(dCos.ndim() == 1);
+  CAFFE_ENFORCE(dCos.dim() == 1);
   CAFFE_ENFORCE(dCos.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<float>());
+  auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<float>());
 
   const auto* X_data = X.template data<float>();
   const auto* Y_data = Y.template data<float>();
@@ -173,7 +179,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
     math::Dot<float, CPUContext>(
         D, X_data + offset, Y_data + offset, &XY, &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, Y_data + offset, dX_data + offset, &context_);
     math::Axpy(
         D,
@@ -182,7 +188,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
         dX_data + offset,
         &context_);
 
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dCos_data[i] / XYN, X_data + offset, dY_data + offset, &context_);
     math::Axpy(
         D,
@@ -199,20 +205,20 @@ template <>
 bool DotProductOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(DOT_OUT);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i), "dimension at ", i);
   }
   int N, D;
-  if (X.size() > 0) {
-    N = X.ndim() > 0 ? X.dim32(0) : 1;
-    D = X.size() / N;
+  if (X.numel() > 0) {
+    N = X.dim() > 0 ? X.dim32(0) : 1;
+    D = X.numel() / N;
   } else {
     N = 0;
     D = 0;
   }
-  result->Resize(N);
+  auto* result = Output(DOT_OUT, {N}, at::dtype<float>());
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.template data<float>();
   const float* Y_data = Y.template data<float>();
@@ -229,7 +235,7 @@ vector<TensorShape> TensorInferenceForDotProduct(
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_GT(in.size(), 0);
 
-  vector<TIndex> dims(1);
+  vector<int64_t> dims(1);
   dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
   return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
 }
@@ -252,24 +258,23 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto& dDot = Input(DER_DOT_IN);
-  auto* dX = Output(DER_X_OUT);
-  auto* dY = Output(DER_Y_OUT);
+
   int N, D;
-  if (X.size() > 0) {
-    N = X.ndim() > 0 ? X.dim32(0) : 1;
-    D = X.size() / N;
+  if (X.numel() > 0) {
+    N = X.dim() > 0 ? X.dim32(0) : 1;
+    D = X.numel() / N;
   } else {
     N = 0;
     D = 0;
   }
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+  CAFFE_ENFORCE(X.dim() == Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
   }
-  CAFFE_ENFORCE(dDot.ndim() == 1);
+  CAFFE_ENFORCE(dDot.dim() == 1);
   CAFFE_ENFORCE(dDot.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<float>());
+  auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<float>());
 
   const auto* X_data = X.template data<float>();
   const auto* Y_data = Y.template data<float>();
@@ -278,9 +283,9 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto* dY_data = dY->template mutable_data<float>();
   for (int i = 0; i < N; ++i) { // TODO: multithreading
     auto offset = i * D;
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], X_data + offset, dY_data + offset, &context_);
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         D, dDot_data[i], Y_data + offset, dX_data + offset, &context_);
   }
   return true;
@@ -290,15 +295,15 @@ template <>
 bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(DOT_OUT);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
 
   int N, D, DX, DY, restD;
-  if (X.size() > 0) {
-    N = X.ndim() > 0 ? X.dim32(0) : 1;
-    DX = X.size() / N;
-    DY = Y.size() / N;
+  if (X.numel() > 0) {
+    N = X.dim() > 0 ? X.dim32(0) : 1;
+    DX = X.numel() / N;
+    DY = Y.numel() / N;
   } else {
     N = 0;
     DX = 0;
@@ -307,8 +312,8 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
 
   D = std::min(DX, DY);
   restD = std::max(DX, DY) - D;
-  result->Resize(N);
-  float* result_data = result->mutable_data<float>();
+  auto* result = Output(DOT_OUT, {N}, at::dtype<float>());
+  float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   for (int i = 0; i < N; ++i) { // TODO: multithreading
@@ -392,6 +397,11 @@ REGISTER_CPU_OPERATOR(L1Distance, L1DistanceOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     L1DistanceGradient,
     L1DistanceGradientOp<float, CPUContext>);
+#ifdef CAFFE2_USE_MKLDNN
+REGISTER_IDEEP_OPERATOR(
+    L1DistanceGradient,
+    IDEEPFallbackOp<L1DistanceGradientOp<float, CPUContext>>);
+#endif
 
 OPERATOR_SCHEMA(L1Distance)
     .NumInputs(2)
@@ -424,22 +434,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = 5*np.ones((1, 4))
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.ones((1, 4))
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```
@@ -577,11 +587,15 @@ Z:
 
 )DOC")
     .Input(0, "X", "*(type: Tensor`<float>`)* 1D or 2D input tensor.")
-    .Input(1, "Y", "*(type: Tensor`<float>`)* 1D or 2D input tensor (must have the same shape as X).")
+    .Input(
+        1,
+        "Y",
+        "*(type: Tensor`<float>`)* 1D or 2D input tensor (must have the same shape as X).")
     .Output(0, "Z", "*(type: Tensor`<float>`)* 1D output tensor.")
     .TensorInferenceFunction(TensorInferenceForDotProduct)
     .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct));
+        OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct))
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(DotProductGradient).NumInputs(3).NumOutputs(2);
 
@@ -632,22 +646,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = np.random.randn(3, 3)
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.random.randn(3, 3)
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```

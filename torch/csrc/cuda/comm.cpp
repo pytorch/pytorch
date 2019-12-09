@@ -7,79 +7,115 @@
 #include <torch/csrc/cuda/nccl.h>
 #endif
 
-#include <torch/csrc/utils/auto_stream.h>
-
-#include <THC/THC.h>
-
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Optional.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <cstddef>
 #include <vector>
 
 namespace torch { namespace cuda {
-
 using namespace at;
+using namespace torch::autograd;
 
 // Some operations can be performed more efficiently if we're handling tensors
 // of a single type only. Adding this logic directly in the loop makes it a bit
 // ugly, so here's a helper for it.
 struct unique_type_checker {
-  void show(const at::Type& t) {
+  void show(const at::DeprecatedTypeProperties& t) {
     if (!unique) return;
     if (!type) type = &t;
     unique = (type == &t);
   }
 
-  const at::Type *type = nullptr;
+  const at::DeprecatedTypeProperties *type = nullptr;
   bool unique = true;
 };
 
-std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
-  auto & type = tensor.type();
-  if (type.is_cuda() && tensor.get_device() != devices[0])
+std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
+  if (tensor.is_cuda() && tensor.get_device() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::DeviceGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
-      _device_guard.set_index(device);
-      tensors.push_back(type.tensor(tensor.sizes()));
+      tensors.push_back(
+          at::empty(tensor.sizes(),
+          tensor.options().device(at::Device(kCUDA, device))));
     }
     nccl::broadcast(tensors);
   } else {
 #else
   {
 #endif
-    auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
-    if (type.is_cuda()) {
+    if (tensor.is_cuda()) {
       tensors.push_back(tensor);
     }
-    IntList loop_devices = type.is_cuda() ? devices.slice(1) : devices;
+    IntArrayRef loop_devices = tensor.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
-      _device_guard.set_index(device);
-      tensors.push_back(gpu_type.copy(tensor, true));
+      tensors.push_back(tensor.to(
+          at::Device(kCUDA, device),
+          tensor.scalar_type(),
+          /*non_blocking=*/true,
+          /*copy=*/true));
     }
   }
   return tensors;
 }
 
-tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t buffer_size) {
+// NOTE [ Version Counter in comm.*_coalesced ]
+//
+// broadcast_coalesced
+// ~~~~~~~~~~~~~~~~~~~
+//
+// In broadcast_coalesced, multiple variables may be coalesced into a single
+// large one, broadcast to other devices, and the get split according to the
+// original shapes.
+//
+// When splitting, the view operations will make all Variables broadcast
+// together to share a single version counter, because they are all views of the
+// large Variable. However, that large Variable is immediately discarded and all
+// these Varaibles do not share storage at all.
+//
+// For example, when two buffers are broadcast together in `DataParallel` and
+// one of them is modified in-place during `forward` but the other is needed in
+// backward, autograd engine will complain.
+//
+// We thus re-wrap these Variables after broadcasting (i.e., effectively doing
+// what is equivalent to .data in Python), and give them individual version
+// counters.
+//
+// NB: Just calling detach() on the variables is not sufficient
+//
+// NB: For `device[0]` in broadcast_coalesced, the input Variables are always
+//     returned as-is, so **do not** re-wrap them.
+//
+// reduce_add_coalesced
+// ~~~~~~~~~~~~~~~~~~~~
+//
+// Similarly for reduce_add_coalesced, when the output are newly created
+// Variables.
+tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_t buffer_size) {
   if (!std::all_of(tensors.begin(), tensors.end(),
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
   }
+#ifdef USE_NCCL
+  buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
+#endif
 
   tensor_list2d outputs(devices.size());
-  outputs[0] = tensors;
+  outputs[0] = tensors.vec();
   for (auto & o : outputs)
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
+  at::cuda::CUDAGuard device_guard(devices[0]);
   for (auto & chunk : utils::take_tensors(tensors, buffer_size)) {
     auto & type = chunk.type();
     type_checker.show(type);
@@ -90,22 +126,27 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
       std::vector<at::Tensor> broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        at::DeviceGuard device_guard(devices[i]);
+        device_guard.set_index(devices[i]);
         auto & device_outputs = outputs[i];
         auto & inds = broadcast_indices[i];
         auto & vals = broadcast_values[i];
-        for (auto & t : utils::unflatten_sparse_tensors(inds, vals, chunk.tensors))
-          device_outputs.push_back(std::move(t));
+        for (auto & t : utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
+          // See NOTE [ Version Counter in comm.*_coalesced ]
+          Variable var = t;
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
+        }
       }
     } else {
-      at::DeviceGuard device_guard(devices[0]);
       std::vector<Tensor> results = broadcast(utils::flatten_dense_tensors(chunk.tensors),
                                               devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         device_guard.set_index(devices[i]);
         auto & device_outputs = outputs[i];
-        for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors))
-          device_outputs.push_back(std::move(t));
+        for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
+          // See NOTE [ Version Counter in comm.*_coalesced ]
+          Variable var = t;
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
+        }
       }
     }
   }
@@ -120,15 +161,15 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
 
 std::vector<at::Tensor> scatter(
     const at::Tensor& tensor,
-    at::IntList devices,
-    const at::optional<std::vector<int64_t>>& chunk_sizes,
+    at::IntArrayRef devices,
+    const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const at::optional<std::vector<THCStream*>>& streams) {
+    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
-        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
-    AT_CHECK(
+        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), int64_t{0});
+    TORCH_CHECK(
       chunk_size_sum == tensor.size(dim),
       "given chunk sizes don't sum up to the tensor's size ",
       "(sum(chunk_sizes) == ", chunk_size_sum,
@@ -137,7 +178,7 @@ std::vector<at::Tensor> scatter(
     int64_t chunk_start = 0;
     for (size_t chunk = 0; chunk < chunk_sizes->size(); ++chunk) {
       const int64_t chunk_size = (*chunk_sizes)[chunk];
-      AT_CHECK(chunk_size > 0, "Chunk size must be positive");
+      TORCH_CHECK(chunk_size > 0, "Chunk size must be positive");
       chunks.push_back(tensor.narrow(dim, chunk_start, chunk_size));
       chunk_start += chunk_size;
     }
@@ -145,18 +186,24 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  auto* thc_state = at::globalContext().lazyInitCUDA();
+  at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
-    const int32_t device_index = devices[chunk];
-    // We must set the current device before setting the current stream.
-    const at::DeviceGuard device_guard({at::kCUDA, device_index});
-    const AutoStream stream_guard(
-        streams ? (*streams)[chunk]
-                : THCState_getStreamOnDevice(thc_state, device_index));
-    // Copy the chunk from its current device to its destination device, which
-    // we set as the default device above, thus specified as -1.
+    const auto device_index = static_cast<int16_t>(devices[chunk]);
+    if (streams && (*streams)[chunk]) {
+      TORCH_CHECK(
+          (*streams)[chunk]->device_index() == device_index,
+          "Expected the device associated with the stream at index ",
+          chunk, " (was ", (*streams)[chunk]->device_index(), ") ",
+          "to match the device supplied at that index ",
+          "(expected ", device_index, ")");
+      cuda_guard.reset_stream(*(*streams)[chunk]);
+    }
     chunks[chunk] =
-        chunks[chunk].contiguous().to({at::kCUDA, -1}, /*non_blocking=*/true);
+        chunks[chunk].to(
+            {at::DeviceType::CUDA, device_index},
+            /*non_blocking=*/true,
+            /*copy=*/false,
+            /*memory_format=*/at::MemoryFormat::Preserve);
   }
   return chunks;
 }
@@ -164,32 +211,41 @@ std::vector<at::Tensor> scatter(
 at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
-    at::optional<int32_t> destination_index) {
-  AT_ASSERT(!tensors.empty());
+    c10::optional<int32_t> destination_index) {
+  TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   at::Tensor result;
   int64_t total_size = 0;
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
+  bool all_channels_last = true;
   for (const auto& tensor : tensors) {
-    AT_CHECK(
-        tensor.type().is_cuda(), "Gather expects all inputs to have CUDA type");
-    AT_CHECK(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    TORCH_CHECK(
+        tensor.is_cuda(), "Gather expects all inputs to have CUDA type");
+    AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
-      AT_CHECK(
+      TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Gather got an input of invalid size: got ",
-          tensor.sizes(), ", but expected ", at::IntList(expected_size));
+          tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
+    all_channels_last = all_channels_last &&
+        tensor.suggest_memory_format() == MemoryFormat::ChannelsLast;
   }
   expected_size[dim] = total_size;
-  at::Device device(at::kCPU);
+  at::Device device(at::DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
-    device = at::Device(at::kCUDA, destination_index ? *destination_index : -1);
+    device = at::Device(at::DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
-  result = at::empty(expected_size, first.options().device(device));
+
+  auto memory_format = MemoryFormat::Contiguous;
+  if (all_channels_last) {
+    memory_format = MemoryFormat::ChannelsLast;
+  }
+  result =
+      at::empty(expected_size, first.options().device(device), memory_format);
 
   int64_t chunk_start = 0;
   for (const auto& tensor : tensors) {

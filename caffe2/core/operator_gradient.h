@@ -1,9 +1,9 @@
 #ifndef CAFFE2_CORE_OPERATOR_GRADIENT_H_
 #define CAFFE2_CORE_OPERATOR_GRADIENT_H_
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -14,7 +14,7 @@ namespace caffe2 {
  * a sparse blob, its gradient name should be written into indice_ for
  * the sparse indices and value_ for the values.
  */
-struct GradientWrapper {
+struct CAFFE2_API GradientWrapper {
   string dense_;
   string indices_;
   string values_;
@@ -33,7 +33,7 @@ struct GradientWrapper {
 /**
  * A struct that holds the gradient operators and related gradient maps.
  */
-struct GradientOpsMeta {
+struct CAFFE2_API GradientOpsMeta {
   vector<OperatorDef> ops_;
   vector<GradientWrapper> g_input_;
 
@@ -44,7 +44,7 @@ struct GradientOpsMeta {
       : ops_(ops), g_input_(v) {}
 };
 
-class GradientMakerBase {
+class CAFFE2_API GradientMakerBase {
  public:
   GradientMakerBase(
       const OperatorDef& def,
@@ -256,7 +256,7 @@ class GradientMakerBase {
  * that the gradient computation should not flow through it at all, and throws
  * an error if it is called.
  */
-class NoGradient : public GradientMakerBase {
+class CAFFE2_API NoGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return vector<OperatorDef>();
@@ -272,8 +272,7 @@ class NoGradient : public GradientMakerBase {
 struct ThrowInTheTowelIfGradientIsCalled : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   GradientOpsMeta Get() override {
-    CAFFE_ENFORCE(
-        false, "One should not call gradient for operator ", def_.type(), ".");
+    CAFFE_THROW("One should not call gradient for operator ", def_.type(), ".");
   }
 };
 
@@ -287,24 +286,32 @@ struct ThrowInTheTowelIfGradientIsCalled : public GradientMakerBase {
 struct GradientNotImplementedYet : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   GradientOpsMeta Get() override {
-    CAFFE_ENFORCE(
-        false,
+    CAFFE_THROW(
         "Operator ",
         def_.type(),
         " should have a gradient but is not implemented yet.");
   }
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+
+#define REGISTER_GRADIENT(name, ...) /* No gradients. */
+#define REGISTER_GRADIENT_STR(str_name, ...) /* No gradients. */
+
+#else
+
 #define REGISTER_GRADIENT(name, ...) \
-  CAFFE_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
 #define REGISTER_GRADIENT_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
+
+#endif
 
 // NO_GRADIENT means that the operator does not need any gradient computation.
 #define NO_GRADIENT(name) REGISTER_GRADIENT(name, NoGradient)
@@ -321,7 +328,7 @@ CAFFE_DECLARE_REGISTRY(
 /**
  * @brief Gets the GradientOpsMeta for the given operator def.
  */
-GradientOpsMeta GetGradientForOp(
+CAFFE2_API GradientOpsMeta GetGradientForOp(
     const OperatorDef& def,
     const vector<GradientWrapper>& g_output);
 

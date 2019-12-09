@@ -1,6 +1,6 @@
-#include "THFile.h"
-#include "THStorage.hpp"
-#include "THFilePrivate.h"
+#include <TH/THFile.h>
+#include <TH/THStorageFunctions.hpp>
+#include <TH/THFilePrivate.h>
 
 #define IMPLEMENT_THFILE_RW(TYPEC, TYPE)                          \
   size_t THFile_read##TYPEC##Raw(THFile *self, TYPE *data, size_t n)  \
@@ -140,12 +140,12 @@ IMPLEMENT_THFILE_SCALAR(Half, THHalf)
 #define IMPLEMENT_THFILE_STORAGE(TYPEC, TYPE)                           \
   size_t THFile_read##TYPEC(THFile *self, TH##TYPEC##Storage *storage)    \
   {                                                                     \
-    return THFile_read##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->size); \
+    return THFile_read##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->numel()); \
   }                                                                     \
                                                                         \
   size_t THFile_write##TYPEC(THFile *self, TH##TYPEC##Storage *storage)   \
   {                                                                     \
-    return THFile_write##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->size); \
+    return THFile_write##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->numel()); \
   }
 
 IMPLEMENT_THFILE_STORAGE(Byte, uint8_t)

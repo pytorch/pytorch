@@ -1,50 +1,24 @@
-#include "batch_sparse_to_dense_op.h"
-
-#include "caffe2/core/context.h"
+#include "caffe2/operators/batch_sparse_to_dense_op.h"
 
 namespace caffe2 {
 
-template <typename T, class Context>
-bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
-  auto& lengths = Input(LENGTHS);
-  auto& indices = Input(INDICES);
-  auto& values = Input(VALUES);
-  auto* output = Output(0);
-  CAFFE_ENFORCE_EQ(indices.size(), values.size());
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-  CAFFE_ENFORCE_EQ(indices.ndim(), 1);
+template <>
+void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
+    const int64_t batch_size,
+    const int64_t indice_lengths,
+    const int64_t* lengths_data,
+    const int64_t* indices_data,
+    const float* values_data,
+    float* output_data,
+    CPUContext* /*context*/) {
+  int64_t lengths_sum = 0;
+  math::Sum<int64_t, CPUContext>(
+      batch_size, lengths_data, &lengths_sum, &context_);
+  CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
-  const TIndex* lengths_data = lengths.template data<TIndex>();
-  const TIndex* indices_data = indices.template data<TIndex>();
-  const T* values_data = values.template data<T>();
-  TIndex batch_size = lengths.size();
-  TIndex lengths_sum = 0;
-  math::Sum<TIndex, Context>(batch_size, lengths_data, &lengths_sum, &context_);
-  CAFFE_ENFORCE_EQ(lengths_sum, indices.size());
-
-  vector<TIndex> output_shape = {batch_size};
-  if (InputSize() == 4) {
-    auto& shaper = Input(3);
-    CAFFE_ENFORCE_EQ(shaper.ndim(), 2);
-    if (dense_last_dim_ == -1) {
-      dense_last_dim_ = shaper.dim(1);
-    } else {
-      CAFFE_ENFORCE(
-          dense_last_dim_ == shaper.dim(1),
-          "The last dim argument is not aligned with the shape input last dim");
-    }
-  } else {
-    CAFFE_ENFORCE(dense_last_dim_ >= 1, "The last dim of dense must be >= 1");
-  }
-  output_shape.push_back(dense_last_dim_);
-  output->Resize(output_shape);
-  T* output_data = output->template mutable_data<T>();
-  math::Set(
-      output->size(), static_cast<T>(default_value_), output_data, &context_);
-
-  TIndex k = 0;
-  for (TIndex i = 0; i < batch_size; ++i) {
-    for (TIndex j = 0; j < lengths_data[i]; ++j) {
+  int64_t k = 0;
+  for (int64_t i = 0; i < batch_size; ++i) {
+    for (int64_t j = 0; j < lengths_data[i]; ++j) {
       CAFFE_ENFORCE(
           indices_data[k] < dense_last_dim_,
           "An indice (",
@@ -56,49 +30,36 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
       k += 1;
     }
   }
-
-  return true;
 }
 
-template <typename T, class Context>
-bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
-  auto& lengths = Input(LENGTHS);
-  auto& indices = Input(INDICES);
-  auto& dense = Input(DENSE);
-  auto* output = Output(0);
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
-  CAFFE_ENFORCE_EQ(indices.ndim(), 1);
-  CAFFE_ENFORCE_EQ(dense.ndim(), 2);
-  const TIndex* lengths_data = lengths.template data<TIndex>();
-  const TIndex* indices_data = indices.template data<TIndex>();
-  const T* dense_data = dense.template data<T>();
+template <>
+void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
+    const int64_t batch_size,
+    const int64_t indice_lengths,
+    const int64_t* lengths_data,
+    const int64_t* indices_data,
+    const float* dense_data,
+    float* output_data,
+    CPUContext* /*context*/) {
+  int64_t lengths_sum = 0;
+  math::Sum<int64_t, CPUContext>(
+      batch_size, lengths_data, &lengths_sum, &context_);
+  CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
-  TIndex batch_size = lengths.size();
-  TIndex lengths_sum = 0;
-  math::Sum<TIndex, Context>(batch_size, lengths_data, &lengths_sum, &context_);
-  CAFFE_ENFORCE_EQ(lengths_sum, indices.size());
-
-  CAFFE_ENFORCE_EQ(batch_size, dense.dim(0));
-  dense_last_dim_ = dense.dim(1);
-  vector<TIndex> output_shape = indices.dims();
-  output->Resize(output_shape);
-  T* output_data = output->template mutable_data<T>();
-
-  TIndex k = 0;
-  for (TIndex i = 0; i < batch_size; ++i) {
-    for (TIndex j = 0; j < lengths_data[i]; ++j) {
+  int64_t k = 0;
+  for (int64_t i = 0; i < batch_size; ++i) {
+    for (int64_t j = 0; j < lengths_data[i]; ++j) {
       CAFFE_ENFORCE(
-          indices_data[k] < dense.dim(1),
+          indices_data[k] < dense_last_dim_,
           "An indice (",
           indices_data[k],
           ") is larger then last dim of dense (",
-          dense.dim(1),
+          dense_last_dim_,
           ").");
-      output_data[k] = dense_data[i * dense.dim(1) + indices_data[k]];
+      output_data[k] = dense_data[i * dense_last_dim_ + indices_data[k]];
       k += 1;
     }
   }
-  return true;
 }
 
 REGISTER_CPU_OPERATOR(
@@ -108,6 +69,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(BatchSparseToDense)
     .NumInputs(3, 4)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Convert sparse matrix representation into dense matrix.
 

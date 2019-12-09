@@ -9,19 +9,18 @@
 #include <unordered_map>
 #include <vector>
 
+#include "c10/core/thread_pool.h"
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/simple_queue.h"
-#include "caffe2/utils/thread_pool.h"
 
-CAFFE2_DECLARE_string(caffe2_override_executor);
+C10_DECLARE_string(caffe2_override_executor);
 
 namespace caffe2 {
 
@@ -35,7 +34,7 @@ class Workspace;
 
 // Net is a thin struct that owns all the operators together with the operator
 // contexts.
-class NetBase : public Observable<NetBase> {
+class CAFFE2_API NetBase : public Observable<NetBase> {
  public:
   NetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   virtual ~NetBase() noexcept {}
@@ -62,6 +61,13 @@ class NetBase : public Observable<NetBase> {
   }
 
   virtual bool RunAsync();
+
+  /* Benchmarks a network for one individual run so that we can feed new
+   * inputs on additional calls.
+   * This function returns the number of microseconds spent
+   * during the benchmark
+   */
+  virtual float TEST_Benchmark_One_Run();
 
   /**
    * Benchmarks a network.
@@ -124,25 +130,27 @@ class NetBase : public Observable<NetBase> {
   string name_;
   vector<const Event*> events_;
   std::shared_ptr<const NetDef> net_def_;
-  DISABLE_COPY_AND_ASSIGN(NetBase);
+  C10_DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
-class ExecutorHelper {
+class CAFFE2_API ExecutorHelper {
  public:
   ExecutorHelper() {}
-  virtual TaskThreadPool* GetPool(const DeviceOption& option) const;
+  virtual TaskThreadPoolBase* GetPool(const DeviceOption& option) const;
+  virtual std::vector<OperatorBase*> GetOperators() const;
+  virtual int GetNumWorkers() const;
   virtual ~ExecutorHelper() {}
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     NetRegistry,
     NetBase,
     const std::shared_ptr<const NetDef>&,
     Workspace*);
 #define REGISTER_NET_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
-  CAFFE_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
 
 /**
  * @brief Creates a network, accessing / creating blobs in the given workspace.
@@ -151,14 +159,14 @@ CAFFE_DECLARE_REGISTRY(
  * created net object to the workspace's net map, while this function returns
  * a standalone net object.
  */
-unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
-unique_ptr<NetBase> CreateNet(
+CAFFE2_API unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
+CAFFE2_API unique_ptr<NetBase> CreateNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws);
 
-void AddGlobalNetObserverCreator(NetObserverCreator creator);
+CAFFE2_API void AddGlobalNetObserverCreator(NetObserverCreator creator);
 
-void ClearGlobalNetObservers();
+CAFFE2_API void ClearGlobalNetObservers();
 
 } // namespace caffe2
 

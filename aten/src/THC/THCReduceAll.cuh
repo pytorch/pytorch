@@ -9,7 +9,8 @@
 // entire tensor to one value.
 //
 
-#include "THCReduceApplyUtils.cuh"
+#include <THC/THCReduceApplyUtils.cuh>
+#include <c10/macros/Macros.h>
 
 // Size per each reduction block
 #define THC_REDUCE_ALL_BLOCK_SIZE 1024L
@@ -25,6 +26,9 @@ template <typename T,
           typename ReduceOp,
           int ADims>
 __global__ void
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
+#endif
 kernelReduceAll(TensorInfo<T, IndexType> in,
                 IndexType totalElements,
                 AccT init,
@@ -69,6 +73,9 @@ template <typename T,
           typename ModifyOp,
           typename ReduceOp,
           int ADims>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
+#endif
 __global__ void
 kernelReduceAllPass1(TensorInfo<T, IndexType> in,
                      IndexType totalElements,
@@ -99,6 +106,9 @@ kernelReduceAllPass1(TensorInfo<T, IndexType> in,
 }
 
 template <typename T, typename ReduceOp>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
+#endif
 __global__ void
 kernelReduceAllPass2(int numPass1Blocks,
                      T init,
@@ -186,8 +196,7 @@ void callReduceAll(THCState* state,
   dim3 block;
 
   if (isTwoPassReductionSize(totalElements)) {
-    void* scratchSpace;
-    THCudaCheck(THCudaMalloc(state, &scratchSpace, THCState_getCurrentDeviceScratchSpaceSize(state)));
+    void* scratchSpace = THCudaMalloc(state, THCState_getCurrentDeviceScratchSpaceSize(state));
 
     getPass1ReduceBlockGrid<AccT>(state, totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -206,7 +215,7 @@ void callReduceAll(THCState* state,
         numPass1Blocks, init, reduceOp,
         (AccT*) scratchSpace, devOut);
 
-    THCudaCheck(THCudaFree(state, scratchSpace));
+    THCudaFree(state, scratchSpace);
   } else {
     getSinglePassReduceBlockGrid(totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -233,11 +242,11 @@ bool THC_reduceAll(THCState* state,
                    int outOnDevice) {
   ptrdiff_t inElements = THCTensor_nElement(state, in);
 
-  if (THCTensor__nDimension(state, in) > MAX_CUTORCH_DIMS) {
+  if (THCTensor_nDimensionLegacyAll(state, in) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor__nDimension(state, in) == 0) {
+  if (THCTensor_nDimensionLegacyAll(state, in) == 0) {
     // Zero-dim tensor; do nothing
     *out = init;
     return true;
@@ -248,7 +257,7 @@ bool THC_reduceAll(THCState* state,
   if (!outOnDevice) {
     // Use the stream-specific scratch space for the reduction kernel
     // to write out its value
-    THCudaCheck(THCudaMalloc(state, (void**)&devOut,
+    devOut = static_cast<AccT*>(THCudaMalloc(state,
         THCState_getCurrentDeviceScratchSpaceSize(state)));
     freeDevOut = true;
   }
@@ -296,7 +305,7 @@ bool THC_reduceAll(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (inInfo.dims == 1) {
       HANDLE_IN_CASE(uint64_t, 1);
@@ -320,7 +329,7 @@ bool THC_reduceAll(THCState* state,
   }
 
   if (freeDevOut) {
-    THCudaCheck(THCudaFree(state, devOut));
+    THCudaFree(state, devOut);
   }
 
   return true;

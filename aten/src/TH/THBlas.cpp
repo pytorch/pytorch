@@ -1,4 +1,7 @@
-#include "THBlas.h"
+#include <TH/THBlas.h>
 
-#include "generic/THBlas.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THBlas.cpp>
+#include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THBlas.cpp>
+#include <TH/THGenerateBFloat16Type.h>

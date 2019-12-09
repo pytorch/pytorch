@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/Tensor.h"
-#include "ATen/ATen.h"
-#include "ATen/dlpack.h"
+#include <ATen/Tensor.h>
+#include <ATen/ATen.h>
+#include <ATen/dlpack.h>
 
 // this convertor will:
 // 1) take a Tensor object and wrap it in the DLPack tensor
@@ -10,8 +10,10 @@
 
 namespace at {
 
-AT_API ScalarType toScalarType(const DLDataType& dtype);
-AT_API DLManagedTensor * toDLPack(const Tensor& src);
-AT_API Tensor fromDLPack(const DLManagedTensor* src);
+CAFFE2_API ScalarType toScalarType(const DLDataType& dtype);
+CAFFE2_API DLManagedTensor* toDLPack(const Tensor& src);
+CAFFE2_API Tensor fromDLPack(const DLManagedTensor* src);
+CAFFE2_API DLDataType getDLDataType(const Tensor& t);
+CAFFE2_API DLContext getDLContext(const Tensor& tensor, const int64_t& device_id);
 
 } //namespace at

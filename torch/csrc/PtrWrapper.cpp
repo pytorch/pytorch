@@ -1,8 +1,8 @@
-#include "torch/csrc/python_headers.h"
-#include "ATen/Utils.h"
+#include <torch/csrc/python_headers.h>
+#include <ATen/Utils.h>
 #include <functional>
 
-static PyObject* THPWrapperClass = NULL;
+static PyObject* THPWrapperClass = nullptr;
 
 struct THPWrapper {
   PyObject_HEAD
@@ -14,9 +14,9 @@ PyObject * THPWrapper_New(void *data, void (*destructor)(void*))
 {
   PyObject *args = PyTuple_New(0);
   if (!args) {
-    return NULL;
+    return nullptr;
   }
-  PyObject *result = PyObject_Call(THPWrapperClass, args, NULL);
+  PyObject *result = PyObject_Call(THPWrapperClass, args, nullptr);
   if (result) {
     THPWrapper* wrapper = (THPWrapper*) result;
     wrapper->data = data;
@@ -40,57 +40,56 @@ static PyObject * THPWrapper_pynew(PyTypeObject *type, PyObject *args, PyObject 
 {
   PyObject* self = type->tp_alloc(type, 0);
   THPWrapper* wrapper = (THPWrapper*) self;
-  wrapper->data = NULL;
-  wrapper->destructor = NULL;
+  wrapper->data = nullptr;
+  wrapper->destructor = nullptr;
   return self;
 }
 
-// UBSAN error: https://github.com/pytorch/pytorch/issues/9054
-static void THPWrapper_dealloc(THPWrapper* self) __ubsan_ignore_function__
+static void THPWrapper_dealloc(THPWrapper* self)
 {
   self->destructor(self->data);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 PyTypeObject THPWrapperType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._PtrWrapper",                /* tp_name */
-  sizeof(THPWrapper),                    /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPWrapper_dealloc,        /* tp_dealloc */
-  0,                                     /* tp_print */
-  0,                                     /* tp_getattr */
-  0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
-  0,                                     /* tp_repr */
-  0,                                     /* tp_as_number */
-  0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
-  0,                                     /* tp_call */
-  0,                                     /* tp_str */
-  0,                                     /* tp_getattro */
-  0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  NULL,                                  /* tp_doc */
-  0,                                     /* tp_traverse */
-  0,                                     /* tp_clear */
-  0,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
-  0,                                     /* tp_iter */
-  0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
-  0,                                     /* tp_members */
-  0,                                     /* tp_getset */
-  0,                                     /* tp_base */
-  0,                                     /* tp_dict */
-  0,                                     /* tp_descr_get */
-  0,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
-  0,                                     /* tp_init */
-  0,                                     /* tp_alloc */
-  THPWrapper_pynew,                      /* tp_new */
+  PyVarObject_HEAD_INIT(nullptr, 0)
+  "torch._C._PtrWrapper",                      /* tp_name */
+  sizeof(THPWrapper),                          /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  (destructor)THPWrapper_dealloc,              /* tp_dealloc */
+  0,                                           /* tp_vectorcall_offset */
+  nullptr,                                     /* tp_getattr */
+  nullptr,                                     /* tp_setattr */
+  nullptr,                                     /* tp_reserved */
+  nullptr,                                     /* tp_repr */
+  nullptr,                                     /* tp_as_number */
+  nullptr,                                     /* tp_as_sequence */
+  nullptr,                                     /* tp_as_mapping */
+  nullptr,                                     /* tp_hash  */
+  nullptr,                                     /* tp_call */
+  nullptr,                                     /* tp_str */
+  nullptr,                                     /* tp_getattro */
+  nullptr,                                     /* tp_setattro */
+  nullptr,                                     /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT,                          /* tp_flags */
+  nullptr,                                     /* tp_doc */
+  nullptr,                                     /* tp_traverse */
+  nullptr,                                     /* tp_clear */
+  nullptr,                                     /* tp_richcompare */
+  0,                                           /* tp_weaklistoffset */
+  nullptr,                                     /* tp_iter */
+  nullptr,                                     /* tp_iternext */
+  nullptr,                                     /* tp_methods */
+  nullptr,                                     /* tp_members */
+  nullptr,                                     /* tp_getset */
+  nullptr,                                     /* tp_base */
+  nullptr,                                     /* tp_dict */
+  nullptr,                                     /* tp_descr_get */
+  nullptr,                                     /* tp_descr_set */
+  0,                                           /* tp_dictoffset */
+  nullptr,                                     /* tp_init */
+  nullptr,                                     /* tp_alloc */
+  THPWrapper_pynew,                            /* tp_new */
 };
 
 bool THPWrapper_init(PyObject *module)

@@ -2,6 +2,21 @@ syntax = "proto2";
 
 package caffe2;
 
+// Original Caffe1 Datum copy: this is used in image input op to allow us to
+// load caffe1 serialized datum without having to regenerate the database.
+message CaffeDatum {
+  optional int32 channels = 1;
+  optional int32 height = 2;
+  optional int32 width = 3;
+  // the actual image data, in bytes
+  optional bytes data = 4;
+  optional int32 label = 5;
+  // Optionally, the datum could also hold float data.
+  repeated float float_data = 6;
+  // If true data contains an encoded image that need to be decoded
+  optional bool encoded = 7 [default = false];
+}
+
 enum LegacyPadding {
   NOTSET = 0;  // Do not use old-stype padding strategies.
 

@@ -1,48 +1,56 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core
-from hypothesis import given
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
+import numpy as np
+from caffe2.python import core
 
 
-class ChannelShuffleOpsTest(hu.HypothesisTestCase):
-    @given(
-        channels_per_group=st.integers(min_value=1, max_value=5),
-        groups=st.integers(min_value=1, max_value=5),
-        n=st.integers(min_value=1, max_value=2),
+class ChannelShuffleOpsTest(serial.SerializedTestCase):
+    def _channel_shuffle_nchw_ref(self, X, group):
+        dims = X.shape
+        N = dims[0]
+        C = dims[1]
+        G = group
+        K = int(C / G)
+        X = X.reshape(N, G, K, np.prod(dims[2:]))
+        Y = np.transpose(X, axes=(0, 2, 1, 3))
+        return [Y.reshape(dims)]
+
+    def _channel_shuffle_nhwc_ref(self, X, group):
+        dims = X.shape
+        N = dims[0]
+        C = dims[-1]
+        G = group
+        K = int(C / G)
+        X = X.reshape(N, np.prod(dims[1:-1]), G, K)
+        Y = np.transpose(X, axes=(0, 1, 3, 2))
+        return [Y.reshape(dims)]
+
+    @serial.given(
+        N=st.integers(0, 5),
+        G=st.integers(1, 5),
+        K=st.integers(1, 5),
+        H=st.integers(1, 5),
+        W=st.integers(1, 5),
         order=st.sampled_from(["NCHW", "NHWC"]),
-        **hu.gcs)
-    def test_channel_shuffle(self, channels_per_group, groups, n, order, gc, dc):
-        X = np.random.randn(
-            n, channels_per_group * groups, 5, 6).astype(np.float32)
-        if order == "NHWC":
-            # NCHW -> NHWC
-            X = X.transpose((0, 2, 3, 1))
+        **hu.gcs
+    )
+    def test_channel_shuffle(self, N, G, K, H, W, order, gc, dc):
+        C = G * K
+        if order == "NCHW":
+            X = np.random.randn(N, C, H, W).astype(np.float32)
+        else:
+            X = np.random.randn(N, H, W, C).astype(np.float32)
 
-        op = core.CreateOperator("ChannelShuffle", ["X"], ["Y"],
-                                 group=groups, kernel=1, order=order,
-                                 device_option=gc)
+        op = core.CreateOperator("ChannelShuffle", ["X"], ["Y"], group=G, order=order)
 
         def channel_shuffle_ref(X):
-            if order == "NHWC":
-                # NHWC -> NCHW
-                X = X.transpose((0, 3, 1, 2))
-            Y_r = X.reshape(X.shape[0],
-                            groups,
-                            X.shape[1] // groups,
-                            X.shape[2],
-                            X.shape[3])
-            Y_trns = Y_r.transpose((0, 2, 1, 3, 4))
-            Y_reshaped = Y_trns.reshape(X.shape)
-            if order == "NHWC":
-                # NCHW -> NHWC
-                Y_reshaped = Y_reshaped.transpose((0, 2, 3, 1))
-            return (Y_reshaped,)
+            if order == "NCHW":
+                return self._channel_shuffle_nchw_ref(X, G)
+            else:
+                return self._channel_shuffle_nhwc_ref(X, G)
 
         self.assertReferenceChecks(gc, op, [X], channel_shuffle_ref)
         self.assertGradientChecks(gc, op, [X], 0, [0])

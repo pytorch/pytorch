@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/serialization.h"
+#define TH_GENERIC_FILE "torch/csrc/generic/serialization.h"
 #else
 
 template <class io>

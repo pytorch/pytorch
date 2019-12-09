@@ -1,7 +1,11 @@
 #pragma once
 
-namespace torch { namespace jit {
+#include <torch/csrc/utils/pybind.h>
 
-void initJITBindings(PyObject *module);
+namespace torch {
+namespace jit {
 
-}}
+void initJITBindings(PyObject* module);
+
+}
+} // namespace torch

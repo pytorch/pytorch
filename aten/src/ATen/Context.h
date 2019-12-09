@@ -1,13 +1,17 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
-#include <ATen/CPUGeneral.h>
-#include "ATen/Generator.h"
-#include "ATen/Type.h"
-#include "ATen/Utils.h"
-#include "ATen/Error.h"
-#include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/CUDAStream.h"
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/Tensor.h>
+#include <ATen/Utils.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Generator.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/HIPHooksInterface.h>
+#include <c10/util/Exception.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/QEngine.h>
 
 #include <memory>
 #include <mutex>
@@ -15,122 +19,79 @@
 
 namespace at {
 
-enum class IsVariable {
-  NotVariable,
-  Variable,
-  NumOptions
-};
+class Tensor;
 
-class AT_API Context {
-public:
+class CAFFE2_API Context {
+ public:
   Context();
-  Type* getTypeRaw(Backend p, ScalarType s) {
-    return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
-  }
-  Type * getTypeOpt(Backend p, ScalarType s) {
-    initCUDAIfNeeded(p);
-    auto type = getTypeRaw(p, s);
 
-    if(!type) {
-      // there is only a single Undefined Type.
-      if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        return getTypeRaw(Backend::Undefined, ScalarType::Undefined);
-      }
+  Generator & defaultGenerator(Device device) {
+    DeviceType device_type = device.type();
+    initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
+    if (device_type == at::kCPU) {
+      return *at::detail::getDefaultCPUGenerator();
+    } else if (device_type == at::kCUDA) {
+      return *at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else {
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
-
-    return type;
   }
-  Type & getType(Backend p, ScalarType s) {
-    auto* type = getTypeOpt(p, s);
-    if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
-    return *type;
+  Device getDeviceFromPtr(void* data, DeviceType device_type) {
+    initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
+    if (device_type == at::kCPU) {
+      return DeviceType::CPU;
+    } else if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else {
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+    }
   }
-  Generator & defaultGenerator(Backend p) {
-    initCUDAIfNeeded(p);
-    auto & generator = generator_registry[static_cast<int>(p)];
-    if(!generator)
-      AT_ERROR(toString(p), " backend type not enabled.");
-    return *generator;
+  bool isPinnedPtr(void* data) {
+    return detail::getCUDAHooks().isPinnedPtr(data);
   }
+  bool hasOpenMP() const;
   bool hasMKL() const;
+  bool hasLAPACK() const;
+  bool hasMKLDNN() const;
+  bool hasMAGMA() const {
+    return detail::getCUDAHooks().hasMAGMA();
+  }
   bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
-  bool hasCuDNN() const {
-    return detail::getCUDAHooks().hasCuDNN();
+  bool hasHIP() const {
+    return detail::getHIPHooks().hasHIP();
   }
-  int64_t current_device() const {
-    return detail::getCUDAHooks().current_device();
+  bool hasXLA() const {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
-  // defined in header so that getType has ability to inline
-  // call_once check. getType is called fairly frequently
+  // defined in header so that getNonVariableType has ability to inline
+  // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(Backend::CUDA)] =
-        detail::getCUDAHooks().initCUDAGenerator(this);
-      detail::getCUDAHooks().registerCUDATypes(this);
     });
     return thc_state.get();
   }
-
+  THHState* lazyInitHIP() {
+    std::call_once(thh_init,[&] {
+      thh_state = detail::getHIPHooks().initHIP();
+    });
+    return thh_state.get();
+  }
+  const at::cuda::NVRTC& getNVRTC() {
+    return detail::getCUDAHooks().nvrtc();
+  }
   THCState* getTHCState() {
     // AT_ASSERT(thc_state);
     return thc_state.get();
   }
-
-  CUDAStream createCUDAStream() const {
-    return detail::CUDAStream_createAndRetainWithOptions(
-      CUDAStream::DEFAULT_FLAGS
-    , CUDAStream::DEFAULT_PRIORITY
-    );
+  THHState* getTHHState() {
+    return thh_state.get();
   }
 
-  CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority) const {
-    return detail::CUDAStream_createAndRetainWithOptions(flags, priority);
-  }
-
-  CUDAStream getDefaultCUDAStream() const {
-    return detail::CUDAStream_getDefaultStream();
-  }
-
-  CUDAStream getDefaultCUDAStreamOnDevice(int64_t device) const {
-    return detail::CUDAStream_getDefaultStreamOnDevice(device);
-  }
-
-  CUDAStream getCurrentCUDAStream() const {
-    return detail::CUDAStream_getAndRetainCurrentStream();
-  }
-
-  CUDAStream getCurrentCUDAStreamOnDevice(int64_t device) const {
-    return detail::CUDAStream_getAndRetainCurrentStreamOnDevice(device);
-  }
-
-  void setCurrentCUDAStream(CUDAStream stream) const {
-    return detail::CUDAStream_setStream(stream.internals());
-  }
-
-  void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) const {
-    return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
-  }
-
-#ifndef __HIP_PLATFORM_HCC__
-  cusparseHandle_t getCurrentCUDASparseHandle() const {
-    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
-  }
-#endif
-  cudaDeviceProp* getCurrentDeviceProperties() const {
-    return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
-  }
-  cudaDeviceProp* getDeviceProperties(int device) const {
-    return detail::getCUDAHooks().getDeviceProperties(thc_state.get(), device);
-  }
-  int getNumGPUs() const {
-    return detail::getCUDAHooks().getNumGPUs();
-  }
-  size_t freshTypeID() {
-    return next_id++;
-  }
   bool setFlushDenormal(bool on);
 
   // NB: This method is *purely* whether or not a user requested
@@ -139,70 +100,138 @@ public:
   // to test this instead
   bool userEnabledCuDNN() const;
   void setUserEnabledCuDNN(bool e);
+  bool userEnabledMkldnn() const;
+  void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(Backend::NumOptions)];
-private:
-  // NB: type_registry has nullptr for all CUDA backends until
-  // CUDA initialization has occurred
-  std::unique_ptr<Type> type_registry
-    [static_cast<int>(Backend::NumOptions)]
-    [static_cast<int>(ScalarType::NumOptions)];
-  void initCUDAIfNeeded(Backend p) {
-    if(p == Backend::CUDA)
+  at::QEngine qEngine() const;
+  void setQEngine(at::QEngine e);
+  const std::vector<at::QEngine>& supportedQEngines() const;
+
+ private:
+  void initCUDAIfNeeded(DeviceType p) {
+    if (p == DeviceType::CUDA) {
       lazyInitCUDA();
+    }
+  }
+  void initHIPIfNeeded(DeviceType p) {
+    if (p == DeviceType::HIP) {
+      lazyInitHIP();
+    }
   }
   std::once_flag thc_init;
+  std::once_flag thh_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
-  std::atomic<size_t> next_id;
+  bool enabled_mkldnn = true;
+  c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
-  friend struct Type;
-  friend void register_cuda_types(Context * context);
+  std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };
 
-AT_API Context & globalContext();
+CAFFE2_API Context& globalContext();
 
 static inline void init() {
   globalContext();
-  if (const char *env_p = std::getenv("OMP_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
-  if (const char *env_p = std::getenv("MKL_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
 }
 
-static inline Type& getType(Backend p, ScalarType s) {
-  return globalContext().getType(p, s);
+CAFFE2_API Allocator* getCPUAllocator();
+
+static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      p, s);
 }
 
-static inline Type& CPU(ScalarType s) {
-  return getType(Backend::CPU, s);
+static inline DeprecatedTypeProperties& CPU(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CPU, s);
 }
 
-static inline Type& CUDA(ScalarType s) {
-  return getType(Backend::CUDA, s);
+static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CUDA, s);
+}
+
+static inline DeprecatedTypeProperties& HIP(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::HIP, s);
 }
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
 
-static inline bool hasCuDNN() {
-  return globalContext().hasCuDNN();
+static inline bool hasHIP() {
+  return globalContext().hasHIP();
+}
+
+static inline bool hasXLA() {
+  return globalContext().hasXLA();
+}
+
+// Despite its name, this function returns the number of *CUDA* GPUs.
+static inline size_t getNumGPUs() {
+  // WARNING: DO NOT ADD LOGIC TO HANDLE OTHER DEVICE TYPES TO THIS
+  // FUNCTION.  If you are interested in interrogating the number of
+  // devices for a specific device type, add that function to the
+  // relevant library (e.g., similar to at::cuda::device_count())
+  if (hasCUDA() && hasHIP()) {
+    throw std::runtime_error(
+        "Enabling both CUDA and HIP in ATen is not supported, as HIP masquerades "
+        "to be CUDA (e.g., when you say CUDA, on a HIP build of ATen, this actually "
+        "means HIP.  Rebuild PyTorch with one or the other disabled.");
+  } else if (hasCUDA()) {
+    return detail::getCUDAHooks().getNumGPUs();
+  } else if (hasHIP()) {
+    return detail::getHIPHooks().getNumGPUs();
+  } else {
+    return 0;
+  }
+}
+
+static inline bool hasOpenMP() {
+  return globalContext().hasOpenMP();
 }
 
 static inline bool hasMKL() {
   return globalContext().hasMKL();
 }
 
-static inline int64_t current_device() {
-  return globalContext().current_device();
+static inline bool hasLAPACK() {
+  return globalContext().hasLAPACK();
+}
+
+static inline bool hasMAGMA() {
+  return globalContext().hasMAGMA();
+}
+
+static inline bool hasMKLDNN() {
+  return globalContext().hasMKLDNN();
+}
+
+static inline void manual_seed(uint64_t seed) {
+  auto& gen = globalContext().defaultGenerator(DeviceType::CPU);
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen.mutex_);
+    gen.set_current_seed(seed);
+  }
+  // NB: Sometimes we build with CUDA, but we don't have any GPUs
+  // available. In that case, we must not seed CUDA; it will fail!
+  int num_gpus = detail::getCUDAHooks().getNumGPUs();
+  if (hasCUDA() && num_gpus > 0) {
+    for (int i = 0; i < num_gpus; i++) {
+      auto& cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(cuda_gen.mutex_);
+        cuda_gen.set_current_seed(seed);
+      }
+    }
+  }
 }
 
 } // namespace at

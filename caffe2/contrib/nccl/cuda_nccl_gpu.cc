@@ -1,15 +1,13 @@
-#include "cuda_nccl_gpu.h"
+#include "caffe2/contrib/nccl/cuda_nccl_gpu.h"
 
 namespace caffe2 {
-
 namespace nccl {
-
 namespace {
 
 std::vector<int> getDevices(const NCCLExecution& ex) {
   std::vector<int> result;
   result.reserve(ex.elements.size());
-  for (const auto& el: ex.elements) {
+  for (const auto& el : ex.elements) {
     result.push_back(el.device);
   }
   return result;
@@ -26,7 +24,7 @@ class NCCLContext {
     streams_.resize(devices_.size());
     events_.resize(devices_.size());
     for (auto i = 0; i < devices_.size(); ++i) {
-      DeviceGuard g(devices_[i]);
+      CUDAGuard g(devices_[i]);
       // get stream priorities
       int lo_pri, hi_pri;
       CUDA_ENFORCE(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
@@ -35,34 +33,23 @@ class NCCLContext {
       CUDA_ENFORCE(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));
     }
-    DeviceGuard g(master_gpu_id_);
+    CUDAGuard g(master_gpu_id_);
     CUDA_ENFORCE(cudaEventCreateWithFlags(
         &master_event_, cudaEventDefault | cudaEventDisableTiming));
   }
 
   ~NCCLContext() {
     for (auto i = 0; i < devices_.size(); ++i) {
-      DeviceGuard g(devices_[i]);
+      CUDAGuard g(devices_[i]);
       CUDA_ENFORCE(cudaStreamDestroy(streams_[i]));
       CUDA_ENFORCE(cudaEventDestroy(events_[i]));
     }
-    DeviceGuard g(master_gpu_id_);
+    CUDAGuard g(master_gpu_id_);
     CUDA_ENFORCE(cudaEventDestroy(master_event_));
 
-    /*
-     * TODO(T30279827) Temporarily disable calling ncclCommDestroy
-     * Calling ncclCommDestroy while program exiting is undefined
-     * according to Nvidia, and will lead to segfault in NCCL 2
-     * (whether it is called before or after the CUDA runtime destructor).
-     * Temporarily disable it in destructor to avoid segfault.
-     * Following up with Nvidia for long term solution.
-     */
-
-    /*
     for (auto& comm : comms_) {
       ncclCommDestroy(comm);
     }
-    */
   }
 
   std::vector<int> devices_;
@@ -72,18 +59,16 @@ class NCCLContext {
   cudaEvent_t master_event_;
   std::vector<cudaEvent_t> events_;
 
-  DISABLE_COPY_AND_ASSIGN(NCCLContext);
+  C10_DISABLE_COPY_AND_ASSIGN(NCCLContext);
 };
 
-// We share the contexts across multiple operators, hence the
-// thread-local cache
+// We share the contexts across multiple operators, hence the cache.
 static std::mutex& gContextsMutex() {
   static std::mutex m;
   return m;
 }
 
 std::unordered_map<std::string, std::unique_ptr<NCCLContext>>& gContexts() {
-  // Initiazed after CUDA, so guaranteed to be destructed before CUDA.
   static std::unordered_map<std::string, std::unique_ptr<NCCLContext>> m;
   return m;
 }
@@ -126,7 +111,7 @@ class ncclTypeWrapper<int> {
 
 #ifdef CAFFE_HAS_CUDA_FP16
 template <>
-class ncclTypeWrapper<float16> {
+class ncclTypeWrapper<at::Half> {
  public:
   static const ncclDataType_t type = ncclHalf;
 };
@@ -137,7 +122,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   // do initialization
   for (auto i = 0; i < ex.elements.size(); ++i) {
     auto& ctx = ex.elements[i];
-    DeviceGuard g(ctx.device);
+    CUDAGuard g(ctx.device);
     init_f(ex.elements[i]);
   }
 
@@ -150,7 +135,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   // children streams, so the children streams are synchronized WRT
   // the original stream.
   {
-    DeviceGuard g(ex.stream_gpu_id);
+    CUDAGuard g(ex.stream_gpu_id);
     CUDA_ENFORCE(cudaEventRecord(context->master_event_, ex.stream));
   }
 
@@ -164,7 +149,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
 
     for (auto i = 0; i < ex.elements.size(); ++i) {
       auto& ctx = ex.elements[i];
-      DeviceGuard g(ctx.device);
+      CUDAGuard g(ctx.device);
       auto& comm = comms[i];
       auto& stream = streams[i];
       auto& event = events[i];
@@ -180,7 +165,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
 
     for (auto i = 0; i < ex.elements.size(); ++i) {
       auto& ctx = ex.elements[i];
-      DeviceGuard g(ctx.device);
+      CUDAGuard g(ctx.device);
       auto& comm = comms[i];
       auto& stream = streams[i];
       auto& event = events[i];
@@ -192,12 +177,18 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   }
 
   // Now, wait on all the events in the original stream.
-  DeviceGuard dg(ex.stream_gpu_id);
+  CUDAGuard dg(ex.stream_gpu_id);
   for (auto& event : events) {
     CUDA_ENFORCE(cudaStreamWaitEvent(CHECK_NOTNULL(ex.stream), event, 0));
   }
 }
 
+} // namespace
+
+void destroyContexts() {
+  std::lock_guard<std::mutex> g(gContextsMutex());
+  auto& contexts = gContexts();
+  contexts.clear();
 }
 
 template <typename T>
@@ -205,14 +196,14 @@ void NCCL<T>::AllReduce(const NCCLExecution& ex) {
   return runNCCL<T>(
       ex,
       [](const NCCLElement& ctx) {
-        ctx.dst->Resize(ctx.src->dims());
+        ctx.dst->Resize(ctx.src->sizes());
         ctx.dst->template mutable_data<T>();
       },
       [](const NCCLElement& ctx, ncclComm_t comm, cudaStream_t stream) {
         CAFFE_NCCL_CHECK(ncclAllReduce(
             ctx.src->raw_data(),
             ctx.dst->raw_mutable_data(),
-            ctx.dst->size(),
+            ctx.dst->numel(),
             ncclTypeWrapper<T>::type,
             ncclSum,
             comm,
@@ -225,13 +216,13 @@ void NCCL<T>::Broadcast(const NCCLExecution& ex) {
   return runNCCL<T>(
       ex,
       [](const NCCLElement& ctx) {
-        ctx.dst->Resize(ctx.src->dims());
+        ctx.dst->Resize(ctx.src->sizes());
         ctx.dst->template mutable_data<T>();
       },
       [&ex](const NCCLElement& ctx, ncclComm_t comm, cudaStream_t stream) {
         CAFFE_NCCL_CHECK(ncclBcast(
             ctx.dst->raw_mutable_data(),
-            ctx.dst->size(),
+            ctx.dst->numel(),
             ncclTypeWrapper<T>::type,
             ex.root,
             comm,
@@ -245,7 +236,7 @@ void NCCL<T>::Reduce(const NCCLExecution& ex) {
       ex,
       [](const NCCLElement& ctx) {
         if (ctx.dst) {
-          ctx.dst->Resize(ctx.src->dims());
+          ctx.dst->Resize(ctx.src->sizes());
           ctx.dst->template mutable_data<T>();
         }
       },
@@ -253,7 +244,7 @@ void NCCL<T>::Reduce(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclReduce(
             ctx.src->raw_data(),
             ctx.dst ? ctx.dst->raw_mutable_data() : nullptr,
-            ctx.src->size(),
+            ctx.src->numel(),
             ncclTypeWrapper<T>::type,
             ncclSum,
             ex.root,
@@ -269,10 +260,10 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
       ex,
       [n](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
-        std::vector<TIndex> dims;
-        dims.reserve(ctx.src->ndim() + 1);
+        std::vector<int64_t> dims;
+        dims.reserve(ctx.src->dim() + 1);
         dims.push_back(n);
-        for (auto d : ctx.src->dims()) {
+        for (auto d : ctx.src->sizes()) {
           dims.push_back(d);
         }
         ctx.dst->Resize(dims);
@@ -283,7 +274,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclAllGather(
             ctx.src->raw_data(),
             ctx.dst->raw_mutable_data(),
-            ctx.src->size(),
+            ctx.src->numel(),
             ncclTypeWrapper<T>::type,
             comm,
             stream));
@@ -306,8 +297,8 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
       ex,
       [](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
-        const auto& srcDims = ctx.src->dims();
-        std::vector<TIndex> dstDims(srcDims.begin() + 1, srcDims.end());
+        const auto& srcDims = ctx.src->sizes();
+        std::vector<int64_t> dstDims(srcDims.begin() + 1, srcDims.end());
         ctx.dst->Resize(dstDims);
         ctx.dst->template mutable_data<T>();
       },
@@ -315,7 +306,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
         CAFFE_NCCL_CHECK(ncclReduceScatter(
             ctx.src->raw_data(),
             ctx.dst->raw_mutable_data(),
-            ctx.dst->size(),
+            ctx.dst->numel(),
             ncclTypeWrapper<T>::type,
             ncclSum,
             comm,
@@ -327,7 +318,8 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
 template class NCCL<float>;
 template class NCCL<int>;
 #ifdef CAFFE_HAS_CUDA_FP16
-template class NCCL<float16>;
+template class NCCL<at::Half>;
 #endif
-}
-}
+
+} // namespace nccl
+} // namespace caffe2

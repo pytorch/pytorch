@@ -1,6 +1,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
+#include <c10/util/Optional.h>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
@@ -11,25 +12,28 @@ namespace at { namespace cuda { namespace detail {
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
   std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
-  std::unique_ptr<Generator> initCUDAGenerator(Context*) const override;
+  Device getDeviceFromPtr(void* data) const override;
+  bool isPinnedPtr(void* data) const override;
+  Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
+  bool hasMAGMA() const override;
   bool hasCuDNN() const override;
-#ifndef __HIP_PLATFORM_HCC__
-  cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const override;
-#endif
-  struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const override;
-  struct cudaDeviceProp* getDeviceProperties(THCState*, int device) const override;
+  const at::cuda::NVRTC& nvrtc() const override;
   int64_t current_device() const override;
+  bool hasPrimaryContext(int64_t device_index) const override;
+  c10::optional<int64_t> getDevceIndexWithPrimaryContext() const override;
   Allocator* getPinnedMemoryAllocator() const override;
-  void registerCUDATypes(Context*) const override;
   bool compiledWithCuDNN() const override;
+  bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
+  bool supportsDepthwiseConvolutionWithCuDNN() const override;
   long versionCuDNN() const override;
+  std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
-  int64_t cuFFTGetPlanCacheMaxSize() const override;
-  void cuFFTSetPlanCacheMaxSize(int64_t max_size) const override;
-  int64_t cuFFTGetPlanCacheSize() const override;
-  void cuFFTClearPlanCache() const override;
+  int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const override;
+  void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const override;
+  int64_t cuFFTGetPlanCacheSize(int64_t device_index) const override;
+  void cuFFTClearPlanCache(int64_t device_index) const override;
   int getNumGPUs() const override;
 };
 

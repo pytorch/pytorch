@@ -1,11 +1,11 @@
-#include "tensor_apply.h"
+#include <torch/csrc/utils/tensor_apply.h>
 
 #include <ATen/TensorUtils.h>
 #include <ATen/ExpandUtils.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/python_scalars.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_scalars.h>
 
 using namespace at;
 
@@ -15,10 +15,10 @@ struct StridedData {
   StridedData(const Tensor & tensor)
     : data(tensor.data_ptr())
     , strides(tensor.strides())
-    , elementSize(tensor.type().elementSizeInBytes()) {}
+    , elementSize(tensor.element_size()) {}
 
   void* data;
-  IntList strides;
+  IntArrayRef strides;
   int64_t elementSize;
 
   void step(int dim) {
@@ -27,7 +27,7 @@ struct StridedData {
 };
 
 template<size_t N>
-static void recursive_apply(IntList sizes, ScalarType scalarType, int64_t dim,
+static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t dim,
                             PyObject* fn, std::array<StridedData, N> strided_data) {
   int64_t ndim = sizes.size();
   if (dim == ndim) {
@@ -54,44 +54,44 @@ static void recursive_apply(IntList sizes, ScalarType scalarType, int64_t dim,
 }
 
 Tensor & apply_(Tensor & self, PyObject* fn) {
-  if (self.type().backend() != kCPU) {
+  if (self.options().backend() != Backend::CPU) {
     throw TypeError("apply_ is only implemented on CPU tensors");
   }
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<1>(self.sizes(), scalarType, 0, fn, {{ self }});
   return self;
 }
 
 Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
-  if (self.type().backend() != kCPU) {
+  if (self.options().backend() != Backend::CPU) {
     throw TypeError("map_ is only implemented on CPU tensors");
   }
-  if (other_.type() != self.type()) {
+  if (!other_.options().type_equal(self.options())) {
     throw TypeError("map_: expected %s for 'other' (got %s)",
-        self.type().toString(), other_.type().toString());
+        self.toString().c_str(), other_.toString().c_str());
   }
   Tensor other;
   std::tie(other) = expand_inplace(self, other_, "map_");
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{ self, other }});
   return self;
 }
 
 Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
-  if (self.type().backend() != kCPU || x_.type().backend() != kCPU || y_.type().backend() != kCPU) {
+  if (self.options().backend() != Backend::CPU || x_.options().backend() != Backend::CPU || y_.options().backend() != Backend::CPU) {
     throw TypeError("map2_ is only implemented on CPU tensors");
   }
-  if (x_.type() != self.type()) {
+  if (!x_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'x' (got %s)",
-        self.type().toString(), x_.type().toString());
+        self.toString().c_str(), x_.toString().c_str());
   }
-  if (y_.type() != self.type()) {
+  if (!y_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'y' (got %s)",
-        self.type().toString(), y_.type().toString());
+        self.toString().c_str(), y_.toString().c_str());
   }
   Tensor other1, other2;
   std::tie(other1, other2) = expand_inplace(self, x_, y_, "map2_");
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<3>(self.sizes(), scalarType, 0, fn, {{ self, other1, other2 }});
   return self;
 }

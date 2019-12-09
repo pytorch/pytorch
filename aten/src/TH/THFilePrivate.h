@@ -1,6 +1,6 @@
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
-#include "THHalf.h"
+#include <TH/THHalf.h>
 
 
 struct THFile__

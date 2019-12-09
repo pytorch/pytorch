@@ -121,18 +121,24 @@ class TestCase(hu.HypothesisTestCase):
         else:
             common_world = str(existing_cw) + ".forked"
 
-        inputs = [store_handler]
         if existing_cw is not None:
-            inputs.append(existing_cw)
-        workspace.RunOperatorOnce(
-            core.CreateOperator(
-                "CreateCommonWorld",
-                inputs,
-                [common_world],
-                size=comm_size,
-                rank=comm_rank,
-                sync=True,
-                engine=op_engine))
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "CloneCommonWorld",
+                    [existing_cw],
+                    [common_world],
+                    sync=True,
+                    engine=op_engine))
+        else:
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "CreateCommonWorld",
+                    [store_handler],
+                    [common_world],
+                    size=comm_size,
+                    rank=comm_rank,
+                    sync=True,
+                    engine=op_engine))
         return (store_handler, common_world)
 
     def synchronize(self, store_handler, value, comm_rank=None):
@@ -298,7 +304,7 @@ class TestCase(hu.HypothesisTestCase):
             tmpdir=tmpdir,
             existing_cw=common_world)
 
-        blob_size = 1e4
+        blob_size = int(1e4)
         num_blobs = 4
 
         for cw in [common_world, common_world2]:
@@ -523,10 +529,16 @@ class TestCase(hu.HypothesisTestCase):
                 self._test_allreduce_multicw,
                 device_option=device_option)
         else:
+            # Note: this test exercises the path where we fork a common world.
+            # We therefore don't need a comm size larger than 2. It used to be
+            # run with comm_size=8, which causes flaky results in a stress run.
+            # The flakiness was caused by too many listening sockets being
+            # created by Gloo context initialization (8 processes times
+            # 7 sockets times 20-way concurrency, plus TIME_WAIT).
             with TemporaryDirectory() as tmpdir:
                 self.run_test_locally(
                     self._test_allreduce_multicw,
-                    comm_size=8,
+                    comm_size=2,
                     device_option=device_option,
                     tmpdir=tmpdir)
 
@@ -621,8 +633,13 @@ class TestCase(hu.HypothesisTestCase):
                     comm_size=comm_size,
                     device_option=device_option,
                     tmpdir=tmpdir)
-        # Check that test finishes quickly because connections get closed
-        self.assertLess(time.time() - start_time, 2.0)
+        # Check that test finishes quickly because connections get closed.
+        # This assert used to check that the end to end runtime was less
+        # than 2 seconds, but this may not always be the case if there
+        # is significant overhead in starting processes. Ideally, this
+        # assert is replaced by one that doesn't depend on time but rather
+        # checks the success/failure status of the barrier that is run.
+        self.assertLess(time.time() - start_time, 20.0)
 
     def _test_io_error(
         self,

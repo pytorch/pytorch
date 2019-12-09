@@ -1,43 +1,33 @@
 ---
-# NOTE: there must be no spaces before the '-', so put the comma first.
-Checks: '
-  *
-  ,modernize-*
-  ,-cert-err58-cpp
-  ,-cert-err60-cpp
-  ,-clang-diagnostic-*
-  ,-cppcoreguidelines-owning-memory
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-type-vararg
-  ,-cppcoreguidelines-special-member-functions
-  ,-fuchsia-*
-  ,-google-build-using-namespace
-  ,-google-explicit-constructor
-  ,-google-readability-braces-around-statements
-  ,-google-readability-namespace-comments
-  ,-google-readability-todo
-  ,-google-runtime-references
-  ,-google-runtime-references
-  ,-hicpp-braces-around-statements
-  ,-hicpp-explicit-conversions
-  ,-hicpp-no-array-decay
-  ,-hicpp-special-member-functions
-  ,-hicpp-vararg
-  ,-llvm-header-guard
-  ,-llvm-namespace-comment
-  ,-misc-unused-parameters
-  ,-modernize-make-unique
-  ,-modernize-use-default-member-init
-  ,-performance-unnecessary-value-param
-  ,-readability-braces-around-statements
-  ,-readability-else-after-return
-  ,-readability-named-parameter
-  ,clang-analyzer-*
+# NOTE there must be no spaces before the '-', so put the comma last.
+Checks: '-*,
+bugprone-*,
+-bugprone-forward-declaration-namespace,
+-bugprone-macro-parentheses,
+-bugprone-lambda-function-name,
+cppcoreguidelines-*,
+-cppcoreguidelines-interfaces-global-init,
+-cppcoreguidelines-owning-memory,
+-cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+-cppcoreguidelines-pro-bounds-constant-array-index,
+-cppcoreguidelines-pro-bounds-pointer-arithmetic,
+-cppcoreguidelines-pro-type-cstyle-cast,
+-cppcoreguidelines-pro-type-reinterpret-cast,
+-cppcoreguidelines-pro-type-static-cast-downcast,
+-cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-pro-type-vararg,
+-cppcoreguidelines-special-member-functions,
+hicpp-exception-baseclass,
+hicpp-avoid-goto,
+modernize-*,
+-modernize-return-braced-init-list,
+-modernize-use-auto,
+-modernize-use-default-member-init,
+-modernize-use-using,
+performance-*,
+-performance-noexcept-move-constructor,
   '
-WarningsAsErrors: ''
-HeaderFilterRegex: 'torch/csrc/'
+HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:
 ...

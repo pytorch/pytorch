@@ -2,15 +2,16 @@
 
 #include <sys/types.h>
 
+#include <mutex>
 #include <unordered_map>
 
-#include "Store.hpp"
+#include <c10d/Store.hpp>
 
 namespace c10d {
 
 class FileStore : public Store {
  public:
-  explicit FileStore(const std::string& path);
+  explicit FileStore(const std::string& path, int numWorkers);
 
   virtual ~FileStore();
 
@@ -22,15 +23,25 @@ class FileStore : public Store {
 
   bool check(const std::vector<std::string>& keys) override;
 
+  void wait(const std::vector<std::string>& keys) override;
+
   void wait(
       const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
+      const std::chrono::milliseconds& timeout) override;
 
  protected:
+  int64_t addHelper(const std::string& key, int64_t i);
+
   std::string path_;
   off_t pos_;
 
+  int numWorkers_;
+  const std::string cleanupKey_;
+  const std::string regularPrefix_;
+
   std::unordered_map<std::string, std::vector<uint8_t>> cache_;
+
+  std::mutex activeFileOpLock_;
 };
 
 } // namespace c10d

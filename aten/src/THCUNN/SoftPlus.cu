@@ -1,6 +1,6 @@
-#include "THCUNN.h"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -16,7 +16,7 @@ struct softPlusupdateOutput_functor
 
   __device__ void operator()(T *output, const T *input) const {
     T betain = beta * (*input);
-    *output = ((betain) > threshold) ? *input : (1/beta) * log1p(exp(betain));
+    *output = ((betain) > threshold) ? *input : (1/beta) * static_cast<T>(log1p(exp(betain)));
   }
 };
 
@@ -39,5 +39,5 @@ struct softPlusupdateGradInput_functor
   }
 };
 
-#include "generic/SoftPlus.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SoftPlus.cu>
+#include <THC/THCGenerateFloatTypes.h>

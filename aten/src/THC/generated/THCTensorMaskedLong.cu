@@ -1,5 +1,5 @@
-#include "../THCTensorMasked.cuh"
-#include "THCTensor.hpp"
-#include "THCStream.h"
-#include "../generic/THCTensorMasked.cu"
-#include "../THCGenerateLongType.h"
+#include <THC/THCTensorMasked.cuh>
+#include <THC/THCTensor.hpp>
+
+#include <THC/generic/THCTensorMasked.cu>
+#include <THC/THCGenerateLongType.h>

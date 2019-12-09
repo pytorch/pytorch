@@ -3,6 +3,7 @@ from .. import functional as F
 
 
 class _DropoutNd(Module):
+    __constants__ = ['p', 'inplace']
 
     def __init__(self, p=0.5, inplace=False):
         super(_DropoutNd, self).__init__()
@@ -13,14 +14,14 @@ class _DropoutNd(Module):
         self.inplace = inplace
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
-        return 'p={}{}'.format(self.p, inplace_str)
+        return 'p={}, inplace={}'.format(self.p, self.inplace)
 
 
 class Dropout(_DropoutNd):
     r"""During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
-    distribution. The elements to zero are randomized on every forward call.
+    distribution. Each channel will be zeroed out independently on every forward
+    call.
 
     This has proven to be an effective technique for regularization and
     preventing the co-adaptation of neurons as described in the paper
@@ -36,8 +37,8 @@ class Dropout(_DropoutNd):
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
 
     Shape:
-        - Input: `Any`. Input can be of any shape
-        - Output: `Same`. Output is of the same shape as input
+        - Input: :math:`(*)`. Input can be of any shape
+        - Output: :math:`(*)`. Output is of the same shape as input
 
     Examples::
 
@@ -54,8 +55,11 @@ class Dropout(_DropoutNd):
 
 
 class Dropout2d(_DropoutNd):
-    r"""Randomly zeroes whole channels of the input tensor.
-    The channels to zero-out are randomized on every forward call.
+    r"""Randomly zero out entire channels (a channel is a 2D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 2D tensor :math:`\text{input}[i, j]`).
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv2d` modules.
 
@@ -93,8 +97,11 @@ class Dropout2d(_DropoutNd):
 
 
 class Dropout3d(_DropoutNd):
-    r"""Randomly zeroes whole channels of the input tensor.
-    The channels to zero are randomized on every forward call.
+    r"""Randomly zero out entire channels (a channel is a 3D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 3D tensor :math:`\text{input}[i, j]`).
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv3d` modules.
 
@@ -131,7 +138,7 @@ class Dropout3d(_DropoutNd):
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
-class AlphaDropout(Module):
+class AlphaDropout(_DropoutNd):
     r"""Applies Alpha Dropout over the input.
 
     Alpha Dropout is a type of Dropout that maintains the self-normalizing
@@ -153,10 +160,12 @@ class AlphaDropout(Module):
 
     Args:
         p (float): probability of an element to be dropped. Default: 0.5
+        inplace (bool, optional): If set to ``True``, will do this operation
+            in-place
 
     Shape:
-        - Input: `Any`. Input can be of any shape
-        - Output: `Same`. Output is of the same shape as input
+        - Input: :math:`(*)`. Input can be of any shape
+        - Output: :math:`(*)`. Output is of the same shape as input
 
     Examples::
 
@@ -167,16 +176,11 @@ class AlphaDropout(Module):
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
-    def __init__(self, p=0.5):
-        super(AlphaDropout, self).__init__()
-        if p < 0 or p > 1:
-            raise ValueError("dropout probability has to be between 0 and 1, "
-                             "but got {}".format(p))
-        self.p = p
-
     def forward(self, input):
         return F.alpha_dropout(input, self.p, self.training)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'p=' + str(self.p) + ')'
+
+class FeatureAlphaDropout(_DropoutNd):
+
+    def forward(self, input):
+        return F.feature_alpha_dropout(input, self.p, self.training)

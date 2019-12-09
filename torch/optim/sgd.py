@@ -32,18 +32,18 @@ class SGD(Optimizer):
         Considering the specific case of Momentum, the update can be written as
 
         .. math::
-                  v = \rho * v + g \\
-                  p = p - lr * v
+                  v_{t+1} = \mu * v_{t} + g_{t+1} \\
+                  p_{t+1} = p_{t} - lr * v_{t+1}
 
-        where p, g, v and :math:`\rho` denote the parameters, gradient,
+        where p, g, v and :math:`\mu` denote the parameters, gradient,
         velocity, and momentum respectively.
 
         This is in contrast to Sutskever et. al. and
         other frameworks which employ an update of the form
 
         .. math::
-             v = \rho * v + lr * g \\
-             p = p - v
+             v_{t+1} = \mu * v_{t} + lr * g_{t+1} \\
+             p_{t+1} = p_{t} - v_{t+1}
 
         The Nesterov version is analogously modified.
     """
@@ -90,12 +90,11 @@ class SGD(Optimizer):
                     continue
                 d_p = p.grad.data
                 if weight_decay != 0:
-                    d_p.add_(weight_decay, p.data)
+                    d_p = d_p.add(weight_decay, p.data)
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
-                        buf = param_state['momentum_buffer'] = torch.zeros_like(p.data)
-                        buf.mul_(momentum).add_(d_p)
+                        buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
                     else:
                         buf = param_state['momentum_buffer']
                         buf.mul_(momentum).add_(1 - dampening, d_p)

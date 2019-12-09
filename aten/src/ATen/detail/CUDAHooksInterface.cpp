@@ -1,6 +1,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <memory>
@@ -9,49 +9,24 @@
 namespace at {
 namespace detail {
 
-void default_set_device(int32_t) {
-  AT_ERROR(
-      "DynamicCUDAInterface::set_device called "
-      "before CUDA library was loaded");
-}
-
-void default_get_device(int32_t*) {
-  AT_ERROR(
-      "DynamicCUDAInterface::get_device called "
-      "before CUDA library was loaded");
-}
-
-void default_unchecked_set_device(int32_t) {
-  AT_ERROR(
-      "DynamicCUDAInterface::unchecked_set_device called "
-      "before CUDA library was loaded");
-}
-
-void default_cuda_stream_create_with_priority(cudaStream_t*, int32_t, int32_t) {
-  AT_ERROR(
-    "DynamicCUDAInterface::cuda_stream_create_with_priority called "
-    "before CUDA library was loaded");
-}
-
-void default_cuda_stream_destroy(cudaStream_t) {
-  AT_ERROR(
-    "DynamicCUDAInterface::cuda_stream_destroy called "
-    "before CUDA library was loaded");
-}
-
-// Default the static members of DynamicCUDAInterface.
-void (*DynamicCUDAInterface::set_device)(int32_t) = default_set_device;
-void (*DynamicCUDAInterface::get_device)(int32_t*) = default_get_device;
-void (*DynamicCUDAInterface::unchecked_set_device)(int32_t) =
-    default_unchecked_set_device;
-void (*DynamicCUDAInterface::cuda_stream_create_with_priority)(cudaStream_t*, int32_t, int32_t) 
-  = default_cuda_stream_create_with_priority;
-void (*DynamicCUDAInterface::cuda_stream_destroy)(cudaStream_t) 
-  = default_cuda_stream_destroy;
-  
+// NB: We purposely leak the CUDA hooks object.  This is because under some
+// situations, we may need to reference the CUDA hooks while running destructors
+// of objects which were constructed *prior* to the first invocation of
+// getCUDAHooks.  The example which precipitated this change was the fused
+// kernel cache in the JIT.  The kernel cache is a global variable which caches
+// both CPU and CUDA kernels; CUDA kernels must interact with CUDA hooks on
+// destruction.  Because the kernel cache handles CPU kernels too, it can be
+// constructed before we initialize CUDA; if it contains CUDA kernels at program
+// destruction time, you will destruct the CUDA kernels after CUDA hooks has
+// been unloaded.  In principle, we could have also fixed the kernel cache store
+// CUDA kernels in a separate global variable, but this solution is much
+// simpler.
+//
+// CUDAHooks doesn't actually contain any data, so leaking it is very benign;
+// you're probably losing only a word (the vptr in the allocated object.)
+static CUDAHooksInterface* cuda_hooks = nullptr;
 
 const CUDAHooksInterface& getCUDAHooks() {
-  static std::unique_ptr<CUDAHooksInterface> cuda_hooks;
   // NB: The once_flag here implies that if you try to call any CUDA
   // functionality before libATen_cuda.so is loaded, CUDA is permanently
   // disabled for that copy of ATen.  In principle, we can relax this
@@ -61,16 +36,15 @@ const CUDAHooksInterface& getCUDAHooks() {
   // safe...)
   static std::once_flag once;
   std::call_once(once, [] {
-    cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
+    cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{}).release();
     if (!cuda_hooks) {
-      cuda_hooks =
-          std::unique_ptr<CUDAHooksInterface>(new CUDAHooksInterface());
+      cuda_hooks = new CUDAHooksInterface();
     }
   });
   return *cuda_hooks;
 }
 } // namespace detail
 
-AT_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 
 } // namespace at

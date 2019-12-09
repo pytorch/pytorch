@@ -1,3 +1,5 @@
+#!/bin/bash
+
 . ./common.sh
 
 test_cpu_speed_torch_tensor () {
@@ -17,7 +19,7 @@ test_cpu_speed_torch_tensor () {
   fi
 
   if ! python perf-tests/modules/test_cpu_torch_tensor.py ${ARGS}; then
-    echo "To reproduce this regression, run \`cd .jenkins/pytorch/perf_test/ && bash "${FUNCNAME[0]}".sh\` on your local machine and compare the runtime before/after your code change."
+    echo "To reproduce this regression, run \`cd .jenkins/pytorch/perf_test/ && bash ${FUNCNAME[0]}.sh\` on your local machine and compare the runtime before/after your code change."
     exit 1
   fi
 }

@@ -1,30 +1,43 @@
-#include "THVector.h"
+#include <TH/THVector.h>
 
-#include "generic/simd/simd.h"
+#include <TH/vector/simd.h>
 
 #ifdef __NEON__
-#include "vector/NEON.cpp"
+#include <TH/vector/NEON.cpp>
 #endif
 
 #ifdef __PPC64__
-#include "vector/VSX.cpp"
-#endif
-
-#if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-        || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-#include "vector/SSE.cpp"
+#include <TH/vector/VSX.cpp>
 #endif
 
 #if defined(USE_AVX)
-#include "vector/AVX.h"
+#include <TH/vector/AVX.h>
 #endif
 
 #if defined(USE_AVX2)
-#include "vector/AVX2.h"
+#include <TH/vector/AVX2.h>
 #endif
 
-#include "generic/THVectorDefault.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THVectorDefault.cpp>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THVectorDispatch.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THVectorDefault.cpp>
+#include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THVectorDefault.cpp>
+#include <TH/THGenerateBoolType.h>
+
+#include <TH/generic/THVectorDefault.cpp>
+#include <TH/THGenerateBFloat16Type.h>
+
+#include <TH/generic/THVectorDispatch.cpp>
+#include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THVectorDispatch.cpp>
+#include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THVectorDispatch.cpp>
+#include <TH/THGenerateBoolType.h>
+
+#include <TH/generic/THVectorDispatch.cpp>
+#include <TH/THGenerateBFloat16Type.h>

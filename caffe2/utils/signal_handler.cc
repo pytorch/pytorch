@@ -21,8 +21,9 @@
 #include <unordered_set>
 
 #include "caffe2/core/init.h"
+#include "caffe2/core/workspace.h"
 
-#if CAFFE2_ANDROID
+#if C10_ANDROID
 #ifndef SYS_gettid
 #define SYS_gettid __NR_gettid
 #endif
@@ -122,15 +123,13 @@ struct {
   const char* name;
   int signum;
   struct sigaction previous;
-} kSignalHandlers[] = {
-  { "SIGABRT",  SIGABRT,  {} },
-  { "SIGINT",   SIGINT,   {} },
-  { "SIGILL",   SIGILL,   {} },
-  { "SIGFPE",   SIGFPE,   {} },
-  { "SIGBUS",   SIGBUS,   {} },
-  { "SIGSEGV",  SIGSEGV,  {} },
-  { nullptr,    0,        {} }
-};
+} kSignalHandlers[] = {{"SIGABRT", SIGABRT, {}},
+                       {"SIGINT", SIGINT, {}},
+                       {"SIGILL", SIGILL, {}},
+                       {"SIGFPE", SIGFPE, {}},
+                       {"SIGBUS", SIGBUS, {}},
+                       {"SIGSEGV", SIGSEGV, {}},
+                       {nullptr, 0, {}}};
 
 struct sigaction* getPreviousSigaction(int signum) {
   for (auto handler = kSignalHandlers; handler->name != nullptr; handler++) {
@@ -160,6 +159,11 @@ std::vector<uintptr_t> getBacktrace() {
   std::vector<uintptr_t> pcs;
   _Unwind_Backtrace(unwinder, &pcs);
   return pcs;
+}
+
+void printBlobSizes() {
+  ::caffe2::Workspace::ForEach(
+      [&](::caffe2::Workspace* ws) { ws->PrintBlobSizes(); });
 }
 
 void printStacktrace() {
@@ -276,6 +280,7 @@ void fatalSignalHandler(int signum) {
   } else {
     perror("Failed to open /proc/self/task");
   }
+  printBlobSizes();
   sigaction(signum, getPreviousSigaction(signum), nullptr);
   raise(signum);
 }
@@ -349,7 +354,7 @@ void uninstallFatalSignalHandlers() {
 } // namespace
 
 #if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_print_stacktraces,
     false,
     "If set, prints stacktraces when a fatal signal is raised.");
@@ -414,7 +419,7 @@ bool printStackTracesOnFatalSignal() {
 
 namespace internal {
 bool Caffe2InitFatalSignalHandler(int*, char***) {
-  if (caffe2::FLAGS_caffe2_print_stacktraces) {
+  if (FLAGS_caffe2_print_stacktraces) {
     setPrintStackTracesOnFatalSignal(true);
   }
   return true;
@@ -426,7 +431,7 @@ REGISTER_CAFFE2_INIT_FUNCTION(
     "Inits signal handlers for fatal signals so we can see what if"
     " caffe2_print_stacktraces is set.");
 
-} // namepsace internal
+} // namespace internal
 #endif // defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
 } // namespace caffe2
 
@@ -437,7 +442,12 @@ REGISTER_CAFFE2_INIT_FUNCTION(
 namespace caffe2 {
 SignalHandler::SignalHandler(
     SignalHandler::Action SIGINT_action,
-    SignalHandler::Action SIGHUP_action) {}
+    SignalHandler::Action SIGHUP_action) {
+  SIGINT_action_ = SIGINT_action;
+  SIGHUP_action_ = SIGHUP_action;
+  my_sigint_count_ = 0;
+  my_sighup_count_ = 0;
+}
 SignalHandler::~SignalHandler() {}
 bool SignalHandler::GotSIGINT() {
   return false;

@@ -37,7 +37,17 @@ class RecurrentNetworkExecutorBase {
       : step_net_def_(step_net_def),
         recurrent_input_map_(recurrent_input_map),
         timestep_blob_(timestep_blob) {
+    const bool net_def_has_device_option = step_net_def_.has_device_option();
     for (int i = 0; i < step_net_def_.op_size(); i++) {
+      if (net_def_has_device_option) {
+        // In the case when net def specifies device option, final device option
+        // will be equal to merge of operator and net def device options, with
+        // preference to settings from the operator.
+        DeviceOption option;
+        option.CopyFrom(step_net_def_.device_option());
+        option.MergeFrom(step_net_def_.op(i).device_option());
+        step_net_def_.mutable_op(i)->mutable_device_option()->CopyFrom(option);
+      }
       op_deps_.push_back(op_deps(i));
     }
   }
@@ -110,11 +120,11 @@ class RecurrentNetworkExecutorBase {
       // avoid conflicting timestep blobs when reusing workspaces, as with
       // the forward-only mode.
       std::string this_timestep_blob =
-          timestep_blob_ + "_rnnexec_t" + caffe2::to_string(t);
-      ws->CreateBlob(this_timestep_blob)->GetMutable<TensorCPU>()->Resize(1);
+          timestep_blob_ + "_rnnexec_t" + c10::to_string(t);
+      BlobGetMutableTensor(ws->CreateBlob(this_timestep_blob), CPU)->Resize(1);
       auto b = ws->GetBlob(this_timestep_blob);
       CAFFE_ENFORCE(b);
-      b->GetMutable<TensorCPU>()->mutable_data<int32_t>()[0] = t;
+      BlobGetMutableTensor(b, CPU)->template mutable_data<int32_t>()[0] = t;
 
       // Copy the operators from template
       for (auto& template_rnn_op : timestep_ops_template_) {
@@ -466,7 +476,7 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor(
     std::string timestep_blob,
     ArgumentHelper rnn_args);
 
-class ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
+class CAFFE2_API ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
  public:
   ThreadedRecurrentNetworkExecutor(
       const NetDef& step_net_def,

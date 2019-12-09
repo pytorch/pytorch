@@ -9,10 +9,10 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_simple_net_benchmark_run_whole_net,
     true,
     "If false, whole net passes won't be performed");
@@ -31,12 +31,16 @@ SimpleNet::SimpleNet(
     VLOG(1) << "Creating operator " << operator_def.name() << ": "
             << operator_def.type();
     std::unique_ptr<OperatorBase> op{nullptr};
-    if (!operator_def.has_device_option() && net_def_has_device_option) {
-      // In the case that the operator def does not specify a device option but
-      // the net def has a default option, we copy the device option over to the
-      // operator def.
+    if (net_def_has_device_option) {
+      // In the case when net def specifies device option, final device option
+      // will be equal to merge of operator and net def device options, with
+      // preference to settings from the operator.
       OperatorDef temp_def(operator_def);
-      temp_def.mutable_device_option()->CopyFrom(net_def->device_option());
+
+      DeviceOption temp_dev(net_def->device_option());
+      temp_dev.MergeFrom(operator_def.device_option());
+
+      temp_def.mutable_device_option()->CopyFrom(temp_dev);
       op = CreateOperator(temp_def, ws, idx);
     } else {
       op = CreateOperator(operator_def, ws, idx);
@@ -162,6 +166,11 @@ vector<float> SimpleNet::TEST_Benchmark(
             memory_bytes_read_per_op_type[op_type] += cost.bytes_read;
             memory_bytes_written_per_op_type[op_type] += cost.bytes_written;
             param_bytes_per_op_type[op_type] += cost.params_bytes;
+          } else {
+            flops_per_op.emplace_back(0);
+            memory_bytes_read_per_op.emplace_back(0);
+            memory_bytes_written_per_op.emplace_back(0);
+            param_bytes_per_op.emplace_back(0);
           }
         }
         timer.Start();
@@ -189,7 +198,9 @@ vector<float> SimpleNet::TEST_Benchmark(
       std::stringstream flops_str;
       if (idx < flops_per_op.size() && flops_per_op[idx]) {
         flops_str << " (" << to_string(1.0e-9 * flops_per_op[idx]) << " GFLOP, "
-                  << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
+                  << to_string(
+                         1.0e-6 * flops_per_op[idx] / time_per_op[idx] *
+                         main_runs)
                   << " GFLOPS)";
       }
       std::stringstream memory_bytes_read_str;

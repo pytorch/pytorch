@@ -1,7 +1,10 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THBlas.cpp"
+#define TH_GENERIC_FILE "TH/generic/THBlas.cpp"
 #else
 
+#ifdef USE_FBGEMM
+#include "fbgemm/FbgemmI64.h"
+#endif // USE_FBGEMM
 
 #ifdef BLAS_F2C
 # define ffloat double
@@ -39,7 +42,7 @@ TH_EXTERNC void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float
 
 
 
-void THBlas_(swap)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
+void THBlas_(swap)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -66,14 +69,14 @@ void THBlas_(swap)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
     int64_t i;
     for(i = 0; i < n; i++)
     {
-      real z = x[i*incx];
+      scalar_t z = x[i*incx];
       x[i*incx] = y[i*incy];
       y[i*incy] = z;
     }
   }
 }
 
-void THBlas_(scal)(int64_t n, real a, real *x, int64_t incx)
+void THBlas_(scal)(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 {
   if(n == 1)
     incx = 1;
@@ -104,7 +107,7 @@ void THBlas_(scal)(int64_t n, real a, real *x, int64_t incx)
   }
 }
 
-void THBlas_(copy)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
+void THBlas_(copy)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -134,7 +137,7 @@ void THBlas_(copy)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
   }
 }
 
-void THBlas_(axpy)(int64_t n, real a, real *x, int64_t incx, real *y, int64_t incy)
+void THBlas_(axpy)(int64_t n, scalar_t a, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -164,7 +167,7 @@ void THBlas_(axpy)(int64_t n, real a, real *x, int64_t incx, real *y, int64_t in
   }
 }
 
-real THBlas_(dot)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
+scalar_t THBlas_(dot)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -180,22 +183,33 @@ real THBlas_(dot)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
     int i_incy = (int)incy;
 
 #if defined(TH_REAL_IS_DOUBLE)
-    return (real) ddot_(&i_n, x, &i_incx, y, &i_incy);
+    return (scalar_t) ddot_(&i_n, x, &i_incx, y, &i_incy);
 #else
-    return (real) sdot_(&i_n, x, &i_incx, y, &i_incy);
+    return (scalar_t) sdot_(&i_n, x, &i_incx, y, &i_incy);
 #endif
   }
 #endif
   {
     int64_t i;
-    real sum = 0;
+    scalar_t sum = 0;
     for(i = 0; i < n; i++)
     sum += x[i*incx]*y[i*incy];
     return sum;
   }
 }
 
-void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_t lda, real *x, int64_t incx, real beta, real *y, int64_t incy)
+void THBlas_(gemv)(
+  char trans,
+  int64_t m,
+  int64_t n,
+  scalar_t alpha,
+  scalar_t *a,
+  int64_t lda,
+  scalar_t *x,
+  int64_t incx,
+  scalar_t beta,
+  scalar_t *y,
+  int64_t incy)
 {
   if(n == 1)
     lda = m;
@@ -228,14 +242,14 @@ void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_
     {
       for(i = 0; i < n; i++)
       {
-        real sum = 0;
-        real *row_ = a+lda*i;
+        scalar_t sum = 0;
+        scalar_t *row_ = a+lda*i;
         for(j = 0; j < m; j++)
           sum += x[j*incx]*row_[j];
-	if (beta == 0)
-	  y[i*incy] = alpha*sum;
-	else
-	  y[i*incy] = beta*y[i*incy] + alpha*sum;
+          if (beta == 0)
+            y[i*incy] = alpha*sum;
+          else
+            y[i*incy] = beta*y[i*incy] + alpha*sum;
       }
     }
     else
@@ -245,8 +259,8 @@ void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_
 
       for(j = 0; j < n; j++)
       {
-        real *column_ = a+lda*j;
-        real z = alpha*x[j*incx];
+        scalar_t *column_ = a+lda*j;
+        scalar_t z = alpha*x[j*incx];
         for(i = 0; i < m; i++)
           y[i*incy] += z*column_[i];
       }
@@ -254,7 +268,16 @@ void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_
   }
 }
 
-void THBlas_(ger)(int64_t m, int64_t n, real alpha, real *x, int64_t incx, real *y, int64_t incy, real *a, int64_t lda)
+void THBlas_(ger)(
+  int64_t m,
+  int64_t n,
+  scalar_t alpha,
+  scalar_t *x,
+  int64_t incx,
+  scalar_t *y,
+  int64_t incy,
+  scalar_t *a,
+  int64_t lda)
 {
   if(n == 1)
     lda = m;
@@ -284,15 +307,28 @@ void THBlas_(ger)(int64_t m, int64_t n, real alpha, real *x, int64_t incx, real 
     int64_t i, j;
     for(j = 0; j < n; j++)
     {
-      real *column_ = a+j*lda;
-      real z = alpha*y[j*incy];
+      scalar_t *column_ = a+j*lda;
+      scalar_t z = alpha*y[j*incy];
       for(i = 0; i < m; i++)
         column_[i] += z*x[i*incx] ;
     }
   }
 }
 
-void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, real alpha, real *a, int64_t lda, real *b, int64_t ldb, real beta, real *c, int64_t ldc)
+void THBlas_(gemm)(
+  char transa,
+  char transb,
+  int64_t m,
+  int64_t n,
+  int64_t k,
+  scalar_t alpha,
+  scalar_t *a,
+  int64_t lda,
+  scalar_t *b,
+  int64_t ldb,
+  scalar_t beta,
+  scalar_t *c,
+  int64_t ldc)
 {
   int transa_ = ((transa == 't') || (transa == 'T'));
   int transb_ = ((transb == 't') || (transb == 'T'));
@@ -347,86 +383,151 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, re
     return;
   }
 #endif
+
+#if defined(USE_FBGEMM) && defined(TH_REAL_IS_LONG)
+  if (alpha == 1 && (beta == 0 || beta == 1)) {
+    // In FBGEMM, we assume row-major ordering; However, here we assume the
+    // column-major ordering following the FORTRAN tradition in BLAS interface
+    // in this function: we can configure the layout (row/column-major ordering)
+    // of A and B by changing transa_ and transb_, but we cannot change the
+    // layout of C with this FORTRAN-style BLAS interface.
+    //
+    // The workaround is that we compute
+    // C^T (n x m) = B^T (n x k) * A^T (k x m) instead.
+    //
+    // In this way we view C^T as the row-major ordering when passing to FBGEMM.
+    fbgemm::cblas_gemm_i64_i64acc(
+        transb_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        transa_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        n,
+        m,
+        k,
+        b,
+        ldb,
+        a,
+        lda,
+        beta == 1,
+        c,
+        ldc);
+    return;
+  }
+#endif
+
   {
-    int64_t i, j, l;
     if(!transa_ && !transb_)
     {
-      real *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        real *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          real sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l*lda]*b_[l];
-          b_ += ldb;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      if (beta == 0) {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] = 0;
+          }
         }
-        a_++;
+      }
+      else {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] *= beta;
+          }
+        }
+      }
+      for (int64_t l = 0; l < k; l++) {
+        for (int64_t j = 0; j < n; j++) {
+          scalar_t val = b[l + j * ldb] * alpha;
+          int64_t i_m = m / 4;
+          for (int64_t i_i = 0; i_i < i_m; i_i++) {
+              c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
+              c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] * val;
+              c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] * val;
+              c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] * val;
+          }
+          int64_t i = i_m * 4;
+          for (; i < m; i++)
+              c[j * ldc + i] += a[i + l * lda] * val;
+        }
       }
     }
     else if(transa_ && !transb_)
     {
-      real *a_ = a;
+      int64_t i, j, l;
+      scalar_t *a_ = a;
       for(i = 0; i < m; i++)
       {
-        real *b_ = b;
+        scalar_t *b_ = b;
         for(j = 0; j < n; j++)
         {
-          real sum = 0;
+          scalar_t sum = 0;
           for(l = 0; l < k; l++)
             sum += a_[l]*b_[l];
           b_ += ldb;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+          if (beta == 0)
+            c[j*ldc+i] = alpha*sum;
+          else
+            c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
         }
         a_ += lda;
       }
     }
     else if(!transa_ && transb_)
     {
-      real *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        real *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          real sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l*lda]*b_[l*ldb];
-          b_++;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      if (beta == 0) {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] = 0;
+          }
         }
-        a_++;
+      }
+      else {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] *= beta;
+          }
+        }
+      }
+      for (int64_t l = 0; l < k; l++) {
+        for (int64_t j = 0; j < n; j++) {
+          scalar_t val = b[j + l * ldb] * alpha;
+          int64_t i_m = m / 4;
+          for (int64_t i_i = 0; i_i < i_m; i_i++) {
+            c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] * val;
+          }
+          int64_t i = i_m * 4;
+          for (; i < m; i++)
+            c[j * ldc + i] += a[i + l * lda] * val;
+        }
       }
     }
     else
     {
-      real *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        real *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          real sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l]*b_[l*ldb];
-          b_++;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      for (int64_t i = 0; i < m; i++) {
+        for (int64_t j = 0; j < n; j++) {
+          if (beta == 0)
+            c[j * ldc + i] = 0;
+          else
+            c[j * ldc + i] *= beta;
         }
-        a_ += lda;
+      }
+      for (int64_t i = 0; i < m; i++) {
+        for (int64_t j = 0; j < n; j++) {
+          int64_t l_k = k / 4;
+          for (int64_t l_l = 0; l_l < l_k; l_l++) {
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 0] //
+                          * b[(l_l * 4 + 0) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 1] //
+                          * b[(l_l * 4 + 1) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 2] //
+                          * b[(l_l * 4 + 2) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 3] //
+                          * b[(l_l * 4 + 3) * ldb + j] * alpha;
+          }
+          int64_t l = l_k * 4;
+          for (; l < k; l++)
+              c[j * ldc + i] += a[i * lda + l] * b[l * ldb + j] * alpha;
+        }
       }
     }
   }

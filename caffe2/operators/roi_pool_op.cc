@@ -26,13 +26,13 @@ bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
 
   Y->Resize(num_rois, channels, pooled_height_, pooled_width_);
   if (!is_test_) {
-    A->Resize(Y->dims());
+    A->Resize(Y->sizes());
   }
 
   const float* Xdata = X.data<float>();
   const float* rois = R.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  int* argmax_data = is_test_ ? nullptr : A->mutable_data<int>();
+  float* Ydata = Y->template mutable_data<float>();
+  int* argmax_data = is_test_ ? nullptr : A->template mutable_data<int>();
 
   // For each ROI R = [batch_index x1 y1 x2 y2]: max pool over R
   for (int n = 0; n < num_rois; ++n) {

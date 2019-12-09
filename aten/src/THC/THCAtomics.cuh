@@ -1,11 +1,10 @@
 #ifndef THC_ATOMICS_INC
 #define THC_ATOMICS_INC
 
-#include "THC.h"
-#include "THCHalf.h"
-#include "THCNumerics.cuh"
-
-namespace at { struct Half; }
+#include <THC/THC.h>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
+#include <ATen/ATen.h>
 
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
@@ -13,18 +12,22 @@ struct AtomicAddIntegerImpl;
 template<typename T>
 struct AtomicAddIntegerImpl<T, 1> {
   inline __device__ void operator()(T *address, T val) {
-    uint32_t * address_as_ui =
-        (uint32_t *) (address - ((size_t)address & 3));
+    size_t offset = (size_t)address & 3;
+    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
     uint32_t old = *address_as_ui;
-    uint32_t shift = (((size_t)address & 3) * 8);
-    uint32_t sum;
+    uint32_t shift = offset * 8;
+    uint32_t old_byte;
+    uint32_t newval;
     uint32_t assumed;
 
     do {
       assumed = old;
-      sum = val + T((old >> shift) & 0xff);
-      old = (old & ~(0x000000ff << shift)) | (sum << shift);
-      old = atomicCAS(address_as_ui, assumed, old);
+      old_byte = (old >> shift) & 0xff;
+      // preserve size in initial cast. Casting directly to uint32_t pads 
+      // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
+      newval = static_cast<uint8_t>(THCNumerics<T>::add(val, old_byte));
+      newval = (old & ~(0x000000ff << shift)) | (newval << shift);
+      old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
 };
@@ -32,17 +35,21 @@ struct AtomicAddIntegerImpl<T, 1> {
 template<typename T>
 struct AtomicAddIntegerImpl<T, 2> {
   inline __device__ void operator()(T *address, T val) {
-    uint32_t * address_as_ui =
-        (uint32_t *) ((char *)address - ((size_t)address & 2));
+    size_t offset = (size_t)address & 2;
+    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
+    bool is_32_align = offset;
     uint32_t old = *address_as_ui;
-    uint32_t sum;
+    uint32_t old_bytes;
     uint32_t newval;
     uint32_t assumed;
 
     do {
       assumed = old;
-      sum = val + (size_t)address & 2 ? T(old >> 16) : T(old & 0xffff);
-      newval = (size_t)address & 2 ? (old & 0xffff) | (sum << 16) : (old & 0xffff0000) | sum;
+      old_bytes = is_32_align ? old >> 16 : old & 0xffff;
+      // preserve size in initial cast. Casting directly to uint32_t pads 
+      // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
+      newval = static_cast<uint16_t>(THCNumerics<T>::add(val, old_bytes));
+      newval = is_32_align ? (old & 0xffff) | (newval << 16) : (old & 0xffff0000) | newval;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
   }
@@ -93,36 +100,37 @@ static inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
 }
 
 static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
-  AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
-}
-
-#ifdef CUDA_HALF_TENSOR
-static inline  __device__ void atomicAdd(half *address, half val) {
-  unsigned int * address_as_ui =
-    (unsigned int *) ((char *)address - ((size_t)address & 2));
-  unsigned int old = *address_as_ui;
-  unsigned int assumed;
-
-  do {
-    assumed = old;
-#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
-    half hsum;
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    hsum = THCNumerics<half>::add(hsum, val);
+#ifdef __HIP_PLATFORM_HCC__
+  __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
-    __half_raw hsum;
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    half tmpres = THCNumerics<half>::add(hsum, val);
-    hsum = __half_raw(tmpres);
+  AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
 #endif
-    old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
-    old = atomicCAS(address_as_ui, assumed, old);
-  } while (assumed != old);
 }
-static inline __device__ void atomicAdd(at::Half *address, half val) {
-  return atomicAdd(reinterpret_cast<half*>(address), val);
+
+static inline __device__ void atomicAdd(bool *address, bool val) {
+  *address = address && val;
 }
-#endif
+
+static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
+  #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
+
+    do {
+      assumed = old;
+      at::Half hsum;
+      hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      hsum = THCNumerics<at::Half>::add(hsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+  #else
+    atomicAdd(reinterpret_cast<__half*>(address), val);
+  #endif
+
+}
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
@@ -141,8 +149,21 @@ static inline  __device__  void atomicAdd(double *address, double val) {
 } while (assumed != old);
 }
 #elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
+
+/* Note [hip-clang differences to hcc]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * The upcoming hip-clang compiler for ROCm differs from hcc in a few details.
+ * It exports the __HIP__ macro, we can hence differentiate between hcc and
+ * hip-clang. In the below, hcc only received support for atomicAdd with double
+ * typing after work week 18312. hip-clang had support from the first version.
+ * In general, the code-visible differences between hip-clang and hcc will be
+ * minimal.
+ */
+
+#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
   static inline  __device__  void atomicAdd(double *address, double val) { }
+#endif
 #endif
 
 #endif // THC_ATOMICS_INC

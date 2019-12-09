@@ -6,31 +6,36 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/hip/common_miopen.h"
-#include "caffe2/core/hip/context_hip.h"
-#include "caffe2/operators/hip/operator_fallback_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
+#include "caffe2/operators/hip/operator_fallback_gpu.h"
+#include "caffe2/python/pybind_state_registry.h"
+#include <c10/hip/HIPGuard.h>
 
 namespace caffe2 {
 namespace python {
 
-REGISTER_HIP_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_HIP_OPERATOR(Python, GPUFallbackOp);
 REGISTER_HIP_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    GPUFallbackOp);
 
-REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
-REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
+REGISTER_HIP_OPERATOR(PythonDLPack, GPUFallbackOp);
+REGISTER_HIP_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
 
-REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorHIP>()), TensorFetcher<HIPContext>);
 REGISTER_BLOB_FEEDER(HIP, TensorFeeder<HIPContext>);
 
 namespace py = pybind11;
 
 void addHIPGlobalMethods(py::module& m) {
   m.def("num_hip_devices", &NumHipDevices);
-  m.def("set_default_gpu_id", &SetDefaultGPUID);
-  m.def("get_default_gpu_id", &GetDefaultGPUID);
   m.def("get_hip_version", &HipVersion);
   m.def("get_miopen_version", &miopenCompiledVersion);
+  m.def("get_gpu_memory_info", [](int device_id) {
+    HIPGuard guard(device_id);
+    size_t device_free, device_total;
+    HIP_CHECK(hipMemGetInfo(&device_free, &device_total));
+    return std::pair<size_t, size_t>{device_free, device_total};
+  });
   m.def("get_hip_peer_access_pattern", []() {
     std::vector<std::vector<bool>> pattern;
     CAFFE_ENFORCE(caffe2::GetHipPeerAccessPattern(&pattern));
@@ -42,6 +47,7 @@ void addHIPGlobalMethods(py::module& m) {
     obj["name"] = py::cast(prop.name);
     obj["major"] = py::cast(prop.major);
     obj["minor"] = py::cast(prop.minor);
+    obj["totalGlobalMem"] = py::cast(prop.totalGlobalMem);
     return obj;
   });
 };
@@ -53,7 +59,7 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
 
             return t->data();
@@ -64,17 +70,17 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
             t->feed(obj);
           },
           "Copy data from given DLPack tensor into this tensor.")
       .def_property_readonly(
           "_shape",
-          [](const DLPackWrapper<HIPContext>& t) { return t.tensor->dims(); })
+          [](const DLPackWrapper<HIPContext>& t) { return t.tensor->sizes(); })
       .def(
           "_reshape",
-          [](DLPackWrapper<HIPContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<HIPContext>* t, std::vector<int64_t> dims) {
             t->tensor->Resize(dims);
           });
 }
@@ -86,6 +92,9 @@ PYBIND11_MODULE(caffe2_pybind11_state_hip, m) {
   addHIPGlobalMethods(m);
   addObjectMethods(m);
   addHIPObjectMethods(m);
+  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
+    PybindAdditionRegistry()->Create(addition, m);
+  }
 }
 } // namespace python
 } // namespace caffe2

@@ -3,11 +3,13 @@
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
+#include "c10/macros/Macros.h"
+
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
 #endif
 
-CAFFE2_DEFINE_bool(caffe2_profile_depthwise, false, "");
+C10_DEFINE_bool(caffe2_profile_depthwise, false, "");
 
 namespace caffe2 {
 
@@ -163,11 +165,11 @@ void runDepthwise3x3Conv(
       int ih = oth * 2 - args.pad_rows;
       int iw = otw * 2 - args.pad_cols;
       // fast-path, all accesses in-bounds
-      if (__builtin_expect(
+      if (C10_LIKELY(
               ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
                   iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
-                  2 * otw + 1 < args.out_cols,
-              1)) {
+                  2 * otw + 1 < args.out_cols
+              )) {
         float32x4x4_t input_tile;
         for (int row = 0; row < 4; ++row) {
           input_tile.val[row] =
@@ -438,9 +440,8 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
-    const Tensor<CPUContext>& X = Input(0);
+    const Tensor& X = Input(0);
     auto& filter = Input(1);
-    Tensor<CPUContext>* Y = Output(0);
     const int N = X.dim32(0), C = X.dim32(1);
     CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
     const int M = filter.dim32(0);
@@ -450,8 +451,8 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
     CAFFE_ENFORCE_EQ(C, this->group_);
     CAFFE_ENFORCE_EQ(M, this->group_);
 
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
-    Y->mutable_data<float>();
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
+    Tensor* Y = Output(0, sizes, at::dtype<float>());
 
     DepthwiseArgs args;
     args.batch = X.dim32(0);
@@ -487,7 +488,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
 
     Timer t;
 
-#if CAFFE2_MOBILE
+#ifdef C10_MOBILE
     ws_->GetThreadPool()->run(
         [&](int, int n_g) {
           const int g = n_g / N;
@@ -536,7 +537,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
   }
 
  private:
-  Tensor<CPUContext> bias_;
+  Tensor bias_{CPU};
 };
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_3x3, Depthwise3x3ConvOp);

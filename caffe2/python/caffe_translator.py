@@ -716,14 +716,25 @@ def TranslateBatchNorm(layer, pretrained_blobs, is_test, **kwargs):
             output + '_var')
     else:
         raise RuntimeError("scalar is zero.")
-    pretrained_blobs[2][0] = 1
-    pretrained_blobs[2] = np.tile(pretrained_blobs[2], (n_channels, ))
-    scale = utils.NumpyArrayToCaffe2Tensor(
-        pretrained_blobs[2],
-        output + '_scale')
-    bias = utils.NumpyArrayToCaffe2Tensor(
-        np.zeros_like(pretrained_blobs[2]),
-        output + '_bias')
+    if len(pretrained_blobs) > 3:
+        # IntelCaffe and NVCaffe uses fused BN+Scale,
+        # three blobs for BN and two blobs for Scale,
+        # so that the total number of blobs becomes five (including scale and bias).
+        scale = utils.NumpyArrayToCaffe2Tensor(
+            pretrained_blobs[3].flatten(),
+            output + '_scale')
+        bias = utils.NumpyArrayToCaffe2Tensor(
+            pretrained_blobs[4].flatten(),
+            output + '_bias')
+    else:
+        pretrained_blobs[2][0] = 1
+        pretrained_blobs[2] = np.tile(pretrained_blobs[2], (n_channels, ))
+        scale = utils.NumpyArrayToCaffe2Tensor(
+            pretrained_blobs[2],
+            output + '_scale')
+        bias = utils.NumpyArrayToCaffe2Tensor(
+            np.zeros_like(pretrained_blobs[2]),
+            output + '_bias')
 
     return caffe_op, [scale, bias, mean, var]
 
@@ -751,7 +762,7 @@ def TranslateScale(layer, pretrained_blobs, is_test, **kwargs):
             raise RuntimeError("This path has not been verified yet.")
 
         output = mul_op.output[0]
-        mul_op_param = output + '_w'
+        mul_op_param = output + 'scale_w'
         mul_op.input.append(mul_op_param)
         weights = []
         weights.append(utils.NumpyArrayToCaffe2Tensor(
@@ -767,7 +778,7 @@ def TranslateScale(layer, pretrained_blobs, is_test, **kwargs):
             # Include a separate Add op for the bias followed by Mul.
             add_op = copy.deepcopy(mul_op)
             add_op.type = "Add"
-            add_op_param = output + '_b'
+            add_op_param = output + 'scale_b'
             internal_blob = output + "_internal"
             del mul_op.output[:]
             mul_op.output.append(internal_blob)
@@ -900,12 +911,10 @@ if __name__ == '__main__':
     output_init_net = args.init_net
     output_predict_net = args.predict_net
 
-    text_format.Merge(
-        open(input_proto, 'r').read(), caffenet
-    )
-    caffenet_pretrained.ParseFromString(
-        open(input_caffemodel, 'rb').read()
-    )
+    with open(input_proto) as f:
+        text_format.Merge(f.read(), caffenet)
+    with open(input_caffemodel, 'rb') as f:
+        caffenet_pretrained.ParseFromString(f.read())
     net, pretrained_params = TranslateModel(
         caffenet, caffenet_pretrained, is_test=True,
         remove_legacy_pad=args.remove_legacy_pad,

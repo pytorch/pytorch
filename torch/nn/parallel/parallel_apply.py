@@ -1,5 +1,7 @@
 import threading
 import torch
+from torch.cuda._utils import _get_device_index
+from torch._utils import ExceptionWrapper
 
 
 def get_a_var(obj):
@@ -22,6 +24,11 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     contained in :attr:`inputs` (positional) and :attr:`kwargs_tup` (keyword)
     on each of :attr:`devices`.
 
+    Args:
+        modules (Module): modules to be parallelized
+        inputs (tensor): inputs to the modules
+        devices (list of int or torch.device): CUDA devices
+
     :attr:`modules`, :attr:`inputs`, :attr:`kwargs_tup` (if given), and
     :attr:`devices` (if given) should all have same length. Moreover, each
     element of :attr:`inputs` can either be a single object as the only argument
@@ -36,7 +43,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
         assert len(modules) == len(devices)
     else:
         devices = [None] * len(modules)
-
+    devices = list(map(lambda x: _get_device_index(x, True), devices))
     lock = threading.Lock()
     results = {}
     grad_enabled = torch.is_grad_enabled()
@@ -53,9 +60,10 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
                 output = module(*input, **kwargs)
             with lock:
                 results[i] = output
-        except Exception as e:
+        except Exception:
             with lock:
-                results[i] = e
+                results[i] = ExceptionWrapper(
+                    where="in replica {} on device {}".format(i, device))
 
     if len(modules) > 1:
         threads = [threading.Thread(target=_worker,
@@ -73,7 +81,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     outputs = []
     for i in range(len(inputs)):
         output = results[i]
-        if isinstance(output, Exception):
-            raise output
+        if isinstance(output, ExceptionWrapper):
+            output.reraise()
         outputs.append(output)
     return outputs

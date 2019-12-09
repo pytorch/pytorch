@@ -139,17 +139,17 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X, simulating a batch of 2, 4x4 matricies
+// Create X, simulating a batch of 2, 4x4 matricies
 X = np.random.randint(0,high=20,size=(2,4,4))
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -226,17 +226,17 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X, simulating a batch of 2, 4x4 matricies
+// Create X, simulating a batch of 2, 4x4 matricies
 X = np.random.randint(0,high=20,size=(2,4,4))
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -296,16 +296,14 @@ bool SumElementsGradientOp<T, Context>::RunOnDevice()
 #endif
 {
   auto& X = Input(0);
-  // Copy Input(1) from Context to CPUContext
-  CPUContext context;
-  TensorCPU sum_grad(Input(1), &context);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
-  DCHECK_EQ(sum_grad.size(), 1);
+  Tensor sum_grad(Input(1), CPU);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<T>());
+  DCHECK_EQ(sum_grad.numel(), 1);
   math::Set<T, Context>(
-      dX->size(),
+      dX->numel(),
       static_cast<T>(
-          sum_grad.template data<T>()[0] * (average_ ? 1.0 / X.size() : 1)),
+          sum_grad.template data<T>()[0] * (average_ ? 1.0 / X.numel() : 1)),
       dX->template mutable_data<T>(),
       &context_);
   return true;
@@ -317,10 +315,9 @@ bool MaxReductionGradientOp<T, Context, ROWWISE>::RunOnDevice() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<T>());
 
-  CAFFE_ENFORCE_EQ(X.ndim(), 3);
+  CAFFE_ENFORCE_EQ(X.dim(), 3);
 
   const int batch_size = X.dim32(0);
   const int M = X.dim32(1);

@@ -1,0 +1,5 @@
+def forward(self,
+    x: Tensor,
+    y: Tensor) -> Tensor:
+  _0 = torch.add(torch.mul(x, 2), y, alpha=1)
+  return _0

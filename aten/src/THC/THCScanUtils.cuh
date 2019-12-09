@@ -1,8 +1,9 @@
 #ifndef THC_SCAN_UTILS_INC
 #define THC_SCAN_UTILS_INC
 
-#include "THCAsmUtils.cuh"
-#include "THCDeviceUtils.cuh"
+#include <THC/THCAsmUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <c10/macros/Macros.h>
 
 // Collection of in-kernel scan / prefix sum utilities
 
@@ -153,11 +154,17 @@ __device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunct
 template <typename T, bool KillWARDependency, class BinaryFunction>
 __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
   // Within-warp, we use warp voting.
+#if defined (__HIP_PLATFORM_HCC__)
+  unsigned long long int vote = WARP_BALLOT(in);
+  T index = __popcll(getLaneMaskLe() & vote);
+  T carry = __popcll(vote);
+#else
   T vote = WARP_BALLOT(in);
   T index = __popc(getLaneMaskLe() & vote);
   T carry = __popc(vote);
+#endif
 
-  int warp = threadIdx.x / 32;
+  int warp = threadIdx.x / C10_WARP_SIZE;
 
   // Per each warp, write out a value
   if (getLaneId() == 0) {
@@ -170,7 +177,7 @@ __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFuncti
   // warp shuffle scan for CC 3.0+
   if (threadIdx.x == 0) {
     int current = 0;
-    for (int i = 0; i < blockDim.x / 32; ++i) {
+    for (int i = 0; i < blockDim.x / C10_WARP_SIZE; ++i) {
       T v = smem[i];
       smem[i] = binop(smem[i], current);
       current = binop(current, v);
@@ -201,7 +208,7 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   *out -= (T) in;
 
   // The outgoing carry for all threads is the last warp's sum
-  *carry = smem[(blockDim.x / 32) - 1];
+  *carry = smem[THCCeilDiv<int>(blockDim.x, C10_WARP_SIZE) - 1];
 
   if (KillWARDependency) {
     __syncthreads();

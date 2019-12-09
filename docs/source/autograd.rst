@@ -65,12 +65,28 @@ Variable (deprecated)
 Tensor autograd functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. autoclass:: torch.Tensor
-    :members: backward, detach, detach_, register_hook, retain_grad
+   :noindex:
+
+   .. autoattribute:: grad
+   .. autoattribute:: requires_grad
+   .. autoattribute:: is_leaf
+   .. automethod:: backward
+   .. automethod:: detach
+   .. automethod:: detach_
+   .. automethod:: register_hook
+   .. automethod:: retain_grad
 
 :hidden:`Function`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: Function
+    :members:
+
+Context method mixins
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+When creating a new :class:`Function`, the following methods are available to `ctx`.
+
+.. autoclass:: torch.autograd.function._ContextMethodMixin
     :members:
 
 .. _grad-check:
@@ -92,6 +108,9 @@ and nvprof based (registers both CPU and GPU activity) using
 :class:`~torch.autograd.profiler.emit_nvtx`.
 
 .. autoclass:: torch.autograd.profiler.profile
+    :members:
+
+.. autoclass:: torch.autograd.profiler.record_function
     :members:
 
 .. autoclass:: torch.autograd.profiler.emit_nvtx

@@ -6,12 +6,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import os
 import unittest
 
 import numpy as np
 
-
 class TestCase(unittest.TestCase):
+
     def setUp(self):
         np.random.seed(seed=0)
 
@@ -21,9 +22,10 @@ class TestCase(unittest.TestCase):
             self.assertEqual(o1.dtype, o2.dtype)
             np.testing.assert_almost_equal(o1, o2, decimal=decimal)
 
-    def add_test_case(name, test_func):
+    def add_test_case(self, name, test_func):
         if not name.startswith('test_'):
             raise ValueError('Test name must start with test_: {}'.format(name))
         if hasattr(self, name):
             raise ValueError('Duplicated test name: {}'.format(name))
         setattr(self, name, test_func)
+

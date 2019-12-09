@@ -5,6 +5,8 @@ The testing package contains testing-specific utilities.
 import torch
 import random
 
+FileCheck = torch._C.FileCheck
+
 __all__ = [
     'assert_allclose', 'make_non_contiguous', 'rand_like', 'randn_like'
 ]
@@ -85,9 +87,23 @@ def make_non_contiguous(tensor):
 
 
 def get_all_dtypes():
-    return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.float32, torch.float64]
+    return [torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.float32, torch.float64, torch.bfloat16]
 
+
+def get_all_math_dtypes(device):
+    dtypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+              torch.float32, torch.float64]
+
+    # torch.float16 is a math dtype on cuda but not cpu.
+    if device.startswith('cuda'):
+        dtypes.append(torch.float16)
+
+    return dtypes
+
+
+def get_all_device_types():
+    return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
 # 'dtype': (rtol, atol)
 _default_tolerances = {

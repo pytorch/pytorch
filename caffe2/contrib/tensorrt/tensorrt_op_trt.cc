@@ -15,7 +15,7 @@ namespace {
 // Otherwise, return the product of CHW dimensions
 int64_t CheckDims(
     const nvinfer1::Dims& nv_dims,
-    const std::vector<TIndex>& c2_dims) {
+    at::ArrayRef<int64_t> c2_dims) {
   if (nv_dims.nbDims + 1 != c2_dims.size()) {
     CAFFE_THROW(
         "Mismatched dimensions between TRT input (",
@@ -51,7 +51,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       logger_(
           (nvinfer1::ILogger::Severity)(OperatorBase::GetSingleArgument<int>(
               "log_verbosity",
-              FLAGS_minloglevel))),
+              FLAGS_caffe2_log_level))),
       max_batch_size_(
           OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
   {
@@ -112,10 +112,10 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     is_input_.push_back(is_input);
     if (!is_input) {
       // For output, we try to get its output size hint
-      const std::string key = MakeString("output_size_hint_", output_idx);
+      const std::string key = c10::str("output_size_hint_", output_idx);
       auto output_size_hint = OperatorBase::GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
-        std::vector<TIndex> dims;
+        std::vector<int64_t> dims;
         for (const auto v : output_size_hint) {
           dims.push_back(v);
         }
@@ -130,17 +130,17 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
 
 void TensorRTOp::MaybeAdjustOutputShape(
     int output_idx,
-    std::vector<TIndex>* dims) {
+    std::vector<int64_t>* dims) {
   const auto it = output_size_hints_.find(output_idx);
   if (it != output_size_hints_.end()) {
     const auto& dims_hint = it->second;
     auto total_trt = std::accumulate(
-        dims->begin(), dims->end(), (TIndex)(1), std::multiplies<TIndex>());
+        dims->begin(), dims->end(), (int64_t)(1), std::multiplies<int64_t>());
     auto total_c2 = std::accumulate(
         dims_hint.begin(),
         dims_hint.end(),
-        (TIndex)(1),
-        std::multiplies<TIndex>());
+        (int64_t)(1),
+        std::multiplies<int64_t>());
     CAFFE_ENFORCE_EQ(
         total_trt,
         total_c2,
@@ -161,7 +161,7 @@ bool TensorRTOp::RunOnDevice() {
   size_t N = 0;
   for (int i = 0; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
-    const auto& tensor_dims = input_tensor.dims();
+    const auto tensor_dims = input_tensor.sizes();
     CAFFE_ENFORCE(!tensor_dims.empty(), "Input tensor cannot be empty");
     if (i == 0) {
       N = tensor_dims.front();
@@ -178,7 +178,7 @@ bool TensorRTOp::RunOnDevice() {
   }
 
   // We need to do the binding at RunOnDevice time because we only know the
-  // exact shapes of the tensors now. In addtion, since TensorRT engine has
+  // exact shapes of the tensors now. In addition, since TensorRT engine has
   // max_batch_size, we need to call that multiple times if input batch size
   // exceeeds this limit.
   CAFFE_ENFORCE_EQ(is_input_.size(), nv_dims_.size());
@@ -198,13 +198,13 @@ bool TensorRTOp::RunOnDevice() {
         // input, check input dimensions
         const auto& input_tensor = Input(input_idx++);
         const float* input_data = input_tensor.data<float>();
-        const auto& tensor_dims = input_tensor.dims();
+        const auto tensor_dims = input_tensor.sizes();
         auto chw = CheckDims(dims, tensor_dims);
         bindings.push_back((void*)(input_data + offset * chw));
       } else {
         // output, we need to allocate the output tensor at first batch run
         auto* output_tensor = Output(output_idx);
-        std::vector<TIndex> tensor_dims;
+        std::vector<int64_t> tensor_dims;
         tensor_dims.push_back(N);
         int64_t chw = 1;
         for (int i = 0; i < dims.nbDims; ++i) {

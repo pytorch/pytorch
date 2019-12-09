@@ -1,19 +1,18 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Function
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import _finfo, broadcast_all, lazy_property
+from torch.distributions.utils import broadcast_all
 
 
 def _standard_gamma(concentration):
-    return concentration._standard_gamma()
+    return torch._standard_gamma(concentration)
 
 
 class Gamma(ExponentialFamily):
     r"""
-    Creates a Gamma distribution parameterized by shape `concentration` and `rate`.
+    Creates a Gamma distribution parameterized by shape :attr:`concentration` and :attr:`rate`.
 
     Example::
 
@@ -48,13 +47,23 @@ class Gamma(ExponentialFamily):
             batch_shape = self.concentration.size()
         super(Gamma, self).__init__(batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Gamma, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.concentration = self.concentration.expand(batch_shape)
+        new.rate = self.rate.expand(batch_shape)
+        super(Gamma, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(shape)
-        value.detach().clamp_(min=_finfo(value).tiny)  # do not record in autograd graph
+        value.detach().clamp_(min=torch.finfo(value.dtype).tiny)  # do not record in autograd graph
         return value
 
     def log_prob(self, value):
+        value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
         return (self.concentration * torch.log(self.rate) +

@@ -1,8 +1,0 @@
-When I exported your model with different inputs, the result was different.
-(To get more information, run torch.onnx.verify(..., verbose=True))
-----------------------------------------------------------------------
-ERROR: Parameters list differs: [] != [u'1']
-
-  * This is really strange! The second time I exported your model,
-    it had a different set of parameters.  Are you assigning Parameters
-    in the forward() of your model definition?

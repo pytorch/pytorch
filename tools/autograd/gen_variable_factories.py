@@ -5,11 +5,20 @@
 import re
 
 from .utils import CodeTemplate, write
+from .gen_variable_type import format_trace
+
 
 FUNCTION_TEMPLATE = CodeTemplate("""\
-inline autograd::Variable ${name}(${formals}) {
-  at::Tensor tensor = at::${name}(${actuals});
-  return autograd::make_variable(tensor, /*requires_grad=*/${requires_grad});
+inline at::Tensor ${name}(${formals}) {
+  ${pre_record_trace}
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::${name}(${actuals});
+  })();
+  at::Tensor result =
+    autograd::make_variable(std::move(tensor), /*requires_grad=*/${requires_grad});
+  ${post_record_trace}
+  return result;
 }
 """)
 
@@ -25,19 +34,21 @@ def fully_qualified_type(argument_type):
     return "{}at::{}".format(argument_type[:index], argument_type[index:])
 
 
-def gen_variable_factories(out, declarations, template_path):
+def gen_variable_factories(out, declarations, template_path, disable_autograd=False):
     function_definitions = []
     for decl in declarations:
         has_tensor_options = any(a["simple_type"] == "TensorOptions" for a in decl["arguments"])
-        if has_tensor_options or decl["name"].endswith("_like"):
-            function_definitions.append(process_function(decl, has_tensor_options))
+        is_namespace_fn = 'namespace' in decl['method_of']
+        if (has_tensor_options or decl["name"].endswith("_like")) and is_namespace_fn:
+            function_definitions.append(
+                process_function(decl, has_tensor_options, disable_autograd=disable_autograd))
     write(out,
           "variable_factories.h",
           CodeTemplate.from_file(template_path + "/variable_factories.h"),
           {"function_definitions": function_definitions})
 
 
-def process_function(decl, has_tensor_options):
+def process_function(decl, has_tensor_options, disable_autograd):
     formals = []
     actuals = []
     for argument in decl["arguments"]:
@@ -46,13 +57,19 @@ def process_function(decl, has_tensor_options):
         formals.append("{} {}{}".format(type, argument["name"], default))
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
-            # We want to discard the runtime type so that `at::{name}` always returns a
-            # tensor and not a variable, since we create a variable right after.
-            actual += ".discard_runtime_type()"
+            actual = "at::TensorOptions({})".format(actual)
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
-        actuals.append('at::TensorOptions({}, /*discard_runtime_type=*/true)'.format(actuals[0]))
+        # Insert TensorOptions before MemoryFormat
+        actuals.insert(-1, '{}.options()'.format(actuals[0]))
+
+    if not disable_autograd:
+        pre_record_trace, post_record_trace = format_trace(decl)
+    else:
+        pre_record_trace, post_record_trace = '', ''
+
     return FUNCTION_TEMPLATE.substitute(
-        name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad
+        name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad,
+        pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
     )

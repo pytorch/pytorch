@@ -6,12 +6,8 @@ namespace caffe2 {
 
 template <>
 bool SparseNormalizeOp<float, CPUContext>::RunOnDevice() {
-  CAFFE_ENFORCE_EQ(
-     Input(PARAM).size_from_dim(1),
-     Input(GRAD).size_from_dim(Input(INDICES).ndim()));
-
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-     this, Input(INDICES));
+      this, Input(INDICES));
 }
 
 template <>
@@ -23,13 +19,13 @@ bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
   const float kEps = 1e-12f;
 
   // n: number of sparse embeddings to be normalized
-  auto n = Input(INDICES).size();
+  auto n = Input(INDICES).numel();
   if (n == 0) {
     return true;
   }
 
   // embedding length, e.g. 32, 64, 128
-  auto block_size = Input(GRAD).size() / n;
+  auto block_size = Input(PARAM).size_from_dim(1);
   for (int i = 0; i < n; ++i) {
     auto idx = indices[i];
     auto offsetIdx = idx * block_size;
@@ -52,11 +48,14 @@ bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
 
 REGISTER_CPU_OPERATOR(SparseNormalize, SparseNormalizeOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseNormalize)
-    .NumInputs(3)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .Input(0, "param", "Parameters to be normalized")
     .Input(1, "indices", "Sparse indices")
-    .Input(2, "grad", "Gradient computed")
+    .Input(
+        2,
+        "grad",
+        "Gradient computed (optional - not used, this argument is for backwards compatibility)")
     .Output(0, "output_param", "Normalized parameters")
     .EnforceOneToOneInplace()
     .Arg(

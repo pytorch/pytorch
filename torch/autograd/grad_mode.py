@@ -8,8 +8,14 @@ class no_grad(object):
     Disabling gradient calculation is useful for inference, when you are sure
     that you will not call :meth:`Tensor.backward()`. It will reduce memory
     consumption for computations that would otherwise have `requires_grad=True`.
+
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
+
+    This mode has no effect when using :class:`~enable_grad` context manager .
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
 
     Also functions as a decorator.
 
@@ -28,11 +34,8 @@ class no_grad(object):
         >>> z.requires_grad
         False
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(False)
 
     def __exit__(self, *args):
@@ -50,8 +53,11 @@ class no_grad(object):
 class enable_grad(object):
     r"""Context-manager that enables gradient calculation.
 
-    Enables gradient calculation inside a :class:`~no_grad` context. This has
-    no effect outside of :class:`~no_grad`.
+    Enables gradient calculation, if it has been disabled via :class:`~no_grad`
+    or :class:`~set_grad_enabled`.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
 
     Also functions as a decorator.
 
@@ -69,17 +75,14 @@ class enable_grad(object):
         >>> @torch.enable_grad()
         ... def doubler(x):
         ...     return x * 2
-        >>> with torch.no_grad:
+        >>> with torch.no_grad():
         ...     z = doubler(x)
         >>> z.requires_grad
         True
 
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(True)
 
     def __exit__(self, *args):
@@ -99,6 +102,12 @@ class set_grad_enabled(object):
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
+
+    When using :class:`~enable_grad` context manager, :class:`~set_grad_enabled(False)`
+    has no effect.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
 
     Arguments:
         mode (bool): Flag whether to enable grad (``True``), or disable

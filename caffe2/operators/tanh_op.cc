@@ -88,7 +88,7 @@ X:
         "output",
         "The hyperbolic tangent values of the input tensor, computed "
         "element-wise")
-    .InheritOnnxSchema("Tanh");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(TanhGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
 

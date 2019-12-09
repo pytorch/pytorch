@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/SpectralOpsUtils.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/Config.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -9,21 +9,22 @@ namespace at { namespace native {
 
 Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
-                bool inverse, IntList checked_signal_sizes,
+                bool inverse, IntArrayRef checked_signal_sizes,
                 bool normalized, bool onesided,
-                IntList output_sizes) {
-  throw std::runtime_error("fft: ATen not compiled with MKL support");
+                IntArrayRef output_sizes) {
+  AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
 }}
 
 #else // AT_MKL_ENABLED
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/Utils.h>
 
 #include <algorithm>
 #include <vector>
@@ -35,9 +36,6 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Limits.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace at { namespace native {
 
@@ -51,7 +49,7 @@ template <typename scalar_t>
 static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,
                        int64_t signal_ndim, int64_t size_last_dim,
                        int64_t start_last_dim_idx, int64_t i, int64_t num) {
-  scalar_t *data = output.data<scalar_t>();
+  scalar_t *data = output.data_ptr<scalar_t>();
 
   // A slice means a slice of last dimension (of size size_last_dim)
 
@@ -137,34 +135,21 @@ static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   for (int64_t d = 0; d < signal_ndim; d++) {
     num *= input.size(d);
   }
-#ifdef _OPENMP
-  if (num > 500) {
-    int nthreads = omp_get_num_threads();
-    int64_t num_slices_per_thread = num / nthreads + 1;
-    #pragma omp parallel
-    {
-      int tid = omp_get_thread_num();
-      int64_t start = tid * num_slices_per_thread;
-      AT_DISPATCH_FLOATING_TYPES(input.type(), "_fft_fill_with_conjugate_symmetry", [&] {
-        _fft_fill_with_conjugate_symmetry_slice<scalar_t>(input, signal_ndim, size_last_dim,
-            last_dim_start_slice, start, std::min(num_slices_per_thread, num - start));
-      });
-    }
-    return;
-  }
-#endif
-  AT_DISPATCH_FLOATING_TYPES(input.type(), "_fft_fill_with_conjugate_symmetry", [&] {
-    _fft_fill_with_conjugate_symmetry_slice<scalar_t>(input, signal_ndim, size_last_dim,
-        last_dim_start_slice, 0, num);
+
+  at::parallel_for(0, num, 500, [&](int64_t start, int64_t end) {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "_fft_fill_with_conjugate_symmetry", [&] {
+      _fft_fill_with_conjugate_symmetry_slice<scalar_t>(input, signal_ndim, size_last_dim,
+          last_dim_start_slice, start, (end - start));
+    });
   });
 }
 
 // MKL DFTI
 Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
-                bool inverse, IntList checked_signal_sizes,
+                bool inverse, IntArrayRef checked_signal_sizes,
                 bool normalized, bool onesided,
-                IntList output_sizes) {
+                IntArrayRef output_sizes) {
   int64_t batch = self.size(0);
   Tensor input = self;
   // real/imag dimension must aligned when viewed as of complex type
@@ -191,12 +176,8 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
       osize = output_sizes[i];
       istride = complex_input ? input.stride(i) >> 1 : input.stride(i);
       ostride = onumel;
-      if (isize > MKL_LONG_MAX || osize > MKL_LONG_MAX || ostride > MKL_LONG_MAX) {
-        std::ostringstream ss;
-        ss << "MKL FFT: input signal numel exceeds allowed range [1 ~ "
-           << MKL_LONG_MAX << "]";
-        throw std::runtime_error(ss.str());
-      }
+      TORCH_CHECK(isize <= MKL_LONG_MAX && osize <= MKL_LONG_MAX && ostride <= MKL_LONG_MAX,
+               "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
       if (!need_contiguous && istride > MKL_LONG_MAX) {
         // If we didn't plan to contiguous-fy but the `istride` exceeds bound,
         // check if we can stride (equal to `inumel`) get back within bound if
@@ -205,29 +186,25 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
         // fine as `inumel` is non-decreasing.
         need_contiguous = true;
       }
-      if (need_contiguous && inumel > MKL_LONG_MAX) {
-        std::ostringstream ss;
-        ss << "MKL FFT: input signal numel exceeds allowed range [1 ~ "
-           << MKL_LONG_MAX << "]";
-        throw std::runtime_error(ss.str());
-      }
+      TORCH_CHECK(!need_contiguous || inumel <= MKL_LONG_MAX,
+               "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
       inumel *= isize;
       onumel *= osize;
     }
   }
-  Tensor output = input.type().tensor(output_sizes);
+  Tensor output = at::empty(output_sizes, input.options());
 
   // precision
   DFTI_CONFIG_VALUE prec;
-  if (input.type().scalarType() == ScalarType::Float) {
+  if (input.scalar_type() == ScalarType::Float) {
     prec = DFTI_SINGLE;
-  } else if (input.type().scalarType() == ScalarType::Double) {
+  } else if (input.scalar_type() == ScalarType::Double) {
     prec = DFTI_DOUBLE;
   } else {
     std::ostringstream ss;
     ss << "MKL FFT doesn't support tensor of type: "
-       << at::toString(input.type().scalarType());
-    throw std::runtime_error(ss.str());
+       << toString(input.scalar_type());
+    AT_ERROR(ss.str());
   }
   // signal type
   DFTI_CONFIG_VALUE signal_type;
@@ -299,4 +276,3 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
 }} // namespace at::native
 
 #endif
-

@@ -1,10 +1,17 @@
 #ifndef THC_ALLOCATOR_INC
 #define THC_ALLOCATOR_INC
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
-extern THAllocator THCudaHostAllocator;
-extern THAllocator THCUVAAllocator;
-THC_API THCDeviceAllocator THCIpcAllocator;
+// IPC doesn't support (re)allocation
+
+class TORCH_CUDA_API THCIpcDeleter {
+ public:
+  THCIpcDeleter(std::shared_ptr<void> basePtr);
+  ~THCIpcDeleter();
+  static at::DataPtr makeDataPtr(std::shared_ptr<void> basePtr, void* data);
+private:
+  std::shared_ptr<void> basePtr_;
+};
 
 #endif

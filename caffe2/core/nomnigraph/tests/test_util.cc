@@ -63,11 +63,9 @@ nom::Graph<std::string> createGraphWithCycle() {
 
 std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::NodeRef node) {
   std::map<std::string, std::string> labelMap;
-  assert(node->data() && "Node doesn't have data, can't render it");
-  auto *bb = dyn_cast<nom::repr::BasicBlockType<nom::repr::NNGraph>>(
-      node->data().get());
+  auto& bb = node->data();
   labelMap["label"] = to_string((unsigned long long)node) + "\\n";
-  for (const auto &instr : bb->getInstructions()) {
+  for (const auto& instr : bb.getInstructions()) {
     assert(isa<nom::repr::NeuralNetOperator>(instr->data()) &&
            "Invalid instruction.");
     auto *op = dyn_cast<nom::repr::NeuralNetOperator>(instr->data().get());
@@ -119,3 +117,13 @@ std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRe
   return labelMap;
 };
 
+nom::Graph<TestClass>::NodeRef createTestNode(nom::Graph<TestClass>& g) {
+  return g.createNode(TestClass());
+}
+
+std::map<std::string, std::string> TestNodePrinter(
+    nom::Graph<TestClass>::NodeRef /* unused */) {
+  std::map<std::string, std::string> labelMap;
+  labelMap["label"] = "Node";
+  return labelMap;
+}

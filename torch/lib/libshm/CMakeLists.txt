@@ -2,10 +2,8 @@ project(libshm C CXX)
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6 FATAL_ERROR)
 CMAKE_POLICY(VERSION 2.6)
 
-include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/public/threads.cmake)
-
-FIND_PACKAGE(Caffe2 REQUIRED)
-INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
+set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
+include(${TORCH_ROOT}/cmake/public/threads.cmake)
 
 IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
@@ -19,19 +17,27 @@ IF(MSVC)
 ENDIF(MSVC)
 
 IF (CMAKE_VERSION VERSION_LESS "3.1")
-  SET(CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
 ELSE ()
-  SET(CMAKE_CXX_STANDARD 11)
+  SET(CMAKE_CXX_STANDARD 14)
 ENDIF ()
 
 ADD_LIBRARY(shm SHARED core.cpp)
+
+target_include_directories(shm PUBLIC
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
+  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
+  )
+
 ADD_EXECUTABLE(torch_shm_manager manager.cpp)
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(torch_shm_manager shm)
+set_target_properties(torch_shm_manager PROPERTIES INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 ### Torch packages supposes libraries prefix is "lib"
 SET_TARGET_PROPERTIES(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib")
-TARGET_LINK_LIBRARIES(shm ${CAFFE2_LIBRARIES})
+TARGET_LINK_LIBRARIES(shm torch c10)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)

@@ -15,14 +15,14 @@ void ComputeArgImpl(
     const int n,
     const Compare& comp,
     const T* X,
-    TIndex* Y,
+    int64_t* Y,
     Context* context) {
-  math::Set<TIndex, Context>(prev_size * next_size, TIndex(0), Y, context);
+  math::Set<int64_t, Context>(prev_size * next_size, int64_t(0), Y, context);
   for (int i = 0; i < prev_size; ++i) {
     const T* cur_X = X + i * n * next_size + next_size;
     for (int k = 1; k < n; ++k) {
       for (int j = 0; j < next_size; ++j) {
-        TIndex* cur_Y = Y + i * next_size + j;
+        int64_t* cur_Y = Y + i * next_size + j;
         if (comp(*cur_X, X[i * n * next_size + *cur_Y * next_size + j])) {
           *cur_Y = k;
         }
@@ -41,7 +41,7 @@ bool ArgMaxReducer<CPUContext>::operator()(
     const int next_size,
     const int n,
     const T* X,
-    TIndex* Y,
+    int64_t* Y,
     CPUContext* context) const {
   ComputeArgImpl(prev_size, next_size, n, std::greater<T>(), X, Y, context);
   return true;
@@ -54,7 +54,7 @@ bool ArgMinReducer<CPUContext>::operator()(
     const int next_size,
     const int n,
     const T* X,
-    TIndex* Y,
+    int64_t* Y,
     CPUContext* context) const {
   ComputeArgImpl(prev_size, next_size, n, std::less<T>(), X, Y, context);
   return true;

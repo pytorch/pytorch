@@ -1,3 +1,6 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+
 r"""
 `torch.distributed.launch` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
@@ -16,7 +19,7 @@ aggregated communication bandwidth.
 In both cases of single-node distributed training or multi-node distributed
 training, this utility will launch the given number of processes per node
 (``--nproc_per_node``). If used for GPU training, this number needs to be less
-or euqal to the number of GPUs on the current system (``nproc_per_node``),
+or equal to the number of GPUs on the current system (``nproc_per_node``),
 and each process will be operating on a single GPU from *GPU 0 to
 GPU (nproc_per_node - 1)*.
 
@@ -85,7 +88,9 @@ Set your device to local rank using either
 
     >>> torch.cuda.set_device(arg.local_rank)  # before your code runs
 
-    or
+or
+
+::
 
     >>> with torch.cuda.device(arg.local_rank):
     >>>    # your code to run
@@ -118,16 +123,27 @@ process. In other words, the ``device_ids`` needs to be ``[args.local_rank]``,
 and ``output_device`` needs to be ``args.local_rank`` in order to use this
 utility
 
+5. Another way to pass ``local_rank`` to the subprocesses via environment variable
+``LOCAL_RANK``. This behavior is enabled when you launch the script with
+``--use_env=True``. You must adjust the subprocess example above to replace
+``args.local_rank`` with ``os.environ['LOCAL_RANK']``; the launcher
+will not pass ``--local_rank`` when you specify this flag.
+
+.. warning::
+
+    ``local_rank`` is NOT globally unique: it is only unique per process
+    on a machine.  Thus, don't use it to decide if you should, e.g.,
+    write to a networked filesystem.  See
+    https://github.com/pytorch/pytorch/issues/12042 for an example of
+    how things can go wrong if you don't do this correctly.
+
 """
 
 
 import sys
 import subprocess
 import os
-import socket
 from argparse import ArgumentParser, REMAINDER
-
-import torch
 
 
 def parse_args():
@@ -158,8 +174,20 @@ def parse_args():
                              "--master_addr can simply be 127.0.0.1")
     parser.add_argument("--master_port", default=29500, type=int,
                         help="Master node (rank 0)'s free port that needs to "
-                             "be used for communciation during distributed "
+                             "be used for communication during distributed "
                              "training")
+    parser.add_argument("--use_env", default=False, action="store_true",
+                        help="Use environment variable to pass "
+                             "'local rank'. For legacy reasons, the default value is False. "
+                             "If set to True, the script will not pass "
+                             "--local_rank as argument, and will instead set LOCAL_RANK.")
+    parser.add_argument("-m", "--module", default=False, action="store_true",
+                        help="Changes each process to interpret the launch script "
+                             "as a python module, executing with the same behavior as"
+                             "'python -m'.")
+    parser.add_argument("--no_python", default=False, action="store_true",
+                        help="Do not prepend the training script with \"python\" - just exec "
+                             "it directly. Useful when the script is not a Python script.")
 
     # positional
     parser.add_argument("training_script", type=str,
@@ -171,7 +199,6 @@ def parse_args():
     # rest from the training program
     parser.add_argument('training_script_args', nargs=REMAINDER)
     return parser.parse_args()
-
 
 def main():
     args = parse_args()
@@ -187,22 +214,49 @@ def main():
 
     processes = []
 
+    if 'OMP_NUM_THREADS' not in os.environ and args.nproc_per_node > 1:
+        current_env["OMP_NUM_THREADS"] = str(1)
+        print("*****************************************\n"
+              "Setting OMP_NUM_THREADS environment variable for each process "
+              "to be {} in default, to avoid your system being overloaded, "
+              "please further tune the variable for optimal performance in "
+              "your application as needed. \n"
+              "*****************************************".format(current_env["OMP_NUM_THREADS"]))
+
     for local_rank in range(0, args.nproc_per_node):
         # each process's rank
         dist_rank = args.nproc_per_node * args.node_rank + local_rank
         current_env["RANK"] = str(dist_rank)
+        current_env["LOCAL_RANK"] = str(local_rank)
 
         # spawn the processes
-        cmd = [sys.executable,
-               "-u",
-               args.training_script,
-               "--local_rank={}".format(local_rank)] + args.training_script_args
+        with_python = not args.no_python
+        cmd = []
+        if with_python:
+            cmd = [sys.executable, "-u"]
+            if args.module:
+                cmd.append("-m")
+        else:
+            if not args.use_env:
+                raise ValueError("When using the '--no_python' flag, you must also set the '--use_env' flag.")
+            if args.module:
+                raise ValueError("Don't use both the '--no_python' flag and the '--module' flag at the same time.")
+
+        cmd.append(args.training_script)
+
+        if not args.use_env:
+            cmd.append("--local_rank={}".format(local_rank))
+
+        cmd.extend(args.training_script_args)
 
         process = subprocess.Popen(cmd, env=current_env)
         processes.append(process)
 
     for process in processes:
         process.wait()
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(returncode=process.returncode,
+                                                cmd=cmd)
 
 
 if __name__ == "__main__":

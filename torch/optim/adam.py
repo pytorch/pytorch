@@ -4,7 +4,7 @@ from .optimizer import Optimizer
 
 
 class Adam(Optimizer):
-    """Implements Adam algorithm.
+    r"""Implements Adam algorithm.
 
     It has been proposed in `Adam: A Method for Stochastic Optimization`_.
 
@@ -19,6 +19,7 @@ class Adam(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
+            (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -71,12 +72,12 @@ class Adam(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data)
+                    state['exp_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    state['exp_avg_sq'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p.data)
+                        state['max_exp_avg_sq'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 if amsgrad:
@@ -84,6 +85,8 @@ class Adam(Optimizer):
                 beta1, beta2 = group['betas']
 
                 state['step'] += 1
+                bias_correction1 = 1 - beta1 ** state['step']
+                bias_correction2 = 1 - beta2 ** state['step']
 
                 if group['weight_decay'] != 0:
                     grad = grad.add(group['weight_decay'], p.data)
@@ -95,13 +98,11 @@ class Adam(Optimizer):
                     # Maintains the maximum of all 2nd moment running avg. till now
                     torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
                     # Use the max. for normalizing running avg. of gradient
-                    denom = max_exp_avg_sq.sqrt().add_(group['eps'])
+                    denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
                 else:
-                    denom = exp_avg_sq.sqrt().add_(group['eps'])
+                    denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
 
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
-                step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
+                step_size = group['lr'] / bias_correction1
 
                 p.data.addcdiv_(-step_size, exp_avg, denom)
 

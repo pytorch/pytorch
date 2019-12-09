@@ -6,21 +6,23 @@ import numpy as np
 from hypothesis import given, assume
 import hypothesis.strategies as st
 
-from caffe2.python import core, model_helper, brew
+from caffe2.python import core, model_helper, brew, utils
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
+import unittest
+import os
 
 
-class TestInstanceNorm(hu.HypothesisTestCase):
+class TestInstanceNorm(serial.SerializedTestCase):
 
     def _get_inputs(self, N, C, H, W, order):
-        if order == 'NCHW':
-            input_data = np.random.rand(N, C, H, W).astype(np.float32)
-        elif order == 'NHWC':
+        input_data = np.random.rand(N, C, H, W).astype(np.float32)
+        if order == 'NHWC':
             # Allocate in the same order as NCHW and transpose to make sure
             # the inputs are identical on freshly-seeded calls.
-            input_data = np.random.rand(N, C, H, W).astype(np.float32)
-            input_data = np.transpose(input_data, axes=(0, 2, 3, 1))
-        else:
+            input_data = utils.NCHW2NHWC(input_data)
+        elif order != "NCHW":
             raise Exception('unknown order type ({})'.format(order))
 
         scale_data = np.random.rand(C).astype(np.float32)
@@ -50,10 +52,10 @@ class TestInstanceNorm(hu.HypothesisTestCase):
 
     @given(gc=hu.gcs['gc'],
            dc=hu.gcs['dc'],
-           N=st.integers(2, 3),
-           C=st.integers(2, 3),
-           H=st.integers(2, 3),
-           W=st.integers(2, 3),
+           N=st.integers(1, 4),
+           C=st.integers(1, 4),
+           H=st.integers(2, 4),
+           W=st.integers(2, 4),
            order=st.sampled_from(['NCHW', 'NHWC']),
            epsilon=st.floats(1e-6, 1e-4),
            store_mean=st.booleans(),
@@ -74,7 +76,16 @@ class TestInstanceNorm(hu.HypothesisTestCase):
             store_inv_stdev=store_inv_stdev,
             epsilon=epsilon,
             order=order)
-        input_blobs = self._get_inputs(N, C, H, W, order)
+
+        input_data = np.arange(N * C * H * W).astype(np.float32)
+        np.random.shuffle(input_data)
+        if order == "NCHW":
+            input_data = input_data.reshape(N, C, H, W)
+        else:
+            input_data = input_data.reshape(N, H, W, C)
+        scale_data = np.random.randn(C).astype(np.float32)
+        bias_data = np.random.randn(C).astype(np.float32)
+        input_blobs = (input_data, scale_data, bias_data)
 
         output_indices = [0]
         # if store_inv_stdev is turned on, store_mean must also be forced on
@@ -86,8 +97,7 @@ class TestInstanceNorm(hu.HypothesisTestCase):
         # The gradient only flows from output #0 since the other two only
         # store the temporary mean and inv_stdev buffers.
         # Check dl/dinput
-        self.assertGradientChecks(gc, op, input_blobs, 0, [0], stepsize=0.005,
-                                  threshold=0.01)
+        self.assertGradientChecks(gc, op, input_blobs, 0, [0])
         # Check dl/dscale
         self.assertGradientChecks(gc, op, input_blobs, 1, [0])
         # Check dl/dbias
@@ -124,11 +134,11 @@ class TestInstanceNorm(hu.HypothesisTestCase):
             outputs[order] = self.ws.blobs['output'].fetch()
         np.testing.assert_allclose(
             outputs['NCHW'],
-            outputs['NHWC'].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
-    @given(gc=hu.gcs['gc'],
+    @serial.given(gc=hu.gcs['gc'],
            dc=hu.gcs['dc'],
            N=st.integers(2, 10),
            C=st.integers(3, 10),
@@ -162,7 +172,7 @@ class TestInstanceNorm(hu.HypothesisTestCase):
 
         def ref(input_blob, scale_blob, bias_blob):
             if order == 'NHWC':
-                input_blob = np.transpose(input_blob, axes=(0, 3, 1, 2))
+                input_blob = utils.NHWC2NCHW(input_blob)
 
             mean_blob = input_blob.reshape((N, C, -1)).mean(axis=2)
             inv_stdev_blob = 1.0 / \
@@ -176,8 +186,7 @@ class TestInstanceNorm(hu.HypothesisTestCase):
                 + bias_bc
 
             if order == 'NHWC':
-                normalized_blob = np.transpose(
-                    normalized_blob, axes=(0, 2, 3, 1))
+                normalized_blob = utils.NCHW2NHWC(normalized_blob)
 
             if not store_mean and not store_inv_stdev:
                 return normalized_blob,
@@ -241,7 +250,7 @@ class TestInstanceNorm(hu.HypothesisTestCase):
 
         input_blob = np.random.rand(N, C, H, W).astype(np.float32)
         if order == 'NHWC':
-            input_blob = np.transpose(input_blob, axes=(0, 2, 3, 1))
+            input_blob = utils.NCHW2NHWC(input_blob)
 
         self.ws.create_blob('input').feed(input_blob)
 
@@ -258,11 +267,10 @@ class TestInstanceNorm(hu.HypothesisTestCase):
 
         output_blob = self.ws.blobs['output'].fetch()
         if order == 'NHWC':
-            output_blob = np.transpose(output_blob, axes=(0, 3, 1, 2))
+            output_blob = utils.NHWC2NCHW(output_blob)
 
         assert output_blob.shape == (N, C, H, W)
 
 
 if __name__ == '__main__':
-    import unittest
     unittest.main()

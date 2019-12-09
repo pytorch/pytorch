@@ -1,4 +1,4 @@
-#include "Descriptors.h"
+#include <ATen/cudnn/Descriptors.h>
 
 #include <ATen/ATen.h>
 
@@ -10,8 +10,8 @@ namespace at { namespace native {
 
 namespace {
 
-inline cudnnDataType_t getDataType(const at::Type& t) {
-  auto scalar_type = t.scalarType();
+inline cudnnDataType_t getDataType(const at::Tensor& t) {
+  auto scalar_type = t.scalar_type();
   if (scalar_type == at::kFloat) {
     return CUDNN_DATA_FLOAT;
   } else if (scalar_type == at::kHalf) {
@@ -22,10 +22,6 @@ inline cudnnDataType_t getDataType(const at::Type& t) {
   throw std::runtime_error("TensorDescriptor only supports double, float and half tensors");
 }
 
-inline cudnnDataType_t getDataType(const at::Tensor& t) {
-  return getDataType(t.type());
-}
-
 } // anonymous namespace
 
 
@@ -33,7 +29,7 @@ void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
   set(getDataType(t), t.sizes(), t.strides(), pad);
 }
 
-void TensorDescriptor::set(cudnnDataType_t datatype, IntList t_sizes, IntList t_strides, size_t pad) {
+void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
   size_t dim = t_sizes.size();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -114,7 +110,7 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  if (!t.is_contiguous()) {
+  if (!t.is_contiguous(t.suggest_memory_format())) {
     // NB: It is possible for this test to be insufficient, because the
     // Tensor passed in to set the filter descriptor may not be the actual
     // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
@@ -129,7 +125,11 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     size[i] = (int) 1;
   }
   dim = std::max(dim, pad);
-  set(getDataType(t), (int) dim, size);
+  cudnnTensorFormat_t filter_format = CUDNN_TENSOR_NCHW;
+  if (t.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+    filter_format = CUDNN_TENSOR_NHWC;
+  }
+  set(getDataType(t), (int) dim, size, filter_format);
 }
 
 }}

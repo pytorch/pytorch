@@ -1,28 +1,35 @@
-# C++ API Tests
+# C++ Frontend Tests
 
-In this folder live the tests for PyTorch's C++ API (formerly known as
-autogradpp). They use the [Catch2](https://github.com/catchorg/Catch2) test
-framework.
+In this folder live the tests for PyTorch's C++ Frontend. They use the
+[GoogleTest](https://github.com/google/googletest) test framework.
 
 ## CUDA Tests
 
-The way we handle CUDA tests is by separating them into a separate `TEST_CASE`
-(e.g. we have `optim` and `optim_cuda` test cases in `optim.cpp`), and giving
-them the `[cuda]` tag. Then, inside `main.cpp` we detect at runtime whether
-CUDA is available. If not, we disable these CUDA tests by appending `~[cuda]`
-to the test specifications. The `~` disables the tag.
+To make a test runnable only on platforms with CUDA, you should suffix your
+test with `_CUDA`, e.g.
 
-One annoying aspect is that Catch only allows filtering on test cases and not
-sections. Ideally, one could have a section like `LSTM` inside the `RNN` test
-case, and give this section a `[cuda]` tag to only run it when CUDA is
-available. Instead, we have to create a whole separate `RNN_cuda` test case and
-put all these CUDA sections in there.
+```cpp
+TEST(MyTestSuite, MyTestCase_CUDA) { }
+```
+
+To make it runnable only on platforms with at least two CUDA machines, suffix
+it with `_MultiCUDA` instead of `_CUDA`, e.g.
+
+```cpp
+TEST(MyTestSuite, MyTestCase_MultiCUDA) { }
+```
+
+There is logic in `main.cpp` that detects the availability and number of CUDA
+devices and supplies the appropriate negative filters to GoogleTest.
 
 ## Integration Tests
 
 Integration tests use the MNIST dataset. You must download it by running the
 following command from the PyTorch root folder:
 
-```shell
+```sh
 $ python tools/download_mnist.py -d test/cpp/api/mnist
 ```
+
+The required paths will be referenced as `test/cpp/api/mnist/...` in the test
+code, so you *must* run the integration tests from the PyTorch root folder.

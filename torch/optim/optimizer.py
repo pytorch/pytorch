@@ -1,10 +1,17 @@
-from collections import defaultdict, Iterable
+from collections import defaultdict
+from torch._six import container_abcs
 
 import torch
 from copy import deepcopy
 from itertools import chain
 
-required = object()
+
+class _RequiredParameter(object):
+    """Singleton class representing a required parameter for an Optimizer."""
+    def __repr__(self):
+        return "<required parameter>"
+
+required = _RequiredParameter()
 
 
 class Optimizer(object):
@@ -23,6 +30,7 @@ class Optimizer(object):
     """
 
     def __init__(self, params, defaults):
+        torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
         if isinstance(params, torch.Tensor):
@@ -44,6 +52,7 @@ class Optimizer(object):
 
     def __getstate__(self):
         return {
+            'defaults': self.defaults,
             'state': self.state,
             'param_groups': self.param_groups,
         }
@@ -123,7 +132,7 @@ class Optimizer(object):
                 return value
             elif isinstance(value, dict):
                 return {k: cast(param, v) for k, v in value.items()}
-            elif isinstance(value, Iterable):
+            elif isinstance(value, container_abcs.Iterable):
                 return type(value)(cast(param, v) for v in value)
             else:
                 return value
@@ -161,6 +170,10 @@ class Optimizer(object):
         Arguments:
             closure (callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
+
+        .. note::
+            Unless otherwise specified, this function should not modify the
+            ``.grad`` field of the parameters.
         """
         raise NotImplementedError
 

@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -16,8 +16,8 @@ namespace {
 template <typename T>
 struct ValueComp {
   bool operator()(
-      const std::pair<T, TIndex>& lhs,
-      const std::pair<T, TIndex>& rhs) const {
+      const std::pair<T, int64_t>& lhs,
+      const std::pair<T, int64_t>& rhs) const {
     return lhs.first > rhs.first ||
         (lhs.first == rhs.first && lhs.second < rhs.second);
   }
@@ -26,34 +26,34 @@ struct ValueComp {
 template <typename T>
 void GetTopK(
     const T* input,
-    const TIndex n,
-    const TIndex k,
-    const TIndex src_offset,
-    const TIndex dst_offset,
-    const TIndex stride,
+    const int64_t n,
+    const int64_t k,
+    const int64_t src_offset,
+    const int64_t dst_offset,
+    const int64_t stride,
     T* values,
-    TIndex* indices,
-    TIndex* flatten_indices) {
+    int64_t* indices,
+    int64_t* flatten_indices) {
   const T* src_ptr = input + src_offset;
-  std::vector<std::pair<T, TIndex>> heap_data;
+  std::vector<std::pair<T, int64_t>> heap_data;
   heap_data.reserve(k);
-  for (TIndex i = 0; i < k && i < n; ++i) {
+  for (int64_t i = 0; i < k && i < n; ++i) {
     heap_data.emplace_back(*src_ptr, i);
     src_ptr += stride;
   }
   std::priority_queue<
-      std::pair<T, TIndex>,
-      std::vector<std::pair<T, TIndex>>,
+      std::pair<T, int64_t>,
+      std::vector<std::pair<T, int64_t>>,
       ValueComp<T>>
       pq(ValueComp<T>(), std::move(heap_data));
-  for (TIndex i = k; i < n; ++i) {
+  for (int64_t i = k; i < n; ++i) {
     if (pq.top().first < *src_ptr) {
       pq.pop();
       pq.emplace(*src_ptr, i);
     }
     src_ptr += stride;
   }
-  TIndex dst_pos = dst_offset + (std::min(k, n) - 1) * stride;
+  int64_t dst_pos = dst_offset + (std::min(k, n) - 1) * stride;
   while (!pq.empty()) {
     const auto& item = pq.top();
     values[dst_pos] = item.first;
@@ -69,13 +69,13 @@ void GetTopK(
 template <typename T>
 void SetTopKGradient(
     const T* values,
-    const TIndex* indices,
+    const int64_t* indices,
     const int k,
-    const TIndex src_offset,
-    const TIndex dst_offset,
-    const TIndex stride,
+    const int64_t src_offset,
+    const int64_t dst_offset,
+    const int64_t stride,
     T* gradient) {
-  TIndex src_pos = src_offset;
+  int64_t src_pos = src_offset;
   for (int i = 0; i < k; ++i) {
     if (indices[src_pos] < 0) {
       continue;
@@ -94,55 +94,61 @@ bool TopKOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  const std::vector<TIndex>& input_dims = input.dims();
+  int64_t k = k_;
+  if(k == -1 && InputSize() == 2) {
+    k = Input(1).template data<int64_t>()[0];
+  }
+  CAFFE_ENFORCE(k >= 1, "k argument must be >= 1");
+
+  at::IntArrayRef input_dims = input.sizes();
   if (axis_ == -1) {
     axis_ = input_dims.size() - 1;
   }
   CAFFE_ENFORCE_GE(axis_, 0);
   CAFFE_ENFORCE_LT(axis_, input_dims.size());
 
-  std::vector<TIndex> output_dims = input_dims;
-  output_dims[axis_] = k_;
+  std::vector<int64_t> output_dims = input_dims.vec();
+  output_dims[axis_] = k;
   values->Resize(output_dims);
   indices->Resize(output_dims);
   if (flatten_indices != nullptr) {
-    flatten_indices->Resize(indices->size());
+    flatten_indices->Resize(indices->numel());
   }
   const T* input_data = input.template data<T>();
   T* values_data = values->template mutable_data<T>();
-  TIndex* indices_data = indices->template mutable_data<TIndex>();
-  TIndex* flatten_indices_data = flatten_indices == nullptr
+  int64_t* indices_data = indices->template mutable_data<int64_t>();
+  int64_t* flatten_indices_data = flatten_indices == nullptr
       ? nullptr
-      : flatten_indices->template mutable_data<TIndex>();
+      : flatten_indices->template mutable_data<int64_t>();
   // init values as the default value
-  math::Set<T, Context>(values->size(), T(0), values_data, &context_);
-  math::Set<TIndex, Context>(
-      indices->size(), TIndex(-1), indices_data, &context_);
+  math::Set<T, Context>(values->numel(), T(0), values_data, &context_);
+  math::Set<int64_t, Context>(
+      indices->numel(), int64_t(-1), indices_data, &context_);
   if (flatten_indices_data != nullptr) {
-    math::Set<TIndex, Context>(
-        flatten_indices->size(), TIndex(-1), flatten_indices_data, &context_);
+    math::Set<int64_t, Context>(
+        flatten_indices->numel(), int64_t(-1), flatten_indices_data, &context_);
   }
 
-  const TIndex prev_size = std::accumulate(
+  const int64_t prev_size = std::accumulate(
       input_dims.cbegin(),
       input_dims.cbegin() + axis_,
-      TIndex(1),
-      std::multiplies<TIndex>());
-  const TIndex next_size = std::accumulate(
+      int64_t(1),
+      std::multiplies<int64_t>());
+  const int64_t next_size = std::accumulate(
       input_dims.cbegin() + axis_ + 1,
       input_dims.cend(),
-      TIndex(1),
-      std::multiplies<TIndex>());
-  const TIndex src_offset_stride = input_dims[axis_] * next_size;
-  const TIndex dst_offset_stride = k_ * next_size;
-  TIndex src_offset = 0;
-  TIndex dst_offset = 0;
-  for (TIndex i = 0; i < prev_size; ++i) {
-    for (TIndex j = 0; j < next_size; ++j) {
+      int64_t(1),
+      std::multiplies<int64_t>());
+  const int64_t src_offset_stride = input_dims[axis_] * next_size;
+  const int64_t dst_offset_stride = k * next_size;
+  int64_t src_offset = 0;
+  int64_t dst_offset = 0;
+  for (int64_t i = 0; i < prev_size; ++i) {
+    for (int64_t j = 0; j < next_size; ++j) {
       GetTopK(
           input_data,
           input_dims[axis_],
-          k_,
+          k,
           src_offset + j,
           dst_offset + j,
           next_size,
@@ -162,34 +168,34 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  const std::vector<TIndex>& values_dims = values.dims();
-  const std::vector<TIndex>& origin_dims = original_input.dims();
+  at::IntArrayRef values_dims = values.sizes();
+  at::IntArrayRef origin_dims = original_input.sizes();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   const T* values_data = values.template data<T>();
-  const TIndex* indices_data = indices.template data<TIndex>();
+  const int64_t* indices_data = indices.template data<int64_t>();
   T* output_data = output->template mutable_data<T>();
   if (axis_ == -1) {
     axis_ = values_dims.size() - 1;
   }
   const int k = values_dims[axis_];
-  math::Set<T, Context>(output->size(), T(0), output_data, &context_);
-  const TIndex prev_size = std::accumulate(
+  math::Set<T, Context>(output->numel(), T(0), output_data, &context_);
+  const int64_t prev_size = std::accumulate(
       values_dims.cbegin(),
       values_dims.cbegin() + axis_,
-      TIndex(1),
-      std::multiplies<TIndex>());
-  const TIndex next_size = std::accumulate(
+      int64_t(1),
+      std::multiplies<int64_t>());
+  const int64_t next_size = std::accumulate(
       values_dims.cbegin() + axis_ + 1,
       values_dims.cend(),
-      TIndex(1),
-      std::multiplies<TIndex>());
-  const TIndex src_offset_stride = k * next_size;
-  const TIndex dst_offset_stride = origin_dims[axis_] * next_size;
-  TIndex src_offset = 0;
-  TIndex dst_offset = 0;
-  for (TIndex i = 0; i < prev_size; ++i) {
-    for (TIndex j = 0; j < next_size; ++j) {
+      int64_t(1),
+      std::multiplies<int64_t>());
+  const int64_t src_offset_stride = k * next_size;
+  const int64_t dst_offset_stride = origin_dims[axis_] * next_size;
+  int64_t src_offset = 0;
+  int64_t dst_offset = 0;
+  for (int64_t i = 0; i < prev_size; ++i) {
+    for (int64_t j = 0; j < next_size; ++j) {
       SetTopKGradient(
           values_data,
           indices_data,
@@ -209,7 +215,7 @@ REGISTER_CPU_OPERATOR(TopK, TopKOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(TopKGradient, TopKGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(TopK)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(2, 3)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
@@ -235,7 +241,9 @@ OPERATOR_SCHEMA(TopK)
       return out;
     })
     .SetDoc(R"DOC(
-Retrieve the top-K elements of the last dimension. Given an input tensor of shape $(a_1, a_2, ..., a_n, r)$ and integer argument `k`, return up to three outputs:
+Retrieve the top-K elements of the last dimension. 
+Given an input tensor of shape $(a_1, a_2, ..., a_n, r)$. `k` can be passed as an integer argument or a 1D tensor containing a single integer.
+Returns up to three outputs:
 
 1. Value tensor of shape $(a_1, a_2, ..., a_n, k)$ which contains the values of the top k elements along the last dimension
 2. Index tensor of shape $(a_1, a_2, ..., a_n, k)$ which contains the indices of the top k elements (original indices from the input tensor).
@@ -324,6 +332,10 @@ Flattened_indices: [ 1  0  3  4  8  7 10 11 13 14 17 16 20 18 23 22 26 25]
       0,
       "X",
       "(*Tensor`<float>`*): input tensor of shape $(a_1, a_2, ..., a_n, r)$")
+    .Input(
+      1,
+      "k",
+      "(*int*): number of top elements to retrieve")
     .Output(
         0,
         "Values",
@@ -335,8 +347,7 @@ Flattened_indices: [ 1  0  3  4  8  7 10 11 13 14 17 16 20 18 23 22 26 25]
     .Output(
         2,
         "Flattened_indices",
-        "(*Tensor`<int>`*): tensor of indices of shape $(a_1 * a_2 * ... * a_n * k,)$; indices values refer to each element's index in the flattened input tensor `X`")
-    .Arg("k", "(*int*): number of top elements to retrieve");
+        "(*Tensor`<int>`*): tensor of indices of shape $(a_1 * a_2 * ... * a_n * k,)$; indices values refer to each element's index in the flattened input tensor `X`");
 
 OPERATOR_SCHEMA(TopKGradient).NumInputs(3).NumOutputs(1);
 

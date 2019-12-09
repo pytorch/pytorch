@@ -1,8 +1,8 @@
 #ifndef THC_DEVICE_TENSOR_UTILS_INC
 #define THC_DEVICE_TENSOR_UTILS_INC
 
-#include "THCDeviceTensor.cuh"
-#include "THCTensor.hpp"
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCTensor.hpp>
 #include <limits>
 
 /// Constructs a DeviceTensor initialized from a THCudaTensor by
@@ -48,7 +48,7 @@ template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>
 toDeviceTensor(THCState* state, THCTensor* t) {
-  if (Dim != THCTensor__nDimension(state, t)) {
+  if (Dim != THCTensor_nDimensionLegacyAll(state, t)) {
     THError("THCudaTensor dimension mismatch");
   }
   // Determine the maximum offset into the tensor achievable; `IndexT`
@@ -58,8 +58,8 @@ toDeviceTensor(THCState* state, THCTensor* t) {
   IndexT strides[Dim];
 
   for (int i = 0; i < Dim; ++i) {
-    int64_t size = THCTensor_size(state, t, i);
-    int64_t stride = THCTensor_stride(state, t, i);
+    int64_t size = THTensor_sizeLegacyNoScalars(t, i);
+    int64_t stride = THTensor_strideLegacyNoScalars(t, i);
 
     maxOffset += (size - 1) * stride;
 
@@ -75,6 +75,6 @@ toDeviceTensor(THCState* state, THCTensor* t) {
     t->data<T>(), sizes, strides);
 }
 
-#include "THCDeviceTensorUtils-inl.cuh"
+#include <THC/THCDeviceTensorUtils-inl.cuh>
 
 #endif // THC_DEVICE_TENSOR_UTILS_INC

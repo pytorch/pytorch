@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/Tensor.h"
-#include "ATen/TensorGeometry.h"
-#include "ATen/Utils.h"
+#include <ATen/Tensor.h>
+#include <ATen/TensorGeometry.h>
+#include <ATen/Utils.h>
 
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
 
@@ -12,7 +12,7 @@ namespace at {
 // make sense.  These are particularly useful for native functions,
 // which do NO argument checking by default.
 
-struct AT_API TensorArg {
+struct CAFFE2_API TensorArg {
   Tensor tensor;
   const char* name;
   int pos; // 1-indexed
@@ -22,7 +22,7 @@ struct AT_API TensorArg {
   const Tensor& operator*() const { return tensor; }
 };
 
-struct AT_API TensorGeometryArg {
+struct CAFFE2_API TensorGeometryArg {
   TensorGeometry tensor;
   const char* name;
   int pos; // 1-indexed
@@ -49,33 +49,105 @@ using CheckedFrom = const char*;
 // not TensorGeometryArg, because the Tensor to TensorGeometry
 // conversion will blow up if you have undefined tensors.
 
-AT_API std::ostream& operator<<(std::ostream & out, TensorGeometryArg t);
-AT_API void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim);
+CAFFE2_API std::ostream& operator<<(std::ostream& out, TensorGeometryArg t);
+CAFFE2_API void checkDim(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim);
 // NB: this is an inclusive-exclusive range
-AT_API void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start, int64_t dim_end);
-AT_API void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
-AT_API void checkContiguous(CheckedFrom c, const TensorGeometryArg& t);
-AT_API void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
-AT_API void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntList sizes);
-AT_API void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size);
-AT_API void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel);
-AT_API void checkSameNumel(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
-AT_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
-AT_API void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
-AT_API void checkScalarTypes(CheckedFrom c, const TensorArg& t, at::ArrayRef<ScalarType> l);
-AT_API void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-AT_API void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
-AT_API void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-AT_API void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors);
-AT_API void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-AT_API void checkDefined(CheckedFrom c, const TensorArg& t);
-AT_API void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
+CAFFE2_API void checkDimRange(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim_start,
+    int64_t dim_end);
+CAFFE2_API void checkSameDim(
+    CheckedFrom c,
+    const TensorGeometryArg& t1,
+    const TensorGeometryArg& t2);
+CAFFE2_API void checkContiguous(CheckedFrom c, const TensorGeometryArg& t);
+CAFFE2_API void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
+CAFFE2_API void checkSize(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    IntArrayRef sizes);
+CAFFE2_API void checkSize(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim,
+    int64_t size);
+CAFFE2_API void checkNumel(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t numel);
+CAFFE2_API void checkSameNumel(
+    CheckedFrom c,
+    const TensorGeometryArg& t1,
+    const TensorGeometryArg& t2);
+CAFFE2_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
+CAFFE2_API void checkScalarType(
+    CheckedFrom c,
+    const TensorArg& t,
+    ScalarType s);
+CAFFE2_API void checkScalarTypes(
+    CheckedFrom c,
+    const TensorArg& t,
+    at::ArrayRef<ScalarType> l);
+CAFFE2_API void checkSameGPU(
+    CheckedFrom c,
+    const TensorArg& t1,
+    const TensorArg& t2);
+CAFFE2_API void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
+CAFFE2_API void checkSameType(
+    CheckedFrom c,
+    const TensorArg& t1,
+    const TensorArg& t2);
+CAFFE2_API void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors);
+CAFFE2_API void checkSameSize(
+    CheckedFrom c,
+    const TensorArg& t1,
+    const TensorArg& t2);
+CAFFE2_API void checkDefined(CheckedFrom c, const TensorArg& t);
+CAFFE2_API void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 
 // FixMe: does TensorArg slow things down?
-AT_API void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
+CAFFE2_API void checkBackend(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> t,
+    at::Backend backend);
+
+CAFFE2_API void checkDeviceType(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> tensors,
+    at::DeviceType device_type);
+
+CAFFE2_API void checkLayout(CheckedFrom c, const Tensor& t, Layout layout);
+
+CAFFE2_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout);
 
 // Methods for getting data_ptr if tensor is defined
-AT_API void * maybe_data_ptr(const Tensor& tensor);
-AT_API void * maybe_data_ptr(const TensorArg& tensor);
+CAFFE2_API void* maybe_data_ptr(const Tensor& tensor);
+CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);
 
-}
+// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
+// Although we cache is_contiguous in tensor now, this is till useful because it
+// allows checking if a particular geometry is contiguous without explicitly
+// constructing a tensor, e.g., when you want to choose a kernel strategy based
+// on whether a subgeometry is contiguous.
+CAFFE2_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
+
+// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
+CAFFE2_API void check_dim_size(
+    const Tensor& tensor,
+    int64_t dim,
+    int64_t dim_size,
+    int64_t size);
+
+namespace detail {
+CAFFE2_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
+CAFFE2_API int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides);
+CAFFE2_API c10::optional<std::vector<int64_t>> computeStride(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    IntArrayRef newshape);
+} // namespace detail
+} // namespace at

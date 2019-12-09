@@ -1,4 +1,5 @@
 import torch
+from torch._six import inf
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from numbers import Number
@@ -8,15 +9,15 @@ from torch.distributions.utils import broadcast_all
 
 class Multinomial(Distribution):
     r"""
-    Creates a Multinomial distribution parameterized by `total_count` and
-    either `probs` or `logits` (but not both). The innermost dimension of
-    `probs` indexes over categories. All other dimensions index over batches.
+    Creates a Multinomial distribution parameterized by :attr:`total_count` and
+    either :attr:`probs` or :attr:`logits` (but not both). The innermost dimension of
+    :attr:`probs` indexes over categories. All other dimensions index over batches.
 
-    Note that `total_count` need not be specified if only :meth:`log_prob` is
+    Note that :attr:`total_count` need not be specified if only :meth:`log_prob` is
     called (see example below)
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-    and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1.
 
     -   :meth:`sample` requires a single shared `total_count` for all
         parameters and samples.
@@ -37,7 +38,8 @@ class Multinomial(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    arg_constraints = {'logits': constraints.real}  # Let logits be the canonical parameterization.
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
 
     @property
     def mean(self):
@@ -55,6 +57,15 @@ class Multinomial(Distribution):
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Multinomial, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.total_count = self.total_count
+        new._categorical = self._categorical.expand(batch_shape)
+        super(Multinomial, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
@@ -90,9 +101,9 @@ class Multinomial(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        logits, value = broadcast_all(self.logits.clone(), value)
+        logits, value = broadcast_all(self.logits.clone(memory_format=torch.contiguous_format), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)
-        logits[(value == 0) & (logits == -float('inf'))] = 0
+        logits[(value == 0) & (logits == -inf)] = 0
         log_powers = (logits * value).sum(-1)
         return log_factorial_n - log_factorial_xs + log_powers

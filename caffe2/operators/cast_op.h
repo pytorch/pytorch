@@ -15,7 +15,7 @@ class CastOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  CastOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CastOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     const ArgumentHelper helper(operator_def);
     TensorProto_DataType to = cast::GetCastDataType(helper, "to");
@@ -42,7 +42,7 @@ class CastOp : public Operator<Context> {
     const auto* data = input.template data<SrcType>();
     auto* out = output->template mutable_data<DstType>();
     auto N = input.size();
-    for (TIndex i = 0; i < N; ++i) {
+    for (int64_t i = 0; i < N; ++i) {
       out[i] = static_cast<DstType>(data[i]);
     }
     return true;

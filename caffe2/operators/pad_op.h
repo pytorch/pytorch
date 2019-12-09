@@ -16,18 +16,19 @@ enum class PadMode {
   EDGE = 2, // pads with the edge values, with string "edge"
 };
 
-PadMode StringToPadMode(const string&);
+CAFFE2_API PadMode StringToPadMode(const string&);
 
 template <typename T, class Context>
 class PadImageOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PadImageOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  template <class... Args>
+  explicit PadImageOp(Args&&... args)
+      : ConvPoolOpBase<Context>(std::forward<Args>(args)...),
         mode_(StringToPadMode(
-            OperatorBase::GetSingleArgument<string>("mode", "constant"))),
+            this->template GetSingleArgument<string>("mode", "constant"))),
         value_(static_cast<T>(
-            OperatorBase::GetSingleArgument<float>("value", 0.0))) {
+            this->template GetSingleArgument<float>("value", 0.0))) {
     CAFFE_ENFORCE(
         legacy_pad_ == LegacyPadding::NOTSET,
         "Padding layer only supports explicit pad values.");
@@ -62,10 +63,11 @@ template <typename T, class Context>
 class PadImageGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PadImageGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws),
+  template <class... Args>
+  explicit PadImageGradientOp(Args&&... args)
+      : ConvPoolOpBase<Context>(std::forward<Args>(args)...),
         mode_(StringToPadMode(
-            OperatorBase::GetSingleArgument<string>("mode", "constant"))) {
+            this->template GetSingleArgument<string>("mode", "constant"))) {
     CAFFE_ENFORCE(
         legacy_pad_ == LegacyPadding::NOTSET,
         "Padding layer only supports explicit pad values.");

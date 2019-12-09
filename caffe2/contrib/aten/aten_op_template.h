@@ -15,7 +15,7 @@ static std::unordered_map<std::string, int> op_to_key = {
 
 namespace caffe2 {
 
-using at::Half; // for AT_FORALL_SCALAR_TYPES
+using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 
 template <class Context>
 class ATenOp : public Operator<Context> {
@@ -40,26 +40,36 @@ private:
   at::Backend backend() const;
 
   TypeMeta typeMetaFor(const at::Tensor & t) {
-    return typeMetaFor(t.type().scalarType());
+    return typeMetaFor(t.scalar_type());
   }
   TypeMeta typeMetaFor(at::ScalarType st) {
-    #define DEFINE_CASE(ctype,aten_name,_) \
+    #define DEFINE_CASE(ctype,aten_name) \
       case at::k##aten_name: \
         return TypeMeta::Make<ctype>();
     switch(st) {
-      AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
-      default:
-        CAFFE_THROW("Unknown ATen Type");
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
+    default:
+      CAFFE_THROW("Unknown ATen Type");
     }
     #undef DEFINE_CASE
   }
 
-  at::Type & typeFor(const Tensor<Context> & ten) {
-    return at::getType(backend(), atScalarTypeFor(ten.meta()));
+  at::TensorOptions optionsFor(const Tensor& ten) {
+    at::Device device = ten.GetDevice();
+#ifdef __HIP_PLATFORM_HCC__
+    if (backend() == at::Backend::HIP) {
+      device = at::Device(kCUDA, device.index());
+    }
+#endif
+    return at::TensorOptions(device).dtype(ten.dtype());
   }
-  at::Tensor tensorWrapping(const Tensor<Context>& ten_) {
-    auto& ten = const_cast<Tensor<Context>&>(ten_);
-    return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
+
+  at::Tensor tensorWrapping(const Tensor& ten_) {
+    auto& ten = const_cast<Tensor&>(ten_);
+    return at::from_blob(
+        ten.raw_mutable_data(),
+        ten.sizes(),
+        optionsFor(ten));
   }
 
   at::Tensor peek(size_t i, size_t N) {
@@ -75,30 +85,30 @@ private:
     return results;
   }
 
-  at::ScalarType atScalarTypeFor(const TypeMeta & meta) {
-    #define DEFINE_IF(ctype,aten_name,_) \
-    if(meta.Match<ctype>()) { \
-      return at::k##aten_name; \
-    }
-    AT_FORALL_SCALAR_TYPES(DEFINE_IF)
-    #undef DEFINE_IF
-    // Special case for bool, since the type in ATen is actually Byte
-    if (meta.Match<bool>()) {
-      return at::kByte;
-    }
-    CAFFE_THROW("Unknown type meta"); // TODO: improve error message...
-  }
-  void assignTo(Tensor<Context> * dst, const at::Tensor & src_) {
+  void assignTo(Tensor* dst, const at::Tensor& src_) {
     at::Tensor src = src_.contiguous();
     auto at_sizes = src.sizes();
-    std::vector<int64_t> dims(at_sizes.begin(),at_sizes.end());
+    caffe2::TypeMeta type_meta = typeMetaFor(src);
+    at::Device device = src.device();
+#ifdef __HIP_PLATFORM_HCC__
+    if (device.type() == at::DeviceType::CUDA) {
+      device = at::Device(at::DeviceType::HIP, device.index());
+    }
+#endif
+    at::TensorImpl* src_impl = src.unsafeReleaseTensorImpl();
+    std::vector<int64_t> dims(at_sizes.begin(), at_sizes.end());
     dst->Resize(dims);
     dst->ShareExternalPointer(
-        src.data_ptr(), typeMetaFor(src), 0, [src](void* ptr) mutable {
-          // return a closure that holds a handle to t until it is called
-          // to keep the aten memory alive
-          return src.reset();
-        });
+        at::DataPtr(
+            src_impl->data(),
+            static_cast<void*>(src_impl),
+            [](void* t_ptr) -> void {
+              at::TensorImpl* local_impl = static_cast<at::TensorImpl*>(t_ptr);
+              c10::raw::intrusive_ptr::decref(local_impl);
+            },
+            device),
+        type_meta,
+        0);
   }
   void assignListStartingAt(
       size_t offset,
@@ -108,35 +118,36 @@ private:
     }
   }
 
-  // the AT_FORALL_SCALAR_TYPES macro just gives a 'i' or 'd' argument
-  // for each type to specify if it is stored as a integer or a double.
-  // We need this workaround here to extract the value in the scalar losslessly
-  // because in some cases like 'sum' Torch promotes float to double
-  // and will complain if we downcast it with toFloat, causing it
-  // to lose precision
-  double extract_d(const at::Scalar & s) {
-    return s.toDouble();
-  }
-  int64_t extract_i(const at::Scalar & s) {
+  template<typename T,
+          typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type* =
+              nullptr>
+  int64_t extract(const at::Scalar &s) {
     return s.toLong();
   }
 
-  void assignTo(Tensor<Context> * dst, at::Type & inferred_type, at::Scalar scalar) {
-    switch(inferred_type.scalarType()) {
-      #define DEFINE_CASE(ctype,aten_name,native) \
+  template<typename T,
+          typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
+              nullptr>
+  int64_t extract(const at::Scalar &s) {
+    return s.toDouble();
+  }
+
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+    switch(scalar_type) {
+      #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \
-          auto value = extract_##native(scalar); \
+          auto value = extract<ctype>(scalar); \
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
-      AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
-      #undef DEFINE_CASE
+      AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CASE)
+#undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");
     }
   }
-  template<typename T>
-  void assignToValue(Tensor<Context> * dst, T v) {
-    dst->Resize(std::vector<TIndex>());
+  template <typename T>
+  void assignToValue(Tensor* dst, T v) {
+    dst->Resize(std::vector<int64_t>());
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }
   int findImplementation(const OperatorDef& operator_def) {
@@ -159,7 +170,7 @@ private:
       descriptor << "-" << a;
 
     std::string descriptor_sized =
-        descriptor.str() + "-" + caffe2::to_string(InputSize());
+        descriptor.str() + "-" + c10::to_string(InputSize());
     std::string descriptor_var_args = descriptor.str() + "-*";
     if (op_to_key.count(descriptor_sized) > 0) {
       return op_to_key[descriptor_sized];
@@ -185,7 +196,7 @@ private:
     CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>(name));
     return OperatorBase::GetSingleArgument<T>(name, 0);
   }
-  std::vector<int64_t> readIntList(const std::string & name) {
+  std::vector<int64_t> readIntArrayRef(const std::string & name) {
     CAFFE_ENFORCE(OperatorBase::HasArgument(name));
     return OperatorBase::GetRepeatedArgument<int64_t>(name, {});
   }
@@ -199,27 +210,6 @@ private:
       result[i] = ints.at(i);
     }
     return result;
-  }
-  at::ScalarType stringToScalarType(const std::string & name) {
-    #define DEFINE_IF(type,aten) \
-      if(#type == name) \
-        return at::k##aten;
-    DEFINE_IF(float16, Half)
-    DEFINE_IF(float, Float)
-    DEFINE_IF(double, Double)
-    DEFINE_IF(uint8, Byte)
-    DEFINE_IF(int8, Char)
-    DEFINE_IF(int16, Short)
-    DEFINE_IF(int32, Int)
-    DEFINE_IF(int64, Long)
-    CAFFE_THROW("unsupported type annotation: ", name);
-  }
-  at::Type & stringToType(const std::string & name) {
-    return at::getType(backend(), stringToScalarType(name));
-  }
-  at::Type * readTypeAttribute(const std::string & name) {
-    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<std::string>(name));
-    return &stringToType(OperatorBase::GetSingleArgument<std::string>(name, ""));
   }
 };
 

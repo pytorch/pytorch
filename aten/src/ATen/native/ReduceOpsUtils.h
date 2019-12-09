@@ -2,9 +2,9 @@
 
 namespace at { namespace native {
 
-static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
+inline Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
                                 int64_t dim) {
-  IntList self_sizes = self.sizes();
+  IntArrayRef self_sizes = self.sizes();
   std::vector<int64_t> result_sizes;
   result_sizes.insert(result_sizes.end(), self_sizes.begin(), self_sizes.end());
   result_sizes[dim] = 1;
@@ -12,7 +12,7 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
   return result;
 }
 
-static bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
+inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
                                       Scalar ident, int64_t dim, bool keepdim) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
@@ -29,7 +29,7 @@ static bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
   return false;
 }
 
-static bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &self,
+inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &self,
                                                int64_t dim, bool keepdim, const char *fn_name) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
@@ -44,4 +44,13 @@ static bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
   return false;
 }
 
+inline c10::optional<Tensor> _allreduce_return_trivial(
+    const Tensor& self,
+    Scalar ident) {
+  // Return identity
+  if (self.numel() == 0) {
+    return at::scalar_tensor(ident, self.options());
+  }
+  return c10::nullopt;
+}
 }}  // at::native

@@ -105,6 +105,8 @@
 #      the host compiler is constructed with one or more visual studio macros
 #      such as $(VCInstallDir), that expands out to the path when
 #      the command is run from within VS.
+#      If the CUDAHOSTCXX environment variable is set it will
+#      be used as the default.
 #
 #   CUDA_NVCC_FLAGS
 #   CUDA_NVCC_FLAGS_<CONFIG>
@@ -232,9 +234,9 @@
 #       - "Auto" detects local machine GPU compute arch at runtime.
 #       - "Common" and "All" cover common and entire subsets of architectures
 #      ARCH_AND_PTX : NAME | NUM.NUM | NUM.NUM(NUM.NUM) | NUM.NUM+PTX
-#      NAME: Fermi Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal
+#      NAME: Kepler Maxwell Kepler+Tesla Maxwell+Tegra Pascal Volta Turing
 #      NUM: Any number. Only those pairs are currently accepted by NVCC though:
-#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2
+#            3.5 3.7 5.0 5.2 5.3 6.0 6.1 6.2 7.0 7.2 7.5
 #      Returns LIST of flags to be added to CUDA_NVCC_FLAGS in ${out_variable}
 #      Additionally, sets ${out_variable}_readable to the resulting numeric list
 #      Example:
@@ -531,7 +533,9 @@ option(CUDA_HOST_COMPILATION_CPP "Generated file extension" ON)
 # Extra user settable flags
 cmake_initialize_per_config_variable(CUDA_NVCC_FLAGS "Semi-colon delimit multiple arguments.")
 
-if(CMAKE_GENERATOR MATCHES "Visual Studio")
+if(DEFINED ENV{CUDAHOSTCXX})
+  set(CUDA_HOST_COMPILER "$ENV{CUDAHOSTCXX}" CACHE FILEPATH "Host side compiler used by NVCC")
+elseif(CMAKE_GENERATOR MATCHES "Visual Studio")
   set(_CUDA_MSVC_HOST_COMPILER "$(VCInstallDir)Tools/MSVC/$(VCToolsVersion)/bin/Host$(Platform)/$(PlatformTarget)")
   if(MSVC_VERSION LESS 1910)
    set(_CUDA_MSVC_HOST_COMPILER "$(VCInstallDir)bin")
@@ -561,12 +565,10 @@ else()
       set(c_compiler_realpath "")
     endif()
     set(CUDA_HOST_COMPILER "${c_compiler_realpath}" CACHE FILEPATH "Host side compiler used by NVCC")
-  elseif(MSVC AND ("${CMAKE_C_COMPILER}" MATCHES "clcache" OR "${CMAKE_C_COMPILER}" MATCHES "sccache"))
-    # NVCC does not think it will work if it is passed clcache.exe as the host
-    # compiler, which means that builds with CC=cl.exe won't work.  Best to just
-    # feed it whatever the actual cl.exe is as the host compiler.
-    #
-    # FYI: clcache works as the match, but clcache.exe does NOT.
+  elseif(MSVC AND "${CMAKE_C_COMPILER}" MATCHES "clcache|sccache")
+    # NVCC does not think it will work if it is passed clcache.exe or sccache.exe
+    # as the host compiler, which means that builds with CC=cl.exe won't work.
+    # Best to just feed it whatever the actual cl.exe is as the host compiler.
     set(CUDA_HOST_COMPILER "cl.exe" CACHE FILEPATH "Host side compiler used by NVCC")
   else()
     set(CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}"
@@ -575,7 +577,7 @@ else()
 endif()
 
 # Propagate the host flags to the host compiler via -Xcompiler
-option(CUDA_PROPAGATE_HOST_FLAGS "Propage C/CXX_FLAGS and friends to the host compiler via -Xcompile" ON)
+option(CUDA_PROPAGATE_HOST_FLAGS "Propagate C/CXX_FLAGS and friends to the host compiler via -Xcompile" ON)
 
 # Blacklisted flags to prevent propagation
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST  "" CACHE STRING "Blacklisted flags to prevent propagation")
@@ -671,7 +673,7 @@ endif()
 # Search for the cuda distribution.
 if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
   # Search in the CUDA_BIN_PATH first.
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS
       ENV CUDA_TOOLKIT_ROOT
@@ -683,19 +685,22 @@ if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
     )
 
   # Now search default paths
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS /opt/cuda/bin
     PATH_SUFFIXES cuda/bin
     DOC "Toolkit location."
     )
 
-  if (CUDA_TOOLKIT_ROOT_DIR)
+  if (CUDA_TOOLKIT_ROOT_DIR_NVCC)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR "${CUDA_TOOLKIT_ROOT_DIR_NVCC}" DIRECTORY)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR}" DIRECTORY CACHE)
     string(REGEX REPLACE "[/\\\\]?bin[64]*[/\\\\]?$" "" CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR})
     # We need to force this back into the cache.
     set(CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR} CACHE PATH "Toolkit location." FORCE)
     set(CUDA_TOOLKIT_TARGET_DIR ${CUDA_TOOLKIT_ROOT_DIR})
   endif()
+  unset(CUDA_TOOLKIT_ROOT_DIR_NVCC CACHE)
 
   if (NOT EXISTS ${CUDA_TOOLKIT_ROOT_DIR})
     if(CUDA_FIND_REQUIRED)
@@ -981,7 +986,8 @@ if(NOT CUDA_VERSION VERSION_LESS "3.2")
     find_cuda_helper_libs(nvcuvid)
   endif()
 endif()
-if(CUDA_VERSION VERSION_GREATER "5.0")
+if(CUDA_VERSION VERSION_GREATER "5.0" AND CUDA_VERSION VERSION_LESS "9.2")
+  # In CUDA 9.2 cublas_device was deprecated
   find_cuda_helper_libs(cublas_device)
 endif()
 
@@ -1469,14 +1475,14 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   # Process the C++11 flag.  If the host sets the flag, we need to add it to nvcc and
   # remove it from the host. This is because -Xcompile -std=c++ will choke nvcc (it uses
   # the C preprocessor).  In order to get this to work correctly, we need to use nvcc's
-  # specific c++11 flag.
+  # specific c++14 flag.
   if( "${_cuda_host_flags}" MATCHES "-std=c\\+\\+11")
-    # Add the c++11 flag to nvcc if it isn't already present.  Note that we only look at
+    # Add the c++14 flag to nvcc if it isn't already present.  Note that we only look at
     # the main flag instead of the configuration specific flags.
-    if( NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11" )
-      list(APPEND nvcc_flags --std c++11)
+    if( NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+14" )
+      list(APPEND nvcc_flags --std c++14)
     endif()
-    string(REGEX REPLACE "[-]+std=c\\+\\+11" "" _cuda_host_flags "${_cuda_host_flags}")
+    string(REGEX REPLACE "[-]+std=c\\+\\+14" "" _cuda_host_flags "${_cuda_host_flags}")
   endif()
 
   if(_cuda_build_shared_libs)
@@ -1629,6 +1635,11 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(verbose_output ON)
       elseif(CMAKE_GENERATOR MATCHES "Makefiles")
         set(verbose_output "$(VERBOSE)")
+      # This condition lets us also turn on verbose output when someone
+      # specifies CMAKE_VERBOSE_MAKEFILE, even if the generator isn't
+      # the Makefiles generator (this is important for us, Ninja users.)
+      elseif(CMAKE_VERBOSE_MAKEFILE)
+        set(verbose_output ON)
       else()
         set(verbose_output OFF)
       endif()
@@ -1790,7 +1801,7 @@ function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options
       add_custom_command(
         OUTPUT ${output_file}
         DEPENDS ${object_files}
-        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} -dlink ${object_files} ${CUDA_cublas_device_LIBRARY} -o ${output_file}
+        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} -dlink ${object_files} -o ${output_file}
         ${flags}
         COMMENT "Building NVCC intermediate link file ${output_file_relative_path}"
         COMMAND_EXPAND_LISTS
@@ -1803,7 +1814,7 @@ function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options
         PRE_LINK
         COMMAND ${CMAKE_COMMAND} -E echo "Building NVCC intermediate link file ${output_file_relative_path}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${output_file_dir}"
-        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} ${flags} -dlink ${object_files} ${CUDA_cublas_device_LIBRARY} -o "${output_file}"
+        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} ${flags} -dlink ${object_files} -o "${output_file}"
         COMMAND_EXPAND_LISTS
         ${_verbatim}
         )

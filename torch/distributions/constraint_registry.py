@@ -82,6 +82,7 @@ class ConstraintRegistry(object):
     """
     def __init__(self):
         self._registry = {}
+        super(ConstraintRegistry, self).__init__()
 
     def register(self, constraint, factory=None):
         """
@@ -152,7 +153,9 @@ transform_to = ConstraintRegistry()
 ################################################################################
 
 @biject_to.register(constraints.real)
+@biject_to.register(constraints.real_vector)
 @transform_to.register(constraints.real)
+@transform_to.register(constraints.real_vector)
 def _transform_to_real(constraint):
     return transforms.identity_transform
 
@@ -164,7 +167,9 @@ def _transform_to_positive(constraint):
 
 
 @biject_to.register(constraints.greater_than)
+@biject_to.register(constraints.greater_than_eq)
 @transform_to.register(constraints.greater_than)
+@transform_to.register(constraints.greater_than_eq)
 def _transform_to_greater_than(constraint):
     return transforms.ComposeTransform([transforms.ExpTransform(),
                                         transforms.AffineTransform(constraint.lower_bound, 1)])
@@ -178,7 +183,9 @@ def _transform_to_less_than(constraint):
 
 
 @biject_to.register(constraints.interval)
+@biject_to.register(constraints.half_open_interval)
 @transform_to.register(constraints.interval)
+@transform_to.register(constraints.half_open_interval)
 def _transform_to_interval(constraint):
     # Handle the special case of the unit interval.
     lower_is_0 = isinstance(constraint.lower_bound, numbers.Number) and constraint.lower_bound == 0
@@ -206,3 +213,33 @@ def _transform_to_simplex(constraint):
 @transform_to.register(constraints.lower_cholesky)
 def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
+
+
+@biject_to.register(constraints.cat)
+def _biject_to_cat(constraint):
+    return transforms.CatTransform([biject_to(c)
+                                    for c in constraint.cseq],
+                                   constraint.dim,
+                                   constraint.lengths)
+
+
+@transform_to.register(constraints.cat)
+def _transform_to_cat(constraint):
+    return transforms.CatTransform([transform_to(c)
+                                    for c in constraint.cseq],
+                                   constraint.dim,
+                                   constraint.lengths)
+
+
+@biject_to.register(constraints.stack)
+def _biject_to_stack(constraint):
+    return transforms.StackTransform(
+        [biject_to(c)
+         for c in constraint.cseq], constraint.dim)
+
+
+@transform_to.register(constraints.stack)
+def _transform_to_stack(constraint):
+    return transforms.StackTransform(
+        [transform_to(c)
+         for c in constraint.cseq], constraint.dim)

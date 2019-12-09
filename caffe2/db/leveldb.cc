@@ -4,8 +4,10 @@
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 
-CAFFE2_DEFINE_int(caffe2_leveldb_block_size, 65536,
-                  "The caffe2 leveldb block size when writing a leveldb.");
+C10_DEFINE_int(
+    caffe2_leveldb_block_size,
+    65536,
+    "The caffe2 leveldb block size when writing a leveldb.");
 
 namespace caffe2 {
 namespace db {
@@ -16,7 +18,7 @@ class LevelDBCursor : public Cursor {
       : iter_(db->NewIterator(leveldb::ReadOptions())) {
     SeekToFirst();
   }
-  ~LevelDBCursor() {}
+  ~LevelDBCursor() override {}
   void Seek(const string& key) override { iter_->Seek(key); }
   bool SupportsSeek() override { return true; }
   void SeekToFirst() override { iter_->SeekToFirst(); }
@@ -35,7 +37,9 @@ class LevelDBTransaction : public Transaction {
     CAFFE_ENFORCE(db_);
     batch_.reset(new leveldb::WriteBatch());
   }
-  ~LevelDBTransaction() { Commit(); }
+  ~LevelDBTransaction() override {
+    Commit();
+  }
   void Put(const string& key, const string& value) override {
     batch_->Put(key, value);
   }
@@ -51,7 +55,7 @@ class LevelDBTransaction : public Transaction {
   leveldb::DB* db_;
   std::unique_ptr<leveldb::WriteBatch> batch_;
 
-  DISABLE_COPY_AND_ASSIGN(LevelDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(LevelDBTransaction);
 };
 
 class LevelDB : public DB {

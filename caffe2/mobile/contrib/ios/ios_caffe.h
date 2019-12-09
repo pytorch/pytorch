@@ -3,9 +3,9 @@
 
 #include <string>
 #include <vector>
-#include "caffe2/core/predictor.h"
 #include "caffe2/mobile/contrib/ios/ios_caffe_defines.h"
 #include "caffe2/mobile/contrib/ios/ios_caffe_predictor.h"
+#include "caffe2/predictor/predictor.h"
 
 extern "C" {
 

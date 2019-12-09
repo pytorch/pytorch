@@ -8,69 +8,95 @@ type_map = {
         'Float',
         'Double',
         'Half',
+        'BFloat16',
     ],
     'integral': [
         'Byte',
         'Char',
         'Short',
         'Int',
-        'Long'
+        'Long',
+        'Bool',
     ],
+    'quantized': [
+        'QInt8',
+        'QUInt8',
+        'QInt32',
+    ]
 }
 
-all_types = type_map['floating_point'] + type_map['integral']
+all_types = type_map['floating_point'] + type_map['integral'] + type_map['quantized']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU']
 default_backends = ['CPU', 'CUDA']
-
-sparse_map = {
-    'CPU': 'SparseCPU',
-    'CUDA': 'SparseCUDA',
-}
 
 
 def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
     # based on the backend and type attributes
     # if backend or type is not defined, it is assumed to be all of them
-    if 'backend_type_pairs' not in option:
+    if 'backend_types' not in option:
         backends = option.get('backends', default_backends)
-        if option.get('aten_sparse', False):
-            backends.extend([sparse_map[p] for p in backends if p in sparse_map])
+        if isinstance(option.get('type_method_definition_dispatch'), dict):
+            backends = option.get('type_method_definition_dispatch').keys()
         backends = set(backends)
 
-        types = option.get('types', all_types)
-
-        pairs = [[p, t] for p in backends for t in types]
+        backend_types = {}
+        for backend in backends:
+            if backend == 'QuantizedCPU':
+                backend_types[backend] = type_map['quantized']
+            else:
+                backend_types[backend] = option.get('types', all_types)
     else:
-        pairs = option['backend_type_pairs']
+        backend_types = option['backend_types']
 
     # expand type alias (integral, floating_point, all)
-    def expand(pair):
-        p, t = pair
-        assert(p in all_backends)
-        if t in type_map:
-            return [(p, tt) for tt in type_map[t]]
-        assert(t in all_types)
-        return [(p, t)]
-    pairs = set(p for pair in pairs for p in expand(pair))
+    def expand(types):
+        ret = []
+        for t in types:
+            if t in type_map:
+                ret.extend(type_map[t])
+            else:
+                assert(t in all_types)
+                ret.append(t)
+        return ret
 
-    # disable CUDA Half if there is a Sparse argument
-    for arg in option.get('arguments', []):
-        if arg['type'] == 'THSTensor*':
-            pairs.discard(('CUDA', 'Half'))
+    for backend in backend_types.keys():
+        assert(backend in all_backends)
+        backend_types[backend] = set(expand(backend_types[backend]))
 
-    # special case remove Half for cpu unless it is explicitly enabled,
+    # special case remove Half for cpu unless it is explicitly enabled
     if not option.get('cpu_half', False):
-        pairs.discard(('CPU', 'Half'))
+        if 'CPU' in backend_types:
+            backend_types['CPU'].discard('Half')
+
+    # special case remove BFloat16 for cpu and cuda unless it is explicitly enabled
+    if not option.get('cpu_bfloat16', False):
+        if 'CPU' in backend_types:
+            backend_types['CPU'].discard('BFloat16')
+
+    if not option.get('cuda_bfloat16', False):
+        if 'CUDA' in backend_types:
+            backend_types['CUDA'].discard('BFloat16')
+
+    # special cases remove bool for cpu and cuda unless it is explicitly enabled
+    if not option.get('cpu_bool', False):
+        if 'CPU' in backend_types:
+            backend_types['CPU'].discard('Bool')
+
+    if not option.get('cuda_bool', False):
+        if 'CUDA' in backend_types:
+            backend_types['CUDA'].discard('Bool')
 
     # sort the result for easy reading
-    option['backend_type_pairs'] = sorted([p for p in pairs])
+    for backend in backend_types.keys():
+        backend_types[backend] = sorted([type for type in backend_types[backend]])
+    option['backend_types'] = backend_types
 
 
 def exclude(declaration):
-    return 'only_register' in declaration or declaration.get('python_name') == 'ndimension'
+    return 'only_register' in declaration or declaration.get('name') == 'ndimension'
 
 
 def add_variants(option):
@@ -124,7 +150,7 @@ def handle_outputs_taken_as_arguments(options):
 
 def sanitize_return(option):
     ret = option['return']
-    m = re.match('argument (\d+(,\d+)*)', ret)
+    m = re.match(r'argument (\d+(,\d+)*)', ret)
     if m is not None:
         arguments = [int(x) for x in m.group(1).split(',')]
         option['return'] = {'kind': 'arguments', 'arguments': arguments}
@@ -151,14 +177,10 @@ def set_mode(option):
 
 
 def discover_zero_dim_tensor_operations(declaration):
-    def exclude(arg):
-        return arg.get('ignore_check')
-
     def signature(option, i=None, value=None):
         elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
                     if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
+                    for j, arg in enumerate(option['arguments'])]
         return '#'.join(elements)
     signature_to_option = {signature(option): option
                            for option in declaration['options']}
@@ -170,8 +192,7 @@ def discover_zero_dim_tensor_operations(declaration):
                 if signature_of_tensor_version in signature_to_option:
                     tensor_version = \
                         signature_to_option[signature_of_tensor_version]
-                    names = [arg['name'] for arg in tensor_version['arguments']
-                             if not exclude(arg)]
+                    names = [arg['name'] for arg in tensor_version['arguments']]
                     tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
                     # print("FOUND "+str(i)   )
                     # print("Scalar Version ===== ")
@@ -181,44 +202,16 @@ def discover_zero_dim_tensor_operations(declaration):
                     # print("SHARED "+names[i])
 
 
-def discover_sparse_tensor_operations(declaration):
-    def exclude(arg):
-        return arg.get('ignore_check')
-
-    def signature(option, i=None, value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
-                    if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
-        return '#'.join(elements)
-
-    # Determine if any options have the 'aten_dense_sparse' flag
-    dense_sparse_options = [option
-                            for option in declaration['options']
-                            if option.get('aten_dense_sparse', False)]
-    if len(dense_sparse_options) > 0:
-        signature_to_option = {signature(option): option
-                               for option in declaration['options']}
-
-        for option in declaration['options']:
-            for i, arg in enumerate(option['arguments']):
-                if (arg['type'] == 'THSTensor*' and
-                        option.get('aten_dense_sparse', False)):
-                    signature_of_tensor_version = signature(
-                        option, i, 'Tensor &')
-                    if signature_of_tensor_version in signature_to_option:
-                        tensor_version = \
-                            signature_to_option[signature_of_tensor_version]
-                        raw_args = len(tensor_version['arguments'])
-                        names = [arg['name'] for arg in tensor_version['arguments']
-                                 if not exclude(arg)]
-                        filtered_args = len(names)
-                        tensor_version['when_sparse_dispatch'] = names[i -
-                                                                       (raw_args - filtered_args)]
+def is_extended_method(option):
+    if 'method' in option['variants']:
+        return False
+    else:
+        return True
 
 
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
+    non_extended_methods = set()
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
         declaration['options'] = [deepcopy(o) for o in declaration['options']]
@@ -227,9 +220,10 @@ def run(declarations):
             allow_kwarg=False,
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)
-        common_with_cwrap.sort_by_number_of_options(declaration)
+
+        common_with_cwrap.sort_by_number_of_args(declaration)
+
         discover_zero_dim_tensor_operations(declaration)
-        discover_sparse_tensor_operations(declaration)
 
         for option in declaration['options']:
             set_mode(option)
@@ -237,6 +231,19 @@ def run(declarations):
                 sanitize_return(option)
             process_types_and_backends(option)
             add_variants(option)
+            if not is_extended_method(option):
+                non_extended_methods.add(option['api_name'])
         declaration['options'] = handle_outputs_taken_as_arguments(
             declaration['options'])
+    # We (very unfortunately) have overloaded virtual methods. Because
+    # of C++'s rules, we cannot move one overload without doing some
+    # extra work to make sure that overload in a superclass and an
+    # overload in a subclass resolve together. I've chosen to resolve
+    # this problem simply by moving ALL overloads of a method which
+    # occurs in Tensor to Type.  This is why we have to first compute
+    # which methods *names* go on type, and then move ALL overloads
+    # of this name to Type.
+    for declaration in declarations:
+        for option in declaration['options']:
+            option['extended_method'] = option['api_name'] not in non_extended_methods
     return declarations

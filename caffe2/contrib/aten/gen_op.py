@@ -73,7 +73,7 @@ def value_is_tensor_type(v):
 # for each aten type, how do we handle a return value of that type?
 RETURN_MAP = {
     'Tensor': 'assignTo(Output(${offset}),${output});',
-    'Scalar': 'assignTo(Output(${offset}),*inferred_type, ${output});',
+    'Scalar': 'assignTo(Output(${offset}),self.scalar_type(), ${output});',
     'bool': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'int64_t': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'std::vector<Tensor>': 'assignListStartingAt(${offset}, ${output});',
@@ -88,11 +88,10 @@ ARGUMENT_MAP = {
     'int': 'int ${arg} = readAttribute<int64_t>("${arg}");',
     'double': 'double ${arg} = readAttribute<float>("${arg}");',
     'int64_t': 'int64_t ${arg} = readAttribute<int64_t>("${arg}");',
-    'IntList': 'auto ${arg} = readIntList("${arg}");',
-    'std::array<bool, 2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
-    'std::array<bool, 3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
+    'IntArrayRef': 'auto ${arg} = readIntArrayRef("${arg}");',
+    'std::array<bool,2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
+    'std::array<bool,3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
 }
-
 
 def expand(o):
     num_defaults = sum(1 if 'default' in arg else 0 for arg in o['arguments'])
@@ -125,6 +124,10 @@ def supports(o, factory_methods):
     if "_out" in o['name']:
         return False
 
+    # skip if no return, previously it is 'void'
+    if len(o['returns']) == 0:
+        return False
+
     # skip return types we cannot handle
     for ret in o['returns']:
         if not value_has_tensors(ret) and ret['type'] not in RETURN_MAP:
@@ -151,12 +154,17 @@ OPTION_TEMPLATE = CT("""\
 case ${key}: { // ${name}
     ${initialization}
     run_op = [=] {
+        at::AutoNonVariableTypeMode guard;
         ${statements}
         auto the_result = ${invocation};
         ${assignments}
         return true;
     };
 } break;
+""")
+
+ASSIGN_CHECK_SIZE_TEMPLATE = CT("""\
+  if(OutputSize() > ${offset}) {${assignment}}
 """)
 
 
@@ -198,6 +206,15 @@ def find_factory_methods(decls):
     return factory_methods
 
 
+def emit_assignments(o, env):
+    for i, r in enumerate(o['returns']):
+        t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
+        assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
+        check_size_assignment = ASSIGN_CHECK_SIZE_TEMPLATE.substitute(env, offset=i, assignment=assignment)
+
+        env['assignments'].append(check_size_assignment)
+
+
 if __name__ == '__main__':
     decls = yaml.load(read(os.path.join(args.yaml_dir, 'Declarations.yaml')), Loader=Loader)
     factory_methods = find_factory_methods(decls)
@@ -235,21 +252,12 @@ if __name__ == '__main__':
             'initialization': [],
             'key': str(key),
         }
-        defined_inferred_type = False
 
-        if 'Tensor' in o['method_of']:
-            # make sure 'self' is the first argument. currently Declarations.yaml
-            # does not always do this. Instead it keeps the argument list the same order
-            # as the Type method.
-            o['arguments'] = self_as_first_argument(o['arguments'])
-        elif 'namespace' not in o['method_of']:
+        if 'namespace' not in o['method_of'] and 'Tensor' not in o['method_of']:
             # methods on type like 'ones' or 'zeros' always take a
             # string attribute that is translated into the at::Type object
             # e.g. "Float" is at::kFloat
             assert('Type' in o['method_of'])
-            defined_inferred_type = True
-            env['initialization'].append(
-                'auto inferred_type = readTypeAttribute("type");')
 
         static_tensor_inputs = sum(arg['type'] != 'TensorList' and value_is_tensor_type(arg) for arg in o['arguments'])
         has_tensorlist = any(arg['type'] == 'TensorList' for arg in o['arguments'])
@@ -267,37 +275,24 @@ if __name__ == '__main__':
                 # switch to indexing the "stack" from the end as if we only had
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
-                        .format(arg['name'], real_inputs, static_tensor_inputs))
+                    .format(arg['name'], real_inputs, static_tensor_inputs))
             elif value_is_tensor_type(arg):
                 # load tensor inputs from Caffe2
-
                 env['statements'].append(
                     'auto {} = peek({}, {});'.format(arg['name'], real_inputs, view_length))
                 real_inputs += 1
-                if arg['dynamic_type'] == 'Tensor' and not defined_inferred_type:
-                    # first tensor input is used to define the output type.
-                    defined_inferred_type = True
-                    env['statements'].append(
-                        'auto inferred_type = &({}.type());'.format(
-                            arg['name']))
             else:
                 init = CT(ARGUMENT_MAP[arg['type']]).substitute(env, arg=arg['name'])
                 env['initialization'].append(init)
 
-        for i, r in enumerate(o['returns']):
-            t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
-            assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
-            env['assignments'].append(assignment)
+        emit_assignments(o, env)
 
-        if 'Tensor' in o['method_of']:
-            env['invocation'] = "self.{}({})".format(
-                o['name'], ', '.join(env['arguments'][1:]))
-        elif 'namespace' in o['method_of']:
+        if 'namespace' in o['method_of']:
             env['invocation'] = CT("at::${name}(${arguments})").substitute(env)
         else:
-            assert('Type' in o['method_of'])
-            env['invocation'] = CT(
-                'inferred_type->${name}(${arguments})').substitute(env)
+            assert('Tensor' in o['method_of'])
+            env['invocation'] = "self.{}({})".format(
+                o['name'], ', '.join(env['arguments'][1:]))
 
         top_env['implementations'].append(OPTION_TEMPLATE.substitute(env))
         key += 1

@@ -1,6 +1,11 @@
 #include <torch/optim/sgd.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/optim/optimizer.h>
+#include <torch/optim/serialize.h>
+#include <torch/types.h>
+#include <torch/utils.h>
 
 #include <ATen/ATen.h>
 
@@ -10,41 +15,50 @@ namespace torch {
 namespace optim {
 SGDOptions::SGDOptions(double learning_rate) : learning_rate_(learning_rate) {}
 
-const SGDOptions& SGD::options() const noexcept {
-  return options_;
-}
-
 void SGD::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    auto& grad = parameters_.at(i).grad();
-    auto& p = parameters_.at(i).data();
+    Tensor p = parameters_.at(i);
 
-    if (!grad.defined()) {
+    if (!p.grad().defined()) {
       continue;
     }
 
-    auto d_p = torch::Tensor(grad).data();
-    if (options_.weight_decay_ > 0) {
-      d_p.add_(p, options_.weight_decay_);
+    auto update = p.grad();
+
+    if (options.weight_decay() > 0) {
+      NoGradGuard guard;
+      update += options.weight_decay() * p;
     }
 
-    if (options_.momentum_ != 0) {
-      auto momentum = buffer_at(momentum_buffers_, i).data();
-      if (iteration_ == 0) {
-        momentum.mul_(options_.momentum_).add_(d_p);
+    if (options.momentum() != 0) {
+      const auto dampening = iteration_ == 0 ? 1 : 1 - options.dampening();
+      auto& momentum = buffer_at(momentum_buffers, i);
+      momentum = (options.momentum() * momentum) + (dampening * update);
+      if (options.nesterov()) {
+        // See github.com/lisa-lab/pylearn2/pull/136#issuecomment-10381617
+        // for notes on this implementation of nesterov momentum.
+        update += options.momentum() * momentum;
       } else {
-        momentum.mul_(options_.momentum_).add_(d_p, 1 - options_.dampening_);
-      }
-      if (options_.nesterov_) {
-        d_p = d_p.add(momentum, options_.momentum_);
-      } else {
-        d_p = momentum;
+        update = momentum;
       }
     }
 
-    p.add_(d_p, -options_.learning_rate_);
+    NoGradGuard guard;
+    p.add_(-options.learning_rate() * update);
   }
   iteration_ += 1;
+}
+
+void SGD::save(serialize::OutputArchive& archive) const {
+  serialize(*this, archive);
+}
+
+void SGD::load(serialize::InputArchive& archive) {
+  serialize(*this, archive);
+}
+
+int64_t SGD::iteration() const {
+  return iteration_;
 }
 } // namespace optim
 } // namespace torch

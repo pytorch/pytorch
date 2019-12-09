@@ -3,18 +3,19 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
-import hypothesis
-from hypothesis import given
+from hypothesis import given, assume
 import hypothesis.strategies as st
 import numpy as np
 import unittest
 
 
-class TestMomentumSGD(hu.HypothesisTestCase):
-    @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
+class TestMomentumSGD(serial.SerializedTestCase):
+    @serial.given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     def test_momentum_sgd(self, n, nesterov, gc, dc):
         param = np.random.rand(n).astype(np.float32)
         grad = np.random.rand(n).astype(np.float32)
@@ -69,7 +70,7 @@ class TestMomentumSGD(hu.HypothesisTestCase):
             reference=momentum_sgd
         )
 
-    @given(
+    @serial.given(
         inputs=hu.tensors(n=3),
         momentum=st.floats(min_value=0.1, max_value=0.9),
         nesterov=st.booleans(),
@@ -94,7 +95,7 @@ class TestMomentumSGD(hu.HypothesisTestCase):
         )
 
         # Verify that the generated indices are unique
-        hypothesis.assume(
+        assume(
             np.array_equal(
                 np.unique(indices.flatten()),
                 np.sort(indices.flatten())))
@@ -138,11 +139,12 @@ class TestMomentumSGD(hu.HypothesisTestCase):
             [grad, m, lr, w, indices],
             sparse)
 
-    @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs_gpu_only)
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+    @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     def test_fp16momentum_sgd(self, n, nesterov, gc, dc):
+        assume(core.IsGPUDeviceType(gc.device_type))
         gpuvers = workspace.GetDeviceProperties(0)["major"]
-        if gpuvers < 6:
+        if gc.device_type == caffe2_pb2.CUDA and gpuvers < 6:
             print("No FP16 support because major version {} < 6".format(gpuvers))
             return
 
@@ -151,7 +153,6 @@ class TestMomentumSGD(hu.HypothesisTestCase):
         lr = np.random.rand(1).astype(np.float32)
         param_momentum = np.random.rand(n).astype(np.float16)
         momentum = 0.9
-        nesterov = True
 
         def momentum_sgd(grad, param_momentum, lr, param=None):
             if not nesterov:
@@ -173,11 +174,13 @@ class TestMomentumSGD(hu.HypothesisTestCase):
             weight_decay=0.0,
         )
 
+        threshold = 1e-3 if (gc.device_type == caffe2_pb2.HIP) else 1e-4
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[grad, param_momentum, lr, param],
-            reference=momentum_sgd
+            reference=momentum_sgd,
+            threshold=threshold
         )
 
 

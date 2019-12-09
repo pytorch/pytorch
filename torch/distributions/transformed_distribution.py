@@ -34,6 +34,7 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.half_normal.HalfNormal`,
     :class:`~torch.distributions.log_normal.LogNormal`,
     :class:`~torch.distributions.pareto.Pareto`,
+    :class:`~torch.distributions.weibull.Weibull`,
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
@@ -54,6 +55,16 @@ class TransformedDistribution(Distribution):
         batch_shape = shape[:len(shape) - event_dim]
         event_shape = shape[len(shape) - event_dim:]
         super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(TransformedDistribution, _instance)
+        batch_shape = torch.Size(batch_shape)
+        base_dist_batch_shape = batch_shape + self.base_dist.batch_shape[len(self.batch_shape):]
+        new.base_dist = self.base_dist.expand(base_dist_batch_shape)
+        new.transforms = self.transforms
+        super(TransformedDistribution, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @constraints.dependent_property
     def support(self):
@@ -114,7 +125,7 @@ class TransformedDistribution(Distribution):
         sign = 1
         for transform in self.transforms:
             sign = sign * transform.sign
-        if sign is 1:
+        if isinstance(sign, int) and sign == 1:
             return value
         return sign * (value - 0.5) + 0.5
 

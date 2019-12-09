@@ -7,7 +7,7 @@ namespace caffe2 {
 
 namespace {
 
-const char* kBroadcastDoc = R"DOC(
+const char kBroadcastDoc[] = R"DOC(
 If necessary the right-hand-side argument will be broadcasted to match the
 shape of left-hand-side argument. When broadcasting is specified, the second
 tensor can either be of size 1 (a scalar value), or having its shape as a
@@ -27,11 +27,11 @@ Argument `broadcast=1` needs to be passed to enable broadcasting.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 )DOC";
 
-const char* kAddExample = R"DOC(
+const char kAddExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -77,7 +77,7 @@ C:
 
 )DOC";
 
-const char* kSubExample = R"DOC(
+const char kSubExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -123,7 +123,7 @@ C:
 
 )DOC";
 
-const char* kMulExample = R"DOC(
+const char kMulExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -169,7 +169,7 @@ C:
 
 )DOC";
 
-const char* kDivExample = R"DOC(
+const char kDivExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -222,9 +222,9 @@ Performs element-wise binary {name} (with limited broadcast support).
 
 {extra}
 )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting");
     schema.Arg(
@@ -274,7 +274,7 @@ OPERATOR_SCHEMA(Add)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("addition", kAddExample))
-    .InheritOnnxSchema("Add");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(AddGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -287,7 +287,7 @@ OPERATOR_SCHEMA(Sub)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("subtraction", kSubExample))
-    .InheritOnnxSchema("Sub");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(SubGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -300,7 +300,7 @@ OPERATOR_SCHEMA(Mul)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("multiplication", kMulExample))
-    .InheritOnnxSchema("Mul");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(MulGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -313,7 +313,7 @@ OPERATOR_SCHEMA(Div)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("division", kDivExample))
-    .InheritOnnxSchema("Div");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(DivGradient)
     .NumInputs(3, 4)
     .NumOutputs(2)
@@ -357,7 +357,7 @@ For example, the following tensor shapes are supported:
         "If broadcasting is disabled it should be of the same size.")
     .Output(0, "C", "Result, has same dimensions and type as B");
 
-const char* kLTExample = R"DOC(
+const char kLTExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -396,7 +396,7 @@ C: [False False  True False False  True]
 </details>
 )DOC";
 
-const char* kLEExample = R"DOC(
+const char kLEExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -435,7 +435,7 @@ C: [ True False  True  True  True  True]
 </details>
 )DOC";
 
-const char* kGTExample = R"DOC(
+const char kGTExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -474,7 +474,7 @@ C: [False  True False False False False]
 </details>
 )DOC";
 
-const char* kGEExample = R"DOC(
+const char kGEExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -513,7 +513,7 @@ C: [ True  True False  True  True False]
 </details>
 )DOC";
 
-const char* kEQExample = R"DOC(
+const char kEQExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -550,7 +550,7 @@ C: [ True False False  True  True False]
 </details>
 )DOC";
 
-const char* kNEExample = R"DOC(
+const char kNEExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -598,10 +598,10 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
 
 {extra}
 )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{desc}", desc);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{desc}", desc);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -636,7 +636,7 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
               }                                                                \
             }                                                                  \
             auto output_dims =                                                 \
-                std::vector<TIndex>(in[0].dims().begin(), in[0].dims().end()); \
+                std::vector<int64_t>(in[0].dims().begin(), in[0].dims().end()); \
             return vector<TensorShape>{                                        \
                 CreateTensorShape(output_dims, TensorProto::BOOL)};            \
           })                                                                   \
@@ -650,7 +650,7 @@ CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(LE, "<=", "less or equal than", kLEExampl
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GT, ">", "greater than", kGTExample);
 CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(GE, ">=", "greater or equal than", kGEExample);
 
-const char* kAndExample = R"DOC(
+const char kAndExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -698,7 +698,7 @@ C:
 </details>
 )DOC";
 
-const char* kOrExample = R"DOC(
+const char kOrExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -746,7 +746,7 @@ C:
 </details>
 )DOC";
 
-const char* kXorExample = R"DOC(
+const char kXorExample[] = R"DOC(
 <details>
 
 <summary> <b>Example</b> </summary>
@@ -804,9 +804,9 @@ Both input operands should be of type `bool`.
 
 {extra}
     )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -823,12 +823,13 @@ Both input operands should be of type `bool`.
 }
 
 #define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol, onnx_schema, extra) \
-  OPERATOR_SCHEMA(name)                                                \
-      .NumInputs(2)                                                    \
-      .NumOutputs(1)                                                   \
-      .AllowInplace({{0, 0}})                                          \
-      .FillUsing(LogicalDocGenerator(symbol, extra))                   \
-      .InheritOnnxSchema(onnx_schema);                                 \
+  OPERATOR_SCHEMA(name)                                                       \
+      .NumInputs(2)                                                           \
+      .NumOutputs(1)                                                          \
+      .AllowInplace({{0, 0}})                                                 \
+      .FillUsing(LogicalDocGenerator(symbol, extra))                          \
+      .TensorInferenceFunction(ElementwiseOpShapeInference)                   \
+      .InheritOnnxSchema(onnx_schema);                                        \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or", kOrExample);
@@ -843,8 +844,8 @@ std::function<void(OpSchema&)> BitwiseDocGenerator(const char* name) {
 Performs element-wise bitwise operation `{name}` (with limited broadcast support).
 Both input operands should be of type `bool`.
 {broadcast_doc})DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -882,7 +883,7 @@ Performs element-wise negation on input tensor `X`.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 <details>
 
@@ -927,7 +928,7 @@ Y:
     )DOC")
     .Input(0, "X", "*(Tensor`<bool>`)* Input tensor.")
     .Output(0, "Y", "*(Tensor`<bool>`)* Negated output tensor.")
-    .InheritOnnxSchema("Not");
+    .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(Not);
 
 OPERATOR_SCHEMA(Sign)
@@ -937,7 +938,7 @@ OPERATOR_SCHEMA(Sign)
 Computes sign for each element of the input: -1, 0 or 1.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 <details>
 

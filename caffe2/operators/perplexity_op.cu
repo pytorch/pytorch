@@ -20,13 +20,12 @@ struct perplexity_function
 template <>
 bool PerplexityOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
 
-  DCHECK_EQ(X.ndim(), 1);
+  DCHECK_EQ(X.dim(), 1);
   int N = X.dim32(0);
 
-  Y->Resize(vector<TIndex>());
-  float* Ydata = Y->mutable_data<float>();
+  auto* Y = Output(0, vector<int64_t>(), at::dtype<float>());
+  float* Ydata = Y->template mutable_data<float>();
   const float* Xdata = X.data<float>();
 
   float perplexity = thrust::transform_reduce(

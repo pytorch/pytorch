@@ -30,6 +30,8 @@ _known_working_ops = [
     "Add",
     "Adagrad",
     "SparseAdagrad",
+    "Adadelta",
+    "SparseAdadelta",
     "AveragedLoss",
     "Cast",
     "Checkpoint",
@@ -168,7 +170,7 @@ class ModelHelper(object):
         be created in the CurrentNameScope with the respect of all parameter
         sharing logic, i.e. 'resolved_name_scope/param_name'.
 
-        Parameter sharing logic is going to override CurrentNameScope accoring
+        Parameter sharing logic is going to override CurrentNameScope according
         to the rules that are specified through ParameterSharing contexts,
         all ParameterSharing contexts are applied recursively until there are no
         extra overrides present, where on each step the best match will be
@@ -202,7 +204,7 @@ class ModelHelper(object):
             param_name = parameter_sharing_context.get_parameter_name(
                 param_name)
         else:
-            raise "Unsupported type for param_name"
+            raise TypeError("Unsupported type for param_name")
 
         if param_name in self._parameters_info:
             assert self._parameters_info[param_name].shape == shape
@@ -256,22 +258,6 @@ class ModelHelper(object):
         ))
         return self._param_info_deprecated[-1]
 
-    # This method is deprecated, use get_param_info method
-    def param_info(self, grad_type=None, id=None):
-        logging.info("param_info method is DEPRECATED")
-        self._update_param_info_deprecated()
-        if id is not None:
-            assert grad_type is None
-            info = self._param_info_deprecated[id]
-            assert info.param_id == id
-            return info
-        elif grad_type is not None:
-            return [
-                info for info in self._param_info_deprecated
-                if info.grad_type() == grad_type]
-        else:
-            return self._param_info_deprecated
-
     def AddParameter(self, param, tags=None):
         assert isinstance(param, core.BlobReference)
         tags = self._normalize_tags(tags)
@@ -302,11 +288,6 @@ class ModelHelper(object):
 
         if namescope == '':
             return self.params[:]
-        elif top_scope:
-            return [
-                p for p in self.params
-                if p.GetNameScope().startswith(namescope)
-            ]
         else:
             return [p for p in self.params if
                     p.GetNameScope().startswith(namescope)]
@@ -468,6 +449,48 @@ class ModelHelper(object):
             _known_working_ops
         )))
 
+    def GetCompleteNet(self):
+        r""" Return param_init_net + net Net.
+        Returns:
+          'core.Net' containing param_init_net and net
+        """
+        new_net = self.param_init_net.Clone(
+            self.name + "_complete_net", keep_schema=True)
+        # add init net info to debug info
+        for op in new_net.Proto().op:
+            op.debug_info = op.debug_info + "/param_init_net"
+        new_net.AppendNet(self.net)
+        # keep the execution optimization
+        if self.net.Proto().HasField("type"):
+            new_net.Proto().type = self.net.Proto().type
+        return new_net
+
+    def ConstructInitTrainNetfromNet(self, net):
+        r""" construct init net and train net from complete_net
+        Inputs:
+          net: 'core.Net' containing param_init_net and train net
+        """
+        param_op_mask = []
+        train_op_mask = []
+        for idx, op in enumerate(net.Proto().op):
+            if op.debug_info.endswith("/param_init_net"):
+                param_op_mask.append(idx)
+            else:
+                train_op_mask.append(idx)
+
+        self.param_init_net = net.Clone(
+            net.Name() + "/generated_param_init_net",
+            keep_schema=True,
+            op_id_mask=param_op_mask,
+            update_external_list=True,
+        )
+        self.net = net.Clone(
+            net.Name() + "/generated_net",
+            keep_schema=True,
+            op_id_mask=train_op_mask,
+            update_external_list=True,
+        )
+
 
 def ExtractPredictorNet(
     net_proto,
@@ -568,7 +591,7 @@ def ExtractPredictorNet(
                             rename_list(step_op.output)
                             if device is not None:
                                 step_op.device_option.device_type = device.device_type
-                                step_op.device_option.cuda_gpu_id = device.cuda_gpu_id
+                                step_op.device_option.device_id = device.device_id
 
                         rename_list(arg.n.external_input)
                         rename_list(arg.n.external_output)
@@ -582,7 +605,7 @@ def ExtractPredictorNet(
 
             if device is not None:
                 op.device_option.device_type = device.device_type
-                op.device_option.cuda_gpu_id = device.cuda_gpu_id
+                op.device_option.device_id = device.device_id
             validate_op(op)
             predict_proto.op.extend([op])
             known_blobs.update(op.output)

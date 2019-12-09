@@ -1,48 +1,55 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorTopK.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorTopK.cu"
 #else
 
-THC_API void THCTensor_(topk)(THCState* state,
-                               THCTensor *topK,
-                               THCudaLongTensor *indices,
-                               THCTensor *input,
-                               int64_t k, int dim, int dir, int sorted) {
-  THAssert(topK != NULL && indices != NULL && input != NULL);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input));
-  THArgCheck(THCTensor_(_nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  int64_t dims = THCudaLongTensor__nDimension(state, indices);
-  THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  int numDims = THCTensor_(_nDimension)(state, input);
+#include <c10/macros/Macros.h>
+
+void THCTensor_(topk)(THCState* state,
+                      THCTensor *topK,
+                      THCudaLongTensor *indices,
+                      THCTensor *input_,
+                      int64_t k, int dim, int dir, int sorted) {
+  THAssert(topK != NULL && indices != NULL && input_ != NULL);
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
+  THArgCheck(THCTensor_(nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, indices) <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
+  int numDims = THCTensor_(nDimensionLegacyNoScalars)(state, input_);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
   THArgCheck(dim >= 0 && dim < numDims, 6, "dim not in range");
 
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
-  THArgCheck(k > 0 && k <= sliceSize, 5, "k not in range for dimension");
+  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input_, dim);
+  THArgCheck(k >= 0 && k <= sliceSize, 5, "k not in range for dimension");
+
+  THCTensor *input = THCTensor_(newContiguous)(state, input_);
 
   // Build the output size, which is the dim being selected set to
   // size k
-  THLongStorage* topKSize = THCTensor_(newSizeOf)(state, input);
-  THLongStorage_set(topKSize, dim, k);
-  THCTensor_(resize)(state, topK, topKSize, NULL);
-  THCudaLongTensor_resize(state, indices, topKSize, NULL);
-  THLongStorage_free(topKSize);
+  std::vector<int64_t> topKSize = input->sizes().vec();
+  if (topKSize.size() > 0) {
+    topKSize[dim] = k;
+  }
+  THCTensor_(resize)(state, topK, topKSize, {});
+  THCudaLongTensor_resize(state, indices, topKSize, {});
+
+  // static_cast is required to ensure that the correct type (INDEX_T)
+  // is provided to the kernel for the arguments.
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
-  gatherTopK<real, INDEX_T, DIM, DIR>                                   \
+  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
       inputInfo,                                                        \
-      sliceSize,                                                        \
-      k,                                                                \
-      inputSlices,                                                      \
+      static_cast<INDEX_T>(sliceSize),                                  \
+      static_cast<INDEX_T>(k),                                          \
+      static_cast<INDEX_T>(inputSlices),                                \
       /* The actual dimension that the k-selection is running in */     \
       /* may have changed from collapseDims() */                        \
-      inputInfo.strides[collapseInputDim],                              \
+      static_cast<INDEX_T>(inputInfo.strides[collapseInputDim]),        \
       topKInfo,                                                         \
-      topKSlices,                                                       \
-      topKInfo.strides[collapseTopKDim],                                \
+      static_cast<INDEX_T>(topKSlices),                                 \
+      static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
-      indicesInfo.strides[collapseIndicesDim])
+      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]))
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \
@@ -63,10 +70,10 @@ THC_API void THCTensor_(topk)(THCState* state,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  TensorInfo<real, INDEX_T> inputInfo =                                 \
-    getTensorInfo<real, THCTensor, INDEX_T>(state, input);              \
-  TensorInfo<real, INDEX_T> topKInfo =                                  \
-    getTensorInfo<real, THCTensor, INDEX_T>(state, topK);               \
+  TensorInfo<scalar_t, INDEX_T> inputInfo =                                 \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);              \
+  TensorInfo<scalar_t, INDEX_T> topKInfo =                                  \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);               \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
     getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \
@@ -95,7 +102,7 @@ THC_API void THCTensor_(topk)(THCState* state,
     THError("Slice to sort is too large");                              \
   }                                                                     \
                                                                         \
-  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) 32), (int64_t) 1024)); \
+  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) C10_WARP_SIZE), (int64_t) 1024)); \
                                                                         \
   /* This is used as a template parameter to calculate indices. */      \
   /* We only specialize it if all collapsed dim sizes are the */        \
@@ -108,14 +115,18 @@ THC_API void THCTensor_(topk)(THCState* state,
                                                                         \
   RUN_DIM(INDEX_T);
 
-  // Based on required index size, run the algorithm with the
-  // appropriate index type
-  if (THCTensor_canUse32BitIndexMath(state, input) &&
-      THCTensor_canUse32BitIndexMath(state, topK) &&
-      THCTensor_canUse32BitIndexMath(state, indices)) {
-    RUN_T(uint32_t);
-  } else {
-    RUN_T(uint64_t);
+  // the below is safe with 0-dimensional tensors because it is based on
+  // THCTensorInfo which implicitly expands to 1-dimensional.
+  if (THCTensor_nElement(state, input) > 0) {
+    // Based on required index size, run the algorithm with the
+    // appropriate index type
+    if (THCTensor_canUse32BitIndexMath(state, input) &&
+        THCTensor_canUse32BitIndexMath(state, topK) &&
+        THCTensor_canUse32BitIndexMath(state, indices)) {
+      RUN_T(uint32_t);
+    } else {
+      RUN_T(uint64_t);
+    }
   }
 #undef RUN_T
 #undef RUN_DIM
@@ -124,10 +135,23 @@ THC_API void THCTensor_(topk)(THCState* state,
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
-  if (sorted) {
+  if (sorted && THCTensor_(numel)(state, topK) > 1) {
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
-    if (sliceSize <= 2048) {
+    // Workaround:
+    // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
+    // and so for the double word types,
+    // we get "too many resources requested for launch" in the 2048 case
+#if CUDA_VERSION >= 8000
+#if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
+    int maxSliceSize = 1024;
+#else
+    int maxSliceSize = 2048;
+#endif
+#else
+    int maxSliceSize = 2048;
+#endif
+    if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
       THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);
@@ -154,6 +178,8 @@ THC_API void THCTensor_(topk)(THCState* state,
       THCudaLongTensor_free(state, sortedIndices);
     }
   }
+
+  THCudaLongTensor_free(state, input);
 
   THCudaCheck(cudaGetLastError());
 }

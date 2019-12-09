@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/ArrayRef.h>
-#include <ATen/Error.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <array>
@@ -21,21 +21,26 @@ template <size_t D, typename T = int64_t>
 class ExpandingArray {
  public:
   /// Constructs an `ExpandingArray` from an `initializer_list`. The extent of
-  /// the lenght is checked against the `ExpandingArray`'s extent parameter `D`
+  /// the length is checked against the `ExpandingArray`'s extent parameter `D`
   /// at runtime.
   /*implicit*/ ExpandingArray(std::initializer_list<T> list)
-      : ExpandingArray(std::vector<T>(list)) {}
+      : ExpandingArray(at::ArrayRef<T>(list)) {}
 
-  /// Constructs an `ExpandingArray` from a `vector`. The extent of the
-  /// lenght is checked against the `ExpandingArray`'s extent parameter `D` at
-  /// runtime.
-  /*implicit*/ ExpandingArray(const std::vector<T>& values) {
-    AT_CHECK(
+  /// Constructs an `ExpandingArray` from an `std::vector`. The extent of
+  /// the length is checked against the `ExpandingArray`'s extent parameter `D`
+  /// at runtime.
+  /*implicit*/ ExpandingArray(std::vector<T> vec)
+      : ExpandingArray(at::ArrayRef<T>(vec)) {}
+
+  /// Constructs an `ExpandingArray` from an `at::ArrayRef`. The extent of
+  /// the length is checked against the `ExpandingArray`'s extent parameter `D`
+  /// at runtime.
+  /*implicit*/ ExpandingArray(at::ArrayRef<T> values) {
+    // clang-format off
+    TORCH_CHECK(
         values.size() == D,
-        "Expected ",
-        D,
-        " values, but instead got ",
-        values.size());
+        "Expected ", D, " values, but instead got ", values.size());
+    // clang-format on
     std::copy(values.begin(), values.end(), values_.begin());
   }
 
@@ -84,4 +89,13 @@ class ExpandingArray {
   std::array<T, D> values_;
 };
 
+template <size_t D, typename T>
+std::ostream& operator<<(
+    std::ostream& stream,
+    const ExpandingArray<D, T>& expanding_array) {
+  if (expanding_array.size() == 1) {
+    return stream << expanding_array->at(0);
+  }
+  return stream << static_cast<at::ArrayRef<T>>(expanding_array);
+}
 } // namespace torch

@@ -1,5 +1,7 @@
 import math
 
+import torch
+from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
 from torch.distributions.cauchy import Cauchy
@@ -27,8 +29,13 @@ class HalfCauchy(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
-        super(HalfCauchy, self).__init__(Cauchy(0, scale), AbsTransform(),
+        base_dist = Cauchy(0, scale)
+        super(HalfCauchy, self).__init__(base_dist, AbsTransform(),
                                          validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(HalfCauchy, _instance)
+        return super(HalfCauchy, self).expand(batch_shape, _instance=new)
 
     @property
     def scale(self):
@@ -43,8 +50,10 @@ class HalfCauchy(TransformedDistribution):
         return self.base_dist.variance
 
     def log_prob(self, value):
+        value = torch.as_tensor(value, dtype=self.base_dist.scale.dtype,
+                                device=self.base_dist.scale.device)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
-        log_prob[value.expand(log_prob.shape) < 0] = -float('inf')
+        log_prob[value.expand(log_prob.shape) < 0] = -inf
         return log_prob
 
     def cdf(self, value):

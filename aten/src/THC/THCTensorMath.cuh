@@ -1,8 +1,13 @@
 #ifndef THC_TENSORMATH_CUH
 #define THC_TENSORMATH_CUH
 
+#include "ATen/cuda/CUDAContext.h"
+
 // Copy the kth diagonal of a matrix B to a vector A.
 template <typename T>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void THCTensor_copyFromDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideA) {
   for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < size;
@@ -14,6 +19,9 @@ __global__ void THCTensor_copyFromDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_
 
 // Copy vector B to the kth diagonal of a matrix A
 template <typename T>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void THCTensor_copyToDiagonal(T* a, T* b, ptrdiff_t start, ptrdiff_t size, ptrdiff_t strideSum, ptrdiff_t strideB) {
   for (ptrdiff_t linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < size;
@@ -36,11 +44,11 @@ inline bool getCatGrid(THCState* state, ptrdiff_t nTensors, dim3& grid) {
 
   // Assume a reasonable number of SMs if no state is available
   int numSM =
-        state ? THCState_getCurrentDeviceProperties(state)->multiProcessorCount : 15;
+        state ? at::cuda::getCurrentDeviceProperties()->multiProcessorCount : 15;
   //X dim of grid for cat array cooperates on a single tensor in the cat.
   //Given half of the GPU, full utilization will always occur.
   grid = dim3( 2LL * numSM, (long long) nTensors );
-	     
+             
   return true;
 }
 
@@ -99,6 +107,9 @@ struct OutputTensorSizeStride {
 
 
 template <typename T, typename IndexType, int Dims>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void CatArrayBatchedCopy(
     T* output,
     CatArrInputTensor<T, IndexType>* inputs,
@@ -120,7 +131,7 @@ __global__ void CatArrayBatchedCopy(
 
     while( tid < nElements){
     IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
-    	      os.outputSize, os.outputStride, dimSize, concatDim, tid);
+                  os.outputSize, os.outputStride, dimSize, concatDim, tid);
     output[dataOffset + elementOffset] = data[tid];
 
     tid += stride;

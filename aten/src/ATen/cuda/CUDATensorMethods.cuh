@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/Tensor.h"
-#include "ATen/Half.h"
+#include <ATen/Tensor.h>
+#include <c10/util/Half.h>
 
 #include <cuda.h>
 #include <cuda_runtime.h>

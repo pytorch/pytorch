@@ -1,2 +1,5 @@
 numpy
 enum34
+pyyaml
+requests
+typing

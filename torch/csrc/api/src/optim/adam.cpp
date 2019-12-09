@@ -2,6 +2,8 @@
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/nn/module.h>
+#include <torch/serialize/archive.h>
+#include <torch/utils.h>
 
 #include <ATen/ATen.h>
 
@@ -10,56 +12,57 @@
 
 namespace torch {
 namespace optim {
-
 AdamOptions::AdamOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-const AdamOptions& Adam::options() const noexcept {
-  return options_;
-}
-
 void Adam::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    auto& grad = parameters_.at(i).grad();
-    auto& p = parameters_.at(i).data();
-    if (!grad.defined()) {
+    Tensor p = parameters_.at(i);
+    if (!p.grad().defined()) {
       continue;
     }
 
-    auto exp_average = buffer_at(exp_average_buffers_, i).data();
-    auto exp_average_sq = buffer_at(exp_average_sq_buffers_, i).data();
-
-    step_buffers_.at(i) += 1;
-
-    auto d_p = torch::autograd::as_variable_ref(grad).data();
-    if (options_.weight_decay_ > 0) {
-      d_p.add_(p, options_.weight_decay_);
+    if (options.weight_decay() > 0) {
+      NoGradGuard guard;
+      p.grad() = p.grad() + options.weight_decay() * p;
     }
 
-    exp_average.mul_(options_.beta1_).add_(d_p, 1 - options_.beta1_);
-    exp_average_sq.mul_(options_.beta2_)
-        .addcmul_(d_p, d_p, 1 - options_.beta2_);
+    auto& exp_average = buffer_at(exp_average_buffers, i);
+    auto& exp_average_sq = buffer_at(exp_average_sq_buffers, i);
 
-    at::Tensor denom;
-    if (options_.amsgrad_) {
-      auto max_exp_average_sq =
-          buffer_at(max_exp_average_sq_buffers_, i).data();
-      torch::max_out(max_exp_average_sq, max_exp_average_sq, exp_average_sq);
-      denom = max_exp_average_sq.sqrt().add_(options_.eps_);
-    } else {
-      denom = exp_average_sq.sqrt().add_(options_.eps_);
-    }
-
+    buffer_at(step_buffers, i) += 1;
     const auto bias_correction1 =
-        1 - std::pow(options_.beta1_, step_buffers_.at(i));
+        1 - std::pow(options.beta1(), buffer_at(step_buffers, i));
     const auto bias_correction2 =
-        1 - std::pow(options_.beta2_, step_buffers_.at(i));
-    const auto step_size = options_.learning_rate_ *
-        std::sqrt(bias_correction2) / bias_correction1;
+        1 - std::pow(options.beta2(), buffer_at(step_buffers, i));
 
-    p.addcdiv_(exp_average, denom, -step_size);
+    exp_average.mul_(options.beta1()).add_(p.grad(), 1 - options.beta1());
+    exp_average_sq.mul_(options.beta2())
+        .addcmul_(p.grad(), p.grad(), 1 - options.beta2());
+
+    Tensor denom;
+    if (options.amsgrad()) {
+      auto& max_exp_average_sq = buffer_at(max_exp_average_sq_buffers, i);
+      max_exp_average_sq = torch::max(max_exp_average_sq, exp_average_sq);
+      denom = max_exp_average_sq / bias_correction2;
+    } else {
+      denom = exp_average_sq / bias_correction2;
+    }
+
+    const auto step_size =
+        options.learning_rate() / bias_correction1;
+
+    NoGradGuard guard;
+    p.addcdiv_(exp_average, denom.sqrt() + options.eps(), -step_size);
   }
 }
 
+void Adam::save(serialize::OutputArchive& archive) const {
+  serialize(*this, archive);
+}
+
+void Adam::load(serialize::InputArchive& archive) {
+  serialize(*this, archive);
+}
 } // namespace optim
 } // namespace torch

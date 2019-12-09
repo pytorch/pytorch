@@ -1,50 +1,103 @@
 #include <torch/nn/modules/dropout.h>
+#include <torch/nn/functional/dropout.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <ostream>
 #include <vector>
+
+namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
-namespace detail {
-template <typename Derived>
-DropoutImplBase<Derived>::DropoutImplBase(DropoutOptions options_)
-    : options(options_) {
-  AT_CHECK(options.rate_ >= 0, "Dropout rate must not be less than zero");
-  AT_CHECK(options.rate_ <= 1, "Dropout rate must not be greater than one");
+
+Tensor DropoutImpl::forward(Tensor input) {
+  return F::detail::dropout(input, options.p(),
+      is_training(), options.inplace());
 }
 
-template <typename Derived>
-void DropoutImplBase<Derived>::reset() {}
-
-template <typename Derived>
-Tensor DropoutImplBase<Derived>::forward(Tensor input) {
-  if (options.rate_ == 0 || !this->is_training()) {
-    return input;
-  }
-
-  auto scale = 1.0f / (1.0f - options.rate_);
-  auto boolean_mask = noise_mask(input).uniform_(0, 1) > options.rate_;
-  auto noise = boolean_mask.to(input.dtype()).mul_(scale);
-
-  return input * noise;
+void DropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::Dropout(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
 }
 
-template class DropoutImplBase<DropoutImpl>;
-template class DropoutImplBase<Dropout2dImpl>;
-} // namespace detail
+// ============================================================================
 
-DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
-
-Tensor DropoutImpl::noise_mask(Tensor input) const {
-  return torch::empty_like(input);
+Tensor Dropout2dImpl::forward(Tensor input) {
+  return F::detail::dropout2d(input, options.p(),
+      is_training(), options.inplace());
 }
 
-Tensor Dropout2dImpl::noise_mask(Tensor input) const {
-  return torch::empty({input.size(0), input.size(1), 1, 1}, input.options());
+void Dropout2dImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::Dropout2d(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
 }
+
+// ============================================================================
+
+Tensor Dropout3dImpl::forward(Tensor input) {
+  return F::detail::dropout3d(input, options.p(),
+      is_training(), options.inplace());
+}
+
+void Dropout3dImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::Dropout3d(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
+}
+
+// ============================================================================
+
+FeatureDropoutImpl::FeatureDropoutImpl(double p)
+  : detail::_DropoutNd<FeatureDropoutImpl>(p) {
+  TORCH_WARN("torch::nn::FeatureDropout module is deprecated."
+             "Use Dropout{2,3}d instead.");
+}
+
+FeatureDropoutImpl::FeatureDropoutImpl(const FeatureDropoutOptions& options_)
+  : detail::_DropoutNd<FeatureDropoutImpl>(options_) {
+  TORCH_WARN("torch::nn::FeatureDropout module is deprecated."
+             "Use Dropout{2,3}d instead.");
+}
+
+Tensor FeatureDropoutImpl::forward(const Tensor& input) {
+  return torch::feature_dropout(input, options.p(), is_training());
+}
+
+void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::FeatureDropout(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
+}
+
+// ============================================================================
+
+Tensor AlphaDropoutImpl::forward(const Tensor& input) {
+  return F::detail::alpha_dropout(input, options.p(), is_training(), /*inplace=*/false);
+}
+
+void AlphaDropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::AlphaDropout(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
+}
+
+// ============================================================================
+
+Tensor FeatureAlphaDropoutImpl::forward(const Tensor& input) {
+  return F::detail::feature_alpha_dropout(input, options.p(), is_training(), /*inplace=*/false);
+}
+
+void FeatureAlphaDropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::FeatureAlphaDropout(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
+}
+
 } // namespace nn
 } // namespace torch

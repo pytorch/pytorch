@@ -5,12 +5,12 @@ namespace caffe2 {
 template <>
 bool DropoutOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->Resize(X.dims());
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+
   if (is_test_) {
-    if (Y != &X) {
-      context_.Copy<float, CPUContext, CPUContext>(
-          X.size(), X.data<float>(), Y->mutable_data<float>());
+    if (!IsInputOutputAlias(0, 0)) {
+      context_.CopyFromCPU<float>(
+          X.numel(), X.data<float>(), Y->template mutable_data<float>());
     }
     return true;
   } else {
@@ -19,12 +19,12 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     // generate probability depending on 1-ratio.
     std::bernoulli_distribution dist(1. - ratio_);
     const float* Xdata = X.data<float>();
-    float* Ydata = Y->mutable_data<float>();
-    auto mask = Output(1);
-    mask->Resize(X.dims());
-    bool* mask_data = mask->mutable_data<bool>();
+    float* Ydata = Y->template mutable_data<float>();
+
+    auto mask = Output(1, X.sizes(), at::dtype<bool>());
+    bool* mask_data = mask->template mutable_data<bool>();
     auto& gen = context_.RandGenerator();
-    for (int i = 0; i < X.size(); ++i) {
+    for (int i = 0; i < X.numel(); ++i) {
       mask_data[i] = dist(gen);
       Ydata[i] = Xdata[i] * scale * mask_data[i];
     }
@@ -35,22 +35,22 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(dY.dims());
+
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   if (is_test_) {
     if (dX != &dY) {
-      context_.Copy<float, CPUContext, CPUContext>(
-          dY.size(), dY.data<float>(), dX->mutable_data<float>());
+      context_.CopyFromCPU<float>(
+          dY.numel(), dY.data<float>(), dX->template mutable_data<float>());
     }
     return true;
   } else {
     auto& mask = Input(1);
-    CAFFE_ENFORCE_EQ(dY.size(), mask.size());
+    CAFFE_ENFORCE_EQ(dY.numel(), mask.numel());
     const float* dYdata = dY.data<float>();
     const bool* mask_data = mask.data<bool>();
-    float* dXdata = dX->mutable_data<float>();
+    float* dXdata = dX->template mutable_data<float>();
     float scale = 1. / (1. - ratio_);
-    for (int i = 0; i < dY.size(); ++i) {
+    for (int i = 0; i < dY.numel(); ++i) {
       dXdata[i] = dYdata[i] * mask_data[i] * scale;
     }
     return true;
@@ -58,7 +58,9 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    DropoutGrad,
+    DropoutGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
@@ -144,7 +146,9 @@ mask: [[False False False  True  True]
 </details>
 
 )DOC")
-    .Arg("ratio", "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
+    .Arg(
+        "ratio",
+        "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
     .ArgIsTest(
         "*(type: int; default: 0)* If zero (train mode), perform dropout. If non-zero"
         "(test mode), Y = X.")
@@ -154,11 +158,11 @@ mask: [[False False False  True  True]
         1,
         "mask",
         "*(type: Tensor`<bool>`)* The output mask containing boolean values for"
-        "each element, signifying which elements are dropped out. If `is_test` is" 
+        "each element, signifying which elements are dropped out. If `is_test` is"
         "nonzero, this output is not filled.")
-    .InheritOnnxSchema("Dropout");
+    .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(DropoutGrad)
+GRADIENT_OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});

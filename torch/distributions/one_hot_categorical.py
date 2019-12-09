@@ -12,7 +12,7 @@ class OneHotCategorical(Distribution):
     Samples are one-hot coded vectors of size ``probs.size(-1)``.
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-    and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1.
 
     See also: :func:`torch.distributions.Categorical` for specifications of
     :attr:`probs` and :attr:`logits`.
@@ -27,7 +27,8 @@ class OneHotCategorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    arg_constraints = {'probs': constraints.simplex}
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
     support = constraints.simplex
     has_enumerate_support = True
 
@@ -37,8 +38,20 @@ class OneHotCategorical(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(OneHotCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(OneHotCategorical, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new._categorical = self._categorical.expand(batch_shape)
+        super(OneHotCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
+
+    @property
+    def _param(self):
+        return self._categorical._param
 
     @property
     def probs(self):
@@ -63,11 +76,9 @@ class OneHotCategorical(Distribution):
     def sample(self, sample_shape=torch.Size()):
         sample_shape = torch.Size(sample_shape)
         probs = self._categorical.probs
-        one_hot = probs.new(self._extended_shape(sample_shape)).zero_()
+        num_events = self._categorical._num_events
         indices = self._categorical.sample(sample_shape)
-        if indices.dim() < one_hot.dim():
-            indices = indices.unsqueeze(-1)
-        return one_hot.scatter_(-1, indices, 1)
+        return torch.nn.functional.one_hot(indices, num_events).to(probs)
 
     def log_prob(self, value):
         if self._validate_args:
@@ -78,9 +89,10 @@ class OneHotCategorical(Distribution):
     def entropy(self):
         return self._categorical.entropy()
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         n = self.event_shape[0]
-        values = self._new((n, n))
-        torch.eye(n, out=values)
+        values = torch.eye(n, dtype=self._param.dtype, device=self._param.device)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
-        return values.expand((n,) + self.batch_shape + (n,))
+        if expand:
+            values = values.expand((n,) + self.batch_shape + (n,))
+        return values

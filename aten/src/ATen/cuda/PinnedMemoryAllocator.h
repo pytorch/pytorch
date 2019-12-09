@@ -1,14 +1,9 @@
 #pragma once
 
-#include <ATen/Allocator.h>
+#include <c10/core/Allocator.h>
 
 namespace at { namespace cuda {
 
-struct PinnedMemoryAllocator final : public Allocator {
-  void* allocate(size_t n) const override;
-  void deallocate(void* ptr) const override;
-};
-
-PinnedMemoryAllocator* getPinnedMemoryAllocator();
+TORCH_CUDA_API at::Allocator* getPinnedMemoryAllocator();
 
 }} // namespace at::cuda

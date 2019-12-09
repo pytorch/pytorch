@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPDropoutOp final : public IDEEPOperator {
  public:
@@ -15,7 +17,7 @@ class IDEEPDropoutOp final : public IDEEPOperator {
     CAFFE_ENFORCE_GE(ratio_, 0);
     CAFFE_ENFORCE_LT(ratio_, 1);
   }
-  virtual ~IDEEPDropoutOp() {}
+  ~IDEEPDropoutOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -55,7 +57,7 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
     CAFFE_ENFORCE_GE(ratio_, 0);
     CAFFE_ENFORCE_LT(ratio_, 1);
   }
-  virtual ~IDEEPDropoutGradientOp() {}
+  ~IDEEPDropoutGradientOp() override {}
 
   bool RunOnDevice() override {
     const auto& dY = Input(OUTPUT_GRAD);
@@ -85,4 +87,4 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(Dropout, IDEEPDropoutOp);
 REGISTER_IDEEP_OPERATOR(DropoutGrad, IDEEPDropoutGradientOp);
 
-} // namespace caffe2
+} // namespace

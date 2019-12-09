@@ -1,82 +1,88 @@
-/**
- * Copyright (c) 2016-present, Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-#include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/relu_n_op.h"
 
+#include <algorithm>
+#include <functional>
+
+#include "caffe2/core/context_gpu.h"
+
 namespace caffe2 {
+
 namespace {
+
 template <typename T>
-__global__ void ReluNKernel(const int N, const T* X, T* Y, const T thres) {
+__global__ void
+ReluNCUDAKernel(const int N, const T threshold, const T* X, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    auto data = X[i];
-    Y[i] = data > 0 ? (data > thres ? thres : data) : 0;
+#if __CUDA_ARCH__ >= 350
+    Y[i] = __ldg(X + i) > 0
+        ? (__ldg(X + i) < threshold ? __ldg(X + i) : threshold)
+        : T(0);
+#else
+    Y[i] = X[i] > 0 ? (X[i] < threshold ? X[i] : threshold) : T(0);
+#endif
   }
 }
 
 template <typename T>
-__global__ void ReluNGradientKernel(
+__global__ void ReluNGradientCUDAKernel(
     const int N,
-    const T* Y,
+    const T threshold,
     const T* dY,
-    T* dX,
-    const T thres) {
+    const T* Y,
+    T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    auto data = Y[i];
-    dX[i] = data > 0 ? (data >= thres ? 0 : dY[i]) : 0;
+#if __CUDA_ARCH__ >= 350
+    dX[i] = (__ldg(Y + i) > 0 && __ldg(Y + i) < threshold) ? dY[i] : T(0);
+#else
+    dX[i] = (Y[i] > 0 && Y[i] < threshold) ? dY[i] : T(0);
+#endif
   }
 }
+
 } // namespace
 
 template <>
-bool ReluNOp<float, CUDAContext>::RunOnDevice() {
-  auto& X = Input(0);
-  auto* Y = Output(0);
-  CAFFE_ENFORCE_GT(X.size(), 0);
-  Y->ResizeLike(X);
-  ReluNKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y->mutable_data<float>(), n);
+template <typename T>
+bool ReluNFunctor<CUDAContext>::
+operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
+  ReluNCUDAKernel<T>
+      <<<CAFFE_GET_BLOCKS(N),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(N, n, X, Y);
   return true;
 }
 
 template <>
-bool ReluNGradientOp<float, CUDAContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& dY = Input(1);
-  auto* dX = Output(0);
-  CAFFE_ENFORCE_GT(Y.size(), 0);
-  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
-  ReluNGradientKernel<float>
-      <<<CAFFE_GET_BLOCKS(Y.size()),
+template <typename T>
+bool ReluNGradientFunctor<CUDAContext>::Forward(
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& /* dY_dims */,
+    const T* Y,
+    const T* dY,
+    T* dX,
+    CUDAContext* context) const {
+  const int size = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  ReluNGradientCUDAKernel<T>
+      <<<CAFFE_GET_BLOCKS(size),
          CAFFE_CUDA_NUM_THREADS,
          0,
-         context_.cuda_stream()>>>(
-          Y.size(),
-          Y.data<float>(),
-          dY.data<float>(),
-          dX->mutable_data<float>(),
-          n);
+         context->cuda_stream()>>>(size, n, dY, Y, dX);
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(ReluN, ReluNOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(ReluNGradient, ReluNGradientOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    ReluN,
+    UnaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        CUDAContext,
+        ReluNFunctor<CUDAContext>>);
+REGISTER_CUDA_OPERATOR(
+    ReluNGradient,
+    BinaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        CUDAContext,
+        ReluNGradientFunctor<CUDAContext>>);
+
 } // namespace caffe2

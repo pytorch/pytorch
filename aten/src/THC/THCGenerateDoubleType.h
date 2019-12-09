@@ -2,14 +2,14 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateDoubleType.h"
 #endif
 
-#define real double
+#define scalar_t double
 #define accreal double
 #define Real Double
 #define CReal CudaDouble
 #define THC_REAL_IS_DOUBLE
 #line 1 THC_GENERIC_FILE
 #include THC_GENERIC_FILE
-#undef real
+#undef scalar_t
 #undef accreal
 #undef Real
 #undef CReal

@@ -3,10 +3,6 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 namespace {
 
@@ -132,7 +128,8 @@ void ROIAlignForward(
     const T* bottom_rois,
     int roi_cols,
     T* top_data,
-    StorageOrder order) {
+    StorageOrder order,
+    bool continuous_coordinate) {
   DCHECK(roi_cols == 4 || roi_cols == 5);
 
   int n_rois = nthreads / channels / pooled_width / pooled_height;
@@ -152,18 +149,23 @@ void ROIAlignForward(
     }
 
     // Do not using rounding; this implementation detail is critical
-    T roi_start_w = offset_bottom_rois[0] * spatial_scale;
-    T roi_start_h = offset_bottom_rois[1] * spatial_scale;
-    T roi_end_w = offset_bottom_rois[2] * spatial_scale;
-    T roi_end_h = offset_bottom_rois[3] * spatial_scale;
-    // T roi_start_w = round(offset_bottom_rois[0] * spatial_scale);
-    // T roi_start_h = round(offset_bottom_rois[1] * spatial_scale);
-    // T roi_end_w = round(offset_bottom_rois[2] * spatial_scale);
-    // T roi_end_h = round(offset_bottom_rois[3] * spatial_scale);
+    T roi_offset = continuous_coordinate ? T(0.5) : 0;
+    T roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
+    T roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
+    T roi_end_w = offset_bottom_rois[2] * spatial_scale - roi_offset;
+    T roi_end_h = offset_bottom_rois[3] * spatial_scale - roi_offset;
 
-    // Force malformed ROIs to be 1x1
-    T roi_width = std::max(roi_end_w - roi_start_w, (T)1.);
-    T roi_height = std::max(roi_end_h - roi_start_h, (T)1.);
+    T roi_width = roi_end_w - roi_start_w;
+    T roi_height = roi_end_h - roi_start_h;
+    if (continuous_coordinate) {
+      CAFFE_ENFORCE(
+          roi_width >= 0 && roi_height >= 0,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = std::max(roi_width, (T)1.);
+      roi_height = std::max(roi_height, (T)1.);
+    }
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -273,29 +275,32 @@ template <>
 bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool, NCHW
   auto& R = Input(1); // RoIs
-  auto* Y = Output(0); // RoI pooled data
 
-  if (R.size() == 0) {
+  if (R.numel() == 0) {
+    std::vector<int64_t> sizes;
     // Handle empty rois
     if (order_ == StorageOrder::NCHW) {
-      Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
+      sizes = {0, X.dim32(1), pooled_height_, pooled_width_};
     } else if (order_ == StorageOrder::NHWC) {
-      Y->Resize(0, pooled_height_, pooled_width_, X.dim32(3));
+      sizes = {0, pooled_height_, pooled_width_, X.dim32(3)};
     }
-    // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    // Output Tensor is inititalized with proper sizes and data type
+    Output(0, sizes, at::dtype<float>());
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   // if R has 5 columns, the first column is the index, otherwise 0
   CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 
   assert(sampling_ratio_ >= 0);
 
   if (order_ == StorageOrder::NCHW) {
-    Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
-    int output_size = Y->size();
+    auto* Y = Output(
+        0,
+        {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
+        at::dtype<float>()); // RoI pooled data
+    int output_size = Y->numel();
     ROIAlignForward<float>(
         output_size,
         X.data<float>(),
@@ -308,11 +313,15 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->mutable_data<float>(),
-        order_);
+        Y->template mutable_data<float>(),
+        order_,
+        aligned_);
   } else if (order_ == StorageOrder::NHWC) {
-    Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
-    int output_size = Y->size();
+    auto* Y = Output(
+        0,
+        {R.dim32(0), pooled_height_, pooled_width_, X.dim32(3)},
+        at::dtype<float>()); // RoI pooled data
+    int output_size = Y->numel();
     ROIAlignForward<float>(
         output_size,
         X.data<float>(),
@@ -325,20 +334,15 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->mutable_data<float>(),
-        order_);
+        Y->template mutable_data<float>(),
+        order_,
+        aligned_);
   }
 
   return true;
 }
 
 REGISTER_CPU_OPERATOR(RoIAlign, RoIAlignOp<float, CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    RoIAlign,
-    mkl::MKLFallbackOp<RoIAlignOp<float, CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 // Input: X, rois; Output: Y
 OPERATOR_SCHEMA(RoIAlign)
@@ -377,3 +381,21 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
         "is a pooled feature map cooresponding to the r-th RoI.");
 
 } // namespace caffe2
+
+using RoIAlignOpFloatCPU = caffe2::RoIAlignOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlign,
+    "_caffe2::RoIAlign("
+      "Tensor features, "
+      "Tensor rois, "
+      "str order, "
+      "float spatial_scale, "
+      "int pooled_h, "
+      "int pooled_w, "
+      "int sampling_ratio, "
+      "bool aligned"
+    ") -> Tensor",
+    RoIAlignOpFloatCPU);
+// clang-format on

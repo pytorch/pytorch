@@ -3,82 +3,37 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THCTensor.h"
-#include "THTensor.hpp"
-#include "THCStorage.hpp"
+#include <THC/THCTensor.h>
+#include <TH/THTensor.hpp>
+#include <THC/THCStorage.hpp>
+#include <THC/THCGeneral.hpp>
 
 #include <atomic>
 #include <ATen/ATen.h>
 
-typedef struct THCTensor
-{
-    int64_t *size;
-    int64_t *stride;
-    int64_t dim_;
-
-    THCStorage *storage;
-    ptrdiff_t storageOffset;
-    std::atomic<int> refcount;
-
-    char flag;
-
-    template <typename T>
-    inline T * data() const {
-      return storage->data<T>() + storageOffset;
-    }
-
-    template <typename T>
-    inline T * unsafe_data() const {
-      return storage->unsafe_data<T>() + storageOffset;
-    }
-
-    // [NOTE: _dim() vs dim()]
-    // _dim() returns the "old" TH dimension view where no dimensions represents an empty tensor.
-    // dim()  returns the ATen view of the dimensionality, i.e. 0-sized dimensions are supported.
-    inline int64_t _dim() const {
-      return is_empty() ? 0: dim_;
-    }
-
-    inline int64_t dim() const {
-      return dim_;
-    }
-
-    // represents that numel() == 0.
-    inline bool is_empty() const {
-      for (int64_t i = 0; i < dim_; ++i) {
-        if (size[i] == 0) {
-          return true;  
-        }
-      }
-      return false;
-    }
-
-    inline at::IntList sizes() {
-      return at::IntList(size, dim_);
-    }
-} THCTensor;
-
-// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
+// See [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
 THC_API int THCTensor_nDimension(THCState *state, const THCTensor *self);
-THC_API int THCTensor__nDimension(THCState *state, const THCTensor *self);
+THC_API int THCTensor_nDimensionLegacyNoScalars(THCState *state, const THCTensor *self);
+THC_API int THCTensor_nDimensionLegacyAll(THCState *state, const THCTensor *self);
 
 THC_API int64_t THCTensor_size(THCState *state, const THCTensor *self, int dim);
+THC_API int64_t THCTensor_sizeLegacyNoScalars(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim);
-THC_API THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self);
+THC_API int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, int dim);
 
-THC_API THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type);
+THC_API THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta);
 
-THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
-THC_API void THCTensor_resizeNd(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
+THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, at::IntArrayRef size, at::IntArrayRef stride);
+THC_API void THCTensor_resizeNd(THCState *state, THCTensor *tensor, int nDimension, const int64_t *size, const int64_t *stride);
 THC_API void THCTensor_resizeAs(THCState *state, THCTensor *tensor, THCTensor *src);
 
 THC_API void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src);
-THC_API void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride);
+THC_API void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
+THC_API void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
 
 THC_API void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
 THC_API void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
 
-THC_API bool THCTensor_isContiguous(THCState *state, const THCTensor *self);
 THC_API bool THCTensor_allContiguous(THCState *state, THCTensor **inputs, int numInputs);
 THC_API ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self);
 
@@ -98,3 +53,12 @@ THC_API void THCTensor_preserveReduceDimSemantics(THCState *state, THCTensor *te
 /* has more than one index that references the same datapoint, */
 /* true otherwise.                                             */
 THC_API bool THCTensor_maybeOverlappingIndices(THCState* state, const THCTensor* t);
+
+#include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateBoolType.h>
+
+#include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateBFloat16Type.h>

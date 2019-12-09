@@ -1,5 +1,5 @@
 #include "caffe2/utils/eigen_utils.h"
-#include "roi_align_op.h"
+#include "caffe2/operators/roi_align_op.h"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
@@ -12,13 +12,13 @@ namespace {
 
 template <class Context>
 void AddConstInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const float value,
     const string& name,
     Context* context,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<Tensor<Context>>();
+  auto* tensor = BlobGetMutableTensor(blob, Context::GetDeviceType());
   tensor->Resize(shape);
   math::Set<float, Context>(
       tensor->size(), value, tensor->template mutable_data<float>(), context);
@@ -27,37 +27,37 @@ void AddConstInput(
 
 template <class Context>
 void AddInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const vector<float>& values,
     const string& name,
     Workspace* ws);
 
 template <>
 void AddInput<CPUContext>(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const vector<float>& values,
     const string& name,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.array() = utils::AsEArrXt(values);
 }
 
 template <>
 void AddInput<CUDAContext>(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const vector<float>& values,
     const string& name,
     Workspace* ws) {
-  TensorCPU tmp(shape);
-  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.size());
+  Tensor tmp(shape, CPU);
+  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.numel());
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->template GetMutable<Tensor<CUDAContext>>();
+  auto* tensor = BlobGetMutableTensor(blob, CUDA);
   tensor->CopyFrom(tmp);
 }
 
@@ -102,10 +102,10 @@ void CreateAndRun(
     vector<float> features(N * C * H * W);
     std::iota(features.begin(), features.end(), 0);
     // utils::AsEArrXt(features) /= features.size();
-    AddInput<Context>(vector<TIndex>{N, C, H, W}, features, "X", &ws);
+    AddInput<Context>(vector<int64_t>{N, C, H, W}, features, "X", &ws);
     const int n_rois = test_params.n_rois;
     const vector<float>& rois = test_params.rois_array;
-    AddInput<Context>(vector<TIndex>{n_rois, 5}, rois, "R", &ws);
+    AddInput<Context>(vector<int64_t>{n_rois, 5}, rois, "R", &ws);
   } else {
     const int N = 2;
     const int C = 3;
@@ -114,7 +114,7 @@ void CreateAndRun(
     vector<float> features(N * C * H * W);
     std::iota(features.begin(), features.end(), 0);
     // utils::AsEArrXt(features) /= features.size();
-    AddInput<Context>(vector<TIndex>{N, C, H, W}, features, "X", &ws);
+    AddInput<Context>(vector<int64_t>{N, C, H, W}, features, "X", &ws);
     vector<float> rois{0, 0,            0,            79,           59,
                        0, 0,            5.0005703f,   52.63237f,    43.69501495f,
                        0, 24.13628387f, 7.51243401f,  79,           46.06628418f,
@@ -124,7 +124,7 @@ void CreateAndRun(
                        0, 23.57396317f, 29.98791885f, 79,           59,
                        0, 0,            41.90219116f, 79,           59,
                        0, 0,            23.30098343f, 79,           59};
-    AddInput<Context>(vector<TIndex>{9, 5}, rois, "R", &ws);
+    AddInput<Context>(vector<int64_t>{9, 5}, rois, "R", &ws);
   }
 
   std::vector<unique_ptr<OperatorBase>> ops;
@@ -136,7 +136,8 @@ void CreateAndRun(
     def.add_input("X");
     def.add_input("R");
     def.add_output("Y");
-    def.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
     def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
     def.add_arg()->CopyFrom(MakeArgument("pooled_h", 6));
     def.add_arg()->CopyFrom(MakeArgument("pooled_w", 8));
@@ -151,7 +152,7 @@ void CreateAndRun(
     def_roialign.add_input("R");
     def_roialign.add_output("Y_NHWC");
     def_roialign.mutable_device_option()->set_device_type(
-        GetDeviceType<Context>());
+        TypeToProto(GetDeviceType<Context>()));
     def_roialign.add_arg()->CopyFrom(
         MakeArgument("spatial_scale", 1.0f / 16.0f));
     def_roialign.add_arg()->CopyFrom(MakeArgument("pooled_h", 6));
@@ -164,14 +165,16 @@ void CreateAndRun(
     def_x.set_type("NCHW2NHWC");
     def_x.add_input("X");
     def_x.add_output("X_NHWC");
-    def_x.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def_x.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
 
     OperatorDef def_y;
     def_y.set_name("test_y");
     def_y.set_type("NHWC2NCHW");
     def_y.add_input("Y_NHWC");
     def_y.add_output("Y");
-    def_y.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def_y.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
 
     ops.push_back(CreateOperator(def_x, &ws));
     ops.push_back(CreateOperator(def_roialign, &ws));
@@ -186,8 +189,8 @@ void CreateAndRun(
   Blob* Y_blob = ws.GetBlob("Y");
   EXPECT_NE(nullptr, Y_blob);
 
-  auto& Y = Y_blob->Get<Tensor<Context>>();
-  outResult->CopyFrom(Y, &context);
+  auto& Y = Y_blob->Get<Tensor>();
+  outResult->CopyFrom(Y);
 }
 
 } // namespace
@@ -196,9 +199,9 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
   if (!caffe2::HasCudaGPU())
     return;
 
-  TensorCPU y_cpu;
-  TensorCPU y_gpu;
-  TensorCPU y_cpu_nhwc;
+  Tensor y_cpu(CPU);
+  Tensor y_gpu(CPU);
+  Tensor y_cpu_nhwc(CPU);
 
   // tests using FAIR example
   {
@@ -207,12 +210,12 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
     CreateAndRun<CUDAContext>(&y_gpu, "NCHW", test_params, false);
     CreateAndRun<CPUContext>(&y_cpu_nhwc, "NHWC", test_params, false);
 
-    EXPECT_EQ(y_cpu.dims(), y_gpu.dims());
-    EXPECT_EQ(y_cpu.dims(), y_cpu_nhwc.dims());
-    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.size());
-    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.size());
+    EXPECT_EQ(y_cpu.sizes(), y_gpu.sizes());
+    EXPECT_EQ(y_cpu.sizes(), y_cpu_nhwc.sizes());
+    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.numel());
+    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.numel());
     ConstEigenVectorMap<float> y_cpu_nhwc_vec(
-        y_cpu_nhwc.data<float>(), y_cpu_nhwc.size());
+        y_cpu_nhwc.data<float>(), y_cpu_nhwc.numel());
     int max_diff_idx = -1;
     (y_cpu_vec - y_gpu_vec).cwiseAbs().maxCoeff(&max_diff_idx);
     EXPECT_FLOAT_EQ(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx]);
@@ -248,12 +251,12 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
     CreateAndRun<CUDAContext>(&y_gpu, "NCHW", test_params, true);
     CreateAndRun<CPUContext>(&y_cpu_nhwc, "NHWC", test_params, true);
 
-    EXPECT_EQ(y_cpu.dims(), y_gpu.dims());
-    EXPECT_EQ(y_cpu.dims(), y_cpu_nhwc.dims());
-    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.size());
-    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.size());
+    EXPECT_EQ(y_cpu.sizes(), y_gpu.sizes());
+    EXPECT_EQ(y_cpu.sizes(), y_cpu_nhwc.sizes());
+    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.numel());
+    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.numel());
     ConstEigenVectorMap<float> y_cpu_nhwc_vec(
-        y_cpu_nhwc.data<float>(), y_cpu_nhwc.size());
+        y_cpu_nhwc.data<float>(), y_cpu_nhwc.numel());
     int max_diff_idx = -1;
     (y_cpu_vec - y_gpu_vec).cwiseAbs().maxCoeff(&max_diff_idx);
     EXPECT_NEAR(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx], 1e-1);

@@ -1,5 +1,0 @@
-graph(%0 : Double(3, 4)) {
-  %2 : Double(3, 4) = aten::neg(%0)
-  %3 : Double(3, 4) = aten::add[other={1}, alpha={1}](%2)
-  return (%3);
-}

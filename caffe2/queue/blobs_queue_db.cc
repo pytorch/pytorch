@@ -10,6 +10,11 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/queue/blobs_queue.h"
 
+#ifdef CAFFE2_USE_MKLDNN
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
+
 namespace caffe2 {
 namespace db {
 
@@ -32,10 +37,16 @@ class CreateBlobsQueueDBOp : public Operator<CPUContext> {
   }
 
  private:
-  DISABLE_COPY_AND_ASSIGN(CreateBlobsQueueDBOp);
+  C10_DISABLE_COPY_AND_ASSIGN(CreateBlobsQueueDBOp);
 };
 
 REGISTER_CPU_OPERATOR(CreateBlobsQueueDB, CreateBlobsQueueDBOp<CPUContext>);
+
+#ifdef CAFFE2_USE_MKLDNN
+REGISTER_IDEEP_OPERATOR(
+    CreateBlobsQueueDB,
+    IDEEPFallbackOp<CreateBlobsQueueDBOp<CPUContext>, SkipIndices<0>>);
+#endif
 
 OPERATOR_SCHEMA(CreateBlobsQueueDB)
     .NumInputs(1)

@@ -4,7 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 namespace caffe2 {
 
@@ -12,15 +12,15 @@ namespace {
 
 template <class CodebookT, class CodeT>
 void Decode(
-    const TensorCPU& codebook,
-    const TensorCPU& codes,
-    /* optional */ const TensorCPU* const decoded_grad,
-    TensorCPU* const output,
+    const Tensor& codebook,
+    const Tensor& codes,
+    /* optional */ const Tensor* const decoded_grad,
+    Tensor* const output,
     bool resizeOnly) {
   CAFFE_ENFORCE(codebook.IsType<CodebookT>());
 
   auto* cb_ptr = codebook.data<CodebookT>();
-  int cb_size = codebook.size();
+  int cb_size = codebook.numel();
 
   CAFFE_ENFORCE(codes.IsType<CodeT>());
   auto* code_ptr = codes.data<CodeT>();
@@ -28,24 +28,24 @@ void Decode(
   if (decoded_grad == nullptr) {
     // Forward pass: decode and store codebook values in output.
     output->ResizeLike(codes);
-    auto* out_ptr = output->mutable_data<CodebookT>();
+    auto* out_ptr = output->template mutable_data<CodebookT>();
     if (resizeOnly) {
       return;
     }
 
-    int sz = output->size();
+    int sz = output->numel();
     for (int i = 0; i < sz; i++) {
       DCHECK_LE(*code_ptr, cb_size);
       *out_ptr++ = cb_ptr[*code_ptr++];
     }
   } else {
     // Backward pass: decode and accumulate gradient w.r.t. codebook values.
-    CAFFE_ENFORCE_EQ(codes.size(), decoded_grad->size());
+    CAFFE_ENFORCE_EQ(codes.numel(), decoded_grad->numel());
     auto* gradient_ptr = decoded_grad->data<CodebookT>();
-    auto* const gradient_end = gradient_ptr + decoded_grad->size();
+    auto* const gradient_end = gradient_ptr + decoded_grad->numel();
 
-    CAFFE_ENFORCE_EQ(cb_size, output->size());
-    auto* out_ptr = output->mutable_data<CodebookT>();
+    CAFFE_ENFORCE_EQ(cb_size, output->numel());
+    auto* out_ptr = output->template mutable_data<CodebookT>();
     while (gradient_ptr < gradient_end) {
       DCHECK_LE(*code_ptr, cb_size);
       out_ptr[*code_ptr++] += *gradient_ptr++;
@@ -56,10 +56,10 @@ void Decode(
 #define REGISTER_DECODER(codebookType, codesType)                      \
   {                                                                    \
     {TypeMeta::Id<codebookType>(), TypeMeta::Id<codesType>()},         \
-        [](const TensorCPU& codebook_,                                 \
-           const TensorCPU& codes_,                                    \
-           const TensorCPU* gradient_,                                 \
-           TensorCPU* outDecoded_,                                     \
+        [](const Tensor& codebook_,                                    \
+           const Tensor& codes_,                                       \
+           const Tensor* gradient_,                                    \
+           Tensor* outDecoded_,                                        \
            bool resizeOnly_) {                                         \
           Decode<codebookType, codesType>(                             \
               codebook_, codes_, gradient_, outDecoded_, resizeOnly_); \
@@ -67,24 +67,24 @@ void Decode(
   }
 
 inline void DecodeGeneral(
-    const TensorCPU& codebook,
-    const TensorCPU& codes,
-    const TensorCPU* gradient,
-    TensorCPU* outDecoded,
+    const Tensor& codebook,
+    const Tensor& codes,
+    const Tensor* gradient,
+    Tensor* outDecoded,
     bool resizeOnly) {
   const static std::map<
-      std::pair<CaffeTypeId, CaffeTypeId>,
+      std::pair<TypeIdentifier, TypeIdentifier>,
       std::function<void(
-          const TensorCPU& codebook,
-          const TensorCPU& codes,
-          const TensorCPU* gradient,
-          TensorCPU* outDecoded,
+          const Tensor& codebook,
+          const Tensor& codes,
+          const Tensor* gradient,
+          Tensor* outDecoded,
           bool resizeOnly)>>
       gDecoderMapper = {REGISTER_DECODER(float, uint8_t),
                         REGISTER_DECODER(float, uint16_t),
                         REGISTER_DECODER(float, int32_t)};
 
-  gDecoderMapper.at({codebook.meta().id(), codes.meta().id()})(
+  gDecoderMapper.at({codebook.dtype().id(), codes.dtype().id()})(
       codebook, codes, gradient, outDecoded, resizeOnly);
 }
 
@@ -102,8 +102,9 @@ template <QuantDecodeRunTy QuantDecodeRun>
 class QuantDecodeOp final : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  QuantDecodeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit QuantDecodeOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   ~QuantDecodeOp() {}
 
@@ -113,7 +114,7 @@ class QuantDecodeOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(InputSize(), OutputSize() + 1);
 
     const auto& codebook = Input(0);
-    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.meta().name());
+    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
     for (int i = 0; i < OutputSize(); i++) {
       auto& ci = Input(i + 1);
@@ -138,8 +139,9 @@ class QuantDecodeOp final : public Operator<CPUContext> {
 class QuantDecodeGradientOp final : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  QuantDecodeGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit QuantDecodeGradientOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
   ~QuantDecodeGradientOp() {}
 
   bool RunOnDevice() override {
@@ -149,12 +151,11 @@ class QuantDecodeGradientOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(OutputSize(), 1);
 
     const auto& codebook = Input(0);
-    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.meta().name());
+    CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
-    auto* gradient = Output(0);
-    gradient->ResizeLike(codebook);
-    auto* gradient_ptr = gradient->mutable_data<float>();
-    std::fill(gradient_ptr, gradient_ptr + gradient->size(), 0);
+    auto* gradient = Output(0, codebook.sizes(), at::dtype<float>());
+    auto* gradient_ptr = gradient->template mutable_data<float>();
+    std::fill(gradient_ptr, gradient_ptr + gradient->numel(), 0);
 
     for (int i = 0; i < num_code_tensors; i++) {
       auto& codes_i = Input(i + 1);

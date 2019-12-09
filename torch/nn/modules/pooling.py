@@ -1,4 +1,7 @@
-import torch
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
 
 from .module import Module
 from .utils import _single, _pair, _triple
@@ -6,6 +9,8 @@ from .. import functional as F
 
 
 class _MaxPoolNd(Module):
+    __constants__ = ['kernel_size', 'stride', 'padding', 'dilation',
+                     'return_indices', 'ceil_mode']
 
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1,
                  return_indices=False, ceil_mode=False):
@@ -30,11 +35,8 @@ class MaxPool1d(_MaxPoolNd):
     and output :math:`(N, C, L_{out})` can be precisely described as:
 
     .. math::
-
-        \begin{equation*}
-        \text{out}(N_i, C_j, k)  = \max_{m=0, \ldots, \text{kernel_size}-1}
-                \text{input}(N_i, C_j, \text{stride} * k + m)
-        \end{equation*}
+        out(N_i, C_j, k) = \max_{m=0, \ldots, \text{kernel\_size} - 1}
+                input(N_i, C_j, stride \times k + m)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -46,16 +48,16 @@ class MaxPool1d(_MaxPoolNd):
         padding: implicit zero padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
-                        Useful when Unpooling later
+                        Useful for :class:`torch.nn.MaxUnpool1d` later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})` where
+        - Output: :math:`(N, C, L_{out})`, where
 
           .. math::
-              L_{out} = \left\lfloor \frac{L_{in} + 2 * \text{padding} - \text{dilation}
-                    * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+              L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -73,10 +75,6 @@ class MaxPool1d(_MaxPoolNd):
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
 
-    def extra_repr(self):
-        return 'kernel_size={kernel_size}, stride={stride}, padding={padding}' \
-            ', dilation={dilation}, ceil_mode={ceil_mode}'.format(**self.__dict__)
-
 
 class MaxPool2d(_MaxPoolNd):
     r"""Applies a 2D max pooling over an input signal composed of several input
@@ -87,11 +85,11 @@ class MaxPool2d(_MaxPoolNd):
     can be precisely described as:
 
     .. math::
-
-        \begin{equation*}
-        \text{out}(N_i, C_j, h, w)  = \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
-                               \text{input}(N_i, C_j, \text{stride}[0] * h + m, \text{stride}[1] * w + n)
-        \end{equation*}
+        \begin{aligned}
+            out(N_i, C_j, h, w) ={} & \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1} \\
+                                    & \text{input}(N_i, C_j, \text{stride[0]} \times h + m,
+                                                   \text{stride[1]} \times w + n)
+        \end{aligned}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -109,19 +107,20 @@ class MaxPool2d(_MaxPoolNd):
         padding: implicit zero padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
-                        Useful when Unpooling later
+                        Useful for :class:`torch.nn.MaxUnpool2d` later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
-                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
+                    \times (\text{kernel\_size[0]} - 1) - 1}{\text{stride[0]}} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
-                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
+                    \times (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
 
     Examples::
 
@@ -151,11 +150,11 @@ class MaxPool3d(_MaxPoolNd):
     can be precisely described as:
 
     .. math::
-
-        \begin{align*}
-        \text{out}(N_i, C_j, d, h, w) &= \max_{k=0, \ldots, kD-1} \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
-                \text{input}(N_i, C_j, \text{stride}[0] * k + d,\\ &\text{stride}[1] * h + m, \text{stride}[2] * w + n)
-        \end{align*}
+        \begin{aligned}
+            \text{out}(N_i, C_j, d, h, w) ={} & \max_{k=0, \ldots, kD-1} \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1} \\
+                                              & \text{input}(N_i, C_j, \text{stride[0]} \times d + k,
+                                                             \text{stride[1]} \times h + m, \text{stride[2]} \times w + n)
+        \end{aligned}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
@@ -173,22 +172,24 @@ class MaxPool3d(_MaxPoolNd):
         padding: implicit zero padding to be added on all three sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
-                        Useful when Unpooling later
+                        Useful for :class:`torch.nn.MaxUnpool3d` later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
-              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0] *
-                (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+              D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0] \times
+                (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1] *
-                (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+          .. math::
+              H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] - \text{dilation}[1] \times
+                (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2] *
-                (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2] \times
+                (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
 
@@ -201,7 +202,7 @@ class MaxPool3d(_MaxPoolNd):
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
-    """
+    """  # noqa: E501
 
     def forward(self, input):
         return F.max_pool3d(input, self.kernel_size, self.stride,
@@ -226,29 +227,29 @@ class MaxUnpool1d(_MaxUnpoolNd):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
-    .. note:: `MaxPool1d` can map several input sizes to the same output sizes.
-              Hence, the inversion process can get ambiguous.
+    .. note:: :class:`MaxPool1d` can map several input sizes to the same output
+              sizes. Hence, the inversion process can get ambiguous.
               To accommodate this, you can provide the needed output size
-              as an additional argument `output_size` in the forward call.
+              as an additional argument :attr:`output_size` in the forward call.
               See the Inputs and Example below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
-            It is set to ``kernel_size`` by default.
+            It is set to :attr:`kernel_size` by default.
         padding (int or tuple): Padding that was added to the input
 
     Inputs:
         - `input`: the input Tensor to invert
-        - `indices`: the indices given out by `MaxPool1d`
-        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
+        - `indices`: the indices given out by :class:`~torch.nn.MaxPool1d`
+        - `output_size` (optional): the targeted output size
 
     Shape:
         - Input: :math:`(N, C, H_{in})`
-        - Output: :math:`(N, C, H_{out})` where
+        - Output: :math:`(N, C, H_{out})`, where
 
           .. math::
-              H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{kernel\_size}[0]
 
           or as given by :attr:`output_size` in the call operator
 
@@ -278,6 +279,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
         self.padding = _single(padding)
 
     def forward(self, input, indices, output_size=None):
+        # type: (Tensor, Tensor, Optional[List[int]]) -> Tensor
         return F.max_unpool1d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
@@ -291,31 +293,32 @@ class MaxUnpool2d(_MaxUnpoolNd):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
-    .. note:: `MaxPool2d` can map several input sizes to the same output sizes.
-              Hence, the inversion process can get ambiguous.
+    .. note:: :class:`MaxPool2d` can map several input sizes to the same output
+              sizes. Hence, the inversion process can get ambiguous.
               To accommodate this, you can provide the needed output size
-              as an additional argument `output_size` in the forward call.
+              as an additional argument :attr:`output_size` in the forward call.
               See the Inputs and Example below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
-            It is set to ``kernel_size`` by default.
+            It is set to :attr:`kernel_size` by default.
         padding (int or tuple): Padding that was added to the input
 
     Inputs:
         - `input`: the input Tensor to invert
-        - `indices`: the indices given out by `MaxPool2d`
-        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
+        - `indices`: the indices given out by :class:`~torch.nn.MaxPool2d`
+        - `output_size` (optional): the targeted output size
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
-            H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+            H_{out} = (H_{in} - 1) \times \text{stride[0]} - 2 \times \text{padding[0]} + \text{kernel\_size[0]}
 
-            W_{out} = (W_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1] + \text{kernel_size}[1]
+          .. math::
+            W_{out} = (W_{in} - 1) \times \text{stride[1]} - 2 \times \text{padding[1]} + \text{kernel\_size[1]}
 
           or as given by :attr:`output_size` in the call operator
 
@@ -350,6 +353,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
         self.padding = _pair(padding)
 
     def forward(self, input, indices, output_size=None):
+        # type: (Tensor, Tensor, Optional[List[int]]) -> Tensor
         return F.max_unpool2d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
@@ -362,33 +366,35 @@ class MaxUnpool3d(_MaxUnpoolNd):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
-    .. note:: `MaxPool3d` can map several input sizes to the same output sizes.
-              Hence, the inversion process can get ambiguous.
+    .. note:: :class:`MaxPool3d` can map several input sizes to the same output
+              sizes. Hence, the inversion process can get ambiguous.
               To accommodate this, you can provide the needed output size
-              as an additional argument `output_size` in the forward call.
+              as an additional argument :attr:`output_size` in the forward call.
               See the Inputs section below.
 
     Args:
         kernel_size (int or tuple): Size of the max pooling window.
         stride (int or tuple): Stride of the max pooling window.
-            It is set to ``kernel_size`` by default.
+            It is set to :attr:`kernel_size` by default.
         padding (int or tuple): Padding that was added to the input
 
     Inputs:
         - `input`: the input Tensor to invert
-        - `indices`: the indices given out by `MaxPool3d`
-        - `output_size` (optional) : a `torch.Size` that specifies the targeted output size
+        - `indices`: the indices given out by :class:`~torch.nn.MaxPool3d`
+        - `output_size` (optional): the targeted output size
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
-              D_{out} = (D_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+              D_{out} = (D_{in} - 1) \times \text{stride[0]} - 2 \times \text{padding[0]} + \text{kernel\_size[0]}
 
-              H_{out} = (H_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1] + \text{kernel_size}[1]
+          .. math::
+              H_{out} = (H_{in} - 1) \times \text{stride[1]} - 2 \times \text{padding[1]} + \text{kernel\_size[1]}
 
-              W_{out} = (W_{in} - 1) * \text{stride}[2] - 2 * \text{padding}[2] + \text{kernel_size}[2]
+          .. math::
+              W_{out} = (W_{in} - 1) \times \text{stride[2]} - 2 \times \text{padding[2]} + \text{kernel\_size[2]}
 
           or as given by :attr:`output_size` in the call operator
 
@@ -410,11 +416,13 @@ class MaxUnpool3d(_MaxUnpoolNd):
         self.padding = _triple(padding)
 
     def forward(self, input, indices, output_size=None):
+        # type: (Tensor, Tensor, Optional[List[int]]) -> Tensor
         return F.max_unpool3d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
 
 class _AvgPoolNd(Module):
+    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad']
 
     def extra_repr(self):
         return 'kernel_size={}, stride={}, padding={}'.format(
@@ -432,10 +440,8 @@ class AvgPool1d(_AvgPoolNd):
 
     .. math::
 
-        \begin{equation*}
-        \text{out}(N_i, C_j, l)  = \frac{1}{k} \sum_{m=0}^{k}
-                               \text{input}(N_i, C_j, \text{stride} * l + m)
-        \end{equation*}
+        \text{out}(N_i, C_j, l) = \frac{1}{k} \sum_{m=0}^{k-1}
+                               \text{input}(N_i, C_j, \text{stride} \times l + m)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
@@ -452,11 +458,11 @@ class AvgPool1d(_AvgPoolNd):
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})` where
+        - Output: :math:`(N, C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} +
-              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
+              2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -465,7 +471,6 @@ class AvgPool1d(_AvgPoolNd):
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
         tensor([[[ 2.,  4.,  6.]]])
     """
-
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool1d, self).__init__()
@@ -491,10 +496,8 @@ class AvgPool2d(_AvgPoolNd):
 
     .. math::
 
-        \begin{equation*}
-        \text{out}(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                               \text{input}(N_i, C_j, \text{stride}[0] * h + m, \text{stride}[1] * w + n)
-        \end{equation*}
+        out(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
+                               input(N_i, C_j, stride[0] \times h + m, stride[1] \times w + n)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points.
@@ -511,17 +514,19 @@ class AvgPool2d(_AvgPoolNd):
         padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
+        divisor_override: if specified, it will be used as divisor, otherwise attr:`kernel_size` will be used
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] -
-                \text{kernel_size}[0]}{\text{stride}[0]} + 1\right\rfloor
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
+                \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] -
-                \text{kernel_size}[1]}{\text{stride}[1]} + 1\right\rfloor
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] -
+                \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
 
@@ -532,19 +537,21 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
+    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
+                 count_include_pad=True, divisor_override=None):
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
+        self.divisor_override = divisor_override
 
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad)
+                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
 
 
 class AvgPool3d(_AvgPoolNd):
@@ -556,13 +563,12 @@ class AvgPool3d(_AvgPoolNd):
     can be precisely described as:
 
     .. math::
-
-        \begin{equation*}
-        \text{out}(N_i, C_j, d, h, w)  = \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                \frac{\text{input}(N_i, C_j, \text{stride}[0] * d + k, \text{stride}[1] * h + m,
-                        \text{stride}[2] * w + n)}
-                     {kD * kH * kW}
-        \end{equation*}
+        \begin{aligned}
+            \text{out}(N_i, C_j, d, h, w) ={} & \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1} \\
+                                              & \frac{\text{input}(N_i, C_j, \text{stride}[0] \times d + k,
+                                                      \text{stride}[1] \times h + m, \text{stride}[2] \times w + n)}
+                                                     {kD \times kH \times kW}
+        \end{aligned}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on all three sides
     for :attr:`padding` number of points.
@@ -579,20 +585,23 @@ class AvgPool3d(_AvgPoolNd):
         padding: implicit zero padding to be added on all three sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
+        divisor_override: if specified, it will be used as divisor, otherwise attr:`kernel_size` will be used
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
-              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] -
-                    \text{kernel_size}[0]}{\text{stride}[0]} + 1\right\rfloor
+              D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] -
+                    \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] -
-                    \text{kernel_size}[1]}{\text{stride}[1]} + 1\right\rfloor
+          .. math::
+              H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] -
+                    \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] -
-                    \text{kernel_size}[2]}{\text{stride}[2]} + 1\right\rfloor
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] -
+                    \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
 
@@ -603,19 +612,21 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50,44, 31)
         >>> output = m(input)
     """
+    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
+                 count_include_pad=True, divisor_override=None):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
+        self.divisor_override = divisor_override
 
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad)
+                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
 
     def __setstate__(self, d):
         super(AvgPool3d, self).__setstate__(d)
@@ -629,13 +640,13 @@ class FractionalMaxPool2d(Module):
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
-    The max-pooling operation is applied in :math:`kHxkW` regions by a stochastic
+    The max-pooling operation is applied in :math:`kH \times kW` regions by a stochastic
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k) or a tuple `(kh x kw)`
+                     Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
         output_size: the target output size of the image of the form `oH x oW`.
                      Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -654,6 +665,8 @@ class FractionalMaxPool2d(Module):
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
+    __constants__ = ['kernel_size', 'return_indices', 'output_size',
+                     'output_ratio']
 
     def __init__(self, kernel_size, output_size=None, output_ratio=None,
                  return_indices=False, _random_samples=None):
@@ -674,14 +687,72 @@ class FractionalMaxPool2d(Module):
                                  .format(output_ratio))
 
     def forward(self, input):
-        samples = None if self._random_samples is None else self._random_samples
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
-            _random_samples=samples)
+            _random_samples=self._random_samples)
+
+
+class FractionalMaxPool3d(Module):
+    r"""Applies a 3D fractional max pooling over an input signal composed of several input planes.
+
+    Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
+
+    The max-pooling operation is applied in :math:`kTxkHxkW` regions by a stochastic
+    step size determined by the target output size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        kernel_size: the size of the window to take a max over.
+                     Can be a single number k (for a square kernel of k x k x k) or a tuple `(kt x kh x kw)`
+        output_size: the target output size of the image of the form `oT x oH x oW`.
+                     Can be a tuple `(oT, oH, oW)` or a single number oH for a square image `oH x oH x oH`
+        output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
+                      This has to be a number or tuple in the range (0, 1)
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to :meth:`nn.MaxUnpool3d`. Default: ``False``
+
+    Examples:
+        >>> # pool of cubic window of size=3, and target output size 13x12x11
+        >>> m = nn.FractionalMaxPool3d(3, output_size=(13, 12, 11))
+        >>> # pool of cubic window and target output size being half of input size
+        >>> m = nn.FractionalMaxPool3d(3, output_ratio=(0.5, 0.5, 0.5))
+        >>> input = torch.randn(20, 16, 50, 32, 16)
+        >>> output = m(input)
+
+    .. _Fractional MaxPooling:
+        http://arxiv.org/abs/1412.6071
+    """
+    __constants__ = ['kernel_size', 'return_indices', 'output_size',
+                     'output_ratio']
+
+    def __init__(self, kernel_size, output_size=None, output_ratio=None,
+                 return_indices=False, _random_samples=None):
+        super(FractionalMaxPool3d, self).__init__()
+        self.kernel_size = _triple(kernel_size)
+        self.return_indices = return_indices
+        self.register_buffer('_random_samples', _random_samples)
+        self.output_size = _triple(output_size) if output_size is not None else None
+        self.output_ratio = _triple(output_ratio) if output_ratio is not None else None
+        if output_size is None and output_ratio is None:
+            raise ValueError("FractionalMaxPool3d requires specifying either "
+                             "an output size, or a pooling ratio")
+        if output_size is not None and output_ratio is not None:
+            raise ValueError("only one of output_size and output_ratio may be specified")
+        if self.output_ratio is not None:
+            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1 and 0 < self.output_ratio[2] < 1):
+                raise ValueError("output_ratio must be between 0 and 1 (got {})"
+                                 .format(output_ratio))
+
+    def forward(self, input):
+        return F.fractional_max_pool3d(
+            input, self.kernel_size, self.output_size, self.output_ratio,
+            self.return_indices,
+            _random_samples=self._random_samples)
 
 
 class _LPPoolNd(Module):
+    __constants__ = ['norm_type', 'kernel_size', 'stride', 'ceil_mode']
 
     def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
         super(_LPPoolNd, self).__init__()
@@ -691,7 +762,7 @@ class _LPPoolNd(Module):
         self.ceil_mode = ceil_mode
 
     def extra_repr(self):
-        return 'norm_type={norm_type}, kernel_size{kernel_size}, stride={stride}, ' \
+        return 'norm_type={norm_type}, kernel_size={kernel_size}, stride={stride}, ' \
             'ceil_mode={ceil_mode}'.format(**self.__dict__)
 
 
@@ -704,7 +775,7 @@ class LPPool1d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = infinity, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     .. note:: If the sum to the power of `p` is zero, the gradient of this function is
@@ -717,11 +788,11 @@ class LPPool1d(_LPPoolNd):
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})` where
+        - Output: :math:`(N, C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} +
-              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
+              2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.
@@ -731,7 +802,7 @@ class LPPool1d(_LPPoolNd):
     """
 
     def forward(self, input):
-        return F.lp_pool1d(input, self.norm_type, self.kernel_size,
+        return F.lp_pool1d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 
@@ -745,7 +816,7 @@ class LPPool2d(_LPPoolNd):
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
     - At p = :math:`\infty`, one gets Max Pooling
-    - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
+    - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
@@ -763,14 +834,15 @@ class LPPool2d(_LPPoolNd):
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0] *
-                    (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0] \times
+                    (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1] *
-                    (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] - \text{dilation}[1] \times
+                    (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
 
@@ -784,11 +856,12 @@ class LPPool2d(_LPPoolNd):
     """
 
     def forward(self, input):
-        return F.lp_pool2d(input, self.norm_type, self.kernel_size,
+        return F.lp_pool2d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 
 class _AdaptiveMaxPoolNd(Module):
+    __constants__ = ['output_size', 'return_indices']
 
     def __init__(self, output_size, return_indices=False):
         super(_AdaptiveMaxPoolNd, self).__init__()
@@ -797,6 +870,9 @@ class _AdaptiveMaxPoolNd(Module):
 
     def extra_repr(self):
         return 'output_size={}'.format(self.output_size)
+
+# FIXME (by @ssnl): Improve adaptive pooling docs: specify what the input and
+#   output shapes are, and how the operation computes output.
 
 
 class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
@@ -892,6 +968,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
 
 class _AdaptiveAvgPoolNd(Module):
+    __constants__ = ['output_size']
 
     def __init__(self, output_size):
         super(_AdaptiveAvgPoolNd, self).__init__()
@@ -930,7 +1007,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single H for a square image H x H
+                     Can be a tuple (H, W) or a single H for a square image H x H.
                      H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
@@ -962,7 +1039,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     Args:
         output_size: the target output size of the form D x H x W.
-                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
                      D, H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 

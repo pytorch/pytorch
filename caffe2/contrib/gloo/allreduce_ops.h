@@ -15,7 +15,7 @@ namespace gloo {
 
 template <class Context>
 class AllreduceOp final : public Operator<Context> {
-  enum Mode { RING_FULL, RING_CHUNKED, HALVING_DOUBLING };
+  enum Mode { RING_FULL, RING_CHUNKED, HALVING_DOUBLING, BCUBE };
 
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -59,7 +59,6 @@ class AllreduceOp final : public Operator<Context> {
  protected:
   void initialize() {
     Mode mode = HALVING_DOUBLING;
-    auto bytes = Input(1).nbytes();
 
     // Store which inputs/outputs this instance initialized with
     update(init_);
@@ -71,15 +70,15 @@ class AllreduceOp final : public Operator<Context> {
     }
 
     // Verify tensors all have same size
-    size_t size = Input(1).size();
+    size_t size = Input(1).numel();
     for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE_EQ(Input(i).size(), size);
+      CAFFE_ENFORCE_EQ(Input(i).numel(), size);
     }
 
     // Verify tensors all have same type
-    TypeMeta meta = Input(1).meta();
+    TypeMeta meta = Input(1).dtype();
     for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE(Input(i).meta() == meta);
+      CAFFE_ENFORCE(Input(i).dtype() == meta);
     }
 
     switch (mode) {
@@ -92,11 +91,15 @@ class AllreduceOp final : public Operator<Context> {
       case HALVING_DOUBLING:
         initializeHalvingDoubling();
         return;
+      case BCUBE:
+        initializeBcube();
+        return;
     }
 
     CAFFE_ENFORCE(false, "Unreachable code");
   }
 
+  void initializeBcube();
   void initializeHalvingDoubling();
   void initializeRingFull();
   void initializeRingChunked();
@@ -113,11 +116,11 @@ class AllreduceOp final : public Operator<Context> {
     params.inputs.resize(InputSize() - 1);
     params.outputs.resize(OutputSize());
     for (auto i = 0; i < params.inputs.size(); i++) {
-      params.inputs[i] = Input(i + 1).template raw_data();
-      params.outputs[i] = Output(i)->template raw_mutable_data();
+      params.inputs[i] = Input(i + 1).raw_data();
+      params.outputs[i] = Output(i)->raw_mutable_data();
     }
-    params.size = Output(0)->size();
-    params.meta = Output(0)->meta();
+    params.size = Output(0)->numel();
+    params.meta = Output(0)->dtype();
   }
 
   GlooParameters init_;

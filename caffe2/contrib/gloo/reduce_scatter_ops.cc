@@ -30,7 +30,7 @@ void ReduceScatterOp<Context>::initializeHalvingDoubling() {
         init_.template getOutputs<float>(),
         init_.size,
         recvCounts_));
-  } else if (init_.template IsType<::caffe2::float16>()) {
+  } else if (init_.template IsType<::at::Half>()) {
     algorithm_.reset(new ::gloo::ReduceScatterHalvingDoubling<::gloo::float16>(
         init_.context,
         init_.template getOutputs<::gloo::float16>(),

@@ -1,15 +1,19 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "THCReduceApplyUtils.cuh"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
+#include <c10/macros/Macros.h>
 
 #include <thrust/functional.h>
 
 #define MULTILABELMARGIN_THREADS 1024
 
 template <typename Dtype, typename Acctype>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
+#endif
 __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output,
                                                                    Dtype *input,
                                                                    THCIndex_t *target,
@@ -37,7 +41,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
   // mark targets in istarget
   if (threadIdx.x == 0) {
     for (int dt = 0; dt < dim; dt++) {
-      int target_idx = target_k[dt] - TH_INDEX_BASE;
+      int target_idx = target_k[dt];
       if (target_idx < 0) break;
       istarget_k[target_idx] = ScalarConvert<int, Dtype>::to(1);
     }
@@ -48,7 +52,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
   Acctype sum = 0;
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = target_k[dt] - TH_INDEX_BASE;
+    int target_idx = target_k[dt];
     if (target_idx < 0) break;
 
     // current value for target
@@ -77,6 +81,9 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
 }
 
 template <typename Dtype, typename Acctype>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
+#endif
 __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gradInput,
                                                                       Dtype *gradOutput,
                                                                       Dtype *input,
@@ -96,7 +103,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   Dtype *gradInput_k = gradInput + k*dim;
   THCIndex_t *target_k = target + k*dim;
   Dtype *istarget_k = istarget + k*dim;
- 
+
   Dtype *gradOutput_k = gradOutput;
   if (!reduce) {
     gradOutput_k += k;
@@ -114,7 +121,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   // iterate over targets
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = (int)target_k[dt] - TH_INDEX_BASE;
+    int target_idx = (int)target_k[dt];
     if (target_idx < 0) break;
 
     // current value for target
@@ -146,7 +153,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   }
 }
 
-#include "generic/MultiLabelMarginCriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/MultiLabelMarginCriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>
 
 #undef MULTILABELMARGIN_THREADS

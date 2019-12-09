@@ -9,19 +9,19 @@ namespace caffe2 {
 template <>
 bool LpNormOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* norm = Output(0);
-  norm->Resize(1);
+
+  auto* norm = Output(0, {1}, at::dtype<float>());
   const float* X_data = X.data<float>();
-  const float size = average_ ? (float)X.size() : 1.0f;
+  const float size = average_ ? (float)X.numel() : 1.0f;
   CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
-    *(norm->mutable_data<float>()) =
-        (ConstEigenVectorMap<float>(X_data, X.size()).array()).abs().sum() /
+    *(norm->template mutable_data<float>()) =
+        (ConstEigenVectorMap<float>(X_data, X.numel()).array()).abs().sum() /
         size;
     // L1(x) = sum(|x|), L1_average(x) = sum(\x\) / x.size()
   } else if (p_ == 2) {
-    *(norm->mutable_data<float>()) =
-        (ConstEigenVectorMap<float>(X_data, X.size()).array()).square().sum() /
+    *(norm->template mutable_data<float>()) =
+        (ConstEigenVectorMap<float>(X_data, X.numel()).array()).square().sum() /
         size;
     // L2(x) = (sum(|x|^2)), L2_average(x) = sum(|x|^2) / x.size()
   }
@@ -32,27 +32,30 @@ template <>
 bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& dnorm = Input(1);
-  auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(dnorm.ndim(), 1);
+
+  CAFFE_ENFORCE_EQ(dnorm.dim(), 1);
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
-  dX->ResizeLike(X);
-  const float kEps = 1e-12f;
-  const float size = average_ ? (float)X.size() : 1.0f;
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  const float size = average_ ? (float)X.numel() : 1.0f;
   if (p_ == 1) {
-    // Todo: implement in eigen
-    for (int i = 0; i < X.size(); ++i) {
-      float temp = (X.data<float>())[i];
-      if (temp < -kEps) {
-        dX->mutable_data<float>()[i] = -(dnorm.data<float>())[0] / size;
-      } else if (temp > kEps) {
-        dX->mutable_data<float>()[i] = (dnorm.data<float>())[0] / size;
-      } else {
-        dX->mutable_data<float>()[i] = 0;
-      }
-    }
+    EigenVectorMap<float>(dX->template mutable_data<float>(), X.numel())
+        .array() = ConstEigenVectorMap<float>(X.data<float>(), X.numel())
+                       .array()
+                       .unaryExpr([](float x) {
+                         const float kEps = 1e-12f;
+                         if (x < -kEps) {
+                           return -1.0f;
+                         } else if (x > kEps) {
+                           return 1.0f;
+                         } else {
+                           return 0.0f;
+                         }
+                       }) *
+        ((dnorm.data<float>())[0] / size);
   } else if (p_ == 2) {
-    EigenVectorMap<float>(dX->mutable_data<float>(), X.size()).array() =
-        ConstEigenVectorMap<float>(X.data<float>(), X.size()).array() * 2.0f *
+    EigenVectorMap<float>(dX->template mutable_data<float>(), X.numel())
+        .array() =
+        ConstEigenVectorMap<float>(X.data<float>(), X.numel()).array() * 2.0f *
         ((dnorm.data<float>())[0] / size);
   }
 
@@ -98,7 +101,7 @@ op = core.CreateOperator(
 X = np.array([5., 2.])
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 
 workspace.RunOperatorOnce(op)
@@ -130,10 +133,10 @@ Y:
         "*(type: bool; default: False)* Whether we calculate norm or averaged_norm.The Lp_averaged_norm(x) is defined as Lp_averaged_norm(x) = LpNorm(x) / size(x)")
     .TensorInferenceFunction([](const OperatorDef& /* unused */,
                                 const vector<TensorShape>& in) {
-      std::vector<TIndex> output_dims(1);
+      std::vector<int64_t> output_dims(1);
       output_dims[0] = 1; // 1
       return vector<TensorShape>{
-          CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+          CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
     });
 
 OPERATOR_SCHEMA(LpNormGradient)
