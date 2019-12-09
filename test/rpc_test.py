@@ -1125,9 +1125,9 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
             )
 
-        from torch.distributed.rpc import _get_debug_info
+        from torch.distributed.rpc import _rref_context_get_debug_info
         rref1 = RRef(self.rank)
-        info = _get_debug_info()
+        info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         # RRef on local value is not added to context until shared across RPC
         self.assertEqual("0", info["num_owner_rrefs"])
@@ -1138,7 +1138,7 @@ class RpcTest(RpcAgentTestFixture):
             set_global_rref,
             args=(rref1,)
         )
-        info = _get_debug_info()
+        info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual("1", info["num_owner_rrefs"])
         rpc.rpc_sync("worker{}".format(dst_rank), clear_global_rref)
@@ -1160,7 +1160,7 @@ class RpcTest(RpcAgentTestFixture):
         # Use a barrier to make sure that OwnerRRefs are created on this worker
         # before checking debug info
         dist.barrier()
-        info = _get_debug_info()
+        info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual("2", info["num_owner_rrefs"])
 
@@ -1259,6 +1259,29 @@ class RpcTest(RpcAgentTestFixture):
         )
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
+
+    @dist_init
+    def test_debug_info(self):
+        # only test keys in this test case. Values should be covered by
+        # individual module debug info tests
+        from torch.distributed.rpc import (
+            _get_debug_info,
+            _rref_context_get_debug_info
+        )
+        from torch.distributed.rpc.api import _agent
+        import torch.distributed.autograd as dist_autograd
+
+        info = _get_debug_info()
+        rref_info = _rref_context_get_debug_info()
+        agent_info = _agent.get_debug_info()
+        autograd_info = dist_autograd._get_debug_info()
+        common_keys = rref_info.keys() & agent_info.keys() & autograd_info.keys()
+        self.assertEqual(0, len(common_keys))
+        expected = {}
+        expected.update(rref_info)
+        expected.update(agent_info)
+        expected.update(autograd_info)
+        self.assertEqual(expected, info)
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
