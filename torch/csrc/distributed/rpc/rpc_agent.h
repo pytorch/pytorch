@@ -3,7 +3,6 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/utils/future.h>
 
 #include <algorithm>
 #include <cctype>
@@ -12,9 +11,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct RpcAgentOptions {
-  RpcAgentOptions() noexcept = default;
+struct RpcBackendOptions {
+  RpcBackendOptions() = default;
   std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
 };
 
 // A globally unique ID to identify an RpcAgent
@@ -83,13 +83,13 @@ class TORCH_API RpcAgent {
   virtual ~RpcAgent();
 
   // Send a message to the ``RpcAgent`` of id ``to`` and returns a
-  // ``Future<Message>`` ptr. The implementation must be asynchronous, i.e., it
+  // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
   // cannot block until it receives the response.
   //
-  // If ``message.isRequest()`` is true, the ``Future<Message>`` will be
+  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
   // completed when the response arrives. For other message types, the Future
   // should be ignored by the caller.
-  virtual std::shared_ptr<torch::utils::Future<Message>> send(
+  virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message) = 0;
 
@@ -104,6 +104,8 @@ class TORCH_API RpcAgent {
       const std::string& workerName) const = 0;
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
+
+  virtual std::vector<WorkerInfo> getWorkerInfos() const = 0;
 
   // Retrieve the timeout for all RPCs.
   inline std::chrono::milliseconds getRpcTimeout() const {
@@ -124,13 +126,23 @@ class TORCH_API RpcAgent {
   virtual void sync() = 0;
 
   // start accepting requests
-  virtual void start() {}
+  virtual void start() = 0;
+
+  // Stop accepting requests and shutdown the RPC framework as soon as possible
+  // by terminating all RPC threads.
+  virtual void shutdown() = 0;
 
   // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
 
   // Retrieve the default rpc agent.
   static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+
+  // Retrive metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
+
+  // Retrive debug info in addition to metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getDebugInfo() = 0;
 
  protected:
   const WorkerInfo workerInfo_;

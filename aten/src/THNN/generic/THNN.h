@@ -53,23 +53,6 @@ TH_API void THNN_(GatedLinear_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t input
           int dim);                    // dimension for halving operation
 
-// HardTanh clamps the values to the interval [min_val; max_val].
-TH_API void THNN_(HardTanh_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *output,            // [OUT] output tensor
-          accreal min_val,             // lower threshold
-          accreal max_val,             // upper threshold
-          bool inplace);
-TH_API void THNN_(HardTanh_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *gradOutput,        // gradient w.r.t. module's output
-          THTensor *gradInput,         // [OUT] gradient w.r.t. the input
-          accreal min_val,             // lower threshold
-          accreal max_val,             // upper threshold
-          bool inplace);
-
 TH_API void THNN_(LeakyReLU_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // [MODIFIED] input tensor
@@ -132,16 +115,6 @@ TH_API void THNN_(RReLU_updateGradInput)(
           bool train,
           bool inplace);
 
-TH_API void THNN_(Sigmoid_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output);
-TH_API void THNN_(Sigmoid_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *output);
-
 TH_API void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
           THTensor *input, THTensor *output,
@@ -167,16 +140,6 @@ TH_API void THNN_(SoftShrink_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           accreal lambda);
-
-TH_API void THNN_(Tanh_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output);
-TH_API void THNN_(Tanh_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *output);
 
 #endif
 #endif

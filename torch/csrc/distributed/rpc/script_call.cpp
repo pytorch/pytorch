@@ -143,7 +143,7 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
     }
   }
 
-  AT_ERROR("Cannot find matching operator for schema ", str_schema);
+  TORCH_CHECK(false, "Cannot find matching operator for schema ", str_schema);
 }
 
 } // namespace rpc

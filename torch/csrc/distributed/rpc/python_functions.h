@@ -2,7 +2,6 @@
 
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/utils/future.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -11,14 +10,14 @@ namespace rpc {
 
 py::object toPyObj(const Message& message);
 
-std::shared_ptr<torch::utils::Future<Message>> pyRpcBuiltin(
+std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
     const py::args& args,
     const py::kwargs& kwargs);
 
-std::shared_ptr<torch::utils::Future<Message>> pyRpcPythonUdf(
+std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,

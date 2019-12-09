@@ -37,15 +37,13 @@ c10::IValue rpcTorchscriptCall(
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
   auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  futMessage->addCallback([futPtr](
-                              const Message& message,
-                              bool hasError,
-                              const utils::FutureError& futErr) {
-    if (hasError) {
-      throw std::runtime_error(futErr.errMsg());
-    }
-    futPtr->markCompleted(deserializeRespToIValue(message));
-  });
+  futMessage->addCallback(
+      [futPtr](const Message& message, const utils::FutureError* futErr) {
+        if (futErr) {
+          throw std::runtime_error((*futErr).what());
+        }
+        futPtr->markCompleted(deserializeRespToIValue(message));
+      });
   return IValue(futPtr);
 }
 

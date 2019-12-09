@@ -3,69 +3,13 @@
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <Python.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-// Write the message into the given ostream
-std::string serialize(const Message& message) {
-  // We cast const void* to void* here because we need to create a tensor using
-  // that memory space. If is fine as that tensor stays function-local, and will
-  // not be modified during its lifetime.
-  auto payload = const_cast<void*>( // NOLINT
-      static_cast<const void*>(message.payload().data()));
-  auto payload_size = message.payload().size();
-
-  // getting tensor table from the message
-  std::vector<torch::Tensor> tensors = message.tensors();
-  // append payload as a tensor
-  tensors.push_back(torch::from_blob(payload, payload_size, {torch::kChar}));
-  // append id and autograd metadata as a tensor
-  tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}));
-
-  // optional: estimate output size, to avoid some unnecessary resizing.
-  static constexpr size_t kBaseOverhead = 2048;
-  static constexpr size_t kPerTensor = 128;
-  size_t estimate = kBaseOverhead;
-  for (const auto& t : tensors) {
-    estimate += t.nbytes() + kPerTensor;
-  }
-
-  std::string out;
-  out.reserve(estimate);
-  torch::save(tensors, [&](const void* buf, size_t n) -> size_t {
-    out.append(static_cast<const char*>(buf), n);
-    return n;
-  });
-  return out;
-}
-
-Message deserialize(MessageType type, const void* buf, size_t size) {
-  std::vector<torch::Tensor> tensors;
-
-  torch::load(tensors, static_cast<const char*>(buf), size);
-
-  TORCH_CHECK(tensors.size() >= 2, "Failed to deserialize a message.");
-  auto idTensor = std::move(tensors.back());
-  tensors.pop_back();
-  auto payloadTensor = std::move(tensors.back());
-  tensors.pop_back();
-
-  TORCH_INTERNAL_ASSERT(1, idTensor.numel());
-  int64_t id = idTensor.storage().data<int64_t>()[0];
-
-  const char* data = static_cast<const char*>(payloadTensor.storage().data());
-  std::vector<char> payload(data, data + payloadTensor.numel());
-
-  return Message(std::move(payload), std::move(tensors), type, id);
-}
-
-} // namespace
 
 //////////////////////////  MessageCounter  /////////////////////////////////
 
@@ -127,7 +71,6 @@ ProcessGroupAgent::ProcessGroupAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
           c10::guts::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
-      shutdown_{false},
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
@@ -179,31 +122,17 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   return allWorkerInfo_[id];
 }
 
-void ProcessGroupAgent::join() {
-  // Every process i sends a SHUTDOWN message to process i + 1. This is
-  // necessary for now because:
-  // 1. There is no abort API for ProcessGroup::recvAnysource yet. We have to
-  //    feed it a message or kill the thread.
-  // 2. A GLOO process cannot send message to itself. (there is an ongoing
-  //    effort to fix this problem).
-  shutdown_.store(true);
-  sync();
-  // This is needed in case no futures were created, otherwise the future
-  // timeout watchdog would sleep forever.
+std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
+  return allWorkerInfo_;
+}
 
-  futureTimeoutCV_.notify_one();
+void ProcessGroupAgent::join() {
+  sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
       lock, [this] { return futures_.empty() && futureTimeouts_.empty(); });
   lock.unlock();
   pg_->barrier()->wait();
-  int dst = (pg_->getRank() + 1) % pg_->getSize();
-  enqueueSend(
-      SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
-  threadPool_.waitWorkComplete();
-  listenerThread_.join();
-  futureTimeoutThread_.join();
-  PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
@@ -269,14 +198,38 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
+  {
+    std::lock_guard<std::mutex> futureLock{futureMutex_};
+    rpcRunning_.store(true);
+  }
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
   futureTimeoutThread_ =
       std::thread(&ProcessGroupAgent::pollTimedOutRPCs, this);
 }
 
-std::shared_ptr<torch::utils::Future<Message>> ProcessGroupAgent::send(
+void ProcessGroupAgent::shutdown() {
+  LOG(INFO) << "Shutting down ProcessGroupAgent.";
+  std::unique_lock<std::mutex> lock{futureMutex_};
+  if (!rpcRunning_.exchange(false)) {
+    return;
+  }
+  lock.unlock();
+  futureTimeoutCV_.notify_one();
+  futureTimeoutThread_.join();
+  {
+    std::unique_lock<std::mutex> lock(recvWorkMutex_);
+    if (recvWork_) {
+      recvWork_->abort();
+    }
+  }
+  threadPool_.waitWorkComplete();
+  listenerThread_.join();
+}
+
+std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
       "Destination rank is out of bound, got ",
@@ -285,7 +238,7 @@ std::shared_ptr<torch::utils::Future<Message>> ProcessGroupAgent::send(
       pg_->getRank());
 
   auto requestId = nextId();
-  auto future = std::make_shared<torch::utils::Future<Message>>();
+  auto future = std::make_shared<FutureMessage>();
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime =
@@ -298,8 +251,13 @@ std::shared_ptr<torch::utils::Future<Message>> ProcessGroupAgent::send(
       if (timeout.count() == 0) {
         timeout = INFINITE_TIMEOUT;
       }
-      auto futureInfo = FutureInfo(future, futureStartTime, to.id_, timeout);
-      futures_[requestId] = futureInfo;
+      auto& futureInfo = futures_
+                             .emplace(
+                                 std::piecewise_construct,
+                                 std::forward_as_tuple(requestId),
+                                 std::forward_as_tuple(FutureInfo(
+                                     future, futureStartTime, to.id_, timeout)))
+                             .first->second;
       auto rpcEndTime = getRPCEndTime(futureInfo);
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[rpcEndTime].push_back(requestId);
@@ -312,11 +270,11 @@ std::shared_ptr<torch::utils::Future<Message>> ProcessGroupAgent::send(
     }
     message.setId(requestId);
   } else {
-    future->markCompleted();
+    future->markCompleted(Message());
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
-  // to our receving queue.
+  // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     TORCH_CHECK(!message.isShutdown(), "Shutting down self not supported");
     threadPool_.run(std::bind(
@@ -325,14 +283,15 @@ std::shared_ptr<torch::utils::Future<Message>> ProcessGroupAgent::send(
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload =
-              c10::guts::make_unique<std::string>(serialize(message));
+          auto payload = c10::guts::make_unique<std::string>(
+              wireSerialize(message.payload(), message.tensors()));
           const char* data = payload->data();
           size_t len = payload->length();
           std::string* delete_when_done = payload.release();
           enqueueRecv(RecvWork(
               getWorkerInfo(pg_->getRank()),
               message.type(),
+              message.id(),
               torch::from_blob(
                   (void*)data,
                   len,
@@ -360,13 +319,15 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
-        std::string serializedPayload = serialize(work.message_);
+        std::string serializedPayload =
+            wireSerialize(work.message_.payload(), work.message_.tensors());
 
         std::vector<torch::Tensor> preamble = {torch::tensor(
             {(int64_t)pg_->getRank(),
              (int64_t)serializedPayload.length(),
-             (int64_t)work.message_.type()},
-            {torch::kLong})};
+             (int64_t)work.message_.type(),
+             (int64_t)work.message_.id()},
+            {torch::kInt64})};
 
         // ProcessGroup is not thread-safe when sending with the same tag, hence
         // the lock
@@ -407,13 +368,17 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         torch::Tensor& payload = work.payload_;
-        Message message =
-            deserialize(work.type_, payload.storage().data(), payload.numel());
+        auto data = wireDeserialize(payload.storage().data(), payload.numel());
+        Message message(
+            std::move(data.first),
+            std::move(data.second),
+            work.type_,
+            work.id_);
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
           auto id = message.id();
-          std::shared_ptr<torch::utils::Future<Message>> fm = nullptr;
+          std::shared_ptr<FutureMessage> fm = nullptr;
           {
             std::lock_guard<std::mutex> lock{futureMutex_};
             const auto& futureInfo = futures_.find(id);
@@ -443,9 +408,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           // Not holding lock on markCompleted as this could run callbacks that
           // call agent_->send
           if (message.type() == MessageType::EXCEPTION) {
-            torch::utils::FutureError err(std::string(
+            fm->setError(std::string(
                 message.payload().begin(), message.payload().end()));
-            fm->markCompleted(std::move(err));
           } else {
             fm->markCompleted(std::move(message));
           }
@@ -462,15 +426,25 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  while (true) {
+  while (rpcRunning_.load()) {
     // rank, tensor size, message type
-    std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
-    pg_->recvAnysource(preamble, pg_->getRank())->wait();
+    std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
+    auto work = pg_->recvAnysource(preamble, pg_->getRank());
+    {
+      std::lock_guard<std::mutex> guard(recvWorkMutex_);
+      recvWork_ = work;
+    }
+
+    if (!rpcRunning_.load() || !work->wait() /* aborted */) {
+      return;
+    }
+
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];
     auto size = preamble_items[1];
     MessageType type = MessageType(preamble_items[2]);
+    int64_t id = preamble_items[3];
 
     if (type == MessageType::SHUTDOWN) {
       // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
@@ -484,14 +458,18 @@ void ProcessGroupAgent::listenLoop() {
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
-    enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
+    enqueueRecv(
+        RecvWork(allWorkerInfo_[srcRank], type, id, std::move(tensors[0])));
   }
 }
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
-  while (!shutdown_.load()) {
-    std::chrono::milliseconds sleepTime;
+  while (true) {
     std::unique_lock<std::mutex> lock{futureMutex_};
+    if (!rpcRunning_.load()) {
+      return;
+    }
+    std::chrono::milliseconds sleepTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
     // if there are no futures or the first future's RPC timeout is set to 0
@@ -511,7 +489,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       futureTimeoutCV_.wait_for(lock, sleepTime);
     }
 
-    if (shutdown_.load()) {
+    if (!rpcRunning_.load()) {
       return;
     }
 
@@ -526,7 +504,8 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
-      timedOutFuture.future_->markCompleted(exceptionMsg);
+      timedOutFuture.future_->setError(std::string(
+          exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
 
       const int dst = timedOutFuture.dstRank_;
       recvCounts_.increment(dst);
@@ -578,6 +557,18 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
   return futureInfo.timeout_ == INFINITE_TIMEOUT
       ? INFINITE_TIMEOUT
       : futureInfo.startTime_ + futureInfo.timeout_;
+}
+
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  /* For now return an empty map, TODO add metrics like send/recv count etc */
+  return metrics;
+}
+
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getDebugInfo() {
+  /* This would later include more info other than metrics for eg: may include
+     stack traces for the threads owned by the agent */
+  return getMetrics();
 }
 
 } // namespace rpc

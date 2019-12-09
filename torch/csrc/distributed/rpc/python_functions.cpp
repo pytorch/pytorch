@@ -48,7 +48,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
     }
   }
 
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Failed to match operator name ",
       opName,
       " and arguments "
@@ -61,9 +62,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
 
 void finishAcceptUserRRef(
     const rpc::Message& message,
-    bool hasError,
-    const utils::FutureError& futErr) {
-  RRefContext::handleException(hasError, futErr);
+    const utils::FutureError* futErr) {
+  RRefContext::handleException(futErr);
   auto rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
   ctx.delPendingUser(rr->forkId());
@@ -71,9 +71,8 @@ void finishAcceptUserRRef(
 
 void finishCreatingOwnerRRef(
     const Message& message,
-    bool hasError,
-    const utils::FutureError& futErr) {
-  RRefContext::handleException(hasError, futErr);
+    const utils::FutureError* futErr) {
+  RRefContext::handleException(futErr);
   auto rr = RemoteRet::fromMessage(message);
   TORCH_INTERNAL_ASSERT(
       rr->rrefId() == rr->forkId(),
@@ -82,7 +81,7 @@ void finishCreatingOwnerRRef(
   ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
 }
 
-std::shared_ptr<torch::utils::Future<rpc::Message>> sendPythonRemoteCall(
+std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     RpcAgent& agent,
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
@@ -112,7 +111,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       Stack stack;
       stack.push_back(ret.value());
       {
-        AutoGIL ag;
+        pybind11::gil_scoped_acquire ag;
         // The createPyObjectForStack does not acquire GIL, but creating a new
         // py::object requires GIL.
         return torch::jit::createPyObjectForStack(std::move(stack));
@@ -139,7 +138,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
     }
     default: {
-      AT_ERROR("Unrecognized response message type ", messageType);
+      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
     }
   }
 }
@@ -148,7 +147,7 @@ py::object toPyObj(const Message& message) {
   return toPyObjInternal(*deserializeResponse(message), message.type());
 }
 
-std::shared_ptr<torch::utils::Future<Message>> pyRpcBuiltin(
+std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
@@ -188,7 +187,7 @@ PyRRef pyRemoteBuiltin(
   return PyRRef(userRRef);
 }
 
-std::shared_ptr<torch::utils::Future<Message>> pyRpcPythonUdf(
+std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,

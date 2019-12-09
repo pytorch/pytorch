@@ -8,20 +8,18 @@ namespace utils {
 
 // FutuerError inherits from std::exception, it can return const char* or
 // std::string error message
-struct TORCH_API FutureError final : public std::exception {
-  FutureError(std::string&& error_msg_) : error_msg(std::move(error_msg_)) {}
+class TORCH_API FutureError final : public std::exception {
+public:
+  FutureError(std::string&& errorMsg) : errorMsg_(std::move(errorMsg)) {}
 
   FutureError() = default;
 
   const char* what() const noexcept override {
-    return error_msg.c_str();
+    return errorMsg_.c_str();
   }
 
-  std::string errMsg() const {
-    return error_msg;
-  }
-
-  std::string error_msg;
+private:
+  std::string errorMsg_;
 };
 
 // This class holds a value of type T that will be ready in the future.
@@ -30,14 +28,14 @@ struct TORCH_API FutureError final : public std::exception {
 template <typename T>
 class TORCH_API Future final {
  public:
-  using Callback = std::function<void(const T&, bool, const FutureError&)>;
+  using Callback = std::function<void(const T&, const FutureError*)>;
 
   const T& wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     finished_cv_.wait(lock, [this] { return completed_.load(); });
 
-    if (has_error_) {
-      throw error_;
+    if (error_) {
+      throw *error_;
     }
     return value_;
   }
@@ -54,16 +52,11 @@ class TORCH_API Future final {
     finished_cv_.notify_all();
   }
 
-  void markCompleted() {
-    markCompleted(T());
-  }
-
-  void markCompleted(FutureError&& error) {
+  void setError(std::string&& errorMsg) {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(!completed());
     completed_ = true;
-    has_error_ = true;
-    error_ = std::move(error);
+    error_ = c10::guts::make_unique<FutureError>(std::move(errorMsg));
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -73,21 +66,12 @@ class TORCH_API Future final {
     return completed_;
   }
 
-  T value() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(completed());
-    if (has_error_) {
-      throw error_;
-    }
-    return value_;
-  }
-
   // If completed() the callback will be invoked in-place.
   void addCallback(const Callback& callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
-      callback(value_, has_error_, error_);
+      callback(value_, error_.get());
       return;
     }
     callbacks_.push_back(callback);
@@ -98,9 +82,9 @@ class TORCH_API Future final {
     TORCH_CHECK(completed(), "Firing callbacks on incomplete Future.");
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the list.
-    // pass value_, has_error_, error_ for callback to easily check state.
+    // pass value_, error_ for callback to easily check state.
     for (auto& callback : callbacks_) {
-      callback(value_, has_error_, error_);
+      callback(value_, error_.get());
     }
     callbacks_.clear();
   }
@@ -110,8 +94,7 @@ class TORCH_API Future final {
   std::condition_variable finished_cv_;
   std::vector<Callback> callbacks_;
   T value_;
-  bool has_error_ = false;
-  FutureError error_;
+  std::unique_ptr<FutureError> error_;
 };
 
 }
