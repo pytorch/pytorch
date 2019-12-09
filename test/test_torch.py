@@ -4147,6 +4147,70 @@ class _TestTorchMixin(object):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
+    def test_serialization_dill_version(self):
+        try:
+            import dill
+        except:
+            # Cannot run this test if dill is not installed
+            return
+        required_dill_version = (0,3,1)
+        dill_version = tuple(int(num) for num in dill.__version__.split('.'))
+        requirement_is_met = dill_version >= required_dill_version
+        x = torch.randn(5, 5)
+
+        with tempfile.NamedTemporaryFile() as f:
+            # First try saving
+            try:
+                torch.save(x, f, pickle_module=dill)
+            except ValueError:
+                error_was_raised = True
+            else:
+                error_was_raised = False
+
+            # If dill version is supported, no error should occur,
+            # but if dill version is not supported, error should occur
+            self.assertTrue(requirement_is_met ^ error_was_raised)
+
+            # Now try loading
+            f.seek(0)
+            try:
+                x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+            except ValueError:
+                error_was_raised = True
+            else:
+                error_was_raised = False
+            self.assertTrue(requirement_is_met ^ error_was_raised)
+
+    def test_serialization_dill_no_encoding(self):
+        try:
+            import dill
+        except:
+            return
+
+        x = torch.randn(5, 5)
+        
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f, pickle_module=dill)
+            f.seek(0)
+            x2 = torch.load(f, pickle_module=dill)
+            self.assertIsInstance(x2, type(x))
+            self.assertEqual(x, x2)
+
+    def test_serialization_dill_encoding(self):
+        try:
+            import dill
+        except:
+            return
+
+        x = torch.randn(5, 5)
+        
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f, pickle_module=dill)
+            f.seek(0)
+            x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+            self.assertIsInstance(x2, type(x))
+            self.assertEqual(x, x2)
+
     def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
         b = torch.randn(1024, 1024, 512, dtype=torch.float32)
