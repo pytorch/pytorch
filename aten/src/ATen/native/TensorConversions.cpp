@@ -45,29 +45,23 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   return r;
 }
 
-Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
-           "to(options) expects unset requires_grad flag, but got "
-           "options.requires_grad set as ", options.requires_grad());
-
-  const auto & layout_opt = options.layout_opt();
-  TORCH_CHECK(!layout_opt || self.layout() == layout_opt.value(),
+Tensor to(const Tensor& self, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(!layout.has_value() || self.layout() == layout.value(),
            "to(options) doesn't support converting to a different layout, "
            "but got self.layout being ", self.layout(),
-           " and options.layout set as ", options.layout());
-
-  auto device_opt = options.device_opt();
-  if (device_opt) {
-    device_opt = ensure_has_index(device_opt.value());
+           " and options.layout set as ", layout.value());
+  
+  if (device.has_value()) {
+    device = ensure_has_index(device.value());
   }
-  const auto & dtype_opt = options.dtype_opt();
   auto specified_options = self.options();
-  if (device_opt) {
-    specified_options = specified_options.device(device_opt.value());
+  if (device.has_value()) {
+    specified_options = specified_options.device(device.value());
   }
-  if (dtype_opt) {
-    specified_options = specified_options.dtype(dtype_opt.value());
+  if (dtype.has_value()) {
+    specified_options = specified_options.dtype(dtype.value());
   }
+  
   return to_impl(self, specified_options, non_blocking, copy, optional_memory_format);
 }
 
