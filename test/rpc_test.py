@@ -1235,7 +1235,7 @@ class RpcTest(RpcAgentTestFixture):
             # times. (NB: this might potentially be flaky. If flakiness does
             # occur, then we have to relax the assert.)
             info = _agent.get_debug_info()
-            if int(info["num_idle_threads"]) ==  NUM_THREAD:
+            if int(info["num_idle_threads"]) == NUM_THREAD:
                 break
             time.sleep(0.1)
         self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
