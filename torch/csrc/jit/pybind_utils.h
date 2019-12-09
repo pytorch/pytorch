@@ -411,7 +411,7 @@ inline IValue toIValue(
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
-            return IValue(py::cast<std::vector<int64_t>>(obj));
+            return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
             c10::List<double> repeated;
@@ -423,7 +423,7 @@ inline IValue toIValue(
           }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
-            return IValue(py::cast<std::vector<double>>(obj));
+            return c10::impl::toList(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
             c10::List<double> repeated;
@@ -434,9 +434,9 @@ inline IValue toIValue(
             return repeated;
           }
         case TypeKind::BoolType:
-          return IValue(py::cast<std::vector<bool>>(obj));
+          return c10::impl::toList(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
-          return IValue(py::cast<std::vector<at::Tensor>>(obj));
+          return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
@@ -541,6 +541,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::QSchemeType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
@@ -649,13 +650,13 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
   } else if (ivalue.isIntList()) {
-    return py::cast(std::move(ivalue).toIntList().vec());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toIntList()));
   } else if (ivalue.isDoubleList()) {
-    return py::cast(std::move(ivalue).toDoubleList().vec());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toDoubleList()));
   } else if (ivalue.isBoolList()) {
-    return py::cast(std::move(ivalue).toBoolList().vec());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toBoolList()));
   } else if (ivalue.isTensorList()) {
-    return py::cast(std::move(ivalue).toTensorList().vec());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toTensorList()));
   } else if (ivalue.isGenericList()) {
     auto list = std::move(ivalue).toGenericList();
     py::list t{list.size()};

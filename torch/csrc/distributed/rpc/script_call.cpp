@@ -11,12 +11,7 @@ const std::string ScriptCall::ATEN_PREFIX_("aten::");
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
     std::vector<at::IValue>&& args)
-    : op_(std::move(op)), stack_(args) {
-      auto values_it = stack_.begin();
-      for (const Argument& arg : (*op_)->schema().arguments()) {
-        torch::jit::restoreAccurateTypeTags(*values_it++, arg.type());
-      }
-    }
+    : op_(std::move(op)), stack_(args) {}
 
 std::shared_ptr<Operator> ScriptCall::op() const {
   return *op_;
@@ -65,7 +60,7 @@ std::shared_ptr<Operator> ScriptCall::fromIValues(
     // remove str_schema from ivalues
     return op;
   } else {
-    AT_ERROR("Unrecognized qualified name ", qualifiedName);
+    TORCH_CHECK(false, "Unrecognized qualified name ", qualifiedName);
   }
 }
 
@@ -107,7 +102,7 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
     }
   }
 
-  AT_ERROR("Cannot find matching operator for schema ", str_schema);
+  TORCH_CHECK(false, "Cannot find matching operator for schema ", str_schema);
 }
 
 } // namespace rpc

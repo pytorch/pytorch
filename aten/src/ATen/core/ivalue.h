@@ -45,7 +45,11 @@ struct Object;
   _(Int) \
   _(Bool) \
   _(Tuple) \
+  _(IntList) \
+  _(DoubleList) \
+  _(BoolList) \
   _(String) \
+  _(TensorList) \
   _(Blob) \
   _(GenericList) \
   _(GenericDict) \
@@ -230,10 +234,16 @@ struct CAFFE2_API IValue final {
   }
 
   // IntList
-  bool isIntList() const;
+  IValue(c10::List<int64_t> v);
+  IValue(c10::ArrayRef<int64_t> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
+  IValue(std::vector<int64_t> v);
+  bool isIntList() const { return Tag::IntList == tag; }
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const &;
-  std::vector<int64_t> toIntVector() const;
+  c10::ArrayRef<int64_t> toIntListRef() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -245,21 +255,36 @@ struct CAFFE2_API IValue final {
   const std::string& toStringRef() const;
 
   // DoubleList
-  bool isDoubleList() const;
+  IValue(c10::List<double> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
+  IValue(std::vector<double> v);
+  bool isDoubleList() const { return Tag::DoubleList == tag; }
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const &;
-  std::vector<double> toDoubleVector() const;
+  c10::ArrayRef<double> toDoubleListRef() const;
 
   // BoolList
-  bool isBoolList() const;
+  IValue(c10::List<bool> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
+  IValue(std::vector<bool> v);
+  bool isBoolList() const { return Tag::BoolList == tag; }
   c10::List<bool> toBoolList() &&;
   c10::List<bool> toBoolList() const &;
 
   //TensorList
-  bool isTensorList() const;
+  IValue(c10::List<at::Tensor> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
+  IValue(std::vector<at::Tensor> v);
+  bool isTensorList() const { return Tag::TensorList == tag; }
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
-  std::vector<at::Tensor> toTensorVector() const;
+  c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
   IValue(c10::List<IValue> v);
@@ -271,10 +296,10 @@ struct CAFFE2_API IValue final {
   template<class T>
   IValue(c10::List<T> v);
   template<class T>
-  IValue(at::ArrayRef<T> v);
-  template<class T>
-  IValue(const std::vector<T>& v);
-
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  /// \endcond
+  IValue(std::vector<T> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
