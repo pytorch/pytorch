@@ -22,8 +22,6 @@
 #include <cpuinfo.h>
 #include <float.h>
 
-#include <TH/THMath.h>
-
 namespace {
 /*
  * This section is a counterpart to Distributions.cu
@@ -323,7 +321,7 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   } else {
     result.resize_({n_sample});
   }
-  multinomial_stub(result.type().device_type(), result, self, n_sample, with_replacement, gen);
+  multinomial_stub(result.device().type(), result, self, n_sample, with_replacement, gen);
   return result;
 }
 

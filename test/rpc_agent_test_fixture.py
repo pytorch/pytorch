@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import dist_utils
 import torch.distributed.rpc as rpc
 
@@ -18,5 +16,5 @@ class RpcAgentTestFixture(object):
         return rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name]
 
     @property
-    def rpc_agent_options(self):
-        return dist_utils.TEST_CONFIG.build_rpc_agent_options(self)
+    def rpc_backend_options(self):
+        return dist_utils.TEST_CONFIG.build_rpc_backend_options(self)

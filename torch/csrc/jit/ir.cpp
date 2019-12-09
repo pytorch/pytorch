@@ -81,7 +81,9 @@ struct const_value_list_with_types {
       : values(values), delim(std::move(delim_)) {}
 };
 
-std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
+std::ostream& operator<<(
+    std::ostream& out,
+    const const_value_list_with_types& l) {
   size_t i = 0;
   for (auto n : l.values) {
     if (i++ > 0) {
@@ -816,6 +818,19 @@ void Value::replaceAllUsesWith(Value* newValue) {
   while (!uses().empty()) {
     replaceFirstUseWith(newValue);
   }
+}
+
+void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use &u) {
+    if (u.user->isAfter(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(std::remove_if(uses_.begin(), uses_.end(), [&node](const Use& u){
+    return u.user->isAfter(node);
+  }), uses_.end());
 }
 
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
@@ -1593,10 +1608,10 @@ Node* Graph::createIsInstance(
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
   std::vector<std::string> kinds;
   if (is_list) {
-    kinds.push_back("list");
+    kinds.emplace_back("list");
   }
   if (is_tuple) {
-    kinds.push_back("tuple");
+    kinds.emplace_back("tuple");
   }
   n->ss_(attr::kinds, std::move(kinds));
   n->tys_(attr::types, types.vec());
@@ -1616,7 +1631,7 @@ Value* Graph::insertFunctionCall(
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
                            ->output()
-                           ->setType(FunctionType::create(std::move(callee)));
+                           ->setType(FunctionType::create(callee));
   std::vector<Value*> inputs = {fn_constant};
   inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
   Value* result = insertNode(create(prim::CallFunction, inputs))
@@ -1657,11 +1672,10 @@ Node* Graph::createClone(
 }
 
 Value* Graph::insertConstant(
-    IValue val,
+    const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+  return jit::insertConstant(*this, val, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString(bool print_source_locations) const {
