@@ -1264,16 +1264,21 @@ class RpcTest(RpcAgentTestFixture):
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
-        from torch.distributed.rpc import _rref_context_get_debug_info
-        from torch.distributed.rpc.api import _agent, _get_debug_info
+        from torch.distributed.rpc import (
+            _get_debug_info,
+            _rref_context_get_debug_info
+        )
+        from torch.distributed.rpc.api import _agent
+        import torch.distributed.autograd as dist_autograd
 
         info = _get_debug_info()
         rref_info = _rref_context_get_debug_info()
         agent_info = _agent.get_debug_info()
-        self.assertEqual(0, len(rref_info.keys() & agent_info.keys()))
-        expected = {**rref_info, **agent_info}
+        autograd_info = dist_autograd._get_debug_info()
+        common_keys = rref_info.keys() & agent_info.keys() & autograd_info.keys()
+        self.assertEqual(0, len(common_keys))
+        expected = {**rref_info, **agent_info, **autograd_info}
         self.assertEqual(expected, info)
-
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
