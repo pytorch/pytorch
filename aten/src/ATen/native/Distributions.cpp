@@ -115,6 +115,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(bernoulli_mkl_stub);
+DEFINE_DISPATCH(uniform_mkl_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
@@ -187,6 +188,26 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator gen) {
         self, [generator, p](scalar_t& ret_val) {
           at::bernoulli_distribution<double> bernoulli(p);
           ret_val = static_cast<scalar_t>(bernoulli(generator));
+        });
+  });
+  return self;
+}
+
+Tensor& uniform_cpu_(Tensor& self, double from, double to, Generator* gen) {
+#if AT_MKL_ENABLED()
+  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+    uniform_mkl_stub(kCPU, self, from, to, gen);
+    return self;
+  }
+#endif
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "uniform_cpu_", [&] {
+    CPUGenerator* generator = at::get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    CPU_tensor_apply1<scalar_t>(
+        self, [generator, from, to](scalar_t& ret_val) {
+          at::uniform_real_distribution<scalar_t> uniform(from, to);
+          ret_val = static_cast<scalar_t>(uniform(generator));
         });
   });
   return self;
