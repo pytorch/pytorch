@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/export.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -82,7 +83,7 @@ struct PythonResolver : public Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) override {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -101,7 +102,7 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -1052,6 +1053,9 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
     return Module(get_python_cu(), type);
   });
+
+  m.def("export_opnames",
+          [](script::Module& sm) {return debugMakeList(torch::jit::export_opnames(sm));});
 
   py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")

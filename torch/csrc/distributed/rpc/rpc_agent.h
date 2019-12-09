@@ -13,8 +13,9 @@ namespace distributed {
 namespace rpc {
 
 struct RpcBackendOptions {
-  RpcBackendOptions() noexcept = default;
+  RpcBackendOptions() = default;
   std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
 };
 
 // A globally unique ID to identify an RpcAgent
@@ -126,13 +127,23 @@ class TORCH_API RpcAgent {
   virtual void sync() = 0;
 
   // start accepting requests
-  virtual void start() {}
+  virtual void start() = 0;
+
+  // Stop accepting requests and shutdown the RPC framework as soon as possible
+  // by terminating all RPC threads.
+  virtual void shutdown() = 0;
 
   // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
 
   // Retrieve the default rpc agent.
   static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+
+  // Retrive metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
+
+  // Retrive debug info in addition to metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getDebugInfo() = 0;
 
  protected:
   const WorkerInfo workerInfo_;
