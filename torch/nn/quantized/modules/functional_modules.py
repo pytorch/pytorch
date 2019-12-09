@@ -23,7 +23,6 @@ class FloatFunctional(torch.nn.Module):
     Valid operation names:
         - add
         - cat
-        - clamp
         - mul
         - add_relu
         - add_scalar
@@ -69,13 +68,6 @@ class FloatFunctional(torch.nn.Module):
     def cat(self, x, dim=0):
         # type: (List[Tensor], int) -> Tensor
         r = torch.cat(x, dim=dim)
-        r = self.activation_post_process(r)
-        return r
-
-    r"""Operation equivalent to ``torch.clamp(Tensor, float, float)``"""
-    def clamp(self, x, min_, max_):
-        # type: (Tensor, float, float) -> Tensor
-        r = torch.clamp(x, min_, max_)
         r = self.activation_post_process(r)
         return r
 
