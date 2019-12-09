@@ -9,8 +9,8 @@ There are a number of utilities for easing integration with Python which
 are worth knowing about, which we briefly describe here.  But the most
 important gotchas:
 
-* DO NOT forget to take out the GIL with `AutoGil` before calling Python
-  API or bringing a `THPObjectPtr` into scope.
+* DO NOT forget to take out the GIL with `pybind11::gil_scoped_acquire`
+  before calling Python API or bringing a `THPObjectPtr` into scope.
 
 * Make sure you include `Python.h` first in your header files, before
   any system headers; otherwise, you will get `error: "_XOPEN_SOURCE" redefined`
@@ -96,16 +96,16 @@ at::Tensor foo(at::Tensor x) {
 ```
 
 
-### `utils/auto_gil.h`
+### GIL
 
 Whenever you make any calls to the Python API, you must have taken out
-the Python GIL, as none of these calls are thread safe.  `AutoGIL` is
-a RAII struct which handles taking and releasing the GIL.  Use it like
-this:
+the Python GIL, as none of these calls are thread safe.
+`pybind11::gil_scoped_acquire` is a RAII struct which handles taking and
+releasing the GIL.  Use it like this:
 
 ```
 void iWantToUsePython() {
-  AutoGil gil;
+  pybind11::gil_scoped_acquire gil;
   ...
 }
 ```

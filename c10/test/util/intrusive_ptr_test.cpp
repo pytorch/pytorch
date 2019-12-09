@@ -1567,13 +1567,14 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+/*
 TEST(IntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   // This would cause very weird bugs on destruction.
   // Better to crash early on creation.
   SomeClass obj;
   intrusive_ptr<SomeClass> ptr;
   EXPECT_ANY_THROW(ptr = intrusive_ptr<SomeClass>::reclaim(&obj));
-}
+}*/
 
 TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenDoesntCrash) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();

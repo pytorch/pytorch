@@ -78,7 +78,7 @@ struct ReadyQueue {
   // To notify threads waiting on the ReadyQueue of available tasks on the heap_
   std::condition_variable not_empty_;
   // To protect read and writes to heap_
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
 
   // incrementOutstandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
@@ -86,12 +86,13 @@ struct ReadyQueue {
   // might set this to false.
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
-
   // Pop a NodeTask from the ReadyQueue, block thread if queue is empty
   std::unique_ptr<NodeTask> pop();
   // Pop a NodeTask from the ReadyQueue within a timeout period, if timeout
   // then it will return a nullptr instead.
   std::unique_ptr<NodeTask> pop(const std::chrono::microseconds &timeout);
+  size_t size() const;
+
 };
 
 // Note [Reentrant backwards]
@@ -179,6 +180,12 @@ auto ReadyQueue::pushShutdownTask() -> void {
     heap_.push(NodeTask({}, nullptr, InputBuffer(0), true));
   }
   not_empty_.notify_one();
+}
+
+size_t ReadyQueue::size() const {
+  // Lock mutex for accesses to heap_
+  std::unique_lock<std::mutex> lock(mutex_);
+  return heap_.size();
 }
 
 auto ReadyQueue::pop() -> std::unique_ptr<NodeTask> {
@@ -431,11 +438,10 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
   return outputs;
 }
 
-static bool is_compatible_type(const at::DeprecatedTypeProperties& expected, const at::DeprecatedTypeProperties& actual) {
+static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
   // Types are compatible if they exactly match or if the gradient is a sparse
   // version of the expected type.
-  return expected == actual || (actual.is_sparse() &&
-      expected == actual.toBackend(toDense(actual.backend())));
+  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
 }
 
 void validate_outputs(
@@ -471,14 +477,14 @@ void validate_outputs(
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
-    TORCH_CHECK(isFloatingType(grads[i].type().scalarType()));
-    if (metadata.type().scalarType() != grads[i].type().scalarType()) {
-      grads[i] = grads[i].to(metadata.type().scalarType());
+    TORCH_CHECK(isFloatingType(grads[i].scalar_type()));
+    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
+      grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (!is_compatible_type(metadata.type(), grads[i].type())) {
+    if (!is_compatible_type(metadata.options(), grads[i].options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.type() << " but got " << grads[i].type();
+       ss << metadata.options() << " but got " << grads[i].options();
        AT_ERROR(format_error(ss.str()));
     }
     auto output_device = output.device();
@@ -596,7 +602,7 @@ void Engine::evaluate_function(
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && output.ne(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());
@@ -848,6 +854,10 @@ void Engine::queue_callback(std::function<void()> callback) {
 
 bool Engine::is_checkpoint_valid() {
   return checkpoint_valid;
+}
+
+size_t Engine::ready_queue_size(at::Device device) {
+  return ready_queue(device).size();
 }
 
 auto Engine::ready_queue(at::Device device) -> ReadyQueue& {

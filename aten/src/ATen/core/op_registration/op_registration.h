@@ -344,7 +344,7 @@ public:
       // its cache each time the kernel is looked up from the dispatch table.
       // A lambda with a capture would be global and share its capture between all kernel lookups.
       // So, instead of making users having to think about it (including the thread-safety
-      // issues this causes), let's just forbid stateful lambdas alltogether.
+      // issues this causes), let's just forbid stateful lambdas altogether.
       static_assert(guts::is_stateless_lambda<guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
       return std::move(*this).kernel(

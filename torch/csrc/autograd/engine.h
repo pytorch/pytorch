@@ -190,6 +190,7 @@ struct TORCH_API Engine {
   void queue_callback(std::function<void()> callback);
 
   bool is_checkpoint_valid();
+  size_t ready_queue_size(at::Device device);
 
   // [Experimental] Configure number of threads on each device to
   // concurrently run autograd backward
