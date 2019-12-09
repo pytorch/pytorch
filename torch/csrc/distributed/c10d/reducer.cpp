@@ -114,17 +114,20 @@ Reducer::Reducer(
     for (size_t i = 0; i < replica_count; i++) {
       at::TensorOptions options, options_host;
       options = options.dtype(at::kInt);
-      options_host =
-          replicas_[i][0].is_cuda() ? options.pinned_memory(true) : options;
-      local_used_maps_.emplace_back(at::zeros({static_cast<long>(variable_count)}, options_host));
+      //options_host =
+      //    replicas_[i][0].is_cuda() ? options.pinned_memory(true) : options;
+      local_used_maps_.emplace_back(at::zeros({static_cast<long>(variable_count)}, options));
+      if (replicas_[i][0].is_cuda()) {
+        local_used_maps_[i] = local_used_maps_[i].pin_memory();
+      }
       // This tensor needs to be on the same device as replica because backend
       // such as NCCL may not support CPU tensors, and hence it might not work
       // if we always put it on CPU.
-      options = options.device(replicas_[i][0].device()).pinned_memory(false);
+      options = options.device(replicas_[i][0].device());
       local_used_maps_dev_.emplace_back(at::empty({static_cast<long>(variable_count)}, options));
 #ifdef USE_CUDA
       if (replicas_[i][0].device() == at::kCUDA) {
-        cudaStreamSynchronize(at::cuda::getCurrentCUDAStream(replicas_[i][0].device().index()));
+        at::cuda::getCurrentCUDAStream(replicas_[i][0].device().index()).synchronize();
       }
 #endif
     }
