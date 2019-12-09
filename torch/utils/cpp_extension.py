@@ -101,26 +101,6 @@ COMMON_NVCC_FLAGS = [
     '--expt-relaxed-constexpr'
 ]
 
-# See comment in load_inline for more information
-# The goal is to be able to call the safe version of the
-# function exactly as if it was the original one.
-# We need to create a pointer to this new function to give
-# it to pybind later.
-
-SAFE_FUNCTION_DEFINITION = '''
-#include <functional>
-
-template <typename Ret, typename ...Args>
-auto _get_safe_version(Ret (*f)(Args...)) -> std::function<Ret(Args...)> {{
-    return [f](Args&& ...args) -> Ret {{
-        HANDLE_TH_ERRORS
-        return f(std::forward<Args>(args)...);
-        END_HANDLE_TH_ERRORS_PYBIND
-    }};
-}}
-
-'''
-
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
 
@@ -858,7 +838,7 @@ def load_inline(name,
                 verbose=False,
                 with_cuda=None,
                 is_python_module=True,
-                with_pytorch_error_handling=True):
+                with_pytorch_error_handling=None):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -906,11 +886,9 @@ def load_inline(name,
             provided. Set it to ``True`` to force CUDA headers
             and libraries to be included.
         with_pytorch_error_handling: Determines whether pytorch error and
-            warning macros are handled by pytorch instead of pybind. To do
-            this, each function ``foo`` is called via an intermediary ``_safe_foo``
-            function. This redirection might cause issues in obscure cases
-            of cpp. This flag should be set to ``False`` when this redirect
-            causes issues.
+            warning macros are handled by pytorch instead of pybind. Deprecated
+            in version 1.4, is now always ``True``.
+
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
@@ -925,6 +903,11 @@ def load_inline(name,
     '''
     build_directory = build_directory or _get_build_directory(name, verbose)
 
+    if with_pytorch_error_handling is not None:
+        warnings.warn(
+            "with_pytorch_error_handling is deprecated and is now always True",
+            DeprecationWarning, stacklevel=2)
+
     if isinstance(cpp_sources, str):
         cpp_sources = [cpp_sources]
     cuda_sources = cuda_sources or []
@@ -932,11 +915,6 @@ def load_inline(name,
         cuda_sources = [cuda_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
-
-    # Adds a new `_get_safe_version(foo)` function that returns a new function
-    # that performs the same operation as `foo` but with pytorch error handling
-    # macros.
-    cpp_sources.append(SAFE_FUNCTION_DEFINITION)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -954,11 +932,9 @@ def load_inline(name,
                 "Expected 'functions' to be a list or dict, but was {}".format(
                     type(functions)))
         for function_name, docstring in functions.items():
-            if with_pytorch_error_handling:
-                module_def.append('m.def("{0}", _get_safe_version({0}), "{1}");'.format(
+            module_def.append(
+                'm.def("{0}", {0}, "{1}", py::call_guard<torch::PyWarningHandler>());'.format(
                     function_name, docstring))
-            else:
-                module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
         cpp_sources += module_def
 
