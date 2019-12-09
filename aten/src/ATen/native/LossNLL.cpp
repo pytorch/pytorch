@@ -380,7 +380,7 @@ Tensor nll_loss_backward_cpu(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  auto grad_input = at::zeros_like(self, at::MemoryFormat::Contiguous);
+  auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   nll_loss_backward_out_cpu(
       grad_input,
       grad_output,

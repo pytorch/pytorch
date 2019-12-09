@@ -45,7 +45,7 @@ qadaptive_avgpool2d_long_configs = op_bench.cross_product_configs(
         (112, 112),  # MaxPool2d-9  # noqa
     ),
     output_size=(
-        (448, 448)
+        (448, 448),
         # VGG16 pools with original input shape: (-1, 3, 224, 224)
         (224, 224),  # MaxPool2d-4  # noqa
         (112, 112),  # MaxPool2d-9  # noqa
@@ -67,6 +67,7 @@ qadaptive_avgpool2d_short_configs = op_bench.config_list(
     },
     tags=('short',)
 )
+
 
 class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
     def setup(self, N, C, H, W, dtype, contig):

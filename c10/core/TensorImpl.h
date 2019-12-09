@@ -747,8 +747,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       sizes_[dim] = new_size[dim];
     }
 
-    empty_tensor_restride(MemoryFormat::Contiguous);
     refresh_numel();
+    empty_tensor_restride(MemoryFormat::Contiguous);
   }
 
   /**
@@ -807,19 +807,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the stride of a tensor at some dimension.
    */
   virtual int64_t stride(int64_t d) const;
-
-  /**
-   * True if we will dispatch to the Variable handler for this tensor.  This has
-   * nothing to do with the variable-ness of a tensor (as every tensor is a
-   * variable; see also the invariant on type_set_), it just consults thread
-   * local state.
-   *
-   * TODO: Remove this in favor of a more direct test that doesn't mention
-   * Tensor at all.
-   */
-  bool is_variable() const {
-    return !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
-  }
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
@@ -1385,9 +1372,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     #endif
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
-        strides_.resize(sizes_.size(), 0);
-        if (dim() > 0) {
-          int last_idx = dim() - 1;
+        // dim_ is a virtual call, don't repeat it
+        auto dim_ = dim();
+        strides_.resize(dim_);
+        if (dim_ > 0) {
+          int last_idx = dim_ - 1;
           strides_[last_idx] = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
             strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
@@ -1747,5 +1736,4 @@ static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               sizeof(TensorImpl) == sizeof(int64_t) * 30,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
-
 } // namespace c10

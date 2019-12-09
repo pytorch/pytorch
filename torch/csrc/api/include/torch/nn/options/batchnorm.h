@@ -39,13 +39,17 @@ using BatchNorm1dOptions = BatchNormOptions;
 using BatchNorm2dOptions = BatchNormOptions;
 using BatchNorm3dOptions = BatchNormOptions;
 
+// ============================================================================
+
 namespace functional {
 
-/// Options for the `BatchNorm` module.
+/// Options for the `BatchNorm` functional.
 struct TORCH_API BatchNormFuncOptions {
   TORCH_ARG(Tensor, weight) = Tensor();
 
   TORCH_ARG(Tensor, bias) = Tensor();
+
+  TORCH_ARG(bool, training) = false;
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.

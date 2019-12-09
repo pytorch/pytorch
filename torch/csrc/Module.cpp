@@ -388,7 +388,7 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // atensor steals the ownership of the underlying storage. It also passes a
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
-  auto atensor = make_variable(at::fromDLPack(dlMTensor), false);
+  auto atensor = at::fromDLPack(dlMTensor);
 
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has

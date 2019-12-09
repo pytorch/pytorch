@@ -261,7 +261,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   void addOutputForTensor(const at::Tensor& tensor) {
     auto v = Variable(tensor);
-    add_next_edge(v.defined() ? v.gradient_edge() : autograd::Edge{});
+    add_next_edge(v.defined() ? torch::autograd::impl::gradient_edge(v) : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
@@ -277,7 +277,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // NB: since our requires_grad setting is only a heuristic we might end
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
-    if (at::isFloatingType(output.type().scalarType())) {
+    if (at::isFloatingType(output.scalar_type())) {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {

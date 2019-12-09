@@ -714,7 +714,7 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  auto mean_tensor = at::full({1}, mean, output.options());
+  auto mean_tensor = at::full({}, mean, output.options());
   // NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
@@ -736,19 +736,19 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
 }
 
 Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(std, at::MemoryFormat::Contiguous);
+  Tensor ret = at::empty_like(std, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }

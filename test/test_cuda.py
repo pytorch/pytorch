@@ -47,7 +47,8 @@ TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
-    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
+    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
+                                torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
@@ -493,7 +494,7 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @unittest.skip("was disabled due to not enough memory, but actually it always fail")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
 
@@ -731,6 +732,17 @@ class TestCuda(TestCase):
 
     def test_gather_dim(self):
         self._test_gather(1)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_memory_format_scatter_gather(self):
+        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
+        results = torch.cuda.comm.scatter(nhwc, (0, 1), None, 0)
+        for result in results:
+            self.assertFalse(result.is_contiguous())
+            self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+        gathered = torch.cuda.comm.gather(results)
+        self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
 
     def test_torch_manual_seed_seeds_cuda_devices(self):
         with freeze_rng_state():

@@ -11,7 +11,7 @@ from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import PY2, PY37, with_metaclass, string_classes
+from torch._six import PY2, PY37, with_metaclass, string_classes, get_function_from_type
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 from torch.utils import set_module
@@ -24,9 +24,11 @@ import inspect
 import math
 import os
 import pickle
+import re
 import sys
 import textwrap
 import warnings
+import weakref
 
 from collections import OrderedDict
 
@@ -238,6 +240,11 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     # TODO: Pretty sure this approach loses ConstSequential status and such
     return torch.jit._recursive.wrap_cpp_module(cpp_module)
 
+def export_opnames(m):
+    r"""
+        Returns a list of operator names of a script module and its submodules
+    """
+    return torch._C.export_opnames(m._c)
 
 def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
@@ -562,15 +569,21 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(traced_func.graph)
+            torch._C._jit_pass_inline(mod_canonicalized)
             torch._C._jit_pass_erase_shape_information(mod_canonicalized)
+            mod_str = str(mod_canonicalized)
+            mod_str = re.sub(r'___torch_mangle_[0-9]+\.', '', mod_str)
             check_canonicalized = torch._C._jit_pass_canonicalize(check_mod_func.graph)
+            torch._C._jit_pass_inline(check_canonicalized)
             torch._C._jit_pass_erase_shape_information(check_canonicalized)
+            check_str = str(check_canonicalized)
+            check_str = re.sub(r'___torch_mangle_[0-9]+\.', '', check_str)
 
             graph_diff_errors = None
-            if str(mod_canonicalized) != str(check_canonicalized):
+            if mod_str != check_str:
                 import difflib
-                graph_diff = difflib.ndiff(str(mod_canonicalized).splitlines(True),
-                                           str(check_canonicalized).splitlines(True))
+                graph_diff = difflib.ndiff(mod_str.splitlines(True),
+                                           check_str.splitlines(True))
                 graph_diff_errors = 'Graph diff:\n' + indent(''.join(graph_diff)) + '\n'
 
                 for n_mod, n_check in zip(mod_canonicalized.nodes(), check_canonicalized.nodes()):
@@ -1263,12 +1276,16 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
     else:
         _check_directly_compile_overloaded(obj)
+        maybe_already_compiled_fn = _try_get_jit_cached_key(obj)
+        if maybe_already_compiled_fn:
+            return maybe_already_compiled_fn
         ast = get_jit_def(obj)
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        _set_jit_cache(obj, fn)
         return fn
 
 def interface(obj):
@@ -1384,7 +1401,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __setitem__(self, k, v):
         # Cases where sub-module can be re-assigned after ScriptModule construction
-        # 1. If the attr is an module interface type, it's guranteed that the module is
+        # 1. If the attr is an module interface type, it's guaranteed that the module is
         #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
         # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
         #    and it's legit to swap a new module in.
@@ -1627,9 +1644,9 @@ if _enabled:
 
         @property
         def original_name(self):
-            if type(self) == self._c.name:
+            if type(self) == str(self._c._type().name()):
                 return ''
-            return self._c.name
+            return str(self._c._type().name())
 
         def define(self, src):
             # We use frames_up=1 to get to the proper surrounding scope. The stack
@@ -1690,11 +1707,53 @@ if _enabled:
         def copy(self):
             return torch.jit._recursive.wrap_cpp_module(self._c._clone())
 
+        def copy_instance(self):
+            return torch.jit._recursive.wrap_cpp_module(self._c._clone_instance())
+
         def __getstate__(self):
             raise pickle.PickleError(
                 "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
+
+        # Python magic methods do method lookups on an object's class type, instead of looking up
+        # the method defines on the class instance. In order to continue to expose the magic methods
+        # of builtin-containers (ModuleList, Sequential, ModuleDict) to python we
+        # define magic methods here as a shim to the correct attribute.
+        def forward_magic_method(self, method_name, *args, **kwargs):
+            self_method = getattr(self, method_name)
+            if getattr(self_method, "__func__", None) == getattr(RecursiveScriptModule, method_name):
+                raise NotImplementedError()
+            return self_method(*args, **kwargs)
+
+        def __iter__(self):
+            return self.forward_magic_method("__iter__")
+
+        def __getitem__(self, idx):
+            return self.forward_magic_method("__getitem__", idx)
+
+        def __len__(self):
+            return self.forward_magic_method("__len__")
+
+        def __contains__(self, key):
+            return self.forward_magic_method("__contains__", key)
+
+        # dir is defined by the base nn.Module, so instead of throwing if
+        # it is not overriden, we call into the nn.Module __dir__ method
+        def __dir__(self):
+            self_method = self.__dir__
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__dir__"):
+                return super(RecursiveScriptModule, self).__dir__()
+            return self_method()
+
+        # to resolve bool(value), python looks if __bool__ is defined then __iter__
+        # is defined then returns true for classes. because __iter__() on this
+        # class throws if it isn't overriden, we define __bool__ to preserve default behavior
+        def __bool__(self):
+            self_method = self.__bool__
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__bool__"):
+                return True
+            return self_method()
 
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
@@ -1785,7 +1844,7 @@ class TracedModule(ScriptModule):
         # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module_for_tracing(tmp_module, ())
 
-        self.__dict__['_name'] = 'TracedModule[' + type(orig).__name__ + ']'
+        self.__dict__['_name'] = type(orig).__name__
         self.__dict__['_actual_script_module'] = script_module
         for name in ("_parameters", "_buffers", "_modules"):
             delattr(self, name)
@@ -1806,105 +1865,13 @@ class TracedModule(ScriptModule):
     def _get_name(self):
         return self._name
 
+    def extra_repr(self):
+        return 'original_name={}'.format(self._name)
+
 
 if _enabled:
     class TopLevelTracedModule(TracedModule):
         forward = _CachedForward()
-
-
-class _ConstModuleList(ScriptModule):
-    def __init__(self, modules):
-        super(_ConstModuleList, self).__init__()
-
-        if isinstance(modules, OrderedDict):
-            for key, module in modules.items():
-                if isinstance(module, torch.nn.Module):
-                    module = torch.jit._recursive.recursive_script(module)
-                self.add_module(key, module)
-        else:
-            for i, module in enumerate(modules):
-                if isinstance(module, torch.nn.Module):
-                    module = torch.jit._recursive.recursive_script(module)
-                self.add_module(str(i), module)
-
-    def __getitem__(self, idx):
-        if isinstance(idx, slice):
-            return _ConstModuleList(list(self._modules.values())[idx])
-        else:
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            return self._modules[str(idx)]
-
-    def __len__(self):
-        return len(self._modules)
-
-    def __iter__(self):
-        return iter(self._modules.values())
-
-    def __dir__(self):
-        keys = super(_ConstModuleList, self).__dir__()
-        keys = [key for key in keys if not key.isdigit()]
-        return keys
-
-class _ConstModuleDict(ScriptModule):
-    def __init__(self, modules):
-        super(_ConstModuleDict, self).__init__()
-
-        assert isinstance(modules, OrderedDict)
-
-        for key, module in modules.items():
-            if isinstance(module, torch.nn.Module):
-                module = torch.jit._recursive.recursive_script(module)
-            self.add_module(key, module)
-
-
-    def __getitem__(self, key):
-        return self._modules[key]
-
-    def __contains__(self, key):
-        return key in self._modules
-
-    def keys(self):
-        r"""Return an iterable of the ModuleDict keys.
-        """
-        return self._modules.keys()
-
-    def items(self):
-        r"""Return an iterable of the ModuleDict key/value pairs.
-        """
-        return self._modules.items()
-
-    def values(self):
-        r"""Return an iterable of the ModuleDict values.
-        """
-        return self._modules.values()
-
-    def __len__(self):
-        return len(self._modules)
-
-    def __iter__(self):
-        return iter(self._modules.values())
-
-    def forward(self):
-        raise NotImplementedError()
-
-class _ConstSequential(_ConstModuleList):
-    def __init__(self, mods):
-        super(_ConstSequential, self).__init__(mods._modules)
-
-        # we define the forward method via self.define rather than
-        # making it a direct class member (with a @script) annotation
-        # because, in optimized runtime environments where only .pyc files
-        # are shipped, we cant retrieve the source code.
-        # TODO: find a workaround for this and remove this hack
-        self.define("""
-        def forward(self, input):
-            for m in self:
-                input = m(input)
-            return input
-        """)
 
 def is_scripting():
     r"""
@@ -2007,6 +1974,28 @@ _builtin_ops = [
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
 ]
+
+
+
+# Caching: we currently cache compilation of free functions.
+# To cache free functions we hold a weak ref to the function object and
+# map to the compiled fn's qualified name.
+# In the future we could consider caching more types of objects so that
+# aliasing is preserved across separate compilations of the same object.
+
+_jit_caching_layer = weakref.WeakKeyDictionary()
+
+def _try_get_jit_cached_key(key):
+    qual_name = _jit_caching_layer.get(key, None)
+    if qual_name:
+        return _python_cu.find_function(qual_name)
+    else:
+        return None
+
+def _set_jit_cache(key, value):
+    # only free functions currently supported
+    assert isinstance(value, torch.jit.ScriptFunction)
+    _jit_caching_layer[key] = value.qualified_name
 
 
 # lazily built to ensure the correct initialization order

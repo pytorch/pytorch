@@ -88,7 +88,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 
 Tensor pinverse(const Tensor& self, double rcond) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
-              "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "pinverse(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
@@ -118,7 +118,7 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
               "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
@@ -127,7 +127,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
               "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
@@ -479,7 +479,7 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
   TORCH_CHECK(a.dim() >= 2 && (at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
-              "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+              "matrix_power(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
               "of floating types with dim at least 2");
   if (n == 0) {
     return a.clone(at::MemoryFormat::Contiguous).copy_(at::eye(a.size(-2), a.options()).expand_as(a));
@@ -556,7 +556,7 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(self, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), 0, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -576,7 +576,7 @@ Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(p, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), -1, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
