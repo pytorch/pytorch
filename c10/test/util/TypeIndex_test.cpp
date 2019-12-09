@@ -58,7 +58,7 @@ static_assert(
     "");
 
 namespace test_top_level_name {
-#if !defined(IS_GCC8_OR_LOWER)
+#if !defined(IS_GCC8_OR_LOWER) && !defined(_MSC_VER)
 static_assert(
     string_view::npos != get_fully_qualified_type_name<Dummy>().find("Dummy"),
     "");
@@ -74,7 +74,7 @@ TEST(TypeIndex, TopLevelName) {
 namespace test_nested_name {
 struct Dummy final {};
 
-#if !defined(IS_GCC8_OR_LOWER)
+#if !defined(IS_GCC8_OR_LOWER) && !defined(_MSC_VER)
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Dummy>().find("test_nested_name::Dummy"),
@@ -93,7 +93,7 @@ template <class T>
 struct Outer final {};
 struct Inner final {};
 
-#if !defined(IS_GCC8_OR_LOWER)
+#if !defined(IS_GCC8_OR_LOWER) && !defined(_MSC_VER)
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Outer<Inner>>().find(
@@ -123,7 +123,7 @@ namespace test_nontype_template_parameter {
 template <size_t N>
 struct Class final {};
 
-#if !defined(IS_GCC8_OR_LOWER)
+#if !defined(IS_GCC8_OR_LOWER) && !defined(_MSC_VER)
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Class<38474355855>>().find("38474355855"),
@@ -143,7 +143,7 @@ struct Type final {
   using type = const T*;
 };
 
-#if !defined(IS_GCC8_OR_LOWER)
+#if !defined(IS_GCC8_OR_LOWER) && !defined(_MSC_VER)
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<typename Type<int>::type>().find("int"),
@@ -182,7 +182,7 @@ TEST(TypeIndex, TypeComputationsAreResolved) {
 struct Functor final {
   std::string operator()(int64_t a, const Type<int>& b) const;
 };
-#if !defined(IS_GCC8_OR_LOWER)
+#if !defined(IS_GCC8_OR_LOWER) && !defined(_MSC_VER)
 static_assert(
     get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>() ==
         get_fully_qualified_type_name<
@@ -201,7 +201,7 @@ TEST(TypeIndex, FunctionTypeComputationsAreResolved) {
 namespace test_function_arguments_and_returns {
 class Dummy final {};
 
-#if !defined(IS_GCC8_OR_LOWER)
+#if !defined(IS_GCC8_OR_LOWER) && !defined(_MSC_VER)
 static_assert(
     string_view::npos !=
         get_fully_qualified_type_name<Dummy(int)>().find(
