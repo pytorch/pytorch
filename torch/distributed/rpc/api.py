@@ -129,7 +129,7 @@ def _wait_all_workers():
         # This is a hack to make the leader linger for a while to finish
         # sending out the last message.
         import time
-        time.sleep(2)
+        time.sleep(0.2)
 
 def shutdown(graceful=True):
     r"""
