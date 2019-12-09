@@ -12,6 +12,12 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+struct RpcBackendOptions {
+  RpcBackendOptions() = default;
+  std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
+};
+
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)
@@ -40,6 +46,10 @@ struct TORCH_API WorkerInfo {
         name_);
   }
 
+  bool operator==(const WorkerInfo& rhs) {
+    return (id_ == rhs.id_) && (name_ == rhs.name_);
+  }
+
   static constexpr size_t MAX_NAME_LEN = 128;
 
   const std::string name_;
@@ -66,7 +76,10 @@ class TORCH_API RpcAgent {
   // NB: RpcAgent implementations should not start serving requests until
   // ``start()`` is called, as there could be other contexts that have not been
   // initialized yet at this time.
-  RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
+  RpcAgent(
+      WorkerInfo id,
+      std::unique_ptr<RequestCallback> cb,
+      std::chrono::milliseconds rpcTimeout);
 
   virtual ~RpcAgent();
 
@@ -93,6 +106,18 @@ class TORCH_API RpcAgent {
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
+  virtual std::vector<WorkerInfo> getWorkerInfos() const = 0;
+
+  // Retrieve the timeout for all RPCs.
+  inline std::chrono::milliseconds getRpcTimeout() const {
+    return rpcTimeout_.load();
+  }
+
+  // Set the timeout for all RPCs
+  inline void setRpcTimeout(const std::chrono::milliseconds& rpcTimeout) {
+    rpcTimeout_.store(rpcTimeout);
+  }
+
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
   virtual void join() = 0;
@@ -102,7 +127,11 @@ class TORCH_API RpcAgent {
   virtual void sync() = 0;
 
   // start accepting requests
-  virtual void start() {}
+  virtual void start() = 0;
+
+  // Stop accepting requests and shutdown the RPC framework as soon as possible
+  // by terminating all RPC threads.
+  virtual void shutdown() = 0;
 
   // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
@@ -110,10 +139,17 @@ class TORCH_API RpcAgent {
   // Retrieve the default rpc agent.
   static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
 
+  // Retrive metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
+
+  // Retrive debug info in addition to metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getDebugInfo() = 0;
+
  protected:
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
+  std::atomic<std::chrono::milliseconds> rpcTimeout_;
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;
@@ -122,3 +158,13 @@ class TORCH_API RpcAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+namespace std {
+template <>
+struct hash<torch::distributed::rpc::WorkerInfo> {
+  std::size_t operator()(
+      const torch::distributed::rpc::WorkerInfo& worker_info) const noexcept {
+    return worker_info.id_;
+  }
+};
+} // namespace std

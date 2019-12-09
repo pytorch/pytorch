@@ -4,6 +4,7 @@ producer_version: "1.3"
 graph {
   node {
     output: "1"
+    name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -17,6 +18,7 @@ graph {
   }
   node {
     output: "2"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -32,12 +34,14 @@ graph {
     input: "0"
     input: "2"
     output: "3"
+    name: "Reshape_2"
     op_type: "Reshape"
   }
   node {
     input: "3"
     input: "1"
     output: "4"
+    name: "Tile_3"
     op_type: "Tile"
   }
   name: "torch-jit-export"

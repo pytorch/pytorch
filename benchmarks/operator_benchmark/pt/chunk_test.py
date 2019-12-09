@@ -14,6 +14,7 @@ import torch
 chunk_short_configs = op_bench.config_list(
     attr_names=["M", "N", "chunks"],
     attrs=[
+        [8, 8, 2],
         [256, 512, 2],
         [512, 512, 2],
     ],
@@ -36,7 +37,7 @@ class ChunkBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, chunks, device):
         self.input_one = torch.rand(M, N, device=device)
         self.chunks = chunks
-        self.set_module_name('chunks')
+        self.set_module_name('chunk')
 
     def forward(self):
         return torch.chunk(self.input_one, self.chunks)
