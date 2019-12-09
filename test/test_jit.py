@@ -16976,7 +16976,7 @@ nn_functional_tests = [
     ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'nearest', None, True), 'nearest_5d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
     ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'nearest', None, True), 'nearest_5d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
     ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'trilinear', None, True), 'trilinear_5d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'trilinear', None, True),  'trilinear_5d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'trilinear', None, True), 'trilinear_5d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
 ]
 
 
