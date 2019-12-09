@@ -43,6 +43,30 @@ void get_operator_from_registry_and_execute() {
   }
 }
 
+void get_autograd_operator_from_registry_and_execute() {
+  auto& ops = torch::jit::getAllOperatorsFor(
+      torch::jit::Symbol::fromQualString("custom::op_with_autograd"));
+  AT_ASSERT(ops.size() == 1);
+
+  auto& op = ops.front();
+  AT_ASSERT(op->schema().name() == "custom::op_with_autograd");
+
+  torch::jit::Stack stack;
+  torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
+  torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
+  torch::jit::push(stack, x, 2, y);
+  op->getOperation()(stack);
+  torch::Tensor output = torch::jit::pop(stack).toTensor();
+  AT_ASSERT(0 == stack.size());
+
+  AT_ASSERT(output.allclose(x + 2*y + x*y));
+  auto go = torch::ones({}, torch::requires_grad());
+  output.sum().backward(go, false, true);
+
+  AT_ASSERT(torch::allclose(x.grad(), y + torch::ones({5,5})));
+  AT_ASSERT(torch::allclose(y.grad(), x + torch::ones({5,5})*2));
+}
+
 void load_serialized_module_with_custom_op_and_execute(
     const std::string& path_to_exported_script_module) {
   torch::jit::script::Module module =
@@ -135,6 +159,7 @@ int main(int argc, const char* argv[]) {
   const std::string path_to_exported_script_module = argv[1];
 
   get_operator_from_registry_and_execute();
+  get_autograd_operator_from_registry_and_execute();
   load_serialized_module_with_custom_op_and_execute(
       path_to_exported_script_module);
   test_argument_checking_for_serialized_modules(path_to_exported_script_module);
