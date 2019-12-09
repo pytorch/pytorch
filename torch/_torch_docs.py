@@ -1985,8 +1985,8 @@ add_docstr(torch.floor_divide,
            r"""
 floor_divide(input, other) -> Tensor
 
-Return the division of the inputs rounded down to the nearest integer. See
-`torch.div` for type promotion and broadcasting rules.
+Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
+for type promotion and broadcasting rules.
 
 .. math::
     \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
