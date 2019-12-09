@@ -69,6 +69,7 @@ from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+from common_device_type import instantiate_device_type_tests
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -1555,6 +1556,8 @@ graph(%input, %weight):
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
+    @unittest.skip("Skip for now since we changed scale/zero_point to attributes."
+                   "We'll enable this in a separate PR")
     def test_fold_prepack(self):
         def copy_weights(name, m, ref_m):
             if name == 'linear':
@@ -2509,7 +2512,6 @@ graph(%Ra, %Rb):
         self.assertEqual(len(list(g.inputs())), 2)
         FileCheck().check("mul").check("add").run(str(g))
 
-    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_trace_c10_ops(self):
         try:
             _ = torch.ops._caffe2.GenerateProposals
@@ -3540,7 +3542,7 @@ graph(%Ra, %Rb):
                 return x
 
         class Test(torch.nn.Module):
-            def forward(self, input=[]):
+            def forward(self, input=[]):  # noqa: B006
                 return input
 
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
@@ -5646,7 +5648,8 @@ a")
                     self.assertEqual(grad, grad_ref)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Profiling executor fails to recognize that tensors in a list require gradients")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING,
+                     "Profiling executor fails to recognize that tensors in a list require gradients")
     def test_meshgrid(self):
         with enable_profiling_mode():
             @torch.jit.script
@@ -6975,7 +6978,9 @@ a")
 
         with self.assertRaises(RuntimeError) as cm:
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
+        FileCheck().check("The above operation failed in interpreter") \
+                   .check("Traceback (most recent call last)") \
+                   .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
         global IFace
@@ -7012,7 +7017,9 @@ a")
         with self.assertRaises(RuntimeError) as cm:
             x = f.one(torch.rand(10), torch.rand(9))
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter").check("Traceback (most recent call last)").check("in foo").check("in baz").run(str(cm.exception))
+        FileCheck().check("The above operation failed in interpreter") \
+                   .check("Traceback (most recent call last)") \
+                   .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_binop_unsupported_error(self):
         with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
@@ -7303,7 +7310,8 @@ a")
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_dtype.graph_for(5, profile_and_replay=True)
             # both should have completed shapes
-            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
+            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut") \
+                       .check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
         else:
             g = test_dtype.graph_for(5)
             # first should have type set second should not
@@ -7316,7 +7324,8 @@ a")
 
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay=True)
-            FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
+            FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut") \
+                       .check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
         else:
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
             FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
@@ -11586,7 +11595,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
                 @torch.jit.script_method  # noqa: B902
-                def forward():
+                def forward():  # noqa: B902
                     return torch.zeros(3, 4)
 
             MethodNoSelf()
@@ -17059,8 +17068,14 @@ def add_autograd_test(
 
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
-        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
+        def do_test(self, device, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     check_ad=check_ad, output_process_fn=output_process_fn):
+            # TODO: The rest of this function does NOT respect device.  If you want to
+            # enable tests for CUDA, you'll need to update everything here to
+            # handle the CUDA case correctly, including how it generates inputs,
+            # and assumptions about which fuser is used.
+            assert torch.device(device) == torch.device('cpu')
+
             # We enable the CPU fuser during these checks for more consistent
             # behavior. Otherwise, we are going to have to analyze the graph to
             # see if producer values are Dimension
@@ -17371,6 +17386,11 @@ class TestDocs(unittest.TestCase):
 
 for test in autograd_method_tests():
     add_autograd_test(*test)
+
+# NB: There isn't much utility in running these tests for CUDA, as the kernels
+# are exercised in test_autograd.py, and the JIT tests intention is to test the
+# JIT infrastructure around it, not the kernels themselves
+instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), except_for='cuda')
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)

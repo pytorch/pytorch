@@ -1736,5 +1736,4 @@ static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               sizeof(TensorImpl) == sizeof(int64_t) * 30,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
-
 } // namespace c10

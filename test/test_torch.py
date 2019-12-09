@@ -5697,7 +5697,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         do_test(torch.tensor([[1, 2]]).data)
         do_test(torch.tensor([[1, 2]]).detach())
 
-    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
@@ -6166,9 +6165,11 @@ class TestTorchDeviceType(TestCase):
         # renorm
         self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
 
-        # sort
+        # sort, topk
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, False)])
+        self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, True)])
 
         # lstsq (gels)
         self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
@@ -6317,13 +6318,24 @@ class TestTorchDeviceType(TestCase):
             for target in (torch.tensor(0, device=device), torch.tensor([0], device=device), torch.tensor([[0]], device=device)):
                 if (input.dim() <= 1 and target.dim() <= 1) or (input.dim() == 2 and target.dim() == 2):
                     output_shape = (target.shape[0],) if target.dim() == 2 else ()
-                    self.assertEqual(output_shape, torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
+                    self.assertEqual(output_shape,
+                                     torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
                     self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean').shape)
                     self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum').shape)
                 else:
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
+                    self.assertRaises(RuntimeError,
+                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
+                    self.assertRaises(RuntimeError,
+                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
+                    self.assertRaises(RuntimeError,
+                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
+
+        # multi_margin_loss
+        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
+            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device)):
+                self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
+                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
+                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -13065,7 +13077,8 @@ class TestTorchDeviceType(TestCase):
         else:
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
 
-    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, compare_data=True, default_is_preserve=False):
+    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
+                                            compare_data=True, default_is_preserve=False):
         nhwc = input_generator_fn(device)
         # nhwc is not memory dense, but looks like channels last
         nhwc = nhwc[:, :, ::2, ::2]
@@ -13105,7 +13118,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_to(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         def transformation_fn(tensor, **kwargs):
             return tensor.to(dtype=torch.float64, **kwargs)
@@ -13114,7 +13128,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_type(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         def transformation_fn(tensor, **kwargs):
             return tensor.type(torch.float64, **kwargs)
@@ -13123,7 +13138,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_clone(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         def transformation_fn(tensor, **kwargs):
             return tensor.clone(**kwargs)
@@ -13146,7 +13162,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_factory_like_functions_preserve_strides(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
+                        .contiguous(memory_format=torch.channels_last)
 
         transformation_fns = [
             lambda t, **kwargs: torch.zeros_like(t, **kwargs),
@@ -13163,7 +13180,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_type_shortcuts(self, device):
         def input_generator_fn(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).clamp(0, 1).round().contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).clamp(0, 1) \
+                        .round().contiguous(memory_format=torch.channels_last)
 
         def get_fn(fn_name):
             def transformation_fn(tensor, **kwargs):
@@ -13180,7 +13198,8 @@ class TestTorchDeviceType(TestCase):
 
         # Test 'float' separately to avoid float->float no-op.
         def input_generator_fn_double(device):
-            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float64).clamp(0, 1).round().contiguous(memory_format=torch.channels_last)
+            return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float64).clamp(0, 1) \
+                        .round().contiguous(memory_format=torch.channels_last)
 
         self._test_memory_format_transformations(device, input_generator_fn_double, get_fn('float'))
 
@@ -13445,32 +13464,6 @@ class TestTorchDeviceType(TestCase):
         res_csub = a.clone()
         res_csub.sub_(scalar)
         self.assertEqual(res_add, res_csub)
-
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_min_max_binary_op_nan(self, device, dtype):
-        a = torch.rand(1000, dtype=dtype, device=device)
-        b = torch.rand(1000, dtype=dtype, device=device)
-
-        # 0:250: a -- nan, b -- not nan
-        a[:250] = float('nan')
-        # 250:500: a -- not nan, b -- nan
-        b[250:500] = float('nan')
-        # 500:750: a and b both nan
-        a[500:750] = float('nan')
-        b[500:750] = float('nan')
-        # 750:1000: neither nan
-
-        ma = torch.max(a, b)
-        mi = torch.min(a, b)
-
-        for i in range(750):
-            self.assertTrue(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
-            self.assertTrue(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
-
-        for i in range(750, 1000):
-            self.assertFalse(torch.isnan(ma[i]), "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]))
-            self.assertFalse(torch.isnan(mi[i]), "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]))
 
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
