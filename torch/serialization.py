@@ -291,6 +291,25 @@ def _check_seekable(f):
     except (io.UnsupportedOperation, AttributeError) as e:
         raise_err_msg(["seek", "tell"], e)
 
+def _check_dill_version(pickle_module):
+    '''Checks if using dill as the pickle module, and if so, checks if it is the correct version.
+    If dill version is lower than 0.3.1, a ValueError is raised.
+
+    Args:
+        pickle_module: module used for pickling metadata and objects
+
+    '''
+    if pickle_module.__name__ == 'dill':
+        required_dill_version = (0, 3, 1)
+        dill_version = tuple(int(num) for num in pickle_module.__version__.split('.'))
+
+        if dill_version < required_dill_version:
+            raise ValueError(
+                "'torch' supports 'dill' >= %s, but you have 'dill' %s" % (
+                    '.'.join([str(num) for num in required_dill_version]),
+                    pickle_module.__version__
+                )
+            )
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
     """Saves an object to a disk file.
@@ -319,6 +338,8 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
+    _check_dill_version(pickle_module)
+
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_file:
             _save(obj, opened_file, pickle_module, pickle_protocol)
@@ -519,6 +540,8 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
+    _check_dill_version(pickle_module)
+
     if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
         pickle_load_args['encoding'] = 'utf-8'
 
