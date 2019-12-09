@@ -115,6 +115,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
+        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
+
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lower_all_tuples(graph)
         torch._C._jit_pass_peephole(graph, True)
@@ -128,7 +130,21 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            torch.onnx.symbolic_helper._quantized_ops.clear()
+            # Unpack quantized weights for conv and linear ops and insert into graph.
             torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
+
+            # Insert permutes before and after each conv op to ensure correct order.
+            torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
+
+            # Find consecutive permutes that are no-ops and remove them.
+            torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+            graph(%Pi):
+                %Pq = quantized::nhwc2nchw(%Pi)
+                %Pr = quantized::nchw2nhwc(%Pq)
+                return (%Pr)""", """
+            graph(%Ri):
+                return (%Ri)""", graph)
 
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
@@ -234,7 +250,8 @@ def _trace(func, args, operator_export_type, return_outs=False):
     if isinstance(args, torch.Tensor):
         args = (args, )
 
-    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(func, args, _force_outplace=False, _return_inputs_states=True)
+    trace_graph, torch_out, inputs_states = \
+        torch.jit._get_trace_graph(func, args, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
 
     trace_graph = _optimize_graph(trace_graph, operator_export_type)
@@ -255,7 +272,8 @@ def _trace_and_get_graph_from_model(model, args, training):
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(model, args, _force_outplace=False, _return_inputs_states=True)
+        trace_graph, torch_out, inputs_states = \
+            torch.jit._get_trace_graph(model, args, _force_outplace=False, _return_inputs_states=True)
         warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
