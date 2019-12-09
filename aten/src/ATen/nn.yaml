@@ -61,9 +61,6 @@
 - name: _thnn_softplus(Tensor self, Scalar beta, Scalar threshold)
   cname: SoftPlus
 
-- name: _thnn_softshrink(Tensor self, Scalar lambd)
-  cname: SoftShrink
-
 # Convolutions
 
 - name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding)
