@@ -2,37 +2,39 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Blas.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at { namespace native {
 
 DEFINE_DISPATCH(addmv_stub);
 
 Tensor &addmv_out(Tensor& result, const Tensor &self_, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
-
-#ifdef BUILD_NAMEDTENSOR
-    at::NoNamesGuard guard;
-#endif
-
-  auto result_sizes = {mat.size(0)};
+  auto result_sizes = std::vector<int64_t> {mat.size(0)};
   if (!result.defined()) {
     result = at::empty(result_sizes, mat.options());
   }
+  if (result.sizes() != result_sizes) {
+    result.resize_(result_sizes);
+  }
 
   Tensor self = self_;
-  if (self_.dim() != 1 || self_.size(0) == 1) {
+  if (self_.dim() == 0 || self_.size(0) == 1) {
     self = self_.expand({mat.size(0)});
   }
+
   TORCH_CHECK((mat.dim() == 2 && vec.dim() == 1 && self.dim() == 1),
     "vector + matrix @ vector expected, got ", self.dim(), ", ", mat.dim(), ", ", vec.dim());
   TORCH_CHECK((mat.size(1) == vec.size(0) && mat.size(0) == self.size(0)),
     "size mismatch, get ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
 
   if (&result != &self) {
-    result.resize_as_(self);
     at::native::copy_(result, self);
   }
 
   if (result.numel() != 0) {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
     addmv_stub(self.device().type(), result, self, mat, vec, beta, alpha);
   }
 
