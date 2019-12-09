@@ -2137,8 +2137,8 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_im2col(self):
         class Unfold(torch.nn.Module):
-            def forward(self, input, kernel_size=[10, 15], dilation=[2, 3], padding=5, stride=3):
-                return torch.nn.functional.unfold(input, kernel_size, dilation, padding, stride)
+            def forward(self, input):
+                return torch.nn.functional.unfold(input, kernel_size=(10, 15), dilation=(2, 3), padding=5, stride=3)
 
         x = torch.rand(1, 1, 200, 100)
         self.run_test(Unfold(), x)
