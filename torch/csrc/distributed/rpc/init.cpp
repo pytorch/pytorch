@@ -230,7 +230,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
     RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
   });
 
-  module.def("_get_debug_info", []() {
+  module.def("_rref_context_get_debug_info", []() {
     return RRefContext::getInstance().getDebugInfo();
   });
 
