@@ -108,7 +108,7 @@ py::tuple PyRRef::pickle() const {
 PyRRef PyRRef::unpickle(const py::tuple& t) {
   auto& ctx = RRefContext::getInstance();
   auto rfd = RRefForkData::fromPyTuple(t.cast<py::tuple>());
-  std::shared_ptr<RRef> rref = nullptr;
+  std::shared_ptr<RRefBase> rref = nullptr;
   rref = ctx.getOrCreateRRef(rfd, PyObjectType::get());
 
   ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);

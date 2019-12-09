@@ -539,6 +539,7 @@ inline IValue toIValue(
       }
     }
     case TypeKind::PyObjectType:
+      // convert a pybind11 object to the IValue and hold it
       return c10::ivalue::PyObjectHolder::create(obj.ptr());
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
@@ -720,6 +721,8 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
+  } else if (ivalue.isPyObject()) {
+    return py::cast<py::object>(ivalue.toPyObject());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

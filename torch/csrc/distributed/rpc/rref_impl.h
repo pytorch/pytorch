@@ -206,6 +206,11 @@ class RRefBase : public c10::RRef {
   // Returns true if this is the ``OwnerRRef``
   virtual bool isOwner() const = 0;
 
+  // Return the type of the holding value
+  inline TypePtr type() const {
+    return type_;
+  }
+
   inline bool isPyObj() {
     return type_ == PyObjectType::get();
   }
@@ -213,7 +218,7 @@ class RRefBase : public c10::RRef {
  protected:
   friend class RRefContext;
 
-  RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type);
+  RRefBase(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type);
 
   RRefForkData fork() const;
 
@@ -285,7 +290,7 @@ class OwnerRRef final : public RRefBase {
       : OwnerRRef(ownerId, rrefId, type, {}) {}
 
   OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type, c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, type) {
+      : RRefBase(ownerId, rrefId, type) {
     value_ = std::move(value);
   }
 

@@ -129,17 +129,5 @@ TH_API void THNN_(SoftPlus_updateGradInput)(
           accreal beta,
           accreal threshold);
 
-TH_API void THNN_(SoftShrink_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          accreal lambda);
-TH_API void THNN_(SoftShrink_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          accreal lambda);
-
 #endif
 #endif

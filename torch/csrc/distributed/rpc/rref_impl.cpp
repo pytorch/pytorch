@@ -86,7 +86,7 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
 
 //////////////////////////////  RRefBase  /////////////////////////////////////
 
-RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type)
+RRefBase::RRefBase(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type)
     : ownerId_(ownerId), rrefId_(rrefId), type_(type) {}
 
 RRefForkData RRefBase::fork() const {
@@ -102,7 +102,7 @@ UserRRef::UserRRef(
     const RRefId& rrefId,
     const ForkId& forkId,
     const TypePtr& type)
-    : RRef(ownerId, rrefId, type), forkId_(forkId) {
+    : RRefBase(ownerId, rrefId, type), forkId_(forkId) {
   // Do nothing,
   // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
   //     a RREF_FORK_REQUEST message to the owner.
