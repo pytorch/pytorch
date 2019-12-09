@@ -292,6 +292,15 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
+  /// Returns if the layout is sparse
+  bool is_sparse() const {
+    return layout_ == c10::Layout::Sparse;
+  }
+
+  // For compatibility with legacy tensor.type() comparisons
+  bool type_equal(const TensorOptions& other) const {
+    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
+  }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.
@@ -335,14 +344,16 @@ struct C10_API TensorOptions {
     switch (layout()) {
       case Layout::Strided:
         switch (device().type()) {
-          case DeviceType::CPU:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
+          case DeviceType::CPU: {
+            auto dtype_tmp = typeMetaToScalarType(dtype());
+            if (isComplexType(dtype_tmp)) {
               return TensorTypeId::ComplexCPUTensorId;
             }
-            if (isQIntType(typeMetaToScalarType(dtype()))) {
+            if (isQIntType(dtype_tmp)) {
               return TensorTypeId::QuantizedCPUTensorId;
             }
             return TensorTypeId::CPUTensorId;
+            }
           case DeviceType::CUDA:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
               return TensorTypeId::ComplexCUDATensorId;
@@ -534,6 +545,12 @@ C10_API std::ostream& operator<<(
 template <typename T>
 inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
+}
+
+inline std::string toString(const TensorOptions options) {
+  std::ostringstream stream;
+  stream << options;
+  return stream.str();
 }
 
 // This is intended to be a centralized location by which we can determine

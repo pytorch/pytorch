@@ -6,15 +6,17 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   device_guard: False
   return: argument 0
   options:
     - cname: set
-      scalar_check: source_->dim() == 0
+      scalar_check: false
       arguments:
         - THTensor* self
         - THTensor* source
     - cname: setStorage
+      scalar_check: false
       arguments:
         - THTensor* self
         - THStorage* source
@@ -27,6 +29,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedFill
   variants: function
   return: self
@@ -42,6 +45,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedFillBool
   variants: function
   return: self
@@ -57,6 +61,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedCopy
   variants: function
   return: self
@@ -71,6 +76,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: maskedCopyBool
   variants: function
   return: self
@@ -86,9 +92,11 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -102,9 +110,11 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -119,6 +129,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -132,12 +143,14 @@
   name: _th_clone
   cname: newClone
   return: THTensor*
+  scalar_check: false
   variants:
     - function
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   arguments:
     - THTensor* self
 ]]
@@ -149,6 +162,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: self.dim() == 0
   arguments:
     - arg: THTensor* result
       output: True
@@ -179,7 +193,7 @@
   variants:
     - function
   return: argument 0
-  scalar_check: index_->dim() == 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -206,6 +220,8 @@
   name: _th_index_add_
   cname: indexAdd
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - THTensor* self
@@ -273,6 +289,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -302,6 +319,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: bitand
       arguments:
@@ -346,6 +364,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: bitor
       arguments:
@@ -388,6 +407,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: lshift
       arguments:
@@ -428,6 +448,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - cname: rshift
       arguments:
@@ -491,7 +512,7 @@
   options:
     - cname: min
       return: argument 0,1
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
+      scalar_check: false
       arguments:
         - arg: THTensor* min
           output: True
@@ -531,7 +552,7 @@
   options:
     - cname: max
       return: argument 0,1
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
+      scalar_check: false
       arguments:
         - arg: THTensor* max
           output: True
@@ -547,7 +568,7 @@
   variants: function
   cname: mode
   return: argument 0,1
-  scalar_check: self_->dim() == 0|| (keepdim == false && self_->dim() == 1)
+  scalar_check: false
   arguments:
     - arg: THTensor* values
       output: True
@@ -583,6 +604,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* values
       output: True
@@ -604,6 +626,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -618,6 +641,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -632,6 +656,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -646,6 +671,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -660,6 +686,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -674,6 +701,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -688,6 +716,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -702,6 +731,7 @@
     - CUDA
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -721,17 +751,6 @@
       arguments:
         - THTensor* self
         - bool unbiased
-    - cname: var_single
-      return: argument 0
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - bool unbiased
-        - bool keepdim
 ]]
 [[
   name: _th_std
@@ -747,17 +766,6 @@
       arguments:
         - THTensor* self
         - bool unbiased
-    - cname: std_single
-      return: argument 0
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - bool unbiased
-        - bool keepdim
 ]]
 [[
   name: _th_renorm
@@ -815,22 +823,6 @@
           broadcast: other fallback
         - THTensor* other
         - real p
-]]
-[[
-  name: _th_reciprocal
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: cinv
-      return: argument 0
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
 ]]
 [[
   name: _th_histc
@@ -974,6 +966,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -988,6 +981,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1001,6 +995,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1054,6 +1049,7 @@
   name: _th_addmm
   cname: addmm
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -1072,6 +1068,7 @@
 [[
   name: _th_addmm_
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: [function]
   return: self
   options:
@@ -1088,8 +1085,10 @@
   name: _th_addmv
   cname: addmv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1104,6 +1103,7 @@
   name: _th_addmv_
   cname: addmv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: self
   arguments:
@@ -1118,6 +1118,7 @@
   name: _th_addr
   cname: addr
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -1134,6 +1135,7 @@
 [[
   name: _th_addr_
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: addr
   return: self
   variants: function
@@ -1149,6 +1151,7 @@
   name: _th_ger
   cname: addr
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -1166,6 +1169,7 @@
 [[
   name: _th_mv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: addmv
   variants: function
   return: argument 0
@@ -1184,6 +1188,7 @@
 [[
   name: _th_mm
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   options:
@@ -1202,6 +1207,7 @@
 ]]
 [[
   name: _th_bmm
+  cuda_bfloat16: True
   cname: baddbmm
   variants:
     - function
@@ -1222,6 +1228,7 @@
 ]]
 [[
   name: _th_addbmm
+  cuda_bfloat16: True
   cname: addbmm
   variants:
     - function
@@ -1239,6 +1246,7 @@
 ]]
 [[
   name: _th_addbmm_
+  cuda_bfloat16: True
   cname: addbmm
   variants: function
   return: self
@@ -1252,6 +1260,7 @@
 ]]
 [[
   name: _th_baddbmm
+  cuda_bfloat16: True
   cname: baddbmm
   variants:
     - function
@@ -1302,6 +1311,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* res1
       output: True
@@ -1377,6 +1387,7 @@
     - CPU
   variants:
     - function
+  scalar_check: false
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -1441,6 +1452,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THIndexTensor* result
       output: True
@@ -1472,6 +1484,7 @@
   backends:
     - CPU
   return: argument 0
+  scalar_check: false
   variants:
     - function
   options:
@@ -1589,6 +1602,7 @@
   cpu_bool: True
   cuda_bool: True
   cpu_bfloat16: True
+  cuda_bfloat16: True
   return: self
   arguments:
     - arg: THTensor* self

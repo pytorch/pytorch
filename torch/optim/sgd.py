@@ -90,7 +90,7 @@ class SGD(Optimizer):
                     continue
                 d_p = p.grad.data
                 if weight_decay != 0:
-                    d_p.add_(weight_decay, p.data)
+                    d_p = d_p.add(weight_decay, p.data)
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:

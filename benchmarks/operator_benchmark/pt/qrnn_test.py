@@ -29,10 +29,11 @@ qrnn_configs = op_bench.config_list(
 
 class _RNNBenchmarkBase(op_bench.TorchBenchmarkBase):
     def init(self, input_size, hidden_size, dtype):
+        print(input_size, hidden_size, dtype)
         scale = 1.0 / 255
         zero_point = 0
-        X = torch.randn(N, input_size, dtype=torch.float32)
-        h = torch.randn(N, hidden_size, dtype=torch.float32)
+        X = torch.randn(16, 1, input_size, dtype=torch.float32)
+        h = torch.randn(16, 1, 1, hidden_size, dtype=torch.float32)
         self.qX = torch.quantize_per_tensor(X, scale=scale,
                                             zero_point=zero_point, dtype=dtype)
         self.qH = torch.quantize_per_tensor(h, scale=scale,
@@ -59,3 +60,6 @@ class LSTMBenchmark(_RNNBenchmarkBase):
         self.set_module_name("QLSTM")
 
 op_bench.generate_pt_test(qrnn_configs, LSTMBenchmark)
+
+if __name__ == "__main__":
+    op_bench.benchmark_runner.main()
