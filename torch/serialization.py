@@ -232,9 +232,24 @@ def _open_file_like(name_or_buffer, mode):
             raise RuntimeError("Expected 'r' or 'w' in mode but got {}".format(mode))
 
 
-class _open_zipfile_reader(_opener):
-    def __init__(self, name_or_buffer, size=None):
-        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer, size))
+class _open_zipfile_reader_file(_opener):
+    def __init__(self, name):
+        super(_open_zipfile_reader_file, self).__init__(torch._C.PyTorchFileReader(name))
+
+
+class _open_zipfile_reader_buffer(_opener):
+    def __init__(self, buffer):
+        self.size = _get_zip_size(buffer)
+        self.start = buffer.tell()
+        self.buffer = buffer
+        super(_open_zipfile_reader_buffer, self).__init__(torch._C.PyTorchFileReader(self.buffer, self.size))
+
+    def __exit__(self, *args):
+        # TODO: Delete this seek() call since it shouldn't be necessary
+        # if self.file_like.tell() != self.start + self.size:
+        #     raise RuntimeError("Bad position after reading")
+        self.buffer.seek(self.start + self.size)
+
 
 
 class _open_zipfile_writer_file(_opener):
@@ -260,6 +275,14 @@ def _open_zipfile_writer(name_or_buffer):
         container = _open_zipfile_writer_file
     else:
         container = _open_zipfile_writer_buffer
+    return container(name_or_buffer)
+
+
+def _open_zipfile_reader(name_or_buffer):
+    if _is_path(name_or_buffer):
+        container = _open_zipfile_reader_file
+    else:
+        container = _open_zipfile_reader_buffer
     return container(name_or_buffer)
 
 
@@ -537,17 +560,13 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     with _open_file_like(f, 'rb') as opened_file:
         if _is_zipfile(opened_file):
-            start = f.tell()
-            size = _get_zip_size(opened_file)
-            with _open_zipfile_reader(f, size=size) as opened_zipfile:
+            with _open_zipfile_reader(f) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                                   " silence this warning)", UserWarning)
                     return torch.jit.load(f)
-                x = _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
-                f.seek(start + size)
-                return x
+                return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 
