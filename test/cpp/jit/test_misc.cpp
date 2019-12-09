@@ -1306,11 +1306,15 @@ void testAutogradSymbols() {
   auto node = graph.create(sym);
   TORCH_CHECK(canRunWithAutograd(node));
 
-  sym = Symbole::fromQualString("prim::test_symbol");
+  sym = Symbol::fromQualString("prim::test_symbol");
   node =  graph.create(sym);
   TORCH_CHECK(canRunWithAutograd(node));
 
-  sym = Symbole::fromQualString("custom::test_symbol");
+  sym = Symbol::fromQualString("prim::FusionGroup");
+  node =  graph.create(sym);
+  TORCH_CHECK(!canRunWithAutograd(node));
+
+  sym = Symbol::fromQualString("custom::test_symbol");
   node =  graph.create(sym);
   TORCH_CHECK(!canRunWithAutograd(node));
 }
