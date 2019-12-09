@@ -748,7 +748,7 @@ PyObject* initModule() {
     if (e) {
       std::rethrow_exception(e);
     }
-    END_HANDLE_TH_ERRORS_RET()
+    END_HANDLE_TH_ERRORS_PYBIND
   });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);

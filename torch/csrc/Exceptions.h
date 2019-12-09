@@ -69,6 +69,15 @@
 
 #define END_HANDLE_TH_ERRORS_PYBIND                                      \
   }                                                                      \
+  catch (py::error_already_set & e) {                                    \
+    throw;                                                               \
+  }                                                                      \
+  catch (py::builtin_exception & e) {                                    \
+    throw;                                                               \
+  }                                                                      \
+  catch (torch::jit::JITException & e) {                                 \
+    throw;                                                               \
+  }                                                                      \
   CATCH_TH_ERRORS(throw py::error_already_set())
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
