@@ -393,11 +393,13 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 
   numel = THLongTensor_nElement(index);
 
-  std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
+  std::vector<int64_t> newSize = src->sizes().vec();
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
-  newSize[dim] = numel;
+  if (src->dim() > 0) {
+    newSize[dim] = numel;
+  }
   THTensor_(resize)(tensor,newSize,{});
 
   index = THLongTensor_newContiguous(index);
@@ -442,10 +444,15 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       }
     }
   }
-  else if (src->dim() <= 1)
+  else if (src->dim() == 0)
   {
-    for (i=0; i<numel; i++)
+    THTensor_(set0d)(tensor,THTensor_(get1d)(src,index_data[0]));
+  }
+  else if (src->dim() == 1)
+  {
+    for (i=0; i<numel; i++) {
       THTensor_(set1d)(tensor,i,THTensor_(get1d)(src,index_data[i]));
+    }
   }
   else
   {
