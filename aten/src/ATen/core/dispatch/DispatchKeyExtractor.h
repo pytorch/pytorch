@@ -79,17 +79,12 @@ public:
         // no safe toTensorRef method, alas)
         ts = ts | ivalue.unsafeToTensorImpl()->type_set();
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const auto& tensor : ivalue.toTensorList()) {
-          ts = ts | at::Tensor(tensor).type_set();
+        for (const auto& tensor : ivalue.toTensorListRef()) {
+          ts = ts | tensor.type_set();
         }
       }
     }
-    if (C10_UNLIKELY(ts.empty())) {
-      return c10::nullopt;
-    }
-
-    // TODO: Don't use legacy extractor; blocked on c10 understanding variable
-    return c10::legacyExtractTypeId(ts);
+    return typeSetToDispatchKey_(ts);
   }
 
   template<class... Args>

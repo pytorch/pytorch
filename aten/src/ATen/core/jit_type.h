@@ -49,7 +49,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(FunctionType)           \
   _(ClassType)              \
   _(CapsuleType)            \
-  _(InterfaceType)
+  _(InterfaceType)          \
+  _(QSchemeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1090,6 +1091,28 @@ struct CAFFE2_API GeneratorType : public Type {
   GeneratorType() : Type(TypeKind::GeneratorType) {}
 };
 
+struct QSchemeType;
+using QSchemeTypePtr = std::shared_ptr<QSchemeType>;
+// This type represents a QScheme
+struct CAFFE2_API QSchemeType : public Type {
+  static QSchemeTypePtr create() {
+    return QSchemeTypePtr(
+        new QSchemeType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "QScheme";
+  }
+  static const TypeKind Kind = TypeKind::QSchemeType;
+  // global singleton
+  static QSchemeTypePtr get();
+
+ private:
+  QSchemeType() : Type(TypeKind::QSchemeType) {}
+};
+
 struct DeviceObjType;
 using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
 // This type represents a Generator
@@ -1231,13 +1254,6 @@ struct getTypePtr_ final {
 };
 
 template <>
-struct getTypePtr_<at::IValue> final {
-  static TypePtr call() {
-    return AnyType::get();
-  }
-};
-
-template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
@@ -1265,6 +1281,12 @@ template <>
 struct getTypePtr_<at::Scalar> final {
   static TypePtr call() {
     return NumberType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::QScheme> final {
+  static TypePtr call() {
+    return QSchemeType::get();
   }
 };
 template <>
@@ -1399,8 +1421,8 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   std::string str() const override {
-    return python_str();
-  }
+     return python_str();
+   }
 
   std::string python_str() const override {
     const auto& n = name().value();
@@ -1442,6 +1464,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeNames_[slot];
   }
 
+  void checkNotExist(const std::string& name, const std::string& what) const;
+
   // Attributes are stored in a specific slot at runtime for effiency.
   // When emitting instructions we specify the slot so that attribute access is
   // a constant lookup
@@ -1478,7 +1502,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
   size_t addAttribute(
       const std::string& name,
-      TypePtr type,
+      const TypePtr& type,
       bool is_parameter = false);
 
   // [Internal Only] Remove attribute from the ClassType,
@@ -1523,6 +1547,39 @@ struct CAFFE2_API ClassType : public NamedType {
 
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
+  }
+
+  bool hasConstant(const std::string& name) const {
+    return std::find_if(
+               constantNames_.cbegin(),
+               constantNames_.cend(),
+               [&](const std::string& constant) { return constant == name; }) !=
+        constantNames_.cend();
+  }
+
+  size_t addConstant(
+      const std::string& name,
+      const IValue& value);
+
+  const std::string& getConstantName(size_t slot) const {
+    TORCH_CHECK(constantNames_.size() == constantValues_.size());
+    TORCH_CHECK(slot < constantNames_.size());
+    return constantNames_[slot];
+  }
+
+  c10::optional<IValue> getConstant(const std::string& name) const;
+
+  size_t numConstants() const {
+    TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
+    return constantNames_.size();
+  }
+
+  at::ArrayRef<std::string> constantNames() const {
+    return constantNames_;
+  }
+
+  at::ArrayRef<IValue> constantValues() const {
+    return constantValues_;
   }
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
@@ -1580,6 +1637,9 @@ struct CAFFE2_API ClassType : public NamedType {
   // available from c10
   std::vector<std::string> attributeNames_;
   std::vector<TypePtr> attributeTypes_;
+  // Mapping of constant names -> their value.
+  std::vector<std::string> constantNames_;
+  std::vector<IValue> constantValues_;
   // Holds method attributes
   std::weak_ptr<CompilationUnit> compilation_unit_;
 
@@ -1647,24 +1707,5 @@ struct CAFFE2_API InterfaceType : public NamedType {
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
 };
-
-
-
-
-inline bool IValue::isDoubleList() const {
-  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(FloatType::get());
-}
-
-inline bool IValue::isTensorList() const {
-  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(TensorType::get());
-}
-
-inline bool IValue::isIntList() const {
-  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(IntType::get());
-}
-
-inline bool IValue::isBoolList() const {
-  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(BoolType::get());
-}
 
 } // namespace c10

@@ -83,6 +83,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
+      case QSchemeType::Kind:
         // no op, there is nothing to tag
         break;
       case AnyType::Kind:
@@ -165,6 +166,7 @@ IValue Unpickler::parse_ivalue() {
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
   restoreAccurateTypeTagsIfPossible(stack_[0]);
+
   return stack_[0];
 }
 
@@ -240,14 +242,6 @@ static std::vector<int64_t> tupleToIntList(const IValue& v) {
   return fmap(v.toTuple()->elements(), [](const IValue& v) -> int64_t {
     return v.toInt();
   });
-}
-
-// note we cannot use toIntList, toDoubleList because during unpickling the
-// lists are not yet tagged
-template <typename T>
-static std::vector<T> convertList(const IValue& v) {
-  return fmap(
-      v.toGenericListRef(), [](const IValue& elem) { return elem.to<T>(); });
 }
 
 PickleOpCode Unpickler::readInstruction() {
@@ -600,8 +594,11 @@ void Unpickler::rebuildTensor(bool quantized) {
               {0}, storage_tensor.options(), q_scale, q_zero_point);
         } break;
         case at::kPerChannelAffine: {
-          std::vector<double> scales = convertList<double>(qparams.at(1));
-          std::vector<int64_t> zero_points = convertList<int64_t>(qparams.at(2));
+          const auto& scales_list = qparams.at(1).toDoubleList();
+          std::vector<double> scales(scales_list.begin(), scales_list.end());
+          const auto& zero_points_list = qparams.at(2).toIntList();
+          std::vector<int64_t> zero_points(
+              zero_points_list.begin(), zero_points_list.end());
           int64_t axis = qparams.at(3).toInt();
           result = _empty_per_channel_affine_quantized(
               {0},

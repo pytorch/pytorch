@@ -69,14 +69,14 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                 reinterpret_cast<ListType*>(type.get())->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
-              auto list = iter->toTensorVector();
+              auto list = iter->toTensorListRef();
               tracer::addInputs(node, args[i].name().c_str(), list);
             } else if (elem_type->kind() == TypeKind::FloatType) {
               AT_ASSERT(iter->isDoubleList());
               // NB: now, tracer doesn't support tracing double list. We add special
               // handling here, since in our case, we assume that all the doubles
               // in the list are constants
-              auto value = iter->toDoubleVector();
+              auto value = iter->toDoubleListRef();
               std::vector<Value*> info(value.size());
               for (size_t value_index = 0; value_index < value.size(); ++value_index) {
                 info[value_index] = graph->insertConstant(value[value_index]);
@@ -87,11 +87,11 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             } else if (elem_type->kind() == TypeKind::IntType) {
               AT_ASSERT(iter->isIntList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), iter->toIntVector());
+                  node, args[i].name().c_str(), iter->toIntListRef());
             } else if (elem_type->kind() == TypeKind::BoolType) {
               AT_ASSERT(iter->isBoolList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), iter->toBoolList().vec());
+                  node, args[i].name().c_str(), c10::impl::toVector(iter->toBoolList()));
             } else {
               throw std::runtime_error(
                   "unsupported input list type: " + elem_type->str());

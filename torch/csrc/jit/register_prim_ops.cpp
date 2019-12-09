@@ -797,10 +797,10 @@ RegisterOperators reg(
              size.reserve(8);
              for (size_t i = 0; i < num_inputs; ++i) {
                size = at::infer_size(
-                   size, peek(stack, i, num_inputs).toIntVector());
+                   size, peek(stack, i, num_inputs).toIntListRef());
              }
              drop(stack, num_inputs);
-             push(stack, IValue(std::move(size)));
+             push(stack, c10::impl::toList(std::move(size)));
              return 0;
            };
          },
@@ -932,7 +932,7 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         "prim::AutogradAnyNonZero(...) -> int",
+         "prim::AutogradAnyNonZero(...) -> bool",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {
@@ -944,8 +944,10 @@ RegisterOperators reg(
                    break;
                  }
                } else if (v.isTensorList()) {
-                 for (const at::Tensor& t : v.toTensorVector()) {
-                   result = true;
+                 for (const at::Tensor& t : v.toTensorListRef()) {
+                   if (t.defined()) {
+                     result = true;
+                   }
                  }
                  if (result) {
                    break;
@@ -989,7 +991,9 @@ RegisterOperators reg(
            if (size.isNone()) {
              push(stack, std::move(self));
            } else {
-             push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
+             push(
+                 stack,
+                 at::sum_to(self.toTensor(), size.toIntListRef()));
            }
            return 0;
          },
@@ -999,9 +1003,8 @@ RegisterOperators reg(
          [](Stack& stack) {
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
-           auto s = self_size.toIntVector();
-           auto o = other_size.toIntVector();
-           if (s == o) {
+           auto s = self_size.toIntListRef();
+           if (s.equals(other_size.toIntListRef())) {
              push(stack, IValue());
            } else {
              push(stack, s);
@@ -3338,14 +3341,14 @@ std::vector<int64_t> _output_size(
       std::vector<int64_t> repeated(dim, size.toInt());
       return repeated;
     } else {
-      return size.toIntVector();
+      return size.toIntListRef().vec();
     }
   }
   std::vector<double> scale_repeated;
   if (scale_factors.isDouble()) {
     scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
   } else {
-    scale_repeated = scale_factors.toDoubleVector();
+    scale_repeated = scale_factors.toDoubleListRef().vec();
   }
   std::vector<int64_t> ret;
   for (size_t i = 0; i < dim; ++i) {
@@ -3462,9 +3465,9 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   if (int_ivalue.isInt()) {
     scale_factor_double = static_cast<double>(int_ivalue.toInt());
   } else if (int_ivalue.isIntList()) {
-    auto int_list = int_ivalue.toIntVector();
+    auto int_list = int_ivalue.toIntListRef();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
-    scale_factor_double = double_vec;
+    scale_factor_double = c10::impl::toList(double_vec);
   } else if (int_ivalue.isNone()) {
     return IValue();
   } else {
@@ -3573,7 +3576,7 @@ at::Tensor leaky_relu(const at::Tensor& tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
 at::Tensor cat(const c10::List<at::Tensor>& tensors) {
-  return at::cat(tensors.vec());
+  return at::cat(c10::impl::toVector(tensors));
 }
 
 std::string get_first(const c10::List<c10::List<std::string>>& strings) {

@@ -94,7 +94,7 @@ Value* TracingState::getValue(const IValue& var) {
         ->insertNode(graph->createList(
             TensorType::get(),
             fmap(
-                var.toTensorVector(),
+                var.toTensorListRef(),
                 [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isTuple()) {
@@ -259,9 +259,8 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     return std::move(dict);
   } else if (auto list_type = type->cast<ListType>()) {
     size_t num_elems = input.isGenericList() ? input.toGenericListRef().size()
-                                             : input.toTensorVector().size();
-    auto list_unpack = state->graph->insertNode(
-        state->graph->createListUnpack(value, num_elems));
+                                             : input.toTensorListRef().size();
+    auto list_unpack = state->graph->insertNode(state->graph->createListUnpack(value, num_elems));
     auto unpack_outputs = list_unpack->outputs();
 
     if (input.isTensorList()) {
@@ -590,7 +589,11 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
-void addInputs(Node* n, const char* name, ArrayRef<double> value) {
+void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
+  AT_ERROR("Tracing float lists currently not supported!");
+}
+
+void addInputs(Node* n, const char* name, const std::vector<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
