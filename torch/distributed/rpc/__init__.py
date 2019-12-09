@@ -25,40 +25,50 @@ if is_available():
     def init_rpc(
         name,
         backend=backend_registry.BackendType.PROCESS_GROUP,
-        init_method=None,
         rank=-1,
         world_size=None,
-        rpc_agent_options=None,
+        rpc_backend_options=None,
     ):
         r"""
         Initializes RPC primitives such as the local RPC agent
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current
-        process ready to send and receive RPCs. The caller needs to make
-        sure the specified backend is properly intialized before calling
-        this method. For example, to use ``pg`` (ProcessGroup) backend,
-        ``init_process_group`` must be invoked prior to this method.
+        process ready to send and receive RPCs. This method also properly
+        initializes a default process group backend that uses gloo for
+        collective communication.
 
         Arguments:
-            backend (Enum): type of RPC backend implementation.
-                        Currently, process group backend is the only
-                        available backend implementation. (default:
-                        ``RpcBackend.PROCESS_GROUP``).
+            backend (Enum): type of RPC backend implementation. Currently,
+                process group backend is the only available backend
+                implementation. (default: ``RpcBackend.PROCESS_GROUP``).
             name (str): a globally unique name of this node. (e.g.,
-                        ``Trainer3``, ``ParameterServer2``, ``Master``,
-                        ``Worker1``) Name can only contain number, alphabet,
-                        underscore, and/or dash, and must be shorter than
-                        128 characters.
-            init_method(str): backend specific init arguments.
+                ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
+                Name can only contain number, alphabet, underscore, and/or dash,
+                and must be shorter than 128 characters.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
-            rpc_agent_options (RpcAgentOptions): The options passed to RpcAgent
-                consturctor.
+            rpc_backend_options (RpcBackendOptions): The options passed to
+                RpcAgent consturctor. It contains RpcAgent specific
+                initialization configurations. By default, it contains
+                ``rpc_timeout = timedelta(seconds=60)``,
+                ``init_method = "env://"``, ``num_send_recv_threads = 4`` for
+                process group agent. If using the default
+                ``rpc_backend_options``, RPC would initialize the underlying
+                process group backend using ``init_method = "env://"``,
+                meaning that environment variables ``MASTER_ADDRESS`` and
+                ``MASTER_PORT`` needs to be set properly.
         """
+
+        if not rpc_backend_options:
+            # default construct a set of RPC backend options.
+            rpc_backend_options = backend_registry.construct_rpc_backend_options(
+                backend
+            )
+
         # Rendezvous.
         rendezvous_iterator = torch.distributed.rendezvous(
-            init_method, rank=rank, world_size=world_size
+            rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
 
@@ -71,4 +81,4 @@ if is_available():
         torch.distributed.autograd._init(rank)
 
         # Initialize RPC.
-        _init_rpc_backend(backend, store, name, rank, world_size, rpc_agent_options)
+        _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)

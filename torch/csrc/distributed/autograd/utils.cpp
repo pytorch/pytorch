@@ -23,12 +23,21 @@ void addSendRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     const rpc::worker_id_t dst) {
+  // Attach autograd information only for tensors requiring grad.
+  std::vector<torch::Tensor> tensors_with_grad;
+  std::copy_if(
+      tensors.begin(),
+      tensors.end(),
+      std::back_inserter(tensors_with_grad),
+      [](const torch::Tensor& t) { return t.requires_grad(); });
+
   // Attach the appropriate autograd edges.
   auto grad_fn = std::make_shared<SendRpcBackward>();
-  grad_fn->set_next_edges(torch::autograd::collect_next_edges(tensors));
+  grad_fn->set_next_edges(
+      torch::autograd::collect_next_edges(tensors_with_grad));
 
   // Add the appropriate input metadata for the grad_fn.
-  for (const auto& tensor : tensors) {
+  for (const auto& tensor : tensors_with_grad) {
     grad_fn->add_input_metadata(tensor);
   }
 
@@ -52,7 +61,9 @@ ContextPtr addRecvRpcBackward(
     auto grad_fn = std::make_shared<RecvRpcBackward>(
         autogradMetadata, autogradContext, fromWorkerId);
     for (auto& tensor : tensors) {
-      torch::autograd::set_history(tensor, grad_fn);
+      if (tensor.requires_grad()) {
+        torch::autograd::set_history(tensor, grad_fn);
+      }
     }
 
     // Now update the autograd context with the necessary information.

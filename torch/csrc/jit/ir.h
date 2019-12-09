@@ -227,6 +227,18 @@ struct Value {
   //          %5 = h(%6, %6)
   TORCH_API void replaceAllUsesWith(Value* newValue);
 
+  // Replaces all uses of this value with 'newValue' after 'node'.
+  // Given:   %3 = f(%1, %2)
+  //          %4 = g(%3)
+  //          %5 = inplace_(%3)
+  //          %6 = h(%3, %3)
+  // Execute: %3.replaceAllUsesAfterNodeWith(%5.node(), %5)
+  // Result:  %3 = f(%1, %2)
+  //          %4 = g(%3)
+  //          %5 = inplace_(%3)
+  //          %6 = h(%5, %5)
+  TORCH_API void replaceAllUsesAfterNodeWith(const Node* node, Value* newValue);
+
   TORCH_API Value* copyMetadata(Value* from);
 };
 
@@ -1133,7 +1145,7 @@ struct Graph {
 
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
-      IValue val,
+      const IValue& val,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 

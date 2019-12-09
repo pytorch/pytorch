@@ -34,14 +34,23 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   auto module = py::handle(rpc_module).cast<py::module>();
 
-  auto rpcAgentOptions =
-      shared_ptr_class_<RpcAgentOptions>(module, "RpcAgentOptions")
-          .def_readwrite("rpc_timeout", &RpcAgentOptions::rpcTimeout);
+  auto rpcBackendOptions =
+      shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
+          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
+          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
 
   auto workerInfo =
-      shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
-          .def_readonly("name", &WorkerInfo::name_)
-          .def_readonly("id", &WorkerInfo::id_)
+      shared_ptr_class_<WorkerInfo>(
+          module,
+          "WorkerInfo",
+          R"(Encapsulates information of a worker in the system.)")
+          .def(
+              py::init<std::string, worker_id_t>(),
+              py::arg("name"),
+              py::arg("id"))
+          .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker.)")
+          .def_readonly(
+              "id", &WorkerInfo::id_, R"(Globally unique id of the worker.)")
           .def("__eq__", &WorkerInfo::operator==, py::is_operator())
           // pybind11 suggests the syntax  .def(hash(py::self)), with the
           // unqualified "hash" function call. However the
@@ -56,32 +65,93 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
-              "sync",
-              &RpcAgent::sync,
+              "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_worker_infos",
+              &RpcAgent::getWorkerInfos,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_debug_info",
+              &RpcAgent::getDebugInfo,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_metrics",
+              &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
-          A class encapsulating a reference to a value of some type on a remote worker.
-          This handle will keep the referenced remote value alive on the worker.
-      )")
+          A class encapsulating a reference to a value of some type on a remote
+          worker. This handle will keep the referenced remote value alive on the
+          worker.
+
+          Example::
+              Following examples skip RPC initialization and shutdown code
+              for simplicity. Refer to RPC docs for those details.
+
+              1. Create an RRef using rpc.remote
+
+              >>> import torch
+              >>> import torch.distributed.rpc as rpc
+              >>> rref = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
+              >>> # get a copy of value from the RRef
+              >>> x = rref.to_here()
+
+              2. Create an RRef from a local object
+
+              >>> import torch
+              >>> from torch.distributed.rpc import RRef
+              >>> x = torch.zeros(2, 2)
+              >>> rref = RRef(x)
+
+              3. Share an RRef with other workers
+
+              >>> # On both worker0 and worker1:
+              >>> def f(rref):
+              >>>   return rref.to_here() + 1
+
+              >>> # On worker0:
+              >>> import torch
+              >>> import torch.distributed.rpc as rpc
+              >>> from torch.distributed.rpc import RRef
+              >>> rref = RRef(torch.zeros(2, 2))
+              >>> # the following RPC shares the rref with worker1, reference
+              >>> # count is automatically updated.
+              >>> rpc.rpc_sync("worker1", f, args(rref,))
+          )")
           .def(py::init<const py::object&>())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
-              &PyRRef::isOwner)
+              &PyRRef::isOwner,
+              R"(
+                  Returns whether or not the current node is the owner of this
+                  ``RRef``.
+              )")
           .def(
               // not releasing GIL here to avoid context switch on getters
               "owner",
-              &PyRRef::owner)
+              &PyRRef::owner,
+              R"(
+                  Returns worker information of the node that owns this ``RRef``.
+              )")
           .def(
               "to_here",
               &PyRRef::toHere,
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Blocking call that copies the value of the RRef from the owner
+                  to the local node and returns it. If the current node is the
+                  owner, returns a reference to the local value.
+              )")
           .def(
               "local_value",
               &PyRRef::localValue,
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  If the current node is the owner, returns a reference to the
+                  local value. Otherwise, throws an exception.
+              )")
           .def(py::pickle(
               [](const PyRRef& self) {
                 // __getstate__
@@ -90,11 +160,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
               [](py::tuple t) { // NOLINT
                 // __setstate__
                 return PyRRef::unpickle(t);
-              }));
+              }))
+          // not releasing GIL to avoid context switch
+          .def("__str__", &PyRRef::str);
 
-  // future.wait() should not be called after join_rpc(), e.g., pythonRpcHandler
-  // is cleaned up in join_rpc(), after join_rpc(), python objects returned
-  // from rpc python call can not be resolved.
+  // future.wait() should not be called after shutdown(), e.g.,
+  // pythonRpcHandler is cleaned up in shutdown(), after
+  // shutdown(), python objects returned from rpc python call can not be
+  // resolved.
   auto futureMessage =
       shared_ptr_class_<FutureMessage>(module, "FutureMessage")
           .def(
@@ -102,12 +175,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
               py::call_guard<py::gil_scoped_release>());
 
-  shared_ptr_class_<ProcessGroupRpcAgentOptions>(
-      module, "ProcessGroupRpcAgentOptions", rpcAgentOptions)
+  shared_ptr_class_<ProcessGroupRpcBackendOptions>(
+      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
       .def(py::init<>())
       .def_readwrite(
           "num_send_recv_threads",
-          &ProcessGroupRpcAgentOptions::numSendRecvThreads);
+          &ProcessGroupRpcBackendOptions::numSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
@@ -131,8 +204,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "get_worker_infos",
+          (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
+              ProcessGroupAgent::getWorkerInfos,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "join",
           &ProcessGroupAgent::join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "shutdown",
+          &ProcessGroupAgent::shutdown,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "sync",
@@ -144,8 +226,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
     agent->start();
   });
 
-  module.def("_destroy_rref_context", []() {
-    RRefContext::getInstance().destroyInstance();
+  module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
+    RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
+  });
+
+  module.def("_get_debug_info", []() {
+    return RRefContext::getInstance().getDebugInfo();
   });
 
   module.def("_cleanup_python_rpc_handler", []() {
