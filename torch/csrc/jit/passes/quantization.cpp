@@ -22,6 +22,8 @@ namespace {
 
 using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
 // Map of quantization parameter name and value
+// for example _scale, _zero_point,
+// _scalar_type and _axis(for per channel quantization)
 using QParamMap = std::unordered_map<std::string, IValue>;
 
 // This struct contains a compiled IR pattens slated for use in the
@@ -619,8 +621,9 @@ class InsertQuantDeQuantHelper {
       script::Module& module,
       const std::string& method_name);
 
-  // quantization parameters including scale, zero_point,
-  // scalar_type and axis(for per channel quantization)
+  // Get quantization parameter map of the given Value in Graph
+  // by searching for observer module of the value and extract the
+  // quantization parameters from the observer module
   QParamMap getQParamMap(script::Module& module, Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
@@ -757,7 +760,9 @@ QParamMap InsertQuantDeQuantHelper::getQParamMap(
   std::unordered_map<std::string, IValue> qparams = {
     {"_scalar_type", scalar_type},
   };
-  // TODO: get this from observer_module
+  // TODO: here we use `scale.numel() > 1` to check if it is per
+  // channel quantization, but we should get qscheme from
+  // observer_module and use qscheme to check if it is per channel quantization
   if (scale.numel() > 1) {
     qparams["_scale"] = scale;
     qparams["_zero_point"] = zero_point;
