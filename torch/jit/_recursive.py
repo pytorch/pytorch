@@ -428,7 +428,7 @@ def get_overload_name_mapping(overload_info):
 def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func, None, None)
     if signature is None:
-        qual_name = _qualified_name(func)
+        qual_name = torch.jit._qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
 
 def make_stubs_for_overloads(overload_info):
