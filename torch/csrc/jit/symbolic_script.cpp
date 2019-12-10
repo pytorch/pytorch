@@ -1224,6 +1224,26 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None, None, None, None
             return output, indices, backward
 
+        def AD_interpolate_scales_list(input,
+                                       scale_factor: Optional[List[float]],
+                                       use_scale_factor: bool):
+            input_dim = len(input.size())
+            if scale_factor is None or not use_scale_factor:
+                scales = [-1.0 for i in range(input_dim-2)]
+            else:
+                scales = [scale_factor[i] for i in range(input_dim-2)]
+            return scales
+
+        def AD_interpolate_scales_float(input,
+                                        scale_factor: Optional[float],
+                                        use_scale_factor: bool):
+            input_dim = len(input.size())
+            if scale_factor is None or not use_scale_factor:
+                scales = [-1.0 for i in range(input_dim-2)]
+            else:
+                scales = [scale_factor for i in range(input_dim-2)]
+            return scales
+
         def AD_interpolate_backward(grad,
                                     input,
                                     mode: str,
@@ -1277,11 +1297,7 @@ const std::vector<std::string> functions = {
                     align_corners = False
                 if use_scale_factor is None:
                     use_scale_factor = False
-                input_dim = len(input.size())
-                if scale_factor is None or not use_scale_factor:
-                    scales = [-1.0 for i in range(input_dim-2)]
-                else:
-                    scales = [scale_factor[i] for i in range(input_dim-2)]
+                scales = AD_interpolate_scales_list(input, scale_factor, use_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 
@@ -1298,11 +1314,7 @@ const std::vector<std::string> functions = {
                     align_corners = False
                 if use_scale_factor is None:
                     use_scale_factor = False
-                input_dim = len(input.size())
-                if scale_factor is None or not use_scale_factor:
-                    scales = [-1.0 for i in range(input_dim-2)]
-                else:
-                    scales = [scale_factor[i] for i in range(input_dim-2)]
+                scales = AD_interpolate_scales_list(input, scale_factor, use_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 
@@ -1319,11 +1331,7 @@ const std::vector<std::string> functions = {
                     align_corners = False
                 if use_scale_factor is None:
                     use_scale_factor = False
-                input_dim = len(input.size())
-                if scale_factor is None or not use_scale_factor:
-                    scales = [-1.0 for i in range(input_dim-2)]
-                else:
-                    scales = [scale_factor for i in range(input_dim-2)]
+                scales = AD_interpolate_scales_float(input, scale_factor, use_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 
@@ -1340,11 +1348,7 @@ const std::vector<std::string> functions = {
                     align_corners = False
                 if use_scale_factor is None:
                     use_scale_factor = False
-                input_dim = len(input.size())
-                if scale_factor is None or not use_scale_factor:
-                    scales = [-1.0 for i in range(input_dim-2)]
-                else:
-                    scales = [scale_factor for i in range(input_dim-2)]
+                scales = AD_interpolate_scales_float(input, scale_factor, use_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 

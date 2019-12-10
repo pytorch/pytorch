@@ -805,7 +805,7 @@ class TestONNXRuntime(unittest.TestCase):
                                                     scale_factor=self.scale_array, use_scale_factor=True)
 
         model = MyModel(mode, use_size, is_upsample, align_corners)
-        self.run_test(model, x)
+        self.run_test(model, x, atol=1e-6)
 
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;

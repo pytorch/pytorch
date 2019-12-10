@@ -2459,9 +2459,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             Default: ``False``
         use_scale_factor (bool, optional): When scale_factor is passed as a parameter, it can be
             directly used in the output computation, or can be used to compute the output size which
-            will later be used to infer new scales values.
-            If set to ``True``, scale_factors are used in the interpolation.
+            will later be used to infer new scales values. In the second case, the value of the scales
+            used in the interpolation can be different than the ones specified by the user for non integer
+            values of scale_factor (due to floating point precision).
+            If set to ``True``, scale_factor is used in the interpolation.
             If set to ``False``, the output_size is computed and new scales are infered for the interpolation.
+            Default: ``False``
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -2478,7 +2481,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
 
-        When scale_factor are specified, if use_scale_factor=False,
+        When scale_factor is specified, if use_scale_factor=False,
         scale_factor is used to compute the output_size which will then
         be used to infer new scales for the interpolation. This is the current
         default behavior when use_scale_factor is not specified.
@@ -2501,15 +2504,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
         if scale_factor is not None:
             if use_scale_factor is None:
+                # only warn when the scales have floating values since
+                # the result for ints is the same with/without use_scale_factor
                 is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
                 if is_float_scale_factor:
                     warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
                                   "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
                                   "instead of relying on the computed output size. "
                                   "If you wish to keep the old behavior, please set use_scale_factor=False. "
-                                  "See the documentation of nn.Upsample for details. "
-                                  "Note that if you are exporting your model to ONNX using use_scale_factor=True "
-                                  "is preferred. ")
+                                  "See the documentation of nn.Upsample for details. ")
 
     def _output_size(dim):
         _check_size_scale_factor(dim)
@@ -2520,7 +2523,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
         # make scale_factor a tensor in tracing so constant doesn't get baked in
         if torch._C._get_tracing_state():
-            return [(torch.floor((input.size(i + 2).float() * torch.scalar_tensor(scale_factors[i],
+            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
                      dtype=torch.float32)).float())) for i in range(dim)]
         else:
             return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]

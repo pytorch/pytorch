@@ -3357,7 +3357,7 @@ std::vector<int64_t> _output_size(
 
 // return true if v is a real float
 // and false if it is an integer
-bool _is_float_value(float v) {
+bool _is_floating_value(double v) {
   return std::floor(v) != v;
 }
 
@@ -3389,33 +3389,30 @@ at::Tensor interpolate(
     }
   }
 
-  float scale_factors_1 = -1.0f;
-  float scale_factors_2 = -1.0f;
-  float scale_factors_3 = -1.0f;
+  double scale_factors_1 = -1.0f;
+  double scale_factors_2 = -1.0f;
+  double scale_factors_3 = -1.0f;
 
   if(!scale_factors.isNone() && use_scale_factor == c10::nullopt) {
     use_scale_factor = false;
     bool warn_use_scale_factor = false;
 
     if (scale_factors.isDouble()) {
-      if(_is_float_value(static_cast<float>(scale_factors.toDouble()))){
+      // only warn when the scales have floating values since
+      // the result for ints is the same with/without use_scale_factor
+      if (_is_floating_value(scale_factors.toDouble())){
         warn_use_scale_factor = true;
       }
     } else if (scale_factors.isDoubleList()) {
-      auto scale_factors_list_ref = scale_factors.toDoubleListRef();
-      std::vector<double> scale_factors_vec(scale_factors_list_ref.begin(), scale_factors_list_ref.end());
-      auto scale_factors_list = c10::impl::toList(scale_factors_vec);
+      auto scale_factors_list = scale_factors.toDoubleList();
 
-      if(_is_float_value(static_cast<float>(scale_factors_list[0]))){
-        warn_use_scale_factor = true;
-      }
-      else if (scale_factors_list.size() >= 2 &&
-               _is_float_value(static_cast<float>(scale_factors_list[1]))) {
-                 warn_use_scale_factor = true;
-      }
-      else if (scale_factors_list.size() >= 3 &&
-          _is_float_value(static_cast<float>(scale_factors_list[2]))) {
-            warn_use_scale_factor = true;
+      for (int i = 0; i < scale_factors_list.size(); i++) {
+        // only warn when the scales have floating values since
+        // the result for ints is the same with/without use_scale_factor
+        if(_is_floating_value(scale_factors_list[i])) {
+          warn_use_scale_factor = true;
+          break;
+        }
       }
     }
 
@@ -3431,18 +3428,16 @@ at::Tensor interpolate(
 
   if(use_scale_factor) {
     if (scale_factors.isDouble()) {
-      scale_factors_1 = static_cast<float>(scale_factors.toDouble());
-      scale_factors_2 = static_cast<float>(scale_factors.toDouble());
-      scale_factors_3 = static_cast<float>(scale_factors.toDouble());
+      scale_factors_1 = scale_factors.toDouble();
+      scale_factors_2 = scale_factors.toDouble();
+      scale_factors_3 = scale_factors.toDouble();
     } else if (scale_factors.isDoubleList()) {
-      auto scale_factors_list_ref = scale_factors.toDoubleListRef();
-      std::vector<double> scale_factors_vec(scale_factors_list_ref.begin(), scale_factors_list_ref.end());
-      auto scale_factors_list = c10::impl::toList(scale_factors_vec);
-      scale_factors_1 = static_cast<float>(scale_factors_list[0]);
+      auto scale_factors_list = scale_factors.toDoubleList();
+      scale_factors_1 = scale_factors_list[0];
       if (scale_factors_list.size() >= 2){
-        scale_factors_2 = static_cast<float>(scale_factors_list[1]);
+        scale_factors_2 = scale_factors_list[1];
         if (scale_factors_list.size() >= 3){
-          scale_factors_3 = static_cast<float>(scale_factors_list[2]);
+          scale_factors_3 = scale_factors_list[2];
         }
       }
     }
