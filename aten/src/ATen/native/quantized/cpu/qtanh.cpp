@@ -45,7 +45,6 @@ Tensor qnnpack_tanh(Tensor input) {
     &tanh_op);
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK TanH operator");
-
   qy = at::_empty_affine_quantized(
     input_contig.sizes(),
     input.options(),

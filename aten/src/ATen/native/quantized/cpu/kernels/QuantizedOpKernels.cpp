@@ -201,8 +201,6 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   auto zero_point_vec = Vec256<float>((float)zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
-  auto iter = TensorIterator::unary_op(qy, qx);
-
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qtanh", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
@@ -210,6 +208,8 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
         qx.q_scale(),
         qx.q_zero_point(),
         qx.suggest_memory_format());
+    auto iter = TensorIterator::unary_op(qy, qx);
+
     using Vec = Vec256<scalar_t>;
     cpu_kernel_vec(
       iter,
