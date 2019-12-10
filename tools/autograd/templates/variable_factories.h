@@ -16,6 +16,10 @@
 #include <initializer_list>
 #include <utility>
 
+using at::Device;
+using at::ScalarType;
+using at::Layout;
+
 #ifdef BUILD_NAMEDTENSOR
 using at::DimnameList;
 #endif
