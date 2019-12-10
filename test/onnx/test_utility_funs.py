@@ -206,7 +206,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
 
-    def test_constant_fold_transpose(self):
+    def test_constant_fold_reshape(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
