@@ -121,15 +121,16 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
     std::atomic<int32_t> remaining;
   };
   auto state = std::make_shared<State>(outStandingRpcs.size());
-  for (auto& rpc : outStandingRpcs) {
-    rpc->addCallback([state](const rpc::Message&) {
-      if (--state->remaining == 0) {
-        state->future->markCompleted();
-      }
-    });
-  }
   if (outStandingRpcs.empty()) {
     state->future->markCompleted();
+  } else {
+    for (auto& rpc : outStandingRpcs) {
+      rpc->addCallback([state](const rpc::Message&) {
+        if (--state->remaining == 0) {
+          state->future->markCompleted();
+        }
+      });
+    }
   }
   return state->future;
 }

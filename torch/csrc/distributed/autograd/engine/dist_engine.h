@@ -48,6 +48,10 @@ class TORCH_API DistEngine {
   // Number of backward passes currently running for the Distributed Engine.
   size_t numBackwardPasses() const;
 
+  // Returns key-value pairs consisting of useful debugging information related
+  // to distributed autograd.
+  std::unordered_map<std::string, std::string> getDebugInfo() const;
+
  private:
   // Make sure this is a singleton.
   DistEngine();

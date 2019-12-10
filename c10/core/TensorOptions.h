@@ -292,6 +292,15 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
+  /// Returns if the layout is sparse
+  bool is_sparse() const {
+    return layout_ == c10::Layout::Sparse;
+  }
+
+  // For compatibility with legacy tensor.type() comparisons
+  bool type_equal(const TensorOptions& other) const {
+    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
+  }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.
@@ -536,6 +545,12 @@ C10_API std::ostream& operator<<(
 template <typename T>
 inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
+}
+
+inline std::string toString(const TensorOptions options) {
+  std::ostringstream stream;
+  stream << options;
+  return stream.str();
 }
 
 // This is intended to be a centralized location by which we can determine
