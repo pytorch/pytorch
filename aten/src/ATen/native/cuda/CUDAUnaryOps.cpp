@@ -23,9 +23,7 @@ Tensor& _clamp_out_cuda(
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
@@ -35,9 +33,7 @@ Tensor& _clamp_max__cuda(Tensor& self, Scalar max) {
 
 Tensor& _clamp_max_out_cuda(Tensor& result, const Tensor& self, Scalar max) {
   legacy::cuda::_th_clamp_max_out(result, self, max);
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
@@ -47,9 +43,7 @@ Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
 
 Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
   legacy::cuda::_th_clamp_min_out(result, self, min);
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 

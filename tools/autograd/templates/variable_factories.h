@@ -16,9 +16,7 @@
 #include <initializer_list>
 #include <utility>
 
-#ifdef BUILD_NAMEDTENSOR
 using at::DimnameList;
-#endif
 
 namespace torch {
 

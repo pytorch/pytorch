@@ -27,14 +27,12 @@ using not_ok_to_box =
         // void returns are ok
         std::is_same<void, T>
       >>
-#ifdef BUILD_NAMEDTENSOR
     ,
     // some constructors are templated (and therefore pass
     // is_constructible), but do not actually work with all
     // template arguments, so we must blacklist them explicitly
     // TODO: The correct fix is to sfinae based on is_constructible of T
     std::is_same<optional<ArrayRef<at::Dimname>>, T>
-#endif
   >;
 
 // TODO boxing should be ok for all kernels. Then remove not_ok_to_box and supports_boxing.
