@@ -214,7 +214,7 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& typ
   // int?[] = std::vector<IValue>  we don't allow type coercion,
   // since t1 & t2 may have different runtime representations. if we did, we would
   // we would try to unify the List element type.
-  // as is, List is covered by EitherIsTheSuperType call above
+  // as is, List is covered by direct subtyping relation check above
 
   // Dicts are not specialized, so we can unify contained types
   if (t1->cast<DictType>() && t2->cast<DictType>()) {
