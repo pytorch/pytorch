@@ -40,13 +40,6 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   return tensor->storage().unsafeGetStorageImpl();
 }
 
-inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_dim) {
-  bool set_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
-  if (set_zero_dim) {
-    tensor->set_sizes_and_strides({}, {});
-  }
-}
-
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
 // nDimension                 corresponds to the "true" ATen dimension.
 // nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.

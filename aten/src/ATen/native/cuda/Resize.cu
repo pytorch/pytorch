@@ -19,7 +19,6 @@ Tensor& resize_cuda_(
 #endif
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
-  self_->maybe_zero_dim(size.size() == 0);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
