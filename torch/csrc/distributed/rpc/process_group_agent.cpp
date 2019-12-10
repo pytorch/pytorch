@@ -456,11 +456,11 @@ void ProcessGroupAgent::listenLoop() {
 
 void ProcessGroupAgent::pollTimedOutRPCs() {
   while (true) {
-    steady_clock_time_point minEndTime;
     std::unique_lock<std::mutex> lock{futureMutex_};
     if (!rpcRunning_.load()) {
       return;
     }
+    steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
     // if there are no futures or the first future's RPC timeout is set to 0
