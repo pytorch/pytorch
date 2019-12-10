@@ -148,7 +148,7 @@ CAFFE2_API void propagate_names_for_addmm(
     /*const*/TensorImpl* bias);
 
 CAFFE2_API void propagate_names_for_addmv(
-    Tensor &result,
+    Tensor& result,
     const Tensor& mat,
     const Tensor& vec,
     const Tensor& bias);
