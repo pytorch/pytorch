@@ -50,7 +50,8 @@ class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
   void withPool(const std::function<void(WorkersPool*)>& fn);
 
  private:
-  mutable std::mutex executionMutex_;
+  std::mutex executionMutex_;
+  //std::mutex numThreadsMutex_;
   size_t minWorkSize_;
   size_t numThreads_;
   std::shared_ptr<WorkersPool> workersPool_;
