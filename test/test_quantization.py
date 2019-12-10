@@ -40,7 +40,8 @@ from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedMod
 
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
+import hypothesis_utils as hu
+hu.assert_deadline_disabled()
 import io
 import copy
 
@@ -48,7 +49,6 @@ import copy
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class EagerModePostTrainingQuantTest(QuantizationTestCase):
-    @no_deadline
     @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
     def test_single_layer(self, qconfig):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -665,8 +665,11 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
                 super(ScriptWrapperPacked, self).__init__()
                 self.cell = cell
 
-            def forward(self, x, hiddens):
-                # type: (PackedSequence, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+            def forward(self,
+                        x,  # type: PackedSequence
+                        hiddens  # type: Tuple[torch.Tensor, torch.Tensor]
+                        ):
+                # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
                 return self.cell(x, hiddens)
 
         cell_packed = torch.jit.script(ScriptWrapperPacked(cell_int8))
@@ -772,15 +775,17 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                                self.calib_data)
 
         qconfig_dict = {'': default_qconfig}
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
         model_script = torch.jit.script(linear_model)
         result_eager = model_eager(self.calib_data[0][0])
-        model_quantized = quantize_script(
-            model_script,
-            qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
-            inplace=False)
-        self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
     def test_observer_with_ignored_function(self):
         r"""Test observers with ignored function and make sure it works in
@@ -809,15 +814,17 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
                                    self.calib_data)
 
             qconfig_dict = {'': qconfig}
+            model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
             model_script = torch.jit.script(linear_model)
             result_eager = model_eager(self.calib_data[0][0])
-            model_quantized = quantize_script(
-                model_script,
-                qconfig_dict,
-                test_only_eval_fn,
-                [self.calib_data],
-                inplace=False)
-            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+            for model_under_test in [model_traced, model_script]:
+                model_quantized = quantize_script(
+                    model_under_test,
+                    qconfig_dict,
+                    test_only_eval_fn,
+                    [self.calib_data],
+                    inplace=False)
+                self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
     def test_conv(self):
         r"""Compare the result of quantizing conv layer in
@@ -892,20 +899,21 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             'sub2.fc1': default_per_channel_qconfig,
             'fc3': default_qconfig
         }
+        model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
         model_script = torch.jit.script(script_model)
         result_eager = model_eager(self.calib_data[0][0])
-        model_quantized = quantize_script(
-            model_script,
-            qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
-            inplace=False)
-        self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
 
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
-    @no_deadline
     @given(train_mode=st.booleans())
     def test_functional_module(self, train_mode):
         model = ModelWithFunctionals()
@@ -1335,7 +1343,6 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()), 2 * len(self.calib_data))
         self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0], model(self.calib_data[0][0]))
 
-    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
     def test_observer_scriptable(self, qdtype, qscheme):
@@ -1352,7 +1359,6 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
-    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
