@@ -73,12 +73,11 @@ static inline TorchTensorType tensorTypeFromScalarType(c10::ScalarType type) {
     int64_t dim = size[i].integerValue;
     dimsVec.push_back(dim);
   }
-  @try {
+  try {
     at::Tensor tensor = torch::from_blob((void*)data, dimsVec, scalarTypeFromTensorType(type));
     return [TorchTensor newWithTensor:tensor];
-  } @catch (NSException* exception) {
-    @throw exception;
-    NSLog(@"%@", exception);
+  } catch (const std::exception& exception) {
+    NSLog(@"%s", exception.what());
   }
   return nil;
 }
