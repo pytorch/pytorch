@@ -40,6 +40,8 @@ from torch._six import string_classes, inf
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
+from torch.autograd import gradcheck
+from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
 

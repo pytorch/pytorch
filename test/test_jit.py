@@ -55,7 +55,7 @@ from torch.testlib.common_quantization import test_only_eval_fn as _test_only_ev
 
 
 # Testing utils
-import torch.testlib.jit_utils
+from torch.testlib import jit_utils
 from torch.testlib.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
