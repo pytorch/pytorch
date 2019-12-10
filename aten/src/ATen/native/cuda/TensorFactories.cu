@@ -43,37 +43,51 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.device().type() == at::DeviceType::CUDA);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
-  check_size_nonnegative(size);
+Tensor empty_cuda(
+  IntArrayRef size, 
+  c10::optional<c10::ScalarType> dtype, 
+  c10::optional<c10::Layout> layout, 
+  c10::optional<c10::Device> device, 
+  c10::optional<bool> pin_memory, 
+  c10::optional<MemoryFormat> optional_memory_format) {
+    // We should be able to calculate backend without creating TensorOptions object
+    // issue #30405
+    TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+    AT_ASSERT(options.backend() == at::Backend::CUDA);
+    TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
+    TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
+    check_size_nonnegative(size);
 
-  auto* allocator = at::cuda::getCUDADeviceAllocator();
-  int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizeable=*/true);
+    auto* allocator = at::cuda::getCUDADeviceAllocator();
+    int64_t nelements = prod_intlist(size);
+    auto storage_impl = c10::make_intrusive<StorageImpl>(
+      options.dtype(),
+      nelements,
+      allocator->allocate(nelements * options.dtype().itemsize()),
+      allocator,
+      /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, TensorTypeId::CUDATensorId);
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
+    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, TensorTypeId::CUDATensorId);
+    // Default TensorImpl has size [0]
+    if (size.size() != 1 || size[0] != 0) {
+      tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+    }
 
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-  return tensor;
+    auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+    tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+    return tensor;
 }
 
-Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
-  auto t = at::native::empty_cuda({0}, options);
-  at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+Tensor empty_strided_cuda(
+  IntArrayRef size, 
+  IntArrayRef stride, 
+  c10::optional<c10::ScalarType> dtype, 
+  c10::optional<c10::Layout> layout, 
+  c10::optional<c10::Device> device, 
+  c10::optional<bool> pin_memory) {
+    auto t = at::native::empty_cuda({0}, dtype, layout, device, pin_memory);
+    at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
+    return t;
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
@@ -321,44 +335,50 @@ void tril_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor tril_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, 
+    int64_t col, 
+    int64_t offset, 
+    c10::optional<c10::ScalarType> dtype, 
+    c10::optional<c10::Layout> layout, 
+    c10::optional<c10::Device> device, 
+    c10::optional<bool> pin_memory) {
+      check_args(row, col, layout);
 
-  auto tril_size = get_tril_size(row, col, offset);
-  auto tensor = empty_cuda({2, tril_size}, options);
+      auto tril_size = get_tril_size(row, col, offset);
+      auto tensor = empty_cuda({2, tril_size}, dtype, layout, device, pin_memory);
 
-  if (tril_size > 0) {
-    auto m_first_row = offset > 0 ?
-      std::min<int64_t>(col, 1 + offset) : // upper bounded by col
-      row + offset > 0; // either 0 or 1
-    auto trapezoid_row_offset = std::max<int64_t>(0, -offset);
-    auto rectangle_row_offset = trapezoid_row_offset + col - m_first_row + 1;
-    int64_t rectangle_size = 0;
-    if (rectangle_row_offset < row) {
-      rectangle_size = (row - rectangle_row_offset) * col;
-    }
+      if (tril_size > 0) {
+        auto m_first_row = offset > 0 ?
+          std::min<int64_t>(col, 1 + offset) : // upper bounded by col
+          row + offset > 0; // either 0 or 1
+        auto trapezoid_row_offset = std::max<int64_t>(0, -offset);
+        auto rectangle_row_offset = trapezoid_row_offset + col - m_first_row + 1;
+        int64_t rectangle_size = 0;
+        if (rectangle_row_offset < row) {
+          rectangle_size = (row - rectangle_row_offset) * col;
+        }
 
-    dim3 dim_block = cuda::getApplyBlock();
-    dim3 dim_grid;
-    // using tril_size instead of tensor.numel(), as each thread takes care of
-    // two elements in the tensor.
-    TORCH_CHECK(
-      cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
-      "unable to get dim grid");
+        dim3 dim_block = cuda::getApplyBlock();
+        dim3 dim_grid;
+        // using tril_size instead of tensor.numel(), as each thread takes care of
+        // two elements in the tensor.
+        TORCH_CHECK(
+          cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
+          "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
-      tril_indices_kernel<<<
-          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data_ptr<scalar_t>(),
-        trapezoid_row_offset,
-        m_first_row,
-        col,
-        tril_size - rectangle_size,
-        tril_size);
-    });
-  }
+        AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
+          tril_indices_kernel<<<
+              dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            tensor.data_ptr<scalar_t>(),
+            trapezoid_row_offset,
+            m_first_row,
+            col,
+            tril_size - rectangle_size,
+            tril_size);
+        });
+      }
 
-  return tensor;
+      return tensor;
 }
 
 template <typename scalar_t>
@@ -395,11 +415,11 @@ void triu_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor triu_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
+  check_args(row, col, layout);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
-  auto tensor = empty_cuda({2, triu_size}, options);
+  auto tensor = empty_cuda({2, triu_size}, dtype, layout, device, pin_memory);
 
   if (triu_size > 0) {
     // # of triu elements in the first row
