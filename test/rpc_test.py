@@ -1284,6 +1284,25 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(autograd_info)
         self.assertEqual(expected, info)
 
+    def test_sender_exceptions(self):
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[
+                dist_utils.TEST_CONFIG.rpc_backend_name
+            ],
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        if self.rank == 0:
+            time.sleep(3)
+            # allow other workers to exit without joining
+            fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
+            with self.assertRaisesRegex(RuntimeError, "Encountered exception in ProcessGroupAgent::enqueueSend"):
+                fut.wait()
+        sys.exit(0)  # workers exit without joining.
+
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_local_shutdown_with_rpc(self):
