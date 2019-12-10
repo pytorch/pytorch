@@ -712,7 +712,7 @@ def make_module(mod, _module_class, _compilation_unit):
     if isinstance(mod, ScriptModule):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
-        def make_stubs(mod):
+        def make_stubs_from_exported_methods(mod):
             exported = []
             for name in dir(mod):
                 item = getattr(mod, name, None)
@@ -724,7 +724,7 @@ def make_module(mod, _module_class, _compilation_unit):
                 stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
             return stubs
 
-        return torch.jit._recursive.create_script_module(mod, make_stubs, share_types=False)
+        return torch.jit._recursive.create_script_module(mod, make_stubs_from_exported_methods, share_types=False)
     else:
         if _module_class is None:
             _module_class = TopLevelTracedModule
