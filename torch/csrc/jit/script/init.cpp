@@ -986,7 +986,7 @@ void initJitScriptBindings(PyObject* module) {
             name,
             overload_decl,
             implementation_def,
-            rcb,
+            std::move(rcb),
             implementation_defaults,
             overload_defaults,
             signature);
