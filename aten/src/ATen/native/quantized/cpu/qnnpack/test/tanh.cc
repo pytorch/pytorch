@@ -12,11 +12,11 @@
 
 #include <qnnpack/params.h>
 
-TEST(SIGMOID_OP, zero_batch) {
+TEST(TANH_OP, zero_batch) {
   TanHOperatorTester().batchSize(0).channels(8).iterations(1).testQ8();
 }
 
-TEST(SIGMOID_OP, unit_batch) {
+TEST(TANH_OP, unit_batch) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(1)
@@ -26,7 +26,7 @@ TEST(SIGMOID_OP, unit_batch) {
   }
 }
 
-TEST(SIGMOID_OP, unit_batch_with_qmin) {
+TEST(TANH_OP, unit_batch_with_qmin) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(1)
@@ -37,7 +37,7 @@ TEST(SIGMOID_OP, unit_batch_with_qmin) {
   }
 }
 
-TEST(SIGMOID_OP, unit_batch_with_qmax) {
+TEST(TANH_OP, unit_batch_with_qmax) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(1)
@@ -48,7 +48,7 @@ TEST(SIGMOID_OP, unit_batch_with_qmax) {
   }
 }
 
-TEST(SIGMOID_OP, unit_batch_with_input_scale) {
+TEST(TANH_OP, unit_batch_with_input_scale) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     for (float inputScale = 1.0e-2f; inputScale < 1.0e+2f;
          inputScale *= 10.0f) {
@@ -62,7 +62,7 @@ TEST(SIGMOID_OP, unit_batch_with_input_scale) {
   }
 }
 
-TEST(SIGMOID_OP, unit_batch_with_input_zero_point) {
+TEST(TANH_OP, unit_batch_with_input_zero_point) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     for (int32_t inputZeroPoint = 0; inputZeroPoint <= 255;
          inputZeroPoint += 51) {
@@ -76,7 +76,7 @@ TEST(SIGMOID_OP, unit_batch_with_input_zero_point) {
   }
 }
 
-TEST(SIGMOID_OP, small_batch) {
+TEST(TANH_OP, small_batch) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -86,7 +86,7 @@ TEST(SIGMOID_OP, small_batch) {
   }
 }
 
-TEST(SIGMOID_OP, small_batch_with_input_stride) {
+TEST(TANH_OP, small_batch_with_input_stride) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -97,7 +97,7 @@ TEST(SIGMOID_OP, small_batch_with_input_stride) {
   }
 }
 
-TEST(SIGMOID_OP, small_batch_with_output_stride) {
+TEST(TANH_OP, small_batch_with_output_stride) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -108,7 +108,7 @@ TEST(SIGMOID_OP, small_batch_with_output_stride) {
   }
 }
 
-TEST(SIGMOID_OP, small_batch_with_qmin) {
+TEST(TANH_OP, small_batch_with_qmin) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -119,7 +119,7 @@ TEST(SIGMOID_OP, small_batch_with_qmin) {
   }
 }
 
-TEST(SIGMOID_OP, small_batch_with_qmax) {
+TEST(TANH_OP, small_batch_with_qmax) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -130,7 +130,7 @@ TEST(SIGMOID_OP, small_batch_with_qmax) {
   }
 }
 
-TEST(SIGMOID_OP, small_batch_with_input_scale) {
+TEST(TANH_OP, small_batch_with_input_scale) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     for (float inputScale = 1.0e-2f; inputScale < 1.0e+2f;
          inputScale *= 10.0f) {
@@ -144,7 +144,7 @@ TEST(SIGMOID_OP, small_batch_with_input_scale) {
   }
 }
 
-TEST(SIGMOID_OP, small_batch_with_input_zero_point) {
+TEST(TANH_OP, small_batch_with_input_zero_point) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     for (int32_t inputZeroPoint = 0; inputZeroPoint <= 255;
          inputZeroPoint += 51) {
@@ -158,7 +158,7 @@ TEST(SIGMOID_OP, small_batch_with_input_zero_point) {
   }
 }
 
-TEST(SIGMOID_OP, strided_batch) {
+TEST(TANH_OP, strided_batch) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -170,7 +170,7 @@ TEST(SIGMOID_OP, strided_batch) {
   }
 }
 
-TEST(SIGMOID_OP, strided_batch_with_qmin) {
+TEST(TANH_OP, strided_batch_with_qmin) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -183,7 +183,7 @@ TEST(SIGMOID_OP, strided_batch_with_qmin) {
   }
 }
 
-TEST(SIGMOID_OP, strided_batch_with_qmax) {
+TEST(TANH_OP, strided_batch_with_qmax) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     TanHOperatorTester()
         .batchSize(3)
@@ -196,7 +196,7 @@ TEST(SIGMOID_OP, strided_batch_with_qmax) {
   }
 }
 
-TEST(SIGMOID_OP, strided_batch_with_input_scale) {
+TEST(TANH_OP, strided_batch_with_input_scale) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     for (float inputScale = 1.0e-2f; inputScale < 1.0e+2f;
          inputScale *= 10.0f) {
@@ -212,7 +212,7 @@ TEST(SIGMOID_OP, strided_batch_with_input_scale) {
   }
 }
 
-TEST(SIGMOID_OP, strided_batch_with_input_zero_point) {
+TEST(TANH_OP, strided_batch_with_input_zero_point) {
   for (size_t channels = 1; channels < 100; channels += 15) {
     for (int32_t inputZeroPoint = 0; inputZeroPoint <= 255;
          inputZeroPoint += 51) {
