@@ -18,7 +18,7 @@ import gzip
 import types
 import textwrap
 import zipfile
-from torch._utils_internal import get_file_path_2
+from torch._utils_internal import get_file_path_2, check_module_version_greater_or_equal
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
@@ -57,6 +57,8 @@ if TEST_DILL:
     import dill
 
 SIZE = 100
+
+
 
 can_retrieve_source = True
 with warnings.catch_warnings(record=True) as warns:
@@ -4152,9 +4154,7 @@ class _TestTorchMixin(object):
 
     @unittest.skipIf(not TEST_DILL, 'Dill not found')
     def test_serialization_dill_version(self):
-        required_dill_version = (0,3,1)
-        dill_version = tuple(int(num) for num in dill.__version__.split('.'))
-        requirement_is_met = dill_version >= required_dill_version
+        requirement_is_met = check_module_version_greater_or_equal(dill, (0,3,1))
         x = torch.randn(5, 5)
 
         with tempfile.NamedTemporaryFile() as f:
