@@ -256,13 +256,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           ? INFINITE_TIMEOUT
           : futureStartTime + timeout;
       // Insert future into future map.
-      auto& futureInfo = futures_
-                             .emplace(
-                                 std::piecewise_construct,
-                                 std::forward_as_tuple(requestId),
-                                 std::forward_as_tuple(FutureInfo(
-                                     future, endTime, to.id_, timeout)))
-                             .first->second;
+      futures_
+          .emplace(
+              std::piecewise_construct,
+              std::forward_as_tuple(requestId),
+              std::forward_as_tuple(
+                  FutureInfo(future, endTime, to.id_, timeout)))
+          .first->second;
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[endTime].push_back(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
