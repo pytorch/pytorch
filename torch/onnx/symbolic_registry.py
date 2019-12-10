@@ -16,6 +16,7 @@ for opset_version in _onnx_stable_opsets:
     module = importlib.import_module('torch.onnx.symbolic_opset{}'.format(opset_version))
     _symbolic_versions[opset_version] = module
 
+
 def register_version(domain, version):
     if not is_registered_version(domain, version):
         global _registry
