@@ -1981,6 +1981,31 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args))
 
+add_docstr(torch.floor_divide,
+           r"""
+floor_divide(input, other) -> Tensor
+
+Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
+for type promotion and broadcasting rules.
+
+.. math::
+    \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
+
+""" + r"""
+Args:
+    input (Tensor): the numerator tensor
+    other (Tensor or Scalar): the denominator
+
+Example::
+
+    >>> a = torch.tensor([4.0, 3.0])
+    >>> b = torch.tensor([2.0, 2.0])
+    >>> torch.floor_divide(a, b)
+    tensor([2.0, 1.0])
+    >>> torch.floor_divide(a, 1.4)
+    tensor([2.0, 2.0])
+""".format(**common_args))
+
 add_docstr(torch.fmod,
            r"""
 fmod(input, other, out=None) -> Tensor
@@ -3099,7 +3124,7 @@ add_docstr(torch.max,
            r"""
 .. function:: max(input) -> Tensor
 
-Returns the maximum value of all elements in the :attr:`input` tensor.
+Returns the maximum value of all elements in the ``input`` tensor.
 
 Args:
     {input}
@@ -3119,10 +3144,10 @@ value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each maximum value found
 (argmax).
 
-If :attr:`keepdim` is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having 1 fewer dimension than :attr:`input`.
+If ``keepdim`` is ``True``, the output tensors are of the same size
+as ``input`` except in the dimension ``dim`` where they are of size 1.
+Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
+in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
@@ -3143,15 +3168,15 @@ Example::
 
 .. function:: max(input, other, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise maximum is taken.
+Each element of the tensor ``input`` is compared with the corresponding
+element of the tensor ``other`` and an element-wise maximum is taken.
 
-The shapes of :attr:`input` and :attr:`other` don't need to match,
+The shapes of ``input`` and ``other`` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    \text{out}_i = \max(\text{tensor}_i, \text{other}_i)
-""" + r"""
+    \text{{out}}_i = \max(\text{{tensor}}_i, \text{{other}}_i)
+
 .. note:: When the shapes do not match, the shape of the returned output tensor
           follows the :ref:`broadcasting rules <broadcasting-semantics>`.
 

@@ -590,7 +590,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'return_type': str,
     'return': ReturnDecl,
     'returns': List[ReturnType],
-    'scalar_check': str,
     'sparse': bool,
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
@@ -1528,26 +1527,9 @@ def create_derived(backend_type_env, declarations):
                     case_env['THType'] = 'Cuda{}'.format(sname)
                     case_env['THTensor'] = 'THCuda{}Tensor'.format(sname)
 
-                # scalar_check is the heuristic conditions when a result may be a scalar_check
-                # if there is a IntArrayRefSize argument, then its dimensions are used to determine scalar.
-                # otherwise, it is true if all the input tensors are scalars,
-                scalar_check_is_from_size = False
-                scalar_check_is_from_option = False
-                scalar_check = None
-                scalar_check_opt = option.get('scalar_check')
-                if scalar_check_opt is not None:
-                    if isinstance(scalar_check_opt, bool):
-                        scalar_check = str(scalar_check_opt).lower()
-                    else:
-                        scalar_check = scalar_check_opt
-                    scalar_check_is_from_option = True
-
                 for arg in option['arguments']:
                     if is_real_argument_to_wrapper(arg):
                         count += 1
-                    if arg['type'] == 'IntArrayRefSize' and not scalar_check_is_from_option:
-                        scalar_check_is_from_size = True
-                        scalar_check = '{}.size() == 0'.format(arg['name'])
                     if arg['type'] == 'TensorList':
                         seen_tensorlists.add(arg['name'])
 
@@ -1605,21 +1587,6 @@ def create_derived(backend_type_env, declarations):
                         else:
                             case_body += initializers
 
-                        # for out-of-place: dim() == 0 for all input tensors is and'd to form
-                        # the test for whether the output is also a scalar
-                        # for in-place: dim() == 0 shouldn't change as a result of the operation
-                        if (not arg.get('output') and 'Tensor' in arg['type'] and
-                                'TensorList' not in arg['type'] and
-                                'THS' not in arg['type'] and
-                                not scalar_check_is_from_size and
-                                not scalar_check_is_from_option and
-                                not option['inplace']):
-                            check = '{}->dim() == 0'.format(arg['name'] + '_')
-                            if nullable_argument(arg):
-                                check = '(!{} || {})'.format(arg['name'] + '_', check)
-                            scalar_check = (check if scalar_check is None
-                                            else scalar_check + ' && ' + check)
-
                 # cimpls, if it exists, contains the underlying C function names and
                 # arguments. Otherwise use option
                 cimpls = option.get('cimpls', [option])
@@ -1630,7 +1597,6 @@ def create_derived(backend_type_env, declarations):
                 if ret['kind'] == 'arguments':
                     if 'aten_custom_call' in option:
                         # all aten_custom_call bodies handle settings on their own.
-                        scalar_check = None
                         case_body.append(CodeTemplate(
                             option['aten_custom_call']).substitute(case_env))
                     else:
@@ -1638,20 +1604,6 @@ def create_derived(backend_type_env, declarations):
                     arguments_indices = ret['arguments']
                     arguments = [option['arguments'][argi]
                                  for argi in arguments_indices]
-                    if scalar_check is not None and scalar_check != 'false':
-                        if not isinstance(scalar_check, dict):
-                            if len(arguments) > 1:
-                                case_body.append("bool maybe_scalar = {};".format(scalar_check))
-                                scalar_check = 'maybe_scalar'
-                        for arg in arguments:
-                            scalar_check_arg = (scalar_check if not isinstance(scalar_check, dict)
-                                                else scalar_check.get(arg['name']))  # type: ignore
-                            # maybe_zero_dim(false) is a no-op
-                            if scalar_check_arg is not None and scalar_check_arg != 'false':
-                                stmt = "{}_->maybe_zero_dim({});".format(arg['name'], scalar_check_arg)
-                                if nullable_argument(arg):
-                                    stmt = "if ({}_) {}".format(arg['name'], stmt)
-                                case_body.append(stmt)
                     if len(arguments_indices) == 1:
                         arg = arguments[0]
                         case_body.append("return {};".format(arg['name']))
@@ -1667,22 +1619,18 @@ def create_derived(backend_type_env, declarations):
                     call = calls[0]
                     if 'aten_custom_call' in option:
                         # all aten_custom_call bodies handle settings on their own.
-                        scalar_check = None
                         case_body.append(CodeTemplate(
                             option['aten_custom_call']).substitute(case_env))
 
                     if ret['type'] in ALLOC_WRAP.keys():
-                        maybe_scalar = "->maybe_zero_dim({})".format(scalar_check) \
-                                       if scalar_check is not None and scalar_check != 'false' \
-                                       else ""
                         wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(
                             case_env, arguments=[call])
                         return_tensor = (
                             "return Tensor(" +
                             "c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(" +
-                            "(${wrapped_tensor})${maybe_scalar}));")
+                            "(${wrapped_tensor})));")
                         case_body.append(CodeTemplate(return_tensor).substitute(
-                            case_env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
+                            case_env, wrapped_tensor=wrapped_tensor))
                     # return the same underlying Tensor type for both real and accreal; this ensures
                     # e.g. x.sum(0) and x.sum() return the same type. We explicitly cast to the
                     # ScalarType before constructing the scalar_tensor to avoid overflow checking.
