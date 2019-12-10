@@ -143,8 +143,11 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toInt();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
-    case IValue::Tag::Tuple:
-      return printList(out, v.toTuple()->elements(), "(", ")");
+    case IValue::Tag::Tuple: {
+      const auto& elements = v.toTuple()->elements();
+      const auto& finish = elements.size() == 1 ? ",)" : ")";
+      return printList(out, elements, "(", finish);
+    }
     case IValue::Tag::IntList:
       return printList(out, v.toIntList(), "[", "]");
     case IValue::Tag::DoubleList:

@@ -29,6 +29,7 @@ executors:
 
   windows-cpu-with-nvidia-cuda:
     machine:
+      # we will change to CPU host when it's ready
       resource_class: windows.xlarge
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
@@ -743,6 +744,16 @@ jobs:
         no_output_timeout: "1h"
         command: |
             source "/pytorch/.circleci/scripts/binary_linux_build.sh"
+    - run:
+        name: save binary size
+        no_output_timeout: "5m"
+        command: |
+            source /env
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            pip3 install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+
     - persist_to_workspace:
         root: /
         paths: final_pkgs
@@ -1634,13 +1645,13 @@ workflows:
             - setup
       - pytorch_windows_test:
           name: pytorch_windows_test1
-          test_name: pytorch-windows-test1
+          test_name: pytorch_windows_test1
           requires:
             - setup
             - pytorch_windows_build
       - pytorch_windows_test:
           name: pytorch_windows_test2
-          test_name: pytorch-windows-test2
+          test_name: pytorch_windows_test2
           requires:
             - setup
             - pytorch_windows_build
