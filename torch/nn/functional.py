@@ -2554,7 +2554,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 4 and mode == 'nearest':
         return torch._C._nn.upsample_nearest2d(input, _output_size(2), scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, _output_size(3), scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
+        return torch._C._nn.upsample_nearest3d(input, _output_size(3),
+                                               scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 3 and mode == 'area':
         return adaptive_avg_pool1d(input, _output_size(1))
     elif input.dim() == 4 and mode == 'area':
@@ -2578,7 +2579,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-        return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners, scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
+        return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners,
+                                                 scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 4 and mode == 'bicubic':
         return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners, scale_factor_list[0], scale_factor_list[1])
     else:
