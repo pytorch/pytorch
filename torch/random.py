@@ -1,6 +1,7 @@
 import contextlib
 import warnings
 
+import torch
 from torch._C import default_generator
 
 
@@ -52,6 +53,43 @@ def initial_seed():
     Python `long`.
     """
     return default_generator.initial_seed()
+
+
+def choice(input):
+    r"""Returns a random element from the the input sequence."""
+    idx = torch.randperm(len(input))
+    return input[idx[0]]
+
+
+def sample(input, n_samples):
+    r"""Returns n_samples length list of unique elements chosen from the input."""
+    idx = torch.randperm(len(input))
+    output = []
+    for i in range(n_samples):
+        output.append(input[idx[i]])
+    return output
+
+
+def shuffle(input):
+    r"""Returns a shuffle version of the input sequence."""
+    idx = torch.randperm(len(input))
+    output = input[idx]
+    return output
+
+
+def random_float():
+    r"""Returns a single random floating point (python) number in the range [0.0, 1.0)."""
+    return torch.rand(1).item()
+
+
+def uniform(low, high):
+    r"""Returns a single random floating point (python) number N such that low <= N <= high."""
+    return torch.empty(1).uniform_(low, high).item()
+
+
+def random_int(low, high):
+    r"""Returns a single random python integer N such that low <= N <= high."""
+    return torch.randint(low, high, (1,)).item()
 
 
 _fork_rng_warned_already = False
