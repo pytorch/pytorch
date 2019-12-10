@@ -15349,7 +15349,7 @@ a")
         def test():
             return diff_num_params_no_annot(1.0)
 
-        with self.assertRaisesRegex(Exception, "Parameters not specified on the overloaded declaration"):
+        with self.assertRaisesRegex(Exception, "Parameters not specified"):
             torch.jit.script(test)
 
 
