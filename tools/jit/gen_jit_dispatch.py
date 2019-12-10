@@ -21,6 +21,12 @@ from ..autograd.utils import CodeTemplate, YamlLoader, write
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
+try:
+    from src.ATen.tensor_options_utils import *
+except ImportError:
+    from tools.shared.module_loader import import_module
+    TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+
 # JIT has a type system of
 # Scalar = int | float | bool # int is the largest int (int64_t),
 # float is the largest float (double) we don't have the others because they are never held in tensors
@@ -281,8 +287,13 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         def pack_arguments(args):
             return ',\n'.join(args)
         is_namespace_function = 'namespace' in decl['method_of']
-        tensor_options_arg_index = decl.get('tensor_options_arg_index', None)
-        if tensor_options_arg_index is not None:
+        
+        if TOUtils.check_if_factory_method(decl['arguments']):
+            if 'ScalarType dtype' in decl['formals']:
+                tensor_options_arg_index = decl['formals'].index('ScalarType dtype')
+            if 'c10::optional<ScalarType> dtype' in decl['formals']:
+                tensor_options_arg_index = decl['formals'].index('c10::optional<ScalarType> dtype')
+            
             dtype = args[tensor_options_arg_index]
             layout = args[tensor_options_arg_index + 1]
             device = args[tensor_options_arg_index + 2]
@@ -419,7 +430,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                 el['simple_type'] += '?'
                 el['default'] = 'None'
         if 'default' in arg and arg['default'] == 'at::kLong':
-            tensor_options_expansion[0]['default'] = 'long'
+            tensor_options_expansion[0]['default'] = 'at::kLong'
         if 'kwarg_only' in arg and arg['kwarg_only']:
             for el in tensor_options_expansion:
                 el['kwarg_only'] = True
@@ -543,7 +554,9 @@ def signature(decl, should_match_schema=True):
                 .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
-                .replace('}', ']')
+                .replace('}', ']') \
+                .replace('}', ']') \
+                .replace('at::kLong', 'long')
 
             default = default_map.get(default, default)
             decl = '{}={}'.format(decl, default)

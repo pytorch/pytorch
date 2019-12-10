@@ -59,6 +59,18 @@ inline void check_args(
   }
 }
 
+inline void check_args(
+    int64_t row, int64_t col, c10::optional<c10::Layout> layout) {
+  TORCH_CHECK(row >= 0, "row must be non-negative, got", row);
+  TORCH_CHECK(col >= 0, "col must be non-negative, got", col);
+  if (layout.has_value()) {
+    TORCH_CHECK(
+      layout.value() == at::kStrided,
+      "only support layout=torch.strided, got",
+      layout.value())
+  }
+}
+
 inline void check_size_nonnegative(IntArrayRef size) {
   for (auto x: size) {
     TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
