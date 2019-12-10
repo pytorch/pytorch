@@ -24,7 +24,8 @@ class ConvPackedParams(torch.nn.Module):
     @torch.jit.export
     def set_weight_bias(self, weight, bias):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride, self.padding, self.dilation, self.groups)
+        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride,
+                                                                 self.padding, self.dilation, self.groups)
 
     @torch.jit.export
     def _weight_bias(self):

@@ -39,7 +39,8 @@ namespace detail {
     bool,
     std::string,
     at::Tensor,
-    at::Scalar
+    at::Scalar,
+    c10::QScheme
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
