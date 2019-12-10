@@ -69,7 +69,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
-          std::make_unique<RequestCallbackImpl>(),
+          c10::guts::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
@@ -283,7 +283,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload = std::make_unique<std::string>(
+          auto payload = c10::guts::make_unique<std::string>(
               wireSerialize(message.payload(), message.tensors()));
           const char* data = payload->data();
           size_t len = payload->length();
@@ -551,6 +551,23 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
   return futureInfo.timeout_ == INFINITE_TIMEOUT
       ? INFINITE_TIMEOUT
       : futureInfo.startTime_ + futureInfo.timeout_;
+}
+
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+  }
+  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
+  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
+  return metrics;
+}
+
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getDebugInfo() {
+  /* This would later include more info other than metrics for eg: may include
+     stack traces for the threads owned by the agent */
+  return getMetrics();
 }
 
 } // namespace rpc

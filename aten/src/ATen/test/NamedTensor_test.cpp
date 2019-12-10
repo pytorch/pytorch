@@ -14,7 +14,7 @@ using at::NamedTensorMeta;
 using at::Symbol;
 using at::namedinference::TensorName;
 using at::namedinference::TensorNames;
-using std::make_unique;
+using c10::guts::make_unique;
 
 TEST(NamedTensorTest, defaultMetadata) {
   int num_names = 4;
