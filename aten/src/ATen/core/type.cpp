@@ -164,9 +164,9 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // NB: we do not return NumberType because there is not currently enough
   // operator support for it
 
-  // Handle bivariant type containers.
-  // We can attempt to unify types without needing to call unshapedType,
-  // because the recursive calls to unifyTypes will handle TensorType mismatches
+  // Attempt to unify Complete Tensor Types for immutable type containers
+
+  // unify(Optional[t1], t2) => Optional[unify(t1, t2)]
   if (auto opt_t1 = t1->cast<OptionalType>()) {
     if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
       return OptionalType::create(*elem);
@@ -206,15 +206,14 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return t1_unshaped;
   }
 
+  // List unification is covered by direct subtyping relation check above
   // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
-  // int?[] = std::vector<IValue>  we don't allow type coercion,
-  // since t1 & t2 may have different runtime representations.
-  // if we did not have runtime specialization, we could try to unify the List element type.
-  // as is, List unification is covered by direct subtyping relation check above
+  // int?[] = std::vector<IValue>  we don't allow unify list element types
+  // Without specializations we could attempt to unify the list element type
 
   // Dicts are not specialized, so we can unify contained types, but we do not
-  // maintain Tensor Specialization in dictionary types so we run this after
-  // calling unshapedType
+  // maintain Tensor Specialization in dictionary types bc of mutability
+  // so we run this after calling unshapedType
   if (t1_unshaped->cast<DictType>() && t2_unsahped->cast<DictType>()) {
     auto dict1 = t1_unshaped->cast<DictType>();
     auto dict2 = t2_unsahped->cast<DictType>();
