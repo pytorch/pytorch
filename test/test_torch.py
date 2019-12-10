@@ -28,7 +28,7 @@ from random import randrange
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
-from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
+from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, TEST_DILL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, \
@@ -52,6 +52,9 @@ if TEST_SCIPY:
 
 if TEST_LIBROSA:
     import librosa
+
+if TEST_DILL:
+    import dill
 
 SIZE = 100
 
@@ -4147,12 +4150,8 @@ class _TestTorchMixin(object):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
+    @unittest.skipIf(not TEST_DILL, 'Dill not found')
     def test_serialization_dill_version(self):
-        try:
-            import dill
-        except:
-            # Cannot run this test if dill is not installed
-            return
         required_dill_version = (0,3,1)
         dill_version = tuple(int(num) for num in dill.__version__.split('.'))
         requirement_is_met = dill_version >= required_dill_version
@@ -4181,12 +4180,8 @@ class _TestTorchMixin(object):
                 error_was_raised = False
             self.assertTrue(requirement_is_met ^ error_was_raised)
 
+    @unittest.skipIf(not TEST_DILL, 'Dill not found')
     def test_serialization_dill_no_encoding(self):
-        try:
-            import dill
-        except:
-            return
-
         x = torch.randn(5, 5)
         
         with tempfile.NamedTemporaryFile() as f:
@@ -4196,12 +4191,8 @@ class _TestTorchMixin(object):
             self.assertIsInstance(x2, type(x))
             self.assertEqual(x, x2)
 
+    @unittest.skipIf(not TEST_DILL, 'Dill not found')
     def test_serialization_dill_encoding(self):
-        try:
-            import dill
-        except:
-            return
-
         x = torch.randn(5, 5)
         
         with tempfile.NamedTemporaryFile() as f:
