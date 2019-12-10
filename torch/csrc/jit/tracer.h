@@ -259,6 +259,14 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::ScalarType>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Device>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Layout>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
 #ifdef BUILD_NAMEDTENSOR
 TORCH_API void addInputs(Node* n, const char* name, c10::optional<at::DimnameList> value);
