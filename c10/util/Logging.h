@@ -62,7 +62,7 @@ using std::string;
 C10_API bool InitCaffeLogging(int* argc, char** argv);
 C10_API void UpdateLoggingLevelsFromFlags();
 
-[[noreturn]] C10_API void ThrowEnforceNotMet(
+C10_API C10_NORETURN void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
