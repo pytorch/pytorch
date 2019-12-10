@@ -1,13 +1,14 @@
 #include <limits>
 #include <algorithm>
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 
-#ifdef USE_BLAS
+#if AT_BLAS_ENABLED()
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
-#endif
+#endif // AT_BLAS_ENABLED
 
 namespace at { namespace native {
 
@@ -33,10 +34,10 @@ inline void gemv_fast_path(char *trans, int *m, int *n, scalar_t *alpha, scalar_
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
-#ifdef USE_BLAS
+#if AT_BLAS_ENABLED()
 template <>
 constexpr inline bool scal_use_fast_path<double>(int64_t n, int64_t incx) {
-  auto intmax = std::numeric_limits<int>::max;
+  auto intmax = std::numeric_limits<int>::max();
   return n <= intmax && incx <= intmax;
 }
 
@@ -57,7 +58,7 @@ inline void scal_fast_path<float>(int *n, float *a, float *x, int *incx) {
 
 template <>
 constexpr inline bool gemv_use_fast_path<float>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
-  auto intmax = std::numeric_limits<int>::max;
+  auto intmax = std::numeric_limits<int>::max();
   return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
          (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
 }
@@ -69,14 +70,14 @@ constexpr inline bool gemv_use_fast_path<double>(int64_t m, int64_t n, int64_t l
 
 template <>
 inline void gemv_fast_path<double>(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy) {
-  dgemv_(trans, m, n, alpha, a, lda, x, i_incx, beta, y, i_incy);
+  dgemv_(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 template <>
 inline void gemv_fast_path<float>(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy) {
-  sgemv_(trans, m, n, alpha, a, lda, x, i_incx, beta, y, i_incy);
+  sgemv_(trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
-#endif
+#endif // AT_BLAS_ENABLED
 
 } // anonymous namespace
 
