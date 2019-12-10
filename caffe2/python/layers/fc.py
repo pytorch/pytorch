@@ -26,7 +26,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
     def __init__(self, model, input_record, output_dims, weight_init=None,
                  bias_init=None, weight_optim=None, bias_optim=None, name='fc',
                  weight_reg=None, bias_reg=None, clip_param=None,
-                 max_fc_size=None, axis=1,
+                 max_fc_size=None, axis=1, transposed=False,
                  **kwargs):
         super(FC, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), (
@@ -70,9 +70,11 @@ class FC(SamplingTrainableMixin, ModelLayer):
         self.output_dim_vec = FC.calculate_fc_output_dims(
             max_fc_size, input_dims, output_dims)
 
+        self.transposed = transposed
         if self.output_dim_vec is None or len(self.output_dim_vec) == 1:
+            weight_shape = [input_dims, output_dims] if transposed else [output_dims, input_dims]
             self.w = self.create_param(param_name='w',
-                                       shape=[output_dims, input_dims],
+                                       shape=weight_shape,
                                        initializer=weight_init,
                                        optimizer=weight_optim,
                                        regularizer=weight_reg)
@@ -87,8 +89,9 @@ class FC(SamplingTrainableMixin, ModelLayer):
             self.b_vec = []
 
             for idx, output_dim in enumerate(self.output_dim_vec):
+                weight_shape = [input_dims, output_dim] if transposed else [output_dim, input_dims]
                 self.w_vec.append(self.create_param(param_name='w_sub_{}'.format(idx),
-                                             shape=[output_dim, input_dims],
+                                             shape=weight_shape,
                                              initializer=weight_init,
                                              optimizer=weight_optim,
                                              regularizer=weight_reg))
@@ -137,12 +140,20 @@ class FC(SamplingTrainableMixin, ModelLayer):
             version: support fp32 and fp16 for now.
         """
         if version == "fp32":
-            return net.FC(
-                self.input_record.field_blobs() + params,
-                outputs,
-                axis=self.axis,
-                **self.kwargs
-            )
+            if self.transposed:
+                return net.FCTransposed(
+                    self.input_record.field_blobs() + params,
+                    outputs,
+                    axis=self.axis,
+                    **self.kwargs
+                )
+            else:
+                return net.FC(
+                    self.input_record.field_blobs() + params,
+                    outputs,
+                    axis=self.axis,
+                    **self.kwargs
+                )
         elif version == "fp16":
             return net.FbFCPacked(
                 self.input_record.field_blobs() + params,
