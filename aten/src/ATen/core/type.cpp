@@ -143,72 +143,71 @@ ListTypePtr ListType::ofBools() {
 
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& type2_input) {
-  if (type1_input->kind() == TensorType::Kind && type2_input->kind() == TensorType::Kind) {
+  auto t1 = type1_input;
+  auto t2 = type2_input;
+
+  // Handle non-container types which do not subtype each other and unify
+  if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
     return type1_input->expect<TensorType>()->merge(type2_input->expect<TensorType>());
   }
 
-  // For direct subtyping relations, and type containers which are immutable
-  // (Optionals, Tuples) we first try to merge types with specialized
-  // tensor types, and then try again with unspecialized tensor types.
-  // For example:
-  // unifyTypes(BoolTensor, None) -> Optional[BoolTensor]
-  // unifyTypes(Optional[BoolTensor], Tensor)
-  // In this case there is no subtyping relationship, because not (Tensor <: BoolTensor)
-  // so we the initial unification with complete tensor types will fail.
-  // The second pass with unshapedTypes will succeed
-  auto t1 = type1_input;
-  auto t2 = type2_input;
-  for (auto use_unshaped : {false, true}) {
-    if (use_unshaped) {
-      t1 = unshapedType(t1);
-      t2 = unshapedType(t2);
-    }
-
-    //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
-    if (t1->isSubtypeOf(t2)) {
-      return t2;
-    } else if (t2->isSubtypeOf(t1)) {
-      return t1;
-    }
-
-    // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
-    if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
-      return OptionalType::create(t2);
-    } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
-      return OptionalType::create(t1);
-    }
-
-    // t1 is Optional[T], t2 is T2, return Optional[unify(T, T2)]
-    if (auto opt_t1 = t1->cast<OptionalType>()) {
-      if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
-        return OptionalType::create(*elem);
-      }
-    } else if (auto opt_t2 = t2->cast<OptionalType>()) {
-      if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
-        return OptionalType::create(*elem);
-      }
-    }
-
-    if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
-      auto tuple1 = t1->cast<TupleType>();
-      auto tuple2 = t2->cast<TupleType>();
-      if (tuple1->elements().size() != tuple2->elements().size()) {
-        return c10::nullopt;
-      }
-      std::vector<TypePtr> elements;
-      for (size_t i = 0; i < tuple1->elements().size(); i++) {
-        if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
-          elements.push_back(*elem);
-        } else {
-          return c10::nullopt;
-        }
-      }
-      return static_cast<TypePtr>(TupleType::create(elements));
-    }
+  if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
+    return OptionalType::create(t2);
+  } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
+    return OptionalType::create(t1);
   }
 
   // NB: we do not return NumberType because there is not currently enough
   // operator support for it
+
+  // Handle bivariant type containers.
+  // We can attempt to unify types without needing to call unshapedType,
+  // because the recursive calls to unifyTypes will handle TensorType mismatches
+  if (auto opt_t1 = t1->cast<OptionalType>()) {
+    if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
+      return OptionalType::create(*elem);
+    }
+  } else if (auto opt_t2 = t2->cast<OptionalType>()) {
+    if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
+      return OptionalType::create(*elem);
+    }
+  }
+
+  if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
+    auto tuple1 = t1->cast<TupleType>();
+    auto tuple2 = t2->cast<TupleType>();
+    if (tuple1->elements().size() != tuple2->elements().size()) {
+      return c10::nullopt;
+    }
+    std::vector<TypePtr> elements;
+    for (size_t i = 0; i < tuple1->elements().size(); i++) {
+      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
+        elements.push_back(*elem);
+      } else {
+        return c10::nullopt;
+      }
+    }
+    return static_cast<TypePtr>(TupleType::create(elements));
+  }
+
+  // Handle direct subtyping relations
+  if (t1->isSubtypeOf(t2)) {
+    return t2;
+  } else if (t2->isSubtypeOf(t1)) {
+    return t1;
+  }
+
+  // Now, check subtyping relations again with Unshaped Types,
+  // to handle unification of container types which might contain two different
+  // specialized tensors (ListType / FutureType)
+  t1 = unshapedType(t1);
+  t2 = unshapedType(t2);
+
+  if (t1->isSubtypeOf(t2)) {
+    return t2;
+  } else if (t2->isSubtypeOf(t1)) {
+    return t1;
+  }
 
   // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
   // int?[] = std::vector<IValue>  we don't allow type coercion,
@@ -216,7 +215,9 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& typ
   // if we did not have runtime specialization, we could try to unify the List element type.
   // as is, List unification is covered by direct subtyping relation check above
 
-  // Dicts are not specialized, so we can unify contained types
+  // Dicts are not specialized, so we can unify contained types, but we do not
+  // maintain Tensor Specialization in dictionary types so we run this after
+  // calling unshapedType
   if (t1->cast<DictType>() && t2->cast<DictType>()) {
     auto dict1 = t1->cast<DictType>();
     auto dict2 = t2->cast<DictType>();
