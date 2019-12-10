@@ -156,7 +156,6 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& typ
   // In this case there is no subtyping relationship, because not (Tensor <: BoolTensor)
   // so we the initial unification with complete tensor types will fail.
   // The second pass with unshapedTypes will succeed
-
   auto t1 = type1_input;
   auto t2 = type2_input;
   for (auto use_unshaped : {false, true}) {
@@ -177,6 +176,17 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& typ
       return OptionalType::create(t2);
     } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
       return OptionalType::create(t1);
+    }
+
+    // t1 is Optional[T], t2 is T2, return Optional[unify(T, T2)]
+    if (auto opt_t1 = t1->cast<OptionalType>()) {
+      if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
+        return OptionalType::create(*elem);
+      }
+    } else if (auto opt_t2 = t2->cast<OptionalType>()) {
+      if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
+        return OptionalType::create(*elem);
+      }
     }
 
     if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
