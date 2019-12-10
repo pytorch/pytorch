@@ -407,7 +407,38 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
-          markFutureWithMessage(message);
+          auto id = message.id();
+          std::shared_ptr<FutureMessage> fm = nullptr;
+          {
+            std::lock_guard<std::mutex> lock{futureMutex_};
+            const auto& futureInfo = futures_.find(id);
+            if (futureInfo == futures_.end()) {
+              // Received a completion for a timed out future, drop the recv.
+              // RecvCounts will not be incremented here, it will be incremented
+              // by the sender who has determined the future has timed out.
+              return;
+            }
+
+            fm = futureInfo->second.future_;
+            auto rpcEndTime = getRPCEndTime(futureInfo->second);
+            futures_.erase(id);
+            // look up the corresponding future by its time out and request ID,
+            // and remove it from the timeouts map
+            auto& futuresAtTime = futureTimeouts_[rpcEndTime];
+            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+            TORCH_INTERNAL_ASSERT(
+                it != futuresAtTime.end(),
+                "Error: could not find future in futureTimeouts map, race condition.");
+            futuresAtTime.erase(it);
+            if (futuresAtTime.empty()) {
+              // remove the key from futureTimeouts_
+              futureTimeouts_.erase(rpcEndTime);
+            }
+          }
+          // Not holding lock on markCompleted as this could run callbacks that
+          // call agent_->send
+          fm->markCompleted(std::move(message));
+          futureCV_.notify_all();
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           TORCH_INTERNAL_ASSERT(
@@ -419,18 +450,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
       std::move(work)));
 }
 
-void ProcessGroupAgent::markFutureWithMessage(const Message& message) {
+void ProcessGroupAgent::markFutureWithMessage(Message& message) {
   auto id = message.id();
   std::shared_ptr<FutureMessage> fm = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     const auto& futureInfo = futures_.find(id);
-    if (futureInfo == futures_.end()) {
-      // Received a completion for a timed out future, drop the recv.
-      // RecvCounts will not be incremented here, it will be incremented
-      // by the sender who has determined the future has timed out.
-      return;
-    }
 
     fm = futureInfo->second.future_;
     auto rpcEndTime = getRPCEndTime(futureInfo->second);
@@ -533,7 +558,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
-      timedOutFuture.future_->markCompleted(std::move(exceptionMsg));
+      timedOutFuture.future_->markCompleted(exceptionMsg);
 
       const int dst = timedOutFuture.dstRank_;
       recvCounts_.increment(dst);

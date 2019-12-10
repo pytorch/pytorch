@@ -134,7 +134,7 @@ class ProcessGroupAgent : public RpcAgent {
   // future is marked with the passed in message, and then removed from the
   // futures_ map. It is also removed from the futureTimeouts_ map since these
   // maps are kept in sync.
-  void markFutureWithMessage(const Message& message);
+  void markFutureWithMessage(Message& message);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
