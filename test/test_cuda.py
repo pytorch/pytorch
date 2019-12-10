@@ -2076,6 +2076,5 @@ t2.start()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
-
 if __name__ == '__main__':
     run_tests()

@@ -550,7 +550,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     //
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-        inputs[i].storage().data(), ncclStream);
+        inputs[i].storage().data_ptr(), ncclStream);
   }
 
   {
@@ -686,7 +686,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data(), stream);
+            output.storage().data_ptr(), stream);
         return ncclAllGather(
             input.data_ptr(),
             output.data_ptr(),
@@ -703,7 +703,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           for (size_t j = 0; j < outputTensors[0].size(); ++j) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
-                outputTensors[i][j].storage().data(), ncclStreams[i]);
+                outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
 
             outputTensors[i][j].copy_(outputFlattened[i][j], true);
           }
@@ -737,7 +737,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data(), stream);
+            output.storage().data_ptr(), stream);
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
@@ -754,7 +754,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
           for (size_t j = 0; j < inputTensors[0].size(); ++j) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
-                inputTensors[i][j].storage().data(), ncclStreams[i]);
+                inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
 
             inputFlattened[i][j].copy_(inputTensors[i][j], true);
           }
