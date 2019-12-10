@@ -15349,7 +15349,7 @@ a")
         def test():
             return diff_num_params_no_annot(1.0)
 
-        with self.assertRaisesRegex(Exception, "Parameters not specified on the overloaded declaration must have a type annotation"):
+        with self.assertRaisesRegex(Exception, "Parameters not specified on the overloaded declaration"):
             torch.jit.script(test)
 
 
