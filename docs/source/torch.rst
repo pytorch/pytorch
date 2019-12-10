@@ -240,6 +240,7 @@ Pointwise Ops
 .. autofunction:: sin
 .. autofunction:: sinh
 .. autofunction:: sqrt
+.. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc
