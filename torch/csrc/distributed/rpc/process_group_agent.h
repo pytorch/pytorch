@@ -77,6 +77,12 @@ class ProcessGroupAgent : public RpcAgent {
       override;
 
  private:
+  using steady_clock_time_point =
+      std::chrono::time_point<std::chrono::steady_clock>;
+
+  static constexpr steady_clock_time_point kInfiniteTimeoutTimePoint =
+      std::chrono::time_point<std::chrono::steady_clock>::max();
+
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);
@@ -93,12 +99,12 @@ class ProcessGroupAgent : public RpcAgent {
   // which is needed for termination detection.
   struct FutureInfo {
     std::shared_ptr<FutureMessage> future_;
-    std::chrono::milliseconds endTime_;
+    steady_clock_time_point endTime_;
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
         const std::shared_ptr<FutureMessage>& future,
-        const std::chrono::milliseconds& endTime,
+        const steady_clock_time_point& endTime,
         int dstRank,
         const std::chrono::milliseconds timeout)
         : future_(future),
@@ -197,7 +203,7 @@ class ProcessGroupAgent : public RpcAgent {
   // find a future that has not timed out. The values correspond to a vector of
   // future ids that started at that time. This map must be kept in sync with
   // the above futures_ map.
-  std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
+  std::map<steady_clock_time_point, std::vector<int64_t>> futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
   // CV to wake up watchdog thread that watches for timed out futures.
