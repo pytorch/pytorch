@@ -215,10 +215,11 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(self.opset_version)
         x = torch.ones(3, 2)
-        graph, _, __ = utils._model_to_graph(ReshapeModule(), (x, ),
-                                             do_constant_folding=True)
+        graph, _, __ = utils._model_to_graph(ReshapeModule(), (x, ), do_constant_folding=True,
+                                             _disable_torch_constant_prop=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Reshape"
+
         assert len(list(graph.nodes())) == 1
 
     def test_strip_doc_string(self):
