@@ -48,6 +48,12 @@ public class Module {
     return mNativePeer.runMethod(methodName, inputs);
   }
 
+  /**
+   * Sets the number of threads used on native side.
+   * Has global effect for all loaded modules.
+   *
+   * @param numThreads number of threads, must be positive number.
+   */
   public void setNumThreads(int numThreads) {
     if (numThreads < 1) {
         throw new IllegalArgumentException("Number of threads cannot be less than 1");
