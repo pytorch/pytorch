@@ -446,6 +446,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sparse_dim
    .. automethod:: sqrt
    .. automethod:: sqrt_
+   .. automethod:: square
+   .. automethod:: square_
    .. automethod:: squeeze
    .. automethod:: squeeze_
    .. automethod:: std

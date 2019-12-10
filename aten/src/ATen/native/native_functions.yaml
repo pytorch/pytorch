@@ -2555,6 +2555,15 @@
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: square(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: square_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: method
+
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

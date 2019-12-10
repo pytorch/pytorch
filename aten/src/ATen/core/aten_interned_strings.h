@@ -126,6 +126,7 @@ _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
 _(aten, _sparse_sum) \
 _(aten, _sqrt) \
+_(aten, _square) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
@@ -619,6 +620,7 @@ _(aten, sparse_resize_and_clear) \
 _(aten, split) \
 _(aten, split_with_sizes) \
 _(aten, sqrt) \
+_(aten, square) \
 _(aten, squeeze) \
 _(aten, sspaddmm) \
 _(aten, stack) \
