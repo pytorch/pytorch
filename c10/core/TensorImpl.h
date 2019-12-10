@@ -477,11 +477,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   *  DONT CALL THIS.  It will go away very soon.
-   */
-  virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
-
-  /**
    * True if a tensor was auto-wrapped from a C++ or Python number.
    * For example, when you write 't + 2', 2 is auto-wrapped into a Tensor
    * with `is_wrapped_number_` set to true.
