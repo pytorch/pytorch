@@ -142,13 +142,17 @@ ListTypePtr ListType::ofBools() {
 }
 
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& type2_input) {
-  auto t1 = type1_input;
-  auto t2 = type2_input;
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+  // check direct subtyping relation
+  if (t1->isSubtypeOf(t2)) {
+    return t2;
+  } else if (t2->isSubtypeOf(t1)) {
+    return t1;
+  }
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return type1_input->expect<TensorType>()->merge(type2_input->expect<TensorType>());
+    return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
   }
 
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
@@ -190,23 +194,16 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& typ
     return static_cast<TypePtr>(TupleType::create(elements));
   }
 
-  // Handle direct subtyping relations
-  if (t1->isSubtypeOf(t2)) {
-    return t2;
-  } else if (t2->isSubtypeOf(t1)) {
-    return t1;
-  }
-
-  // Now, check subtyping relations again with Unshaped Types,
+  // Check direct subtyping relations again with Unshaped Types,
   // to handle unification of container types which might contain two different
   // specialized tensors (ListType / FutureType)
-  t1 = unshapedType(t1);
-  t2 = unshapedType(t2);
+  auto t1_unshaped = unshapedType(t1);
+  auto t2_unsahped = unshapedType(t2);
 
-  if (t1->isSubtypeOf(t2)) {
-    return t2;
-  } else if (t2->isSubtypeOf(t1)) {
-    return t1;
+  if (t1_unshaped->isSubtypeOf(t2_unsahped)) {
+    return t2_unsahped;
+  } else if (t2_unsahped->isSubtypeOf(t1_unshaped)) {
+    return t1_unshaped;
   }
 
   // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
@@ -218,9 +215,9 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& typ
   // Dicts are not specialized, so we can unify contained types, but we do not
   // maintain Tensor Specialization in dictionary types so we run this after
   // calling unshapedType
-  if (t1->cast<DictType>() && t2->cast<DictType>()) {
-    auto dict1 = t1->cast<DictType>();
-    auto dict2 = t2->cast<DictType>();
+  if (t1_unshaped->cast<DictType>() && t2_unsahped->cast<DictType>()) {
+    auto dict1 = t1_unshaped->cast<DictType>();
+    auto dict2 = t2_unsahped->cast<DictType>();
 
     auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
     auto unified_value = unifyTypes(dict1->getValueType(), dict2->getValueType());
