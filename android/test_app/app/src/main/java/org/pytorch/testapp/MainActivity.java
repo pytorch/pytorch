@@ -93,9 +93,17 @@ public class MainActivity extends AppCompatActivity {
       final String moduleFileAbsoluteFilePath = new File(
           assetFilePath(this, BuildConfig.MODULE_ASSET_NAME)).getAbsolutePath();
       mModule = Module.load(moduleFileAbsoluteFilePath);
+
+      final int numThreads = BuildConfig.NUM_THREADS;
+      Log.i(TAG, "numThreads:" + numThreads);
+      if (numThreads != -1) {
+        mModule.setNumThreads(numThreads);
+      }
+
       mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * 224 * 224);
       mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 3, 224, 224});
     }
+
 
     final long startTime = SystemClock.elapsedRealtime();
     final long moduleForwardStartTime = SystemClock.elapsedRealtime();

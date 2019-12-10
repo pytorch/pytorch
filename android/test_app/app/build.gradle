@@ -32,19 +32,37 @@ android {
     }
     flavorDimensions "model"
     productFlavors {
-        mobNet2Quant {
+        mbq{
             dimension "model"
-            applicationIdSuffix ".mobNet2Quant"
+            applicationIdSuffix ".mbq"
             buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME_MOBNET2_QUANT'))
-            addManifestPlaceholders([APP_NAME: "PyMobNet2Quant"])
+            addManifestPlaceholders([APP_NAME: "MBQ"])
             buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-mobnet2q\"")
+            buildConfigField ("int", "NUM_THREADS", "-1")
+        }
+        mbq1{
+            dimension "model"
+            applicationIdSuffix ".mbq1"
+            buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME_MOBNET2_QUANT'))
+            addManifestPlaceholders([APP_NAME: "MBQ1"])
+            buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-mobnet2q1\"")
+            buildConfigField ("int", "NUM_THREADS", "1")
+        }
+        mbq2{
+            dimension "model"
+            applicationIdSuffix ".mbq2"
+            buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME_MOBNET2_QUANT'))
+            addManifestPlaceholders([APP_NAME: "MBQ2"])
+            buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-mobnet2q2\"")
+            buildConfigField ("int", "NUM_THREADS", "2")
         }
         resnet18 {
             dimension "model"
-            applicationIdSuffix ".resneti18"
+            applicationIdSuffix ".rn"
             buildConfigField ("String", "MODULE_ASSET_NAME", buildConfigProps('MODULE_ASSET_NAME_RESNET18'))
-            addManifestPlaceholders([APP_NAME: "PyResNet18"])
+            addManifestPlaceholders([APP_NAME: "RN"])
             buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
+            buildConfigField ("int", "NUM_THREADS", "-1")
         }
     }
     packagingOptions {
