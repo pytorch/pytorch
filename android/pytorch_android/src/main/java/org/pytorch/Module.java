@@ -49,8 +49,8 @@ public class Module {
   }
 
   /**
-   * Sets the number of threads used on native side.
-   * Has global effect for all loaded modules.
+   * Globally sets the number of threads used on native side.
+   * Attention: Has global effect, all modules will use one thread pool with specified number of threads.
    *
    * @param numThreads number of threads, must be positive number.
    */
