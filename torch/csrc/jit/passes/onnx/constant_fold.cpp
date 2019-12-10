@@ -234,7 +234,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   } else if (node->kind() == onnx::Reshape) {
     assert(inputTensorValues.size() == 2);
     updated_val = inputTensorValues[0];
-		std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
+    std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
     auto shape_a = inputTensorValues[1].accessor<int64_t, 1>();
     for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
       shape[i] = shape_a[i];
