@@ -356,7 +356,7 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor0.requires_grad());
   ASSERT_FALSE(tensor0.is_pinned());
 
-  // Test setting grad to FALSE
+  // Test setting requires_grad to false.
   tensor0 = at::empty({4}, at::TensorOptions().requires_grad(false));
   ASSERT_EQ(tensor0.dtype(), at::kFloat);
   ASSERT_EQ(tensor0.layout(), at::kStrided);
@@ -364,13 +364,13 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor0.requires_grad());
   ASSERT_FALSE(tensor0.is_pinned());
 
-  // Test setting grad to TRUE
+  // Test setting requires_grad to true.
   tensor0 = at::empty({4}, at::TensorOptions().requires_grad(true));
   ASSERT_EQ(tensor0.dtype(), at::kFloat);
   ASSERT_EQ(tensor0.layout(), at::kStrided);
   ASSERT_EQ(tensor0.device(), at::kCPU);
   // This is a bug. Requires_grad was set to TRUE but this is being ignored.
-  // Issue #30405
+  // Issue https://github.com/pytorch/pytorch/issues/30405
   ASSERT_FALSE(tensor0.requires_grad());
   ASSERT_FALSE(tensor0.is_pinned());
 
@@ -405,10 +405,13 @@ TEST(BasicTest, FactoryMethodsTest) {
     ASSERT_EQ(tensor1.dtype(), at::kHalf);
     ASSERT_EQ(tensor1.layout(), at::kSparse);
     ASSERT_TRUE(tensor1.device().is_cuda());
+
+    // This is a bug
+    // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_FALSE(tensor1.requires_grad());
 
-    // This will cause an exception. 
-    // Issue #30405
+    // This will cause an exception
+    // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_ANY_THROW(tensor1.is_pinned());
   }
 }
