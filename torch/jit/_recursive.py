@@ -306,8 +306,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
         #    recursively scripting them.
-        for name, module_type in concrete_type.get_modules():
+        for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
+            module_type = sub_concrete_type.jit_type
             assert isinstance(orig_value, Module)
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
@@ -316,7 +317,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 scripted = orig_value
             else:
                 # use the default recursive rule to compile the module
-                scripted = create_script_module(orig_value, infer_methods_to_compile)
+                scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
