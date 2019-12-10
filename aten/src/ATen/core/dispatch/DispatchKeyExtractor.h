@@ -48,11 +48,65 @@ namespace detail {
     }
   };
 
+  struct TensorOptionsAccumulator : at::IterArgs<TensorOptionsAccumulator> {
+    TensorOptions options;
+    void operator()(c10::optional<ScalarType> dtype) {
+      if (dtype.has_value())
+        options = options.dtype(*dtype);
+      else 
+        options = options.dtype(at::get_default_dtype());
+    }
+    void operator()(c10::optional<Device> device) {
+      if (device.has_value())
+        options = options.device(*device);
+    }
+    void operator()(c10::optional<Layout> layout) {
+      if (layout.has_value())
+        options = options.layout(*layout);
+    }
+    void operator()(c10::optional<bool> pin_memory) {
+      if (pin_memory.has_value())
+        options = options.pinned_memory(*pin_memory);
+    }
+    void operator()(ScalarType dtype) { 
+      options = options.dtype(dtype);
+    }
+    void operator()(Device device) {
+      options = options.device(device);
+    }
+    void operator()(Layout layout) {
+      options = options.layout(layout);
+    }
+    void operator()(bool pin_memory) {
+      options = options.pinned_memory(pin_memory);
+    }
+    template <typename T>
+    void operator()(const T& x) {
+      // do nothing
+    }
+  };
+
+  template<class Arg> using arg_is_tensor_option_arg = guts::typelist::contains<
+    guts::typelist::typelist<c10::optional<ScalarType>, c10::optional<Layout>, 
+                             c10::optional<Device>, c10::optional<bool>, ScalarType, Layout, Device, bool>,
+    guts::remove_const_t<guts::remove_reference_t<Arg>>>;
+
+  template<class... Args> using args_have_tensor_options = guts::disjunction<
+    arg_is_tensor_option_arg<Args>...>;
+
   // NB: take by const reference (Don't do universal forwarding here! You
   // don't want to move into this function!)
   template <typename... Args>
   TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
-    return MultiDispatchTensorTypeSet().apply(args...).ts;
+    auto type_set = MultiDispatchTensorTypeSet().apply(args...);
+
+    if (args_have_tensor_options<Args...>::value) {
+      TensorOptions tensorOptions = TensorOptionsAccumulator().apply(args...).options;
+      if (tensorOptions.has_dtype() && tensorOptions.has_device() && tensorOptions.has_layout()) {
+        type_set(tensorOptions);
+      }
+    }
+    return type_set.ts;
   }
 }
 
