@@ -411,7 +411,7 @@ struct Converter<
     To,
     std::complex<FromV>,
     typename std::enable_if<
-        guts::negation<is_complex_t<To>>::value>::type> {
+        c10::guts::negation<is_complex_t<To>>::value>::type> {
   To operator()(std::complex<FromV> f) {
     return static_cast<To>(f.real());
   }
