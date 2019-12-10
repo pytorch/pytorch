@@ -1981,6 +1981,31 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args))
 
+add_docstr(torch.floor_divide,
+           r"""
+floor_divide(input, other) -> Tensor
+
+Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
+for type promotion and broadcasting rules.
+
+.. math::
+    \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
+
+""" + r"""
+Args:
+    input (Tensor): the numerator tensor
+    other (Tensor or Scalar): the denominator
+
+Example::
+
+    >>> a = torch.tensor([4.0, 3.0])
+    >>> b = torch.tensor([2.0, 2.0])
+    >>> torch.floor_divide(a, b)
+    tensor([2.0, 1.0])
+    >>> torch.floor_divide(a, 1.4)
+    tensor([2.0, 2.0])
+""".format(**common_args))
+
 add_docstr(torch.fmod,
            r"""
 fmod(input, other, out=None) -> Tensor
