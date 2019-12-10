@@ -381,7 +381,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 
   auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
 
-  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
 
   if (src._nnz() == 0) {
     return copy_sparse_to_sparse_(r, t);
@@ -438,7 +438,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
     dense.sizes(), " while other has size ", sparse_.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
 
   auto commonDtype = promoteTypes(dense.scalar_type(), sparse_.scalar_type());
-  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
 
   r.resize_as_(dense);
   SparseTensor sparse = sparse_.coalesce();
@@ -532,7 +532,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   int64_t r_i = 0, t_i = 0, s_i = 0;
 
   auto commonDtype = promoteTypes(t_.scalar_type(), src_.scalar_type());
-  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in mul operation");
 
   Tensor t_values = t._values().to(commonDtype);
   Tensor s_values = src._values().to(commonDtype);

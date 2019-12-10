@@ -741,7 +741,7 @@ class TestOperators(TestCase):
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
-        self.assertONNX(model, inputs)
+        self.assertONNX(model, inputs, custom_opsets={'org.pytorch._caffe2': 0})
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
