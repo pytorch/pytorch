@@ -1093,27 +1093,6 @@
     - CONSTANT AS_REAL(1)
 ]]
 [[
-<<<<<<< HEAD
-=======
-  name: _th_mv
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  cname: addmv
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-      resize: [ [self, 0] ]
-      cpu_zero: True
-    - argument 0
-    - THTensor* self
-    - THTensor* vec
-    - CONSTANT AS_REAL(0)
-    - CONSTANT AS_REAL(1)
-]]
-[[
->>>>>>> 57f29a44c7ef82326536f2f5bcf2c6aad6bad4ca
   name: _th_mm
   cpu_bfloat16: True
   cuda_bfloat16: True
