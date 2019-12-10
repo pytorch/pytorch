@@ -89,8 +89,7 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !node->kind().is_caffe2() &&
-          !is_aten_enabled && !node->mustBeNone()) {
+      if (node->kind().is_aten() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -337,8 +336,15 @@ void EncoderBase::EncodeBlock(
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (!node->kind().is_onnx()) {
-      p_n->set_domain(node->kind().domainString());
-      domains_.insert(node->kind().domainString());
+      std::string domain;
+      if (node->kind().is_aten() || node->kind().is_caffe2()) {
+        domain = node->kind().domainString();
+      }
+      else {  //  Custom namespace and domain
+        domain = node->kind().ns().toUnqualString();
+      }
+      domains_.insert(domain);
+      p_n->set_domain(domain);
     }
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
@@ -472,6 +478,7 @@ class GraphEncoder : public EncoderBase {
       bool defer_weight_export,
       bool strip_doc,
       bool keep_initializers_as_inputs,
+      const std::map<std::string, int>& custom_opsets,
       bool add_node_names);
 
   RawDataExportMap get_raw_data_export_map() {
@@ -497,6 +504,7 @@ GraphEncoder::GraphEncoder(
     bool defer_weight_export,
     bool strip_doc,
     bool keep_initializers_as_inputs,
+    const std::map<std::string, int>& custom_opsets,
     bool add_node_names)
     : EncoderBase(operator_export_type, strip_doc),
       defer_weight_export_(defer_weight_export) {
@@ -514,7 +522,20 @@ GraphEncoder::GraphEncoder(
   for (const std::string& domain : domains_) {
     auto* opset = model_proto_.add_opset_import();
     opset->set_domain(domain);
-    opset->set_version(0);
+    //  Check if domain version is registered. If not, set to version 1
+    auto it = custom_opsets.find(domain);
+    if (it == custom_opsets.end())
+      opset->set_version(1);
+    else {
+      opset->set_version(it->second);
+    }
+  }
+
+  for (auto const& custom_opset : custom_opsets){
+    if (!std::count(domains_.begin(), domains_.end(), custom_opset.first)) {
+      AT_WARN("Custom opset domain: '", custom_opset.first, "' provided is not used in the model. ",
+      "Please verify custom opset domain names.");
+    }
   }
 }
 
@@ -738,6 +759,7 @@ std::string pretty_print_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool google_printer,
     bool keep_initializers_as_inputs,
+    const std::map<std::string, int>& custom_opsets,
     bool add_node_names) {
   auto graph_encoder = GraphEncoder(
       graph,
@@ -748,6 +770,7 @@ std::string pretty_print_onnx(
       defer_weight_export,
       true,
       keep_initializers_as_inputs,
+      custom_opsets,
       add_node_names);
   if (google_printer) {
     return graph_encoder.get_model_proto().DebugString();
@@ -769,6 +792,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool strip_doc_string,
     bool keep_initializers_as_inputs,
+    const std::map<std::string, int>& custom_opsets,
     bool add_node_names) {
   auto graph_encoder = GraphEncoder(
       graph,
@@ -779,6 +803,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       defer_weight_export,
       strip_doc_string,
       keep_initializers_as_inputs,
+      custom_opsets,
       add_node_names);
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
