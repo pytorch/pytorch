@@ -207,7 +207,7 @@ class TestUtilityFuns(TestCase):
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_reshape(self):
-        class TransposeModule(torch.nn.Module):
+        class ReshapeModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
                 b = torch.reshape(a, (3, 2))
@@ -215,9 +215,8 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(self.opset_version)
         x = torch.ones(3, 2)
-        graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ),
-                                             do_constant_folding=True,
-                                             _disable_torch_constant_prop=True)
+        graph, _, __ = utils._model_to_graph(ReshapeModule(), (x, ),
+                                             do_constant_folding=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Reshape"
         assert len(list(graph.nodes())) == 1

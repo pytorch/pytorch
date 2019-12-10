@@ -848,6 +848,16 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.ones(1)
         self.run_test(CopyModel2(), (x, update))
 
+    def test_reshape_constant_fold(self):
+        class ReshapeModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+                b = torch.reshape(a, (3, 2))
+                return b + x
+
+        x = torch.ones(3, 2)
+        self.run_test(ReshapeModule(), x, do_constant_folding=True)
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_flip(self):
         class MyModule(torch.nn.Module):
