@@ -130,8 +130,11 @@ class ProcessGroupAgent : public RpcAgent {
   const std::chrono::milliseconds getRPCEndTime(
       const FutureInfo& futureInfo) const;
 
-  // a helper function to mark a future in the futures_ map with a message.
-  void markFutureWithMessage(long futureId, const Message& exceptionMsg);
+  // a helper function to mark a future in the futures_ map with a message. The
+  // future is marked with the passed in message, and then removed from the
+  // futures_ map. It is also removed from the futureTimeouts_ map since these
+  // maps are kept in sync.
+  void markFutureWithMessage(const Message& message);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
