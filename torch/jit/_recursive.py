@@ -258,51 +258,43 @@ def create_methods_from_stubs(concrete_type, stubs):
     defaults = [get_default_args(m.original_method) for m in stubs]
     concrete_type._create_methods(defs, rcbs, defaults)
 
-def create_script_module_for_tracing(nn_module, stubs):
+def create_script_module(nn_module, stubs_fn, share_types=True):
     """
-    Creates a new ScriptModule from an nn.Module, but always uses a fresh type.
-
-    NOTE: Only use this when we cannot guarantee type sharing will work
-          correctly. This only happens today for traced modules, where the same
-          module can produce different traced methods depending on the inputs.
+    Creates a new ScriptModule from an nn.Module
 
     Arguments:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
-        stubs:  ScriptMethodStubs to compile as part of the conversion process.
+        stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
+        share_types:  Whether to share underlying JIT types between modules (if possible).
+            NOTE: Only set to False this when we cannot guarantee type sharing will work
+                correctly. This only happens today for traced modules, where the same
+                module can produce different traced methods depending on the inputs.
     """
+    assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
-    # Get a concrete type directly, without trying to re-use an existing JIT
-    # type from the type store.
-    concrete_type_builder = infer_concrete_type_builder(nn_module)
-    concrete_type_builder.set_poisoned()
-    concrete_type = concrete_type_builder.build()
+    if share_types:
+        # Look into the store of cached JIT types
+        concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
+    else:
+        # Get a concrete type directly, without trying to re-use an existing JIT
+        # type from the type store.
+        concrete_type_builder = infer_concrete_type_builder(nn_module)
+        concrete_type_builder.set_poisoned()
+        concrete_type = concrete_type_builder.build()
 
-    return create_script_module_impl(nn_module, concrete_type, stubs)
+    return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
-
-def create_script_module(nn_module, stubs):
-    """
-    Creates a new ScriptModule from an nn.Module, sharing underlying JIT types if possible
-
-    Arguments:
-        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
-        stubs:  ScriptMethodStubs to compile as part of the conversion process.
-    """
-    check_module_initialized(nn_module)
-    concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
-
-    return create_script_module_impl(nn_module, concrete_type, stubs)
-
-def create_script_module_impl(nn_module, concrete_type, stubs):
+def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
     Arguments:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         concrete_type:  The fully initialized ConcreteType of the module.
-        stubs:  ScriptMethodStubs to compile as part of the conversion process.
+        stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
     """
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
+    stubs = stubs_fn(nn_module)
 
     def init_fn(script_module):
         # Initialize the ScriptModule:
@@ -320,9 +312,11 @@ def create_script_module_impl(nn_module, concrete_type, stubs):
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
+            elif isinstance(orig_value, torch.jit.ScriptModule):
+                scripted = orig_value
             else:
                 # use the default recursive rule to compile the module
-                scripted = recursive_script(orig_value)
+                scripted = create_script_module(orig_value, infer_methods_to_compile)
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
@@ -490,16 +484,6 @@ def infer_methods_to_compile(nn_module):
         stubs.append(make_stub_from_method(nn_module, method))
     return overload_stubs + stubs
 
-def infer_interface_methods_to_compile(mod_interface, nn_module):
-    """
-    Rule to infer the methods from the interface type to know which
-    methods need to act as starting points for compilation.
-    """
-    stubs = []
-    for method in mod_interface.getMethodNames():
-        stubs.append(make_stub_from_method(nn_module, method))
-    return stubs
-
 def interface_script(mod_interface, nn_module):
     """
     Makes a ScriptModule from an nn.Module, using the interface methods rule for
@@ -513,22 +497,18 @@ def interface_script(mod_interface, nn_module):
         return nn_module
 
     check_module_initialized(nn_module)
-    return create_script_module(nn_module, infer_interface_methods_to_compile(mod_interface, nn_module))
 
-def recursive_script(nn_module):
-    """
-    Makes a ScriptModule from an nn.Module, using the default rules for
-    determining which methods to compile.
+    def infer_interface_methods_to_compile(nn_module):
+        """
+        Rule to infer the methods from the interface type to know which
+        methods need to act as starting points for compilation.
+        """
+        stubs = []
+        for method in mod_interface.getMethodNames():
+            stubs.append(make_stub_from_method(nn_module, method))
+        return stubs
 
-    Arguments:
-        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
-    """
-    if isinstance(nn_module, torch.jit.ScriptModule):
-        return nn_module
-
-    check_module_initialized(nn_module)
-
-    return create_script_module(nn_module, infer_methods_to_compile(nn_module))
+    return create_script_module(nn_module, infer_interface_methods_to_compile)
 
 def try_compile_fn(fn, loc):
     if _jit_internal.is_ignored_fn(fn):
