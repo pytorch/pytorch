@@ -461,7 +461,6 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     if (!rpcRunning_.load()) {
       return;
     }
-    std::chrono::milliseconds sleepTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
     // if there are no futures or the first future's RPC timeout is set to 0
