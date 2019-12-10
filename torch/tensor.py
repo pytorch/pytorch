@@ -105,8 +105,8 @@ class Tensor(torch._C._TensorBase):
                 # when/if we get multi-axis quantized tensors in the future, the shape
                 # is recoverable from the main tensor shape
                 quantizer_params = (torch.per_channel_affine,
-                                    [e.item() for e in self.q_per_channel_scales().reshape(-1)],
-                                    [e.item() for e in self.q_per_channel_zero_points().reshape(-1)],
+                                    self.q_per_channel_scales(),
+                                    self.q_per_channel_zero_points(),
                                     self.q_per_channel_axis())
             else:
                 raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
