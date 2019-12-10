@@ -12,11 +12,9 @@ Tensor& resize_cuda_(
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-#ifdef BUILD_NAMEDTENSOR
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
-#endif
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
   self_->maybe_zero_dim(size.size() == 0);
