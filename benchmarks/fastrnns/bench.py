@@ -219,7 +219,7 @@ if __name__ == '__main__':
     del bench_args['cnns']
     del bench_args['variable_lstms']
 
-    results = dict()
+    results = {}
     if should_bench_varlen_lstms:
         if args.nloops + args.warmup > 30:
             print_stderr(
