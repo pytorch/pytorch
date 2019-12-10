@@ -35,7 +35,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       Workspace* ws,
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
-      const std::unordered_map<std::string, TensorShape>& shape_hints,
+      const ShapeInfoMap& shape_hints,
       const std::unordered_set<int>& blacklisted_ops) override;
 
  private:

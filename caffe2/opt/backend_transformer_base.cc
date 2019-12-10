@@ -90,11 +90,10 @@ QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
   return t;
 }
 
-std::unordered_map<std::string, TensorShape>
-BackendTransformerBase::ssaRewriteAndMapNames(
+ShapeInfoMap BackendTransformerBase::ssaRewriteAndMapNames(
     Workspace* ws,
     NetDef* pred_net,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
+    const ShapeInfoMap& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
   annotateOpIndex(pred_net);
@@ -112,7 +111,7 @@ BackendTransformerBase::ssaRewriteAndMapNames(
     input_mapping_.erase(i);
   }
 
-  std::unordered_map<std::string, TensorShape> shape_hints_mapped;
+  ShapeInfoMap shape_hints_mapped;
   for (const auto& kv : input_shape_hints) {
     shape_hints_mapped.emplace(kv.first, kv.second);
   }
@@ -122,24 +121,10 @@ BackendTransformerBase::ssaRewriteAndMapNames(
 ShapeInfoMap BackendTransformerBase::inferShapes(
     Workspace* ws,
     NetDef* pred_net,
-    const std::unordered_map<std::string, TensorShape>& shape_hints_mapped,
+    const ShapeInfoMap& shape_hints_mapped,
     const BoundShapeSpec& spec) {
-  ShapeInfoMap shape_map;
-  // We treat hinted shapes as BATCH. If there are shape hints on blobs in the
-  // workspace, since they are already inserted as CONSTANT, it will take effect
-  // here. For SEQ typed tensors, there are only a few of them and they will be
-  // handled by BoundShapeInferencer.
-  for (const auto& kv : shape_hints_mapped) {
-    std::vector<TensorBoundShape_DimType> dimType(
-        kv.second.dims_size(), TensorBoundShape_DimType_CONSTANT);
-    if (dimType.size()) {
-      dimType[0] = TensorBoundShape_DimType_BATCH;
-    }
-    shape_map.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(kv.first),
-        std::forward_as_tuple(dimType, kv.second));
-  }
+  ShapeInfoMap shape_map = shape_hints_mapped;
+
   // Populate shapes from workplace
   const std::vector<std::string> ws_blobs = ws->Blobs();
   for (const auto& s : ws_blobs) {

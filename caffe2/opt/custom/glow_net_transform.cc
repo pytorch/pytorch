@@ -5,10 +5,7 @@
 
 #include <unordered_set>
 
-C10_DEFINE_bool(
-    onnxifi_debug_mode,
-    false,
-    "Enable onnxifi debug mode.");
+C10_DEFINE_bool(onnxifi_debug_mode, false, "Enable onnxifi debug mode.");
 
 C10_DEFINE_bool(
     onnxifi_adjust_batch,
@@ -91,7 +88,7 @@ void onnxifi(
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
     const std::unordered_set<int>& blacklist,
-    const std::unordered_map<std::string, TensorShape>& shape_hints,
+    const ShapeInfoMap& shape_hints,
     bool use_onnx,
     size_t max_batch_size,
     size_t max_seq_size) {
@@ -134,13 +131,14 @@ void onnxifi(
         for (const auto& d : dims) {
           try {
             input.add_dims(std::stoi(d));
-          } catch (const std::exception &e) {
+          } catch (const std::exception& e) {
             valid = false;
             CAFFE_THROW("Cannot parse shape hint: ", hint);
           }
         }
         if (valid) {
-          more_shape_hints.emplace(kv.front(), input);
+          more_shape_hints.emplace(
+              kv.front(), constructShapeInfoWithDefaultDimType(input));
         }
       } else {
         CAFFE_THROW("Cannot parse shape hint: ", hint);

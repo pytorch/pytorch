@@ -49,7 +49,7 @@ class BackendTransformerBase {
       Workspace* ws,
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
-      const std::unordered_map<std::string, TensorShape>& shape_hints,
+      const ShapeInfoMap& shape_hints,
       const std::unordered_set<int>& blacklisted_ops) = 0;
 
   static void annotateOpIndex(NetDef* net);
@@ -68,10 +68,10 @@ class BackendTransformerBase {
       const std::string& fname) const;
 
   // SSA rewrite the net and return name mapping
-  std::unordered_map<std::string, TensorShape> ssaRewriteAndMapNames(
+  ShapeInfoMap ssaRewriteAndMapNames(
       Workspace* ws,
       NetDef* pred_net,
-      const std::unordered_map<std::string, TensorShape>& input_shape_hints);
+      const ShapeInfoMap& input_shape_hints);
 
   // Wrap TensorShape into TensorProto
   TensorProto wrapShapeInfoIntoTensorProto(
@@ -87,7 +87,7 @@ class BackendTransformerBase {
   ShapeInfoMap inferShapes(
       Workspace* ws,
       NetDef* pred_net,
-      const std::unordered_map<std::string, TensorShape>& shape_hints_mapped,
+      const ShapeInfoMap& shape_hints_mapped,
       const BoundShapeSpec& spec);
 
   // Input mapping of input name -> original input name
