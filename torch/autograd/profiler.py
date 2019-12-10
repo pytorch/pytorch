@@ -110,7 +110,7 @@ class EventList(list):
             f.write("[")
             for evt in self:
                 f.write("{\"name\": \"%s\", \"ph\": \"X\", \"ts\": %s, " \
-                        "\"dur\": %s, \"tid\": %s, \"pid\": \"CPU functions\", " \
+                        '"dur": %s, "tid": %s, \"pid\": \"CPU functions\", ' \
                         "\"args\": {}}, " % (evt.name, evt.cpu_interval.start,
                                              evt.cpu_interval.elapsed_us(), evt.thread))
                 for k in evt.kernels:
