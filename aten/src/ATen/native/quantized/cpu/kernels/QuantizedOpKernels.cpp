@@ -7,6 +7,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/SortingUtils.h>
 
+#include <cmath>
 
 namespace at {
 namespace native {
@@ -196,8 +197,8 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
   float scale = qx.q_scale();
   float inv_scale = 1.0f / scale;
-  auto scale_vec = Vec256<float>(self_scale);
-  auto zero_point_vec = Vec256<float>((float)self_zero_point);
+  auto scale_vec = Vec256<float>(scale);
+  auto zero_point_vec = Vec256<float>((float)zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   auto iter = TensorIterator::unary_op(qy, qx);
@@ -214,13 +215,13 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
       iter,
       [&](scalar_t value_qx) -> scalar_t {
         const auto value_dx = at::dequantize_val(scale, zero_point, value_qx);
-        return at::quantize_val(scale, zero_point, tanh(value_dx));
+        return at::quantize_val<scalar_t>(scale, zero_point, std::tanh(value_dx));
       },
-      [&](Vec value_qx) -> scalar_t {
+      [&](Vec value_qx) -> Vec {
         const auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
         Vec::float_vec_return_type retvals;
         for (int idx = 0; idx < Vec::float_num_vecs(); ++idx) {
-          retvals[idx] = tanh(value_dx[idx]);
+          retvals[idx] = value_dx[idx].tanh();
         }
         return Vec::quantize(retvals, scale, zero_point, inv_scale);
       }
