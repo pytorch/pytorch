@@ -58,7 +58,7 @@ struct maybe_real {
 
 template<typename src_t>
 struct maybe_real<true, src_t> {
-  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
+  C10_HOST_DEVICE static inline auto apply(src_t src) -> decltype(src.real()) {
     return src.real();
   }
 };

@@ -20,7 +20,6 @@
 // handled by the template<U=T> case with default template argument.
 // - `constexpr struct in_place_t {} in_place{}` is moved to `c10/util/in_place.h`,
 // so that it can also be used in `c10/util/variant.h`.
-// - Remove special cases for pre-c++14 compilers to make code simpler
 
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
@@ -37,6 +36,84 @@
 
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
+
+#if defined __GNUC__ // NOTE: GNUC is also defined for Clang
+#if (__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)
+#define TR2_OPTIONAL_GCC_4_8_AND_HIGHER___
+#elif (__GNUC__ > 4)
+#define TR2_OPTIONAL_GCC_4_8_AND_HIGHER___
+#endif
+#
+#if (__GNUC__ == 4) && (__GNUC_MINOR__ >= 7)
+#define TR2_OPTIONAL_GCC_4_7_AND_HIGHER___
+#elif (__GNUC__ > 4)
+#define TR2_OPTIONAL_GCC_4_7_AND_HIGHER___
+#endif
+#
+#if (__GNUC__ == 4) && (__GNUC_MINOR__ == 8) && (__GNUC_PATCHLEVEL__ >= 1)
+#define TR2_OPTIONAL_GCC_4_8_1_AND_HIGHER___
+#elif (__GNUC__ == 4) && (__GNUC_MINOR__ >= 9)
+#define TR2_OPTIONAL_GCC_4_8_1_AND_HIGHER___
+#elif (__GNUC__ > 4)
+#define TR2_OPTIONAL_GCC_4_8_1_AND_HIGHER___
+#endif
+#endif
+#
+#if defined __clang_major__
+#if (__clang_major__ == 3 && __clang_minor__ >= 5)
+#define TR2_OPTIONAL_CLANG_3_5_AND_HIGHTER_
+#elif (__clang_major__ > 3)
+#define TR2_OPTIONAL_CLANG_3_5_AND_HIGHTER_
+#endif
+#if defined TR2_OPTIONAL_CLANG_3_5_AND_HIGHTER_
+#define TR2_OPTIONAL_CLANG_3_4_2_AND_HIGHER_
+#elif ( \
+    __clang_major__ == 3 && __clang_minor__ == 4 && __clang_patchlevel__ >= 2)
+#define TR2_OPTIONAL_CLANG_3_4_2_AND_HIGHER_
+#endif
+#endif
+#
+#if defined _MSC_VER
+#if (_MSC_VER >= 1900)
+#define TR2_OPTIONAL_MSVC_2015_AND_HIGHER___
+#endif
+#endif
+
+#if defined __clang__
+#if (__clang_major__ > 2) || (__clang_major__ == 2) && (__clang_minor__ >= 9)
+#define OPTIONAL_HAS_THIS_RVALUE_REFS 1
+#else
+#define OPTIONAL_HAS_THIS_RVALUE_REFS 0
+#endif
+#elif defined TR2_OPTIONAL_GCC_4_8_1_AND_HIGHER___
+#define OPTIONAL_HAS_THIS_RVALUE_REFS 1
+#elif defined TR2_OPTIONAL_MSVC_2015_AND_HIGHER___
+#define OPTIONAL_HAS_THIS_RVALUE_REFS 1
+#else
+#define OPTIONAL_HAS_THIS_RVALUE_REFS 0
+#endif
+
+#if defined TR2_OPTIONAL_GCC_4_8_1_AND_HIGHER___
+#define OPTIONAL_HAS_CONSTEXPR_INIT_LIST 1
+#define OPTIONAL_CONSTEXPR_INIT_LIST constexpr
+#else
+#define OPTIONAL_HAS_CONSTEXPR_INIT_LIST 0
+#define OPTIONAL_CONSTEXPR_INIT_LIST
+#endif
+
+#if defined TR2_OPTIONAL_CLANG_3_5_AND_HIGHTER_ && (defined __cplusplus) && \
+    (__cplusplus != 201103L)
+#define OPTIONAL_HAS_MOVE_ACCESSORS 1
+#else
+#define OPTIONAL_HAS_MOVE_ACCESSORS 0
+#endif
+
+#// In C++11 constexpr implies const, so we need to make non-const members also non-constexpr
+#if (defined __cplusplus) && (__cplusplus == 201103L)
+#define OPTIONAL_MUTABLE_CONSTEXPR
+#else
+#define OPTIONAL_MUTABLE_CONSTEXPR constexpr
+#endif
 
 namespace c10 {
 
@@ -220,7 +297,7 @@ struct constexpr_optional_base {
       class U,
       class... Args,
       TR2_OPTIONAL_REQUIRES(std::is_constructible<T, std::initializer_list<U>>)>
-  constexpr explicit constexpr_optional_base(
+  OPTIONAL_CONSTEXPR_INIT_LIST explicit constexpr_optional_base(
       in_place_t,
       std::initializer_list<U> il,
       Args&&... args)
@@ -262,15 +339,33 @@ class optional : private OptionalBase<T> {
     return detail_::static_addressof(OptionalBase<T>::storage_.value_);
   }
 
+#if OPTIONAL_HAS_THIS_RVALUE_REFS == 1
   constexpr const T& contained_val() const& {
     return OptionalBase<T>::storage_.value_;
   }
-  constexpr T&& contained_val() && {
+#if OPTIONAL_HAS_MOVE_ACCESSORS == 1
+  OPTIONAL_MUTABLE_CONSTEXPR T&& contained_val() && {
     return std::move(OptionalBase<T>::storage_.value_);
   }
-  constexpr T& contained_val() & {
+  OPTIONAL_MUTABLE_CONSTEXPR T& contained_val() & {
     return OptionalBase<T>::storage_.value_;
   }
+#else
+  T& contained_val() & {
+    return OptionalBase<T>::storage_.value_;
+  }
+  T&& contained_val() && {
+    return std::move(OptionalBase<T>::storage_.value_);
+  }
+#endif
+#else
+  constexpr const T& contained_val() const {
+    return OptionalBase<T>::storage_.value_;
+  }
+  T& contained_val() {
+    return OptionalBase<T>::storage_.value_;
+  }
+#endif
 
   void clear() noexcept {
     if (initialized())
@@ -354,7 +449,7 @@ class optional : private OptionalBase<T> {
       class U,
       class... Args,
       TR2_OPTIONAL_REQUIRES(std::is_constructible<T, std::initializer_list<U>>)>
-  constexpr explicit optional(
+  OPTIONAL_CONSTEXPR_INIT_LIST explicit optional(
       in_place_t,
       std::initializer_list<U> il,
       Args&&... args)
@@ -447,7 +542,9 @@ class optional : private OptionalBase<T> {
     return TR2_OPTIONAL_ASSERTED_EXPRESSION(initialized(), dataptr());
   }
 
-  constexpr T* operator->() {
+#if OPTIONAL_HAS_MOVE_ACCESSORS == 1
+
+  OPTIONAL_MUTABLE_CONSTEXPR T* operator->() {
     assert(initialized());
     return dataptr();
   }
@@ -456,12 +553,12 @@ class optional : private OptionalBase<T> {
     return TR2_OPTIONAL_ASSERTED_EXPRESSION(initialized(), contained_val());
   }
 
-  constexpr T& operator*() & {
+  OPTIONAL_MUTABLE_CONSTEXPR T& operator*() & {
     assert(initialized());
     return contained_val();
   }
 
-  constexpr T&& operator*() && {
+  OPTIONAL_MUTABLE_CONSTEXPR T&& operator*() && {
     assert(initialized());
     return constexpr_move(contained_val());
   }
@@ -472,29 +569,85 @@ class optional : private OptionalBase<T> {
         : (throw bad_optional_access("bad optional access"), contained_val());
   }
 
-  constexpr T& value() & {
+  OPTIONAL_MUTABLE_CONSTEXPR T& value() & {
     return initialized()
         ? contained_val()
         : (throw bad_optional_access("bad optional access"), contained_val());
   }
 
-  constexpr T&& value() && {
+  OPTIONAL_MUTABLE_CONSTEXPR T&& value() && {
     if (!initialized())
       throw bad_optional_access("bad optional access");
     return std::move(contained_val());
   }
+
+#else
+
+  T* operator->() {
+    assert(initialized());
+    return dataptr();
+  }
+
+  constexpr T const& operator*() const {
+    return contained_val();
+  }
+
+  T& operator*() {
+    assert(initialized());
+    return contained_val();
+  }
+
+  // This might be constexpr, but MSVC+cuda don't like combination of constexpr
+  // and throw.
+  T const& value() const {
+    return initialized()
+        ? contained_val()
+        : (throw bad_optional_access("bad optional access"), contained_val());
+  }
+
+  T& value() {
+    return initialized()
+        ? contained_val()
+        : (throw bad_optional_access("bad optional access"), contained_val());
+  }
+
+#endif
+
+#if OPTIONAL_HAS_THIS_RVALUE_REFS == 1
 
   template <class V>
   constexpr T value_or(V&& v) const& {
     return *this ? **this : detail_::convert<T>(constexpr_forward<V>(v));
   }
 
+#if OPTIONAL_HAS_MOVE_ACCESSORS == 1
+
   template <class V>
-  constexpr T value_or(V&& v) && {
+  OPTIONAL_MUTABLE_CONSTEXPR T value_or(V&& v) && {
     return *this
         ? constexpr_move(const_cast<optional<T>&>(*this).contained_val())
         : detail_::convert<T>(constexpr_forward<V>(v));
   }
+
+#else
+
+  template <class V>
+  T value_or(V&& v) && {
+    return *this
+        ? constexpr_move(const_cast<optional<T>&>(*this).contained_val())
+        : detail_::convert<T>(constexpr_forward<V>(v));
+  }
+
+#endif
+
+#else
+
+  template <class V>
+  constexpr T value_or(V&& v) const {
+    return *this ? **this : detail_::convert<T>(constexpr_forward<V>(v));
+  }
+
+#endif
 
   // 20.6.3.6, modifiers
   void reset() noexcept {
