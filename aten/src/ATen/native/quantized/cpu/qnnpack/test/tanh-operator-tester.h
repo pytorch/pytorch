@@ -144,9 +144,7 @@ class TanHOperatorTester {
           const float x = inputScale() *
               (int32_t(input[i * inputStride() + c]) -
                int32_t(inputZeroPoint()));
-          const float exp_x = exp(x);
-          const float exp_x_r = exp(-x);
-          const float tanhX = (exp_x - exp_x_r) / (exp_x + exp_x_r);
+          const float tanhX = tanh(x);
           const float scaledTanHX = tanhX / outputScale();
           float y = scaledTanHX;
           y = std::min<float>(y, int32_t(qmax()) - int32_t(outputZeroPoint()));

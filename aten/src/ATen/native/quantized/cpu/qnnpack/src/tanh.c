@@ -108,10 +108,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_tanh_nc_q8(
     const float x =
         input_scale * (float)(i - (int32_t)(uint32_t)input_zero_point);
     /* Scale tanh(x) by 1 / output scale = 256.0 */
-    float expf_x = expf(x);
-    float expf_x_recipocal = expf(-x);
-    float tanh_x = (expf_x - expf_x_recipocal) / (expf_x - expf_x_recipocal);
-    float scaled_tanh_x = 256.0f * tanh_x;
+    float scaled_tanh_x = 256.0f * tanh(x);
     if (scaled_tanh_x < scaled_min) {
       scaled_tanh_x = scaled_min;
     }
