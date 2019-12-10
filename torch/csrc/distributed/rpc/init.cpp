@@ -39,9 +39,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
           module,
           "RpcBackendOptions",
           R"(A structure encapsulating the options passed into the RPC backend.
-            An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc` in order to
-            initialize RPC with specific configurations, such as the RPC timeout
-            and init_method to be used. )")
+            An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc`
+            in order to initialize RPC with specific configurations, such as the
+             RPC timeout and init_method to be used. )")
           .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout,
             R"(A `datetime.timedelta` indicating the timeout to use for all RPCs.
                 If an RPC does not complete in this timeframe, it will complete
@@ -60,7 +60,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
             through :meth:`~torch.distributed.rpc.get_worker_info` and the
             result can be passed in to functions such as
             :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
-            :meth:`~torch.distributed.rpc.remote` to avoid copying a string on every invocation.)")
+            :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
+            every invocation.)")
           .def(
               py::init<std::string, worker_id_t>(),
               py::arg("name"),
