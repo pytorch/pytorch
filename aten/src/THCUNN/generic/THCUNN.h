@@ -282,19 +282,6 @@ THC_API void THNN_(SoftPlus_updateGradInput)(
                   accreal beta,
                   accreal threshold);
 
-THC_API void THNN_(SoftShrink_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal lambda);
-
-THC_API void THNN_(SoftShrink_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  accreal lambda);
-
 THC_API void THNN_(Tanh_updateOutput)(
                   THCState *state,
                   THCTensor *input,
