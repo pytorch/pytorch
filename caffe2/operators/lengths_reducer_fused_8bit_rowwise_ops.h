@@ -8,6 +8,7 @@
 #include "caffe2/operators/reducer_functors.h"
 #include "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.h"
 #include "caffe2/utils/math.h"
+#include "fbgemm/Fbgemm.h"
 
 namespace caffe2 {
 
@@ -52,7 +53,9 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     const std::vector<int64_t> shape = {lengths.size(0), data.size(1) - 8};
     auto* output = Output(0, shape, at::dtype<float>());
 
-    Fused8BitRowwiseEmbeddingLookup(
+    // Calling the JITed kernel from FBGEMM
+    // Will Remove the call to C2/perfkernels/
+    bool success = fbgemm::EmbeddingSpMDM<std::uint8_t, IndexType>(
         /*block_size=*/output->size(1),
         /*output_size=*/output->size(0),
         /*index_size=*/indices.numel(),
@@ -62,7 +65,40 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
         /*lengths=*/lengths.template data<int>(),
         /*weights=*/weights,
         /*normalize_by_lengths=*/is_mean,
-        /*out=*/output->template mutable_data<float>());
+        /*out=*/output->template mutable_data<float>(),
+        /*prefetch distance*/ 16);
+
+    if (success) {
+      return true;
+    }
+
+    int64_t current = 0;
+    auto output_size = output->size(0);
+    auto lengths_ = lengths.template data<IndexType>();
+    auto index_size = indices.numel();
+    auto indices_ = indices.template data<IndexType>();
+    auto data_size = data.size(0);
+
+    for (int m = 0; m < output_size; ++m) {
+      for (int i = 0; i < lengths_[m]; ++i) {
+        CAFFE_ENFORCE_LT(current, index_size);
+        IndexType idx = indices_[current];
+        CAFFE_ENFORCE(
+            0 <= idx && idx < data_size,
+            "Index ",
+            current,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
+        ++current;
+      }
+    }
+    CAFFE_ENFORCE_EQ(
+        current,
+        index_size,
+        "Your input seems to be incorrect: the sum of lengths values should be "
+        "the size of the indices tensor, but it appears not.");
 
     return true;
   }
