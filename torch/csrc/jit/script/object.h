@@ -40,7 +40,7 @@ struct TORCH_API Object {
           v.type()->python_str(),
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
-    } else if (auto v = _ivalue()->type()->getConstant(name)) {
+    } else if (_ivalue()->type()->findConstantSlot(name)) {
       TORCH_CHECK(
           false,
           "Can't set constant '",
@@ -58,8 +58,8 @@ struct TORCH_API Object {
     if (auto r = _ivalue()->type()->findAttributeSlot(name)) {
       return _ivalue()->getSlot(*r);
     }
-    if (_ivalue()->type()->hasConstant(name)) {
-      return *_ivalue()->type()->getConstant(name);
+    if (auto r = _ivalue()->type()->findConstantSlot(name)) {
+      return _ivalue()->type()->getConstant(*r);
     }
     TORCH_CHECK(
         false,
@@ -73,14 +73,14 @@ struct TORCH_API Object {
     if (auto r = _ivalue()->type()->findAttributeSlot(name)) {
       return _ivalue()->getSlot(*r);
     }
-    if (_ivalue()->type()->hasConstant(name)) {
-      return *_ivalue()->type()->getConstant(name);
+    if (auto r = _ivalue()->type()->findConstantSlot(name)) {
+      return _ivalue()->type()->getConstant(*r);
     }
     return or_else;
   }
 
   bool hasattr(const std::string& name) const {
-    return _ivalue()->type()->findAttributeSlot(name).has_value()
+    return _ivalue()->type()->hasAttribute(name)
       || _ivalue()->type()->hasConstant(name);
   }
 
