@@ -51,10 +51,10 @@ defined(TARGET_IPHONE_SIMULATOR)
 void observerConfig() {
   caffe2::ClearGlobalNetObservers();
   caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
-    return std::make_unique<caffe2::PerfNetObserver>(subject);
+    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
   });
   caffe2::ObserverConfig::setReporter(
-      std::make_unique<caffe2::NetObserverReporterPrint>());
+      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
 }
 
 bool backendCudaSet(const string& backend) {
