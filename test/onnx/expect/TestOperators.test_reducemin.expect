@@ -5,6 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
+    name: "ReduceMin_0"
     op_type: "ReduceMin"
     attribute {
       name: "keepdims"

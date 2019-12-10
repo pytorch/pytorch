@@ -76,7 +76,7 @@ inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() const & {
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
-  return toIntrusivePtr<ivalue::Object>();
+  return moveToIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
@@ -470,7 +470,8 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
-C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+// TODO this is deprecated but we don't throw a warning because a lot of ops in native_functions.yaml still return std::vector.
+//C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
