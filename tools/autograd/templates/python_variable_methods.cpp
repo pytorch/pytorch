@@ -570,8 +570,7 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
   }
-  void* data = self_.storage().data_ptr().get();
-  c10::cuda::CUDACachingAllocator::recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
+  c10::cuda::CUDACachingAllocator::recordStream(self_.storage().data_ptr(), at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
   Py_RETURN_NONE;
 #else
   throw std::runtime_error("PyTorch compiled without CUDA support");
