@@ -553,6 +553,18 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
       : futureInfo.startTime_ + futureInfo.timeout_;
 }
 
+std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
+  std::unordered_map<std::string, std::string> metrics;
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+  }
+  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
+  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
+  return metrics;
+}
+
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

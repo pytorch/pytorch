@@ -28,12 +28,24 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   debug_info->setModelName(name());
   debug_info->setMethodName(method_name);
   at::setThreadLocalDebugInfo(debug_info);
+
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    observer->onEnter();
+  }
 #endif
 
   auto m = find_method(method_name);
   stack.insert(stack.begin(), object_);
   m->run(stack);
-  return stack.front();
+  c10::IValue result = stack.front();
+
+#if defined(PYTORCH_MOBILE_OBSERVER)
+  if (observer) {
+    observer->onExit();
+  }
+#endif
+  return result;
 }
 
 Function* Module::find_method(const std::string& basename) const {
