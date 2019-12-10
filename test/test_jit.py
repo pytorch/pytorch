@@ -12549,6 +12549,26 @@ a")
         for a, b in zip(eager_out, script_out):
             check_equal_and_dtype(a, b)
 
+    def test_floordiv(self):
+        funcs_template = dedent('''
+        def fn():
+            ten = {a_construct}
+            ten_or_scalar = {b_construct}
+            return ten // ten_or_scalar, torch.floor_divide(ten, ten_or_scalar)
+        ''')
+
+        lhs = ["torch.tensor([5.5, 3.2])", "torch.tensor([2, 2])", "torch.tensor([3, 2])"]
+        rhs = ["1.5", "2", "4", "1.1"] + lhs
+        for tensor in lhs:
+            for tensor_or_scalar in rhs:
+                funcs_str = funcs_template.format(a_construct=tensor, b_construct=tensor_or_scalar)
+                scope = {}
+                execWrapper(funcs_str, globals(), scope)
+                cu = torch.jit.CompilationUnit(funcs_str)
+                f_script = cu.fn
+                f = scope['fn']
+                self.assertEqual(f_script(), f())
+
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_traced_module(self):
         @_trace(torch.rand(3, 4))

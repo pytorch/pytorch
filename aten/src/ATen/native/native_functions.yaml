@@ -1222,6 +1222,12 @@
     CPU: floor_out
     CUDA: floor_out
 
+- func: floor_divide(Tensor input, Tensor other) -> Tensor
+  supports_named_tensor: True
+
+- func: floor_divide.Scalar(Tensor input, Scalar other) -> Tensor
+  supports_named_tensor: True
+
 - func: frac(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
