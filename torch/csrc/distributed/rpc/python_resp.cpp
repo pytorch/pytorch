@@ -18,7 +18,7 @@ Message PythonResp::toMessage() && {
 }
 
 std::unique_ptr<PythonResp> PythonResp::fromMessage(const Message& message) {
-  return std::make_unique<PythonResp>(
+  return c10::guts::make_unique<PythonResp>(
       message.payload(), message.tensors());
 }
 
