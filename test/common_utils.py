@@ -1370,3 +1370,15 @@ def load_tests(loader, tests, pattern):
             check_test_defined_in_running_script(test)
             test_suite.addTest(test)
     return test_suite
+
+
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
+    # call assert function rather than returning a bool since it's nicer
+    # if we get whether this failed on the gradcheck or the gradgradcheck.
+    test_case.assertTrue(gradcheck(apply_fn, inputs))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
+
+
+dtype2prec = {torch.float: 1e-5,
+              torch.double: 1e-5,
+              torch.half: 1e-2}

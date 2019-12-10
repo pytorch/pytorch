@@ -4284,7 +4284,7 @@ class _TestTorchMixin(object):
             return module
 
         with filecontext_lambda() as checkpoint:
-            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.py')
+            fname = get_file_path_2(os.path.dirname(__file__), 'torch', 'testlib', 'data', 'network1.py')
             module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
@@ -4297,7 +4297,7 @@ class _TestTorchMixin(object):
                     self.assertEquals(len(w), 0)
 
             # Replace the module with different source
-            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network2.py')
+            fname = get_file_path_2(os.path.dirname(__file__), 'torch', 'testlib', 'data', 'network2.py')
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:

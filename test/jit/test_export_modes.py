@@ -12,7 +12,7 @@ from torch.autograd import Variable
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
+from torch.testlib.jit_utils import JitTestCase
 from torch.testlib.common_utils import skipIfNoLapack
 
 if __name__ == '__main__':

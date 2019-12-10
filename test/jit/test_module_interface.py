@@ -4,7 +4,7 @@
 from typing import List
 import torch
 import torch.nn as nn
-from jit_utils import JitTestCase
+from torch.testlib.jit_utils import JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

@@ -455,6 +455,8 @@ def read_expected_content(function_ptr):
     test_dir = os.path.dirname(sys.modules[module_id].__file__)
     functionName = function_ptr.id().split('.')[-1]
     expected_file = os.path.join(test_dir,
+                                 "torch",
+                                 "testlib",
                                  "expect",
                                  'TestTensorBoard.' + functionName + ".expect")
     assert os.path.exists(expected_file)

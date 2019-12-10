@@ -9,7 +9,7 @@ import torch.nn.functional as F
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase, RUN_CUDA
+from torch.testlib.jit_utils import JitTestCase, RUN_CUDA
 from torch.testlib.common_utils import slowTest, suppress_warnings
 
 if __name__ == '__main__':
