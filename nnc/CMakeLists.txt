@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.5)
+project(nnc)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -mavx2 -march=native")
+
+set(default_build_type "Release")
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE STRING "Choose the type of build" FORCE)
+endif()
+
+file(GLOB SRCS src/*.cc)
+
+add_library(nnc ${SRCS})
+target_include_directories(nnc PUBLIC "include")
+
+add_custom_target(cpptest)
+add_subdirectory(tests/googletest/ EXCLUDE_FROM_ALL)
+file(GLOB TEST_SRCS tests/*.cc)
+foreach(test_path ${TEST_SRCS})
+  get_filename_component(filename ${test_path} NAME)
+  string(REPLACE ".cc" "" test_exec ${filename})
+  add_executable(${test_exec} ${test_path})
+  add_dependencies(cpptest ${test_exec})
+  target_link_libraries(${test_exec} nnc gtest_main gtest)
+  set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_ALL 1)
+  set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD 1)
+endforeach()
