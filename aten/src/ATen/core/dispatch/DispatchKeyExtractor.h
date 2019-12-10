@@ -48,13 +48,87 @@ namespace detail {
     }
   };
 
+  struct TensorOptionsAccumulator : at::IterArgs<TensorOptionsAccumulator> {
+    TensorOptions options;
+    void operator()(c10::optional<ScalarType> dtype) {
+      if (dtype.has_value()) {
+        options = options.dtype(*dtype);
+      }
+      else {
+        // Following the TensorOptions logic where in case of undefined
+        // dtype, default dtype is returned.
+        // Issue https://github.com/pytorch/pytorch/issues/30405
+        options = options.dtype(at::get_default_dtype());
+      }
+    }
+    void operator()(c10::optional<Device> device) {
+      if (device.has_value()) {
+        options = options.device(*device);
+      }
+    }
+    void operator()(c10::optional<Layout> layout) {
+      if (layout.has_value()) {
+        options = options.layout(*layout);
+      }
+    }
+    void operator()(c10::optional<bool> pin_memory) {
+      if (pin_memory.has_value()) {
+        options = options.pinned_memory(*pin_memory);
+      }
+    }
+    void operator()(ScalarType dtype) {
+      options = options.dtype(dtype);
+    }
+    void operator()(Device device) {
+      options = options.device(device);
+    }
+    void operator()(Layout layout) {
+      options = options.layout(layout);
+    }
+    void operator()(bool pin_memory) {
+      options = options.pinned_memory(pin_memory);
+    }
+    template <typename T>
+    void operator()(const T& x) {
+      // do nothing
+    }
+  };
+
+
+  // NOTE: [schema mismatch in native_functions.yaml]
+  // Due to this issue we have to check for two sets of TensorOptions types:
+  // optinal and non-optional.
+  // issue https://github.com/pytorch/pytorch/issues/30763
+  // issue https://github.com/pytorch/pytorch/issues/30405
+  template<class Arg> using arg_is_tensor_option_arg = guts::typelist::contains<
+     guts::typelist::typelist<ScalarType, Layout, Device, bool>,
+     guts::remove_const_t<guts::remove_reference_t<Arg>>>;
+
+  template<class Arg> using arg_is_tensor_option_opt_arg = guts::typelist::contains<
+     guts::typelist::typelist<c10::optional<ScalarType>,
+                              c10::optional<Layout>,
+                              c10::optional<Device>,
+                              c10::optional<bool>>,
+     guts::remove_const_t<guts::remove_reference_t<Arg>>>;
+
+  template<class... Args> using args_have_tensor_options = guts::disjunction<
+     arg_is_tensor_option_arg<Args>..., arg_is_tensor_option_opt_arg<Args>...>;
+
   // NB: take by const reference (Don't do universal forwarding here! You
   // don't want to move into this function!)
   template <typename... Args>
   TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
-    return MultiDispatchTensorTypeSet().apply(args...).ts;
+    auto type_set = MultiDispatchTensorTypeSet().apply(args...);
+
+    if (args_have_tensor_options<Args...>::value) {
+      TensorOptions tensorOptions = TensorOptionsAccumulator().apply(args...).options;
+      if (tensorOptions.has_dtype() && tensorOptions.has_device() && tensorOptions.has_layout()) {
+        type_set(tensorOptions);
+      }
+    }
+    return type_set.ts;
   }
-}
+ }
 
 /**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given
