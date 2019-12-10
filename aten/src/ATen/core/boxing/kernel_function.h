@@ -11,11 +11,11 @@ namespace detail {
   template<class FuncType, FuncType* kernel_func, class ReturnType, class... Parameters>
   class WrapKernelFunction_<FuncType, kernel_func, ReturnType, guts::typelist::typelist<Parameters...>> final : public c10::OperatorKernel {
   public:
-    decltype(auto) operator()(Parameters... args) {
+    auto operator()(Parameters... args) -> decltype((*kernel_func)(std::forward<Parameters>(args)...)) {
       return (*kernel_func)(std::forward<Parameters>(args)...);
     }
   };
-  template<class FuncType, FuncType* kernel_func, class Enable = std::enable_if_t<guts::is_function_type<FuncType>::value>>
+  template<class FuncType, FuncType* kernel_func, class Enable = guts::enable_if_t<guts::is_function_type<FuncType>::value>>
   struct WrapKernelFunction final {
     using type = WrapKernelFunction_<
         FuncType,

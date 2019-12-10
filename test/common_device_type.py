@@ -349,6 +349,27 @@ class skipCUDAIf(skipIf):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
 
+class expectedFailure(object):
+
+    def __init__(self, device_type):
+        self.device_type = device_type
+
+    def __call__(self, fn):
+
+        @wraps(fn)
+        def efail_fn(slf, device, *args, **kwargs):
+            if self.device_type is None or self.device_type == slf.device_type:
+                try:
+                    fn(slf, device, *args, **kwargs)
+                except Exception:
+                    return
+                else:
+                    slf.fail('expected test to fail, but it passed')
+
+            return fn(slf, device, *args, **kwargs)
+        return efail_fn
+
+
 class onlyOn(object):
 
     def __init__(self, device_type):
@@ -477,6 +498,10 @@ def onlyCPU(fn):
 
 def onlyCUDA(fn):
     return onlyOn('cuda')(fn)
+
+
+def expectedFailureCUDA(fn):
+    return expectedFailure('cuda')(fn)
 
 
 # Skips a test on CPU if LAPACK is not available.

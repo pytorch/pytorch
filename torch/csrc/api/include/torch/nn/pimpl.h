@@ -129,7 +129,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// NOTE: std::forward is qualified to prevent VS2017 emitting
   ///       error C2872: 'std': ambiguous symbol
   template <typename Arg>
-  decltype(auto) operator[](Arg&& arg) {
+  auto operator[](Arg&& arg) -> decltype((*impl_)[::std::forward<Arg>(arg)]) {
     return (*impl_)[::std::forward<Arg>(arg)];
   }
 

@@ -86,7 +86,7 @@ class reverse_iterator
   constexpr reverse_iterator(const reverse_iterator& __x)
       : current(__x.current) {}
 
-  constexpr reverse_iterator& operator=(
+  AT_CPP14_CONSTEXPR reverse_iterator& operator=(
       const reverse_iterator& rhs) noexcept {
     current = rhs.current;
   }
@@ -100,32 +100,42 @@ class reverse_iterator
   }
 
   constexpr reference operator*() const {
+#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
     _Iterator iter = current;
     return *--iter;
+#else
+    // Only works for random access iterators if we're not C++14 :(
+    return *(current - 1);
+#endif
   }
 
   constexpr pointer operator->() const {
+#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
     _Iterator iter = current;
     return _S_to_pointer(--iter);
+#else
+    // Only works for random access iterators if we're not C++14 :(
+    return _S_to_pointer(current - 1);
+#endif
   }
 
-  constexpr reverse_iterator& operator++() {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator++() {
     --current;
     return *this;
   }
 
-  constexpr reverse_iterator operator++(int) {
+  AT_CPP14_CONSTEXPR reverse_iterator operator++(int) {
     reverse_iterator __tmp = *this;
     --current;
     return __tmp;
   }
 
-  constexpr reverse_iterator& operator--() {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator--() {
     ++current;
     return *this;
   }
 
-  constexpr reverse_iterator operator--(int) {
+  AT_CPP14_CONSTEXPR reverse_iterator operator--(int) {
     reverse_iterator __tmp = *this;
     ++current;
     return __tmp;
@@ -135,7 +145,7 @@ class reverse_iterator
     return reverse_iterator(current - __n);
   }
 
-  constexpr reverse_iterator& operator+=(difference_type __n) {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator+=(difference_type __n) {
     current -= __n;
     return *this;
   }
@@ -144,7 +154,7 @@ class reverse_iterator
     return reverse_iterator(current + __n);
   }
 
-  constexpr reverse_iterator& operator-=(difference_type __n) {
+  AT_CPP14_CONSTEXPR reverse_iterator& operator-=(difference_type __n) {
     current += __n;
     return *this;
   }
@@ -250,9 +260,10 @@ inline constexpr bool operator>=(
 }
 
 template <typename _IteratorL, typename _IteratorR>
-inline constexpr decltype(auto) operator-(
+inline constexpr auto operator-(
     const reverse_iterator<_IteratorL>& __x,
-    const reverse_iterator<_IteratorR>& __y) {
+    const reverse_iterator<_IteratorR>& __y)
+    -> decltype(__y.base() - __x.base()) {
   return __y.base() - __x.base();
 }
 
@@ -276,7 +287,8 @@ inline constexpr reverse_iterator<_Iterator> make_reverse_iterator(
 }
 
 template <typename _Iterator>
-decltype(auto) __niter_base(reverse_iterator<_Iterator> __it) {
+auto __niter_base(reverse_iterator<_Iterator> __it)
+    -> decltype(__make_reverse_iterator(__niter_base(__it.base()))) {
   return __make_reverse_iterator(__niter_base(__it.base()));
 }
 
