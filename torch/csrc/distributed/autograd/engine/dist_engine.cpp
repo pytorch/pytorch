@@ -18,6 +18,30 @@ using torch::autograd::Node;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
+static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
+static constexpr char* kNumThreadsBlocked = "num_threads_blocked_in_backward";
+static constexpr char* kEngineCPUQueueSize =
+    "local_autograd_engine_cpu_queue_size";
+static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
+
+namespace {
+
+static std::atomic<int> num_threads_blocked_in_backward(0);
+
+// Guard to keep track of threads blocked in the autograd backward call.
+class ThreadsBlockedGuard {
+ public:
+  explicit ThreadsBlockedGuard() {
+    num_threads_blocked_in_backward++;
+  }
+
+  ~ThreadsBlockedGuard() {
+    num_threads_blocked_in_backward--;
+  }
+};
+
+} // anonymous namespace
+
 DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
 
@@ -179,6 +203,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   // gradients.
   // TODO: make this non-blocking
   // (https://github.com/pytorch/pytorch/issues/26359)
+  ThreadsBlockedGuard guard;
   variable_list grads = engine_.execute_with_graph_task(
       autogradContext->retrieveGraphTask(), graphRoot);
 
@@ -278,6 +303,18 @@ void DistEngine::clearInitializedContextId(int64_t contextId) {
 size_t DistEngine::numBackwardPasses() const {
   std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
   return initializedContextIds_.size();
+}
+
+std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
+  std::unordered_map<std::string, std::string> debugInfo;
+  debugInfo[kNumBackwardPasses] = std::to_string(numBackwardPasses());
+  debugInfo[kNumThreadsBlocked] =
+      std::to_string(num_threads_blocked_in_backward.load());
+  debugInfo[kEngineCPUQueueSize] =
+      std::to_string(engine_.ready_queue_size(at::kCPU));
+  debugInfo[kNumAutogradContexts] = std::to_string(
+      DistAutogradContainer::getInstance().numAutogradContexts());
+  return debugInfo;
 }
 
 } // namespace autograd
