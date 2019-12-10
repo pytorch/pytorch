@@ -9,6 +9,7 @@ from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
+
 class Transformer(Module):
     r"""A transformer model. User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
@@ -65,7 +66,7 @@ class Transformer(Module):
     def forward(self, src, tgt, src_mask=None, tgt_mask=None,
                 memory_mask=None, src_key_padding_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
-        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor])
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor  # noqa
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -161,7 +162,7 @@ class TransformerEncoder(Module):
         self.norm = norm
 
     def forward(self, src, mask=None, src_key_padding_mask=None):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor])
+        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -209,7 +210,7 @@ class TransformerDecoder(Module):
     def forward(self, tgt, memory, tgt_mask=None,
                 memory_mask=None, tgt_key_padding_mask=None,
                 memory_key_padding_mask=None):
-        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor])
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -278,7 +279,7 @@ class TransformerEncoderLayer(Module):
         super(TransformerEncoderLayer, self).__setstate__(state)
 
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor])
+        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -346,7 +347,7 @@ class TransformerDecoderLayer(Module):
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
-        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor])
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
