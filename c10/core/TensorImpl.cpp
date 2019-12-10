@@ -183,10 +183,7 @@ int64_t TensorImpl::stride(int64_t d) const {
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
-  if (set_zero_dim) {
-    resize_dim(0);
-  }
+  TORCH_INTERNAL_ASSERT(false, "maybe_zero_dim should not be called anymore");
   return this;
 }
 
