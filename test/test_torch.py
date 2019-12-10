@@ -38,6 +38,7 @@ from torch.testlib.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride
 import torch.backends.quantized
+import torch.testlib.data
 
 
 # load_tests from torch.testlib.common_utils is used to automatically filter tests for
@@ -4284,7 +4285,7 @@ class _TestTorchMixin(object):
             return module
 
         with filecontext_lambda() as checkpoint:
-            fname = get_file_path_2(os.path.dirname(__file__), 'torch', 'testlib', 'data', 'network1.py')
+            fname = get_file_path_2(os.path.dirname(torch.testlib.data.__file__), 'network1.py')
             module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
@@ -4297,7 +4298,7 @@ class _TestTorchMixin(object):
                     self.assertEquals(len(w), 0)
 
             # Replace the module with different source
-            fname = get_file_path_2(os.path.dirname(__file__), 'torch', 'testlib', 'data', 'network2.py')
+            fname = get_file_path_2(os.path.dirname(torch.testlib.data.__file__), 'network2.py')
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
