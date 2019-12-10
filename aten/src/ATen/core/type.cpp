@@ -141,73 +141,78 @@ ListTypePtr ListType::ofBools() {
   return value;
 }
 
-c10::optional<TypePtr> tryEitherIsTheSuperType(const TypePtr& t1, const TypePtr& t2) {
-  if (t1->isSubtypeOf(t2)) {
-    return t2;
-  } else if (t2->isSubtypeOf(t1)) {
-    return t1;
-  } else {
-    return c10::nullopt;
-  }
-}
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
-  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
-  if (auto maybe_supertype = tryEitherIsTheSuperType(t1, t2)) {
-    return *maybe_supertype;
+c10::optional<TypePtr> unifyTypes(const TypePtr& type1_input, const TypePtr& type2_input) {
+  if (type1_input->kind() == TensorType::Kind && type2_input->kind() == TensorType::Kind) {
+    return type1_input->expect<TensorType>()->merge(type2_input->expect<TensorType>());
+  }
+
+  // For direct subtyping relations, and type containers which are immutable
+  // (Optionals, Tuples) we first try to merge types with specialized
+  // tensor types, and then try again with unspecialized tensor types.
+  // For example:
+  // unifyTypes(BoolTensor, None) -> Optional[BoolTensor]
+  // unifyTypes(Optional[BoolTensor], Tensor)
+  // In this case there is no subtyping relationship, because not (Tensor <: BoolTensor)
+  // so we the initial unification with complete tensor types will fail.
+  // The second pass with unshapedTypes will succeed
+
+  auto t1 = type1_input;
+  auto t2 = type2_input;
+  for (auto use_unshaped : {false, true}) {
+    if (use_unshaped) {
+      t1 = unshapedType(t1);
+      t2 = unshapedType(t2);
+    }
+
+    //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+    if (t1->isSubtypeOf(t2)) {
+      return t2;
+    } else if (t2->isSubtypeOf(t1)) {
+      return t1;
+    }
+
+    // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
+    if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
+      return OptionalType::create(t2);
+    } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
+      return OptionalType::create(t1);
+    }
+
+    if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
+      auto tuple1 = t1->cast<TupleType>();
+      auto tuple2 = t2->cast<TupleType>();
+      if (tuple1->elements().size() != tuple2->elements().size()) {
+        return c10::nullopt;
+      }
+      std::vector<TypePtr> elements;
+      for (size_t i = 0; i < tuple1->elements().size(); i++) {
+        if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
+          elements.push_back(*elem);
+        } else {
+          return c10::nullopt;
+        }
+      }
+      return static_cast<TypePtr>(TupleType::create(elements));
+    }
   }
 
   // NB: we do not return NumberType because there is not currently enough
   // operator support for it
 
-  if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
-  }
+  // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
+  // int?[] = std::vector<IValue>  we don't allow type coercion,
+  // since t1 & t2 may have different runtime representations. if we did, we would
+  // we would try to unify the List element type.
+  // as is, List is covered by EitherIsTheSuperType call above
 
-  if (t1->isSubtypeOf(TensorType::get()) && t2->isSubtypeOf(TensorType::get())) {
-    return static_cast<TypePtr>(TensorType::get());;
-  }
-
-  // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
-  if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
-    return OptionalType::create(t2);
-  } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
-    return OptionalType::create(t1);
-  }
-
-  //types which contain other types
-  if (t1->cast<ListType>() && t2->cast<ListType>()) {
-    // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
-    // int?[] = std::vector<IValue>  we don't allow type coercion,
-    // since t1 & t2 may have different runtime representations.
-
-    // allow Lists of different tensor types
-    auto unshaped_t1 = unshapedType(t1);
-    auto unshaped_t2 = unshapedType(t2);
-    return tryEitherIsTheSuperType(unshaped_t1, unshaped_t2);
-  } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
-    auto tuple1 = t1->cast<TupleType>();
-    auto tuple2 = t2->cast<TupleType>();
-    if (tuple1->elements().size() != tuple2->elements().size()) {
-      return c10::nullopt;
-    }
-    std::vector<TypePtr> elements;
-    for (size_t i = 0; i < tuple1->elements().size(); i++) {
-      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
-        elements.push_back(*elem);
-      } else {
-        return c10::nullopt;
-      }
-    }
-    return static_cast<TypePtr>(TupleType::create(elements));
-  } else if (t1->cast<DictType>() && t2->cast<DictType>()) {
+  // Dicts are not specialized, so we can unify contained types
+  if (t1->cast<DictType>() && t2->cast<DictType>()) {
     auto dict1 = t1->cast<DictType>();
     auto dict2 = t2->cast<DictType>();
 
     auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
-    auto unshaped_value1 = unshapedType(dict1->getValueType());
-    auto unshaped_value2 = unshapedType(dict2->getValueType());
-    auto unified_value = tryEitherIsTheSuperType(unshaped_value1, unshaped_value2);
+    auto unified_value = unifyTypes(dict1->getValueType(), dict2->getValueType());
     if (!unified_key || !unified_value) {
       return c10::nullopt;
     }
