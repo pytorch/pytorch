@@ -2502,17 +2502,16 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                 and len(scale_factor) != dim:
             raise ValueError('scale_factor shape must match input shape. '
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
-        if scale_factor is not None:
-            if use_scale_factor is None:
-                # only warn when the scales have floating values since
-                # the result for ints is the same with/without use_scale_factor
-                is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
-                if is_float_scale_factor:
-                    warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                                  "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
-                                  "instead of relying on the computed output size. "
-                                  "If you wish to keep the old behavior, please set use_scale_factor=False. "
-                                  "See the documentation of nn.Upsample for details. ")
+        if scale_factor is not None and use_scale_factor is None:
+            # only warn when the scales have floating values since
+            # the result for ints is the same with/without use_scale_factor
+            is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
+            if is_float_scale_factor:
+                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
+                              "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                              "instead of relying on the computed output size. "
+                              "If you wish to keep the old behavior, please set use_scale_factor=False. "
+                              "See the documentation of nn.Upsample for details. ")
 
     def _output_size(dim):
         _check_size_scale_factor(dim)
