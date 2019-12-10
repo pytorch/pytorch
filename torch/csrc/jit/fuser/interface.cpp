@@ -78,7 +78,8 @@ bool isFusible(const Node* const node) {
     case c10::kCPU:
       return cpu::isFusibleOnCPU(node);
     case c10::kCUDA:
-      return false;
+      return cuda::isFusibleOnCUDA(node);
+      //return false;
     default:
       return false;
   }
@@ -96,7 +97,7 @@ int fuse(const Node* const node) {
     case c10::kCPU:
       return cpu::fuseOnCPU(node);
     case c10::kCUDA:
-      return -1;
+      return cuda::fuseOnCUDA(node);
     default:
       TORCH_CHECK(false, "Trying to fuse on device type that doesn't support fusion!");
   }
@@ -112,6 +113,7 @@ void compileFusion(Node* fusion) {
       cpu::compileFusionOnCPU(fusion);
       return;
     case c10::kCUDA:
+      cuda::compileFusionOnCUDA(fusion);
       return;
     default:
       TORCH_CHECK(false, "Trying to fuse on device type that doesn't support fusion!");
@@ -127,7 +129,8 @@ void callFusion(const Node* const fusion, Stack& stack) {
   const Graph& graph = *fusion->g(attr::Subgraph);
   const auto nInputs = graph.inputs().size();
   at::ArrayRef<IValue> inputs = last(stack, nInputs);
-  drop(stack, nInputs);
+  //Life time issue, can't drop inputs from stack yet, as inputs are `ArrayRef`
+  //drop(stack, nInputs);
 
   // Constructs output
   std::vector<at::Tensor> outputs;
@@ -153,8 +156,12 @@ void callFusion(const Node* const fusion, Stack& stack) {
   // Adds outputs to stack
   stack.insert(
     stack.end()
-  , std::make_move_iterator(outputs.begin())
-  , std::make_move_iterator(outputs.end()));
+  , outputs.begin()
+  , outputs.end());
+  // Life time issue, can't remove outputs from stack yet, as outputs is used
+  // later in callFusionOnXXX;
+  //, std::make_move_iterator(outputs.begin())
+  //, std::make_move_iterator(outputs.end()));
 
   // Calls fusion
   const auto device = *(graph.outputs()[0]->type()->expect<TensorType>()->device());
@@ -163,10 +170,12 @@ void callFusion(const Node* const fusion, Stack& stack) {
       cpu::callFusionOnCPU(fusion, outputs, inputs);
       return;
     case c10::kCUDA:
+      cuda::callFusionOnCUDA(fusion, outputs, inputs);
       return;
     default:
       TORCH_CHECK(false, "Acquired an unknown fusion device type!");
   }
+  drop(stack, nInputs);
 }
 
 
