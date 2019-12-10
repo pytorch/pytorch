@@ -48,6 +48,13 @@ public class Module {
     return mNativePeer.runMethod(methodName, inputs);
   }
 
+  public void setNumThreads(int numThreads) {
+    if (numThreads < 1) {
+        throw new IllegalArgumentException("Number of threads cannot be less than 1");
+    }
+    mNativePeer.setNumThreads(numThreads);
+  }
+
   /**
    * Explicitly destroys the native torch::jit::script::Module. Calling this method is not required,
    * as the native object will be destroyed when this object is garbage-collected. However, the
