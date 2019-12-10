@@ -9,7 +9,7 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 # TODO: Update these variables when there
 # is a new ir_version and producer_version
 # and use these values in the exporter
-ir_version = 4
+ir_version = 6
 producer_name = "pytorch"
 producer_version = "1.3"
 
