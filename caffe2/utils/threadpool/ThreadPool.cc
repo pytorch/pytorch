@@ -88,7 +88,6 @@ int ThreadPool::getNumThreads() const {
 }
 
 void ThreadPool::setNumThreads(size_t numThreads) {
-  //std::lock_guard<std::mutex> guard(numThreadsMutex_);
   numThreads_ = numThreads;
 }
 
@@ -101,11 +100,7 @@ void ThreadPool::setMinWorkSize(size_t size) {
 }
 
 void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
-  const auto numThreads = numThreads_; 
-  //const auto numThreads = [&](){
-  //  std::lock_guard<std::mutex> g{numThreadsMutex_};
-  //  return numThreads_;
-  //}();
+  const auto numThreads = numThreads_.load(std::memory_order_relaxed); 
 
   std::lock_guard<std::mutex> guard(executionMutex_);
   // If there are no worker threads, or if the range is too small (too

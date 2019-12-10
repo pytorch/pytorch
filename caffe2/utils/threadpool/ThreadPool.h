@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <atomic>
 
 #include "caffe2/core/common.h"
 
@@ -51,9 +52,8 @@ class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
 
  private:
   std::mutex executionMutex_;
-  //std::mutex numThreadsMutex_;
   size_t minWorkSize_;
-  size_t numThreads_;
+  std::atomic_size_t numThreads_;
   std::shared_ptr<WorkersPool> workersPool_;
   std::vector<std::shared_ptr<Task>> tasks_;
 };
