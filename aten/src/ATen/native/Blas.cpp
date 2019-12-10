@@ -9,10 +9,9 @@ namespace at { namespace native {
 DEFINE_DISPATCH(addmv_stub);
 
 Tensor &addmv_out(Tensor& result, const Tensor &self_, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
-#ifdef BUILD_NAMEDTENSOR
   { // scope of NoNamesGuard
+
   at::NoNamesGuard guard;
-#endif
   auto result_sizes = std::vector<int64_t> {mat.size(0)};
   if (!result.defined()) {
     result = at::empty(result_sizes, mat.options());
@@ -39,10 +38,8 @@ Tensor &addmv_out(Tensor& result, const Tensor &self_, const Tensor &mat, const 
     addmv_stub(self.device().type(), result, self, mat, vec, beta, alpha);
   }
 
-#ifdef BUILD_NAMEDTENSOR
   } // scope of NoNamesGuard
   at::namedinference::propagate_names_for_addmv(result, mat, vec, self_);
-#endif
   return result;
 }
 

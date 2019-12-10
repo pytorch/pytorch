@@ -44,8 +44,8 @@ CONFIG_TREE_DATA = [
                     ("libtorch", [XImportant(True)])
                 ]),
             ]),
-            ("9.2", [XImportant("3.6")]),
-            ("10", [XImportant("3.6")]),
+            ("9.2", [X("3.6")]),
+            ("10", [X("3.6")]),
             ("10.1", [XImportant("3.6")]),
         ]),
         ("android", [
