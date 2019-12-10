@@ -176,9 +176,9 @@ struct FunctionSchema {
   //      this schema must provide default values.
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
-      std::ostream* why_not = nullptr) const;
+      std::ostream* why_not=nullptr) const;
 
- private:
+private:
   OperatorName name_;
   std::vector<Argument> arguments_;
   std::vector<Argument> returns_;
