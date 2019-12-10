@@ -2,6 +2,9 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
+#ifdef USE_FBGEMM
+#include "fbgemm/Fbgemm.h"
+#endif
 
 namespace caffe2 {
 
@@ -76,6 +79,67 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
       in_weight = weightInput.template data<T>();
     }
 
+    constexpr bool is_input_float = std::is_same<InputType, float>::value;
+
+#ifdef USE_FBGEMM
+    if (is_input_float) {
+      auto success = fbgemm::EmbeddingSpMDM<float, IndexType>(
+          D,
+          M,
+          indices_size,
+          N,
+          ((const float*)(in_data)),
+          indices,
+          lengths,
+          in_weight,
+          USE_MEAN,
+          out_data,
+          16,
+          USE_POSITIONAL_WEIGHT);
+      if (success) {
+        return true;
+      }
+
+      int64_t current = 0;
+      for (int m = 0; m < M; ++m) {
+        for (int i = 0; i < lengths[m]; ++i) {
+          CAFFE_ENFORCE_LT(current, indices_size);
+          IndexType idx = indices[current];
+          CAFFE_ENFORCE(
+              0 <= idx && idx < N,
+              "Index ",
+              current,
+              " is out of bounds: ",
+              idx,
+              ", range 0 to ",
+              N);
+          ++current;
+        }
+      }
+      CAFFE_ENFORCE_EQ(
+          current,
+          indices_size,
+          "Your input seems to be incorrect: the sum of lengths values should be "
+          "the size of the indices tensor, but it appears not.");
+      return true;
+
+    } else {
+      // delegate work to perfkernel that branches based on architecture
+      EmbeddingLookup<IndexType, InputType, T, USE_POSITIONAL_WEIGHT>(
+          D,
+          M,
+          indices_size,
+          N,
+          in_data,
+          indices,
+          lengths,
+          in_weight,
+          nullptr, // scale_bias field is only used in
+                   // SparseLengths8BitsRowwiseOp
+          USE_MEAN,
+          out_data);
+    }
+#else
     // delegate work to perfkernel that branches based on architecture
     EmbeddingLookup<IndexType, InputType, T, USE_POSITIONAL_WEIGHT>(
         D,
@@ -86,9 +150,12 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
         indices,
         lengths,
         in_weight,
-        nullptr, // scale_bias field is only used in SparseLengths8BitsRowwiseOp
+        nullptr, // scale_bias field is only used in
+                 // SparseLengths8BitsRowwiseOp
         USE_MEAN,
         out_data);
+#endif
+
     return true;
   }
 
