@@ -617,6 +617,10 @@ class InsertQuantDeQuantHelper {
     script::Module& module,
     const std::string& method_name);
 
+  ModuleMethodVector getInvokedMethods(
+      script::Module& module,
+      const std::string& method_name);
+
   // Get quantization parameter map of the given Value in Graph
   // by searching for observer module of the value and extract the
   // quantization parameters from the observer module
@@ -783,9 +787,51 @@ c10::optional<script::Module> InsertQuantDeQuantHelper::findChildModuleToQuantiz
   return c10::nullopt;
 }
 
+ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
+    script::Module& module,
+    const std::string& method_name) {
+  auto graph = module.get_method(method_name).graph();
+
+  ModuleMethodVector invoked_methods;
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (n->kind() == prim::CallMethod) {
+        auto module_instance = n->inputs()[0];
+        auto module_method_name = n->s(attr::name);
+        c10::optional<script::Module> m;
+        // calling method on self
+        if (module_instance == graph->inputs()[0]) {
+          m = module;
+        } else {
+          m = findChildModuleToQuantize(module, module_instance);
+        }
+        if (m) {
+          invoked_methods.push_back({*m, module_method_name});
+        }
+      }
+
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  return invoked_methods;
+}
+
+
 void InsertQuantDeQuantHelper::run(
     script::Module& module,
     const std::string& method_name) {
+  for (auto& invoked_methods: getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_methods);
+    const auto& invoked_method_name = std::get<1>(invoked_methods);
+    run(invoked_module, invoked_method_name);
+  }
+
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
@@ -810,20 +856,6 @@ void InsertQuantDeQuantHelper::run(
       for (Value* v : n->outputs()) {
         if (!v->type()->isSubtypeOf(TensorType::get())) {
           continue;
-        }
-        if (v->node()->kind() == prim::CallMethod) {
-          auto module_instance = v->node()->inputs()[0];
-          auto module_method_name = v->node()->s(attr::name);
-          c10::optional<script::Module> m;
-          // calling method on self
-          if (module_instance == graph->inputs()[0]) {
-            m = module;
-          } else {
-            m = findChildModuleToQuantize(module, module_instance);
-          }
-          if (m) {
-            run(m.value(), module_method_name);
-          }
         }
         collectObserverNodesAndValueToQuantize(module, v);
       }
