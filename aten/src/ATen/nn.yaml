@@ -35,10 +35,6 @@
 
 # Activation functions
 
-- name: _thnn_elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
-  cname: ELU
-  has_inplace: True
-
 - name: _thnn_glu(Tensor self, int64_t dim)
   cname: GatedLinear
   wrap_dim:

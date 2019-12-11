@@ -135,6 +135,28 @@ void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
 
 #endif // AT_MKL_ENABLED()
 
+void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_cpu", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    cpu_kernel(it, [=](scalar_t a) -> scalar_t {
+      return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+    });
+  });
+}
+
+void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    cpu_kernel(it, [=](scalar_t a, scalar_t b) -> scalar_t {
+      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+    });
+  });
+}
+
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
@@ -253,6 +275,8 @@ void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
 } // namespace
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
+REGISTER_DISPATCH(elu_stub, &elu_kernel);
+REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);

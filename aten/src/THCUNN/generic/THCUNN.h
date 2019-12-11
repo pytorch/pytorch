@@ -42,24 +42,6 @@ THC_API void THNN_(ClassNLLCriterion_updateGradInput)(
                   THCTensor *total_weight,
                   int64_t ignore_index);
 
-THC_API void THNN_(ELU_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal alpha,
-                  accreal scale,
-                  accreal input_scale,
-                  bool inplace);
-
-THC_API void THNN_(ELU_updateGradInput)(
-                  THCState *state,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *output,
-                  accreal alpha,
-                  accreal scale,
-                  accreal input_scale);
-
 THC_API void THNN_(GatedLinear_updateOutput)(
                   THCState *state,
                   THCTensor *input,
