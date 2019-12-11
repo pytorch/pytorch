@@ -1,8 +1,5 @@
 #include <ATen/native/layer_norm.h>
 
-#include <array>
-#include <numeric>
-
 #include <cmath>
 
 #include <ATen/ATen.h>
