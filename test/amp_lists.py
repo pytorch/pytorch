@@ -18,7 +18,7 @@ class AmpLists(object):
         mat2_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
         mat3_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
         mat4_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
-        
+
         conv_args_fp32 = [(torch.randn((8, 8, *(8,) * dims), dtype=torch.float32, device="cuda"),
                      torch.randn((8, *(8,) * (dims + 1)), dtype=torch.float32, device="cuda"))
                      for dims in (1, 2, 3)]
@@ -75,12 +75,50 @@ class AmpLists(object):
         ]
         self.torch_fp32 = [
             ("acos", (pointwise0_fp16[0].clamp(-.9, 0.9),)),
+            ("asin", (pointwise0_fp16[0].clamp(-.9, 0.9),)),
+            ("cosh", pointwise0_fp16),
+            ("erfinv", (pointwise0_fp16[0].clamp(-.9, .9),)),
+            ("exp", pointwise0_fp16),
+            ("expm1", pointwise0_fp16),
+            ("log", (pointwise0_fp16[0].clamp(0.1, 100.0),)),
+            ("log10", (pointwise0_fp16[0].clamp(0.1, 100.0),)),
+            ("log2", (pointwise0_fp16[0].clamp(0.1, 100.0),)),
+            ("log1p", (pointwise0_fp16[0].clamp(-0.9, 100.0),)),
+            ("reciprocal", pointwise0_fp16),
+            ("rsqrt", (pointwise0_fp16[0].clamp(0.0, 100.0),)),
+            ("sinh", pointwise0_fp16),
+            ("tan", (pointwise0_fp16[0].clamp(-3.1/2, 3.1/2),)),
         ]
         self.torch_fp32_inplace = [
             ("acos_", (pointwise0_fp32[0].clamp(-.9, 0.9),)),
+            ("asin_", (pointwise0_fp32[0].clamp(-.9, 0.9),)),
+            ("cosh_", pointwise0_fp32),
+            ("exp_", pointwise0_fp32),
+            ("expm1_", pointwise0_fp32),
+            ("log_", (pointwise0_fp32[0].clamp(0.1, 100.0),)),
+            ("log10_", (pointwise0_fp32[0].clamp(0.1, 100.0),)),
+            ("log2_", (pointwise0_fp32[0].clamp(0.1, 100.0),)),
+            ("log1p_", (pointwise0_fp32[0].clamp(-0.9, 100.0),)),
+            ("reciprocal_", pointwise0_fp32),
+            ("rsqrt_", (pointwise0_fp32[0].clamp(0.0, 100.0),)),
+            ("sinh_", pointwise0_fp32),
+            ("tan_", (pointwise0_fp32[0].clamp(-3.1/2, 3.1/2),)),
         ]
         self.torch_fp32_user_supplied_out = [
             ("acos", pointwise0_fp32 + (pointwise0_fp16[0].clamp(-.9, 0.9),)),
+            ("asin", pointwise0_fp32 + (pointwise0_fp16[0].clamp(-.9, 0.9),)),
+            ("cosh", pointwise0_fp32 + pointwise0_fp16),
+            ("erfinv", pointwise0_fp32 + (pointwise0_fp16[0].clamp(-.9, .9),)),
+            ("exp", pointwise0_fp32 + pointwise0_fp16),
+            ("expm1", pointwise0_fp32 + pointwise0_fp16),
+            ("log", pointwise0_fp32 + (pointwise0_fp16[0].clamp(0.1, 100.0),)),
+            ("log10", pointwise0_fp32 + (pointwise0_fp16[0].clamp(0.1, 100.0),)),
+            ("log2", pointwise0_fp32 + (pointwise0_fp16[0].clamp(0.1, 100.0),)),
+            ("log1p", pointwise0_fp32 + (pointwise0_fp16[0].clamp(-0.9, 100.0),)),
+            ("reciprocal", pointwise0_fp32 + pointwise0_fp16),
+            ("rsqrt", pointwise0_fp32 + (pointwise0_fp16[0].clamp(0.0, 100.0),)),
+            ("sinh", pointwise0_fp32 + pointwise0_fp16),
+            ("tan", pointwise0_fp32 + (pointwise0_fp16[0].clamp(-3.1/2, 3.1/2),)),
         ]
         # self.torch_fp32 = []
         # self.torch_fp32_inplace = []
@@ -91,11 +129,11 @@ class AmpLists(object):
         # self.torch_expect_builtin_promotion = []
         # self.torch_expect_builtin_promotion_inplace = []
         # self.torch_expect_builtin_promotion_user_supplied_out = []
-        
+
         # self.torch_need_autocast_sequence_cast_ops = [
         #     ("cat", mat1_fp16 + mat1_fp32 + mat1_fp16),
         #     ("stack", mat1_fp16 + mat1_fp32 + mat1_fp16)]
-        
+
         # self.nn_fp16 = []
         # self.nn_fp16_inplace = []
         # self.nn_fp16_user_supplied_out = []
@@ -111,7 +149,7 @@ class AmpLists(object):
         # self.nn_expect_builtin_promotion = []
         # self.nn_expect_builtin_promotion_inplace = []
         # self.nn_expect_builtin_promotion_user_supplied_out = []
-        
+
         # self.tensor_only_fp16 = []
         self.tensor_only_fp16_inplace = [
             ("addmm_", mat1_fp32 + mat2_fp32 + mat3_fp32),
@@ -119,7 +157,9 @@ class AmpLists(object):
         ]
         # self.tensor_only_fp16_user_supplied_out = []
         # self.tensor_only_fp32 = []
-        # self.tensor_only_fp32_inplace = []
+        self.tensor_only_fp32_inplace = [
+            ("erfinv_", (pointwise0_fp32[0].clamp(-.9, .9),)),
+        ]
         # self.tensor_only_fp32_user_supplied_out = []
         # self.tensor_only_fp32 = []
         # self.tensor_only_fp32_inplace = []

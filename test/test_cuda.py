@@ -2134,12 +2134,13 @@ t2.start()
         # Therefore, it doesn't make sense to check if the user-supplied output has been casted to a different dtype.
         # However, we can still compare numerics to Python-side "autocasting" that (we expect) uses the same
         # sequence of types as the C++-side autocasting:
-        getattr(torch, op)(*args[1:], out=args[0])
+        output = args[0].clone()
+        getattr(torch, op)(*args[1:], out=output)
         with torch.cuda.amp.autocast(enabled=False):
             control = args[0].clone().to(run_as_type).zero_()
             getattr(torch, op)(*(a.to(run_as_type) if (isinstance(a, torch.Tensor) and a.is_floating_point())
                                  else a for a in args[1:]), out=control)
-            self.assertTrue(torch.allclose(args[0], control.to(args[0].dtype)))
+            self.assertTrue(torch.allclose(output, control.to(output.dtype)))
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -2200,6 +2201,13 @@ t2.start()
         with torch.cuda.amp.autocast():
             for op, args in self.amp_lists.tensor_only_fp16_inplace:
                 self._run_autocast_inplace(op, args, torch.float16)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_tensor_only_fp32_inplace(self):
+        with torch.cuda.amp.autocast():
+            for op, args in self.amp_lists.tensor_only_fp32_inplace:
+                self._run_autocast_inplace(op, args, torch.float32)
 
 
 if __name__ == '__main__':

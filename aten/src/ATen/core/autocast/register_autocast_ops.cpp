@@ -133,7 +133,7 @@ T cached_cast(at::ScalarType to_type, T arg) {
 }
 
 /******************************************************************
-Templates for well-behaved ops
+Templates to provide wrapper functions for well-behaved ops
 
 Well-behaved means
 - The op has an at:: exposure, AND
@@ -144,8 +144,6 @@ Well-behaved means
 CastPolicy::passthrough ops (which don't cast or promote) may
 receive non-const Tensor & arguments and remain well-behaved as
 long as they have an at:: exposure.
-
-Fortunately, most of the ops I need to treat are well-behaved.
 ******************************************************************/
 
 // Copying the pattern used in core/boxing/kernel_function.h to extract args and return type
@@ -190,7 +188,8 @@ struct WrapFunction_<CastPolicy::promote, Behavior::wellbehaved, FuncType, F, Re
 // to serve ops that meet all of the following:
 // - don't require casting, so in principle they should use the boxed fallback
 // - don't play well with the boxed fallback, unfortunately
-// - do play well with the templating logic
+// - are well-behaved
+// Example:  at::detach_
 template<class FuncType, FuncType* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::passthrough, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
@@ -212,9 +211,6 @@ Generally, these ops fall into two categories, with two possible subcategories:
 
 There seems to be a correlation (perhaps coincidental) between
 not having an at::* exposure and being in-place.
-
-For now, I'll special-case them manually, imitating
-VariableType*.cpp.  Hopefully there aren't many.
 
 The tools we have to reduce manual special casing are templates,
 macros, and codegen.  Based on the observed commonalities among
@@ -267,7 +263,7 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, FuncType, F, Ret, guts
 };
 
 // 1.b. For ops that don't have an at:: exposure, VariableType's functions forward to a Tensor method,
-// eg self_.addmm_.  For these, I need to create a specialized macro, so I can request self.FUNC.
+// eg self_.addmm_.  For these, I need to create a macro that defines a specialization, so I can request self.FUNC.
 // Pure macros or codegen are looking better and better...
 #define SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(FUNC) \
 template<class Ret, class... Args> \
@@ -290,13 +286,36 @@ struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, decltype(FUNC), FUNC, 
   } \
 };
 
-// Declare the specializations that will serve each 1.b. FUNC.
+#define SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(FUNC) \
+template<class Ret, class... Args> \
+struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(FUNC), FUNC, Ret, guts::typelist::typelist<Args...>> { \
+  template<typename... RemainingArgs> static \
+  Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) { \
+    auto run_as_type = at::kFloat; \
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId); \
+    if (self.scalar_type() == run_as_type) { \
+      self.FUNC(cached_cast(run_as_type, args)...); \
+    } else { \
+      AT_ASSERT(false, "In-place operators that autocast to torch.float32 require that the argument modified in-place is already torch.float32.  (Other arguments may be any type.)"); \
+    } \
+    return self; \
+  } \
+  static Tensor & call(Args... args) { \
+    return peel_first_arg_and_run(args...); \
+  } \
+};
+
+// Define the specializations that will serve each 1.b. FUNC.
 // For each specialization, I must also supply a dummy function with the right signature
 // (copied from VariableType) to provide the type information for instantiation.
+// fp16 ops
 Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) { return self; }
 SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addmm_)
 Tensor & addr_(Tensor & self, const Tensor & vec1, const Tensor & vec2, Scalar beta, Scalar alpha) { return self; }
 SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addr_)
+// fp32 ops
+Tensor & erfinv_(Tensor & self) { return self; }
+SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(erfinv_)
 
 // 2.a. Functions with out=... arguments
 // According to VariableType, these don't support automatic differentiation.
@@ -523,6 +542,58 @@ auto register_well_behaved = torch::RegisterOperators()
     .schema("aten::acos(Tensor self) -> Tensor")
     .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::acos, fp32, wellbehaved))
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::asin(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::asin, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cosh(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::cosh, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::erfinv(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::erfinv, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::exp(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::exp, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::expm1(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::expm1, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::log, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log10(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::log10, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log2(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::log2, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log1p(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::log1p, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::reciprocal(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::reciprocal, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::rsqrt(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::rsqrt, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::sinh(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::sinh, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::tan(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::tan, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // CastPolicy::promote
   // CastPolicy::passthrough
   .op(torch::RegisterOperators::options()
@@ -536,19 +607,83 @@ auto register_well_behaved = torch::RegisterOperators()
   ;
 
 /**************************************************************************************
-Explicit registration for non-well-behaved ops part 1:  in-place ops
-
+Explicit registration for non-well-behaved ops
 It's not technically required to register these separately, but it helps organize them.
 **************************************************************************************/
+
+/**************************************
+1a:  in-place ops with an at:: exposure
+**************************************/
 auto register_inplace = torch::RegisterOperators()
+  // fp16 ops
+  .op(torch::RegisterOperators::options()
+    .schema("aten::addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::addmv_, fp16, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  // fp32 ops
+  .op(torch::RegisterOperators::options()
+    .schema("aten::acos_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::acos_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::asin_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::asin_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cosh_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::cosh_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::exp_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::exp_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::expm1_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::expm1_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::log_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log10_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::log10_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log2_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::log2_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log1p_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::log1p_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::reciprocal_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::reciprocal_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::rsqrt_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::rsqrt_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::sinh_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::sinh_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::tan_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::tan_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  // promote ops
+  ;
+
+/**************************************************
+1b:  in-place ops only accessible as Tensor methods
+**************************************************/
+auto register_inplace_method_only = torch::RegisterOperators()
   // fp16 ops
   .op(torch::RegisterOperators::options()
     .schema("aten::addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::autocast::addmm_, fp16, inplace)>(TensorTypeId::AutocastTensorId)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::addmv_, fp16, inplace)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)")
@@ -556,8 +691,8 @@ auto register_inplace = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // fp32 ops
   .op(torch::RegisterOperators::options()
-    .schema("aten::acos_(Tensor(a!) self) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::acos_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .schema("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::autocast::erfinv_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // promote ops
   ;
@@ -595,6 +730,58 @@ auto register_user_supplied_out = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::acos_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::asin_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::cosh_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::erfinv_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::exp_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::expm1_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::log_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::log10_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::log2_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::log1p_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::reciprocal_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::rsqrt_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::sinh_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::tan_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // promote ops
   ;
