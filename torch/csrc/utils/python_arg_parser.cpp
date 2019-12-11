@@ -5,7 +5,6 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
