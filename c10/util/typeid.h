@@ -291,9 +291,9 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
 }
 
 template <class T>
-inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
-  constexpr auto typeId = TypeIdentifier::Get<T>();
-  constexpr auto typeName = c10::util::get_fully_qualified_type_name<T>();
+inline C10_TYPENAME_CONSTEXPR TypeMetaData _makeTypeMetaDataInstance() {
+  C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
+  C10_TYPENAME_CONSTEXPR auto typeName = c10::util::get_fully_qualified_type_name<T>();
 
   return {sizeof(T),
           _PickNew<T>(),
@@ -496,13 +496,13 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define CAFFE_KNOWN_TYPE(T)                           \
-  template <>                                         \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData*       \
-  TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
-    static constexpr detail::TypeMetaData singleton = \
-        detail::_makeTypeMetaDataInstance<T>();       \
-    return &singleton;                                \
+#define CAFFE_KNOWN_TYPE(T)                                        \
+  template <>                                                      \
+  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                    \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {                  \
+    static C10_TYPENAME_CONSTEXPR detail::TypeMetaData singleton = \
+        detail::_makeTypeMetaDataInstance<T>();                    \
+    return &singleton;                                             \
   }
 
 } // namespace caffe2
