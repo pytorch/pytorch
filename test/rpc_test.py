@@ -166,7 +166,7 @@ def multi_layer_nested_sync_rpc(dst, world_size, ttl):
         next_dst = (dst + 1) % world_size
         return rpc.rpc_sync(
             current_dst,
-            multi_layer_nested_async_rpc,
+            multi_layer_nested_sync_rpc,
             args=(next_dst, world_size, ttl - 1),
         )
 
