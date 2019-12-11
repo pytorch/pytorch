@@ -580,7 +580,7 @@ class basic_string_view final {
   constexpr bool equals_(basic_string_view rhs) const {
     // We don't use string_view::compare() here but implement it manually because
     // only looking at equality allows for more optimized code.
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !(defined(__clang__) && __clang_major__ < 4) && !(!defined(__clang__) && !defined(_MSC_VER) && __GNUC__ == 5 && __GNUC_MINOR__ < 4)
     return size() == rhs.size() && 0 == __builtin_memcmp(data(), rhs.data(), size());
 #elif __cpp_constexpr >= 201304
     // if we are in C++14, write it iteratively. This is faster than the recursive C++11 implementation below.
