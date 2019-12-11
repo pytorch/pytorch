@@ -1,21 +1,13 @@
 #pragma once
+#include<ATen/ATen.h>
+#include<unordered_map>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
+TORCH_API std::unordered_map<int, c10::DeviceType> getFusionToDeviceMap();
 
-// TODO: can likely do better than global fusion counter
-// and fusion key -> device map
-int fusion_counter = 0;
-std::unordered_map<int, c10::DeviceType> fusion_to_device_map;
-
-TORCH_API std::unordered_map<int, c10::DeviceType> getFusionToDeviceMap() {
-  return fusion_to_device_map;
-}
-
-TORCH_API int getAndIncrementGlobalFusionCounter() {
-  return fusion_counter++;
-}
+TORCH_API int getAndIncrementGlobalFusionCounter();
 
 }}} // torch::jit::fuser
