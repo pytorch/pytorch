@@ -50,10 +50,29 @@ class Tensor(torch._C._TensorBase):
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
-                new_tensor = self.new()
-                new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                if self.is_quantized:
+                    if self.qscheme() == torch.per_tensor_affine:
+                        quantizer_params = self.qscheme(), self.q_scale(), self.q_zero_point()
+                    elif self.qscheme() == torch.per_channel_affine:
+                        quantizer_params = self.qscheme(), \
+                            self.q_per_channel_scales(), \
+                            self.q_per_channel_zero_points(), \
+                            self.q_per_channel_axis()
+                    else:
+                        raise RuntimeError("Unsupported qscheme {} in deepcopy".format(self.qscheme()))
+                    new_tensor = torch._utils._rebuild_qtensor(
+                        new_storage,
+                        self.storage_offset(),
+                        self.size(),
+                        self.stride(),
+                        quantizer_params,
+                        self.requires_grad,
+                        self._backward_hooks)
+                else:
+                    new_tensor = self.new()
+                    new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    new_tensor.requires_grad = self.requires_grad
             memo[id(self)] = new_tensor
-            new_tensor.requires_grad = self.requires_grad
             return new_tensor
 
     def __reduce_ex__(self, proto):
@@ -285,7 +304,10 @@ class Tensor(torch._C._TensorBase):
             if var is None:
                 return
             if var._grad is None:
-                var._grad = grad.clone()
+                if grad.is_sparse:
+                    var._grad = grad.clone()
+                else:
+                    var._grad = grad.clone(memory_format=torch.contiguous_format)
             else:
                 var._grad = var._grad + grad
 
@@ -399,10 +421,7 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        result = self / other
-        if result.dtype.is_floating_point:
-            result = result.trunc()
-        return result
+        return torch.floor_divide(self, other)
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
@@ -538,10 +557,16 @@ class Tensor(torch._C._TensorBase):
         itemsize = self.storage().element_size()
 
         shape = tuple(self.shape)
-        strides = tuple(s * itemsize for s in self.stride())
-        data = (self.data_ptr(), False)  # read-only is false
+        if self.is_contiguous():
+            # __cuda_array_interface__ v2 requires the strides to be omitted
+            # (either not set or set to None) for C-contiguous arrays.
+            strides = None
+        else:
+            strides = tuple(s * itemsize for s in self.stride())
+        data_ptr = self.data_ptr() if self.numel() > 0 else 0
+        data = (data_ptr, False)  # read-only is false
 
-        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=2)
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.

@@ -1,7 +1,6 @@
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/Tensor.h>
 #include <c10/util/C++17.h>
 
@@ -25,7 +24,7 @@ void NamesMode::set_enabled(bool enabled) {
 }
 
 Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
-  impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names);
+  impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names, /*validate_names=*/true);
   return tensor;
 }
 
@@ -92,12 +91,14 @@ void check_names_valid_for(TensorImpl* impl, DimnameList names) {
   check_names_valid_for(impl->dim(), names);
 }
 
-void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {
+void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names, bool validate_names) {
   if (!names) {
     impl->set_named_tensor_meta(nullptr);
     return;
   }
-  check_names_valid_for(impl, *names);
+  if (validate_names) {
+    check_names_valid_for(impl, *names);
+  }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
     impl->set_named_tensor_meta(c10::guts::make_unique<NamedTensorMeta>(*names));
@@ -143,4 +144,3 @@ bool has_names(const TensorImpl* impl) {
 } // namespace impl
 
 } // namespace at
-#endif

@@ -63,7 +63,7 @@ struct TORCH_API TracingState
   void setValue(const IValue& v, Value* value);
   void delValue(const IValue& var);
   Value* getValue(const IValue& var);
-  Value* getOutput(const IValue& var);
+  Value* getOutput(const IValue& var, size_t i);
   bool hasValue(const IValue& var) const;
 
 private:
@@ -260,9 +260,7 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
-#ifdef BUILD_NAMEDTENSOR
 TORCH_API void addInputs(Node* n, const char* name, c10::optional<at::DimnameList> value);
-#endif
 TORCH_API void addInputs(
     Node* n,
     const char* name,

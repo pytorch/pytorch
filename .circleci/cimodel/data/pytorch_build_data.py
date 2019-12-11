@@ -4,8 +4,6 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 CONFIG_TREE_DATA = [
     ("xenial", [
         (None, [
-            XImportant("2.7.9"),
-            X("2.7"),
             XImportant("3.5"),  # Not run on all PRs, but should be included on [test all]
             X("nightly"),
         ]),
@@ -39,7 +37,6 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
                 XImportant("3.6"),
                 ("3.6", [
                     ("libtorch", [XImportant(True)])

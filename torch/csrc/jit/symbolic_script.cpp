@@ -408,7 +408,7 @@ const std::vector<std::string> functions = {
                     tensor1,
                     tensor2,
                     *,
-                    value: number = 1.0):
+                    value: number):
             result = torch.addcmul(self, tensor1, tensor2, value=value)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             tensor1_size = torch._size_if_not_equal(tensor1.size(), result.size())
@@ -473,7 +473,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None, None
 
-            return torch.full_like(self, fill_value), backward
+            return torch.full_like(self, fill_value, memory_format=1), backward
 
         def lerp_0(self,
                    end,
@@ -521,7 +521,7 @@ const std::vector<std::string> functions = {
 
         def split_with_sizes(self,
                              split_sizes: List[int],
-                             dim: int=0):
+                             dim: int):
             def backward(grad_outputs: List[Tensor]):
                 size = len(grad_outputs)
                 grad_self = torch.cat(grad_outputs, dim)
@@ -538,7 +538,7 @@ const std::vector<std::string> functions = {
             return torch.stack(tensors, dim), backward
 
         def unbind(self,
-                   dim: int=0):
+                   dim: int):
             def backward(grad_outputs: List[Tensor]):
                 grad_self = torch.stack(grad_outputs, dim)
                 return grad_self, None
@@ -546,7 +546,7 @@ const std::vector<std::string> functions = {
             return torch.unbind(self, dim), backward
 
         def cat(tensors: List[Tensor],
-                dim: int=0):
+                dim: int):
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
@@ -562,7 +562,7 @@ const std::vector<std::string> functions = {
         def index(self,
                   indices: List[Tensor]):
             def backward(grad_output):
-                grad_self = torch.zeros_like(self).index_put_(indices, grad_output, True)
+                grad_self = torch.zeros_like(self, memory_format=1).index_put_(indices, grad_output, True)
                 return grad_self, None
 
             return torch.index(self, indices), backward
@@ -602,13 +602,13 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None
 
-            return torch.ones_like(self), backward
+            return torch.ones_like(self, memory_format=1), backward
 
         def pow_0(self,
                   exponent: number):
             def backward(grad_output):
                 if float(exponent) == 0.0:
-                    grad_self = torch.zeros_like(self)
+                    grad_self = torch.zeros_like(self, memory_format=1)
                 else:
                     grad_self = grad_output * exponent * torch.pow(self, float(exponent) - 1)
                 return grad_self, None
@@ -621,7 +621,7 @@ const std::vector<std::string> functions = {
             exponent_size = torch._size_if_not_equal(exponent.size(), result.size())
 
             def backward(grad_output):
-                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
+                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self, memory_format=1), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
                 grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent_size)
                 return grad_self, grad_exponent
 
@@ -637,7 +637,7 @@ const std::vector<std::string> functions = {
 
         def rsub_0(self,
                    other,
-                   alpha: number = 1.0):
+                   alpha: number):
             result = torch.rsub(self, other, alpha)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             other_size = torch._size_if_not_equal(other.size(), result.size())
@@ -650,7 +650,7 @@ const std::vector<std::string> functions = {
 
         def rsub_1(self,
                    other: number,
-                   alpha: number = 1.0):
+                   alpha: number):
             def backward(grad_output):
                 grad_self = (- grad_output * alpha)
                 return grad_self, None, None
@@ -673,8 +673,8 @@ const std::vector<std::string> functions = {
         def to_0(self,
                  device: Optional[Device],
                  dtype: Optional[int],
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             self_device = self.device
             self_dtype = self.dtype
             if device is not None:
@@ -690,8 +690,8 @@ const std::vector<std::string> functions = {
 
         def to_1(self,
                  dtype: int,
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             self_dtype = self.dtype
             def backward(grad_output):
                 grad_self = grad_output.to(self_dtype, non_blocking, copy)
@@ -701,8 +701,8 @@ const std::vector<std::string> functions = {
 
         def to_2(self,
                  other,
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             def backward(grad_output):
                 grad_self = grad_output.to(self, non_blocking, copy)
                 return grad_self, None, None, None
@@ -864,7 +864,7 @@ const std::vector<std::string> functions = {
 
         def ceil(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.ceil(self), backward
 
@@ -889,7 +889,7 @@ const std::vector<std::string> functions = {
 
         def floor(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.floor(self), backward
 
@@ -938,7 +938,7 @@ const std::vector<std::string> functions = {
 
         def round(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.round(self), backward
 
@@ -970,7 +970,7 @@ const std::vector<std::string> functions = {
 
         def trunc(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.trunc(self), backward
 
@@ -1078,7 +1078,7 @@ const std::vector<std::string> functions = {
                        eps : float,
                        cudnn_enabled : bool):
 
-            output, save1, save2, impl_idx = torch._batch_norm_impl_index(
+            output, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
                 input, weight, bias, running_mean, running_var, training,
                 momentum, eps, cudnn_enabled)
             has_weight = weight is not None
@@ -1087,7 +1087,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 dinput, dweight, dbias = torch._batch_norm_impl_index_backward(
                     impl_idx, input, grad_output, weight, running_mean, running_var,
-                    save1, save2, training, eps, [True, has_weight, has_bias])
+                    save1, save2, training, eps, [True, has_weight, has_bias], reserve)
                 return dinput, dweight, dbias, None, None, None, None, None, None
 
             return output, backward
@@ -1108,7 +1108,7 @@ const std::vector<std::string> functions = {
 
             input_reshape = input.contiguous().view(1, n, -1)
 
-            bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
+            bn_out, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
                 input_reshape, None, None, None, None, True,
                 0.0, eps, cudnn_enable)
 
@@ -1145,7 +1145,7 @@ const std::vector<std::string> functions = {
 
                 grad_input, _, _ = torch._batch_norm_impl_index_backward(
                     impl_idx, input_reshape, grad_bn_out, None, None, None,
-                    save1, save2, True, eps, [True, False, False])
+                    save1, save2, True, eps, [True, False, False], reserve)
 
                 grad_input = grad_input.view(input.size())
                 return grad_input, None, grad_weight, grad_bias, None, None
@@ -1167,18 +1167,18 @@ const std::vector<std::string> functions = {
             # for cpu backend, where fusions are disabled, a different lowering that is more efficient
             # in the absence of fusion is used
             p1m = 1. - p
-            if use_cuda:
-                mask = torch.rand_like(input) < p1m
-                res = mask.type_as(input) * input * (1./p1m)
+            if train:
+                if use_cuda:
+                    mask = torch.rand_like(input, memory_format=1) < p1m
+                    res = mask.type_as(input) * input * (1./p1m)
+                else:
+                    mask = torch.empty_like(input, memory_format=1)
+                    mask.bernoulli_(p1m)
+                    res = mask * input / p1m
             else:
-                mask = torch.empty_like(input)
-                mask.bernoulli_(p1m)
-                res = mask * input / p1m
-
-            if not train:
                 p1m = 1.
                 res = input
-                mask = torch.ones_like(input)
+                mask = torch.empty_like(input, memory_format=1)
 
             def backward(grad_output):
                 use_cuda = grad_output.is_cuda
@@ -1252,7 +1252,7 @@ const std::vector<std::string> functions = {
                 grad_input = torch.adaptive_avg_pool3d_backward(grad, input)
             else:
                 # NEVER REACH HERE
-                grad_input = torch.zeros_like(input)
+                grad_input = torch.zeros_like(input, memory_format=1)
                 raise RuntimeError('Input Error: Only 3D, 4D and 5D input Tensors supported')
 
             return grad_input
@@ -1260,7 +1260,7 @@ const std::vector<std::string> functions = {
         def __interpolate_0(input,
                             size: Optional[int],
                             scale_factor: Optional[List[float]],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1273,7 +1273,7 @@ const std::vector<std::string> functions = {
         def __interpolate_1(input,
                             size: Optional[List[int]],
                             scale_factor: Optional[List[float]],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1286,7 +1286,7 @@ const std::vector<std::string> functions = {
         def __interpolate_2(input,
                             size: Optional[int],
                             scale_factor: Optional[float],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1299,7 +1299,7 @@ const std::vector<std::string> functions = {
         def __interpolate_3(input,
                             size: Optional[List[int]],
                             scale_factor: Optional[float],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1316,7 +1316,7 @@ const std::vector<std::string> functions = {
         def add_0(self,
                   other,
                   *,
-                  alpha: number = 1.0):
+                  alpha: number):
             result = torch.add(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
@@ -1327,7 +1327,7 @@ const std::vector<std::string> functions = {
 
         def add_1(self,
                   other: number,
-                  alpha: number = 1.0):
+                  alpha: number):
             def backward(grad_output):
                 return grad_output, None, None
             return torch.add(self, other, alpha=alpha), backward
@@ -1335,7 +1335,7 @@ const std::vector<std::string> functions = {
         def sub_0(self,
                   other,
                   *,
-                  alpha: number = 1.0):
+                  alpha: number):
             result = torch.sub(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
@@ -1346,7 +1346,7 @@ const std::vector<std::string> functions = {
 
         def sub_1(self,
                   other: number,
-                  alpha: number = 1.0):
+                  alpha: number):
             def backward(grad_output):
                 return grad_output, None, None
             return torch.sub(self, other, alpha=alpha), backward

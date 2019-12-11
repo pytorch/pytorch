@@ -4,6 +4,6 @@
 
 namespace at { namespace cuda {
 
-CAFFE2_API at::Allocator* getPinnedMemoryAllocator();
+TORCH_CUDA_API at::Allocator* getPinnedMemoryAllocator();
 
 }} // namespace at::cuda

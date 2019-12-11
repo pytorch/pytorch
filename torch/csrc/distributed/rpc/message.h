@@ -66,7 +66,7 @@ enum MessageType {
 //                  if they have their own ways to do matching.
 //
 // Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
-// and PythonUDFResp into a Message, and it is up to the RpcAgent
+// and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
 class TORCH_API Message final {
  public:
@@ -114,6 +114,17 @@ class TORCH_API Message final {
   MessageType type_ = MessageType::UNKNOWN;
   int64_t id_ = -1;
 };
+
+// Create a response Message with an exception for the provided request message.
+// The exception string representation will be used as the message's payload.
+TORCH_API Message
+createExceptionResponse(const Message& request, const std::exception& e);
+
+// Create a response Message with an exception type for the provided request
+// message. The passed in string will be used as the created message's payload
+TORCH_API Message createExceptionResponse(
+    const Message& request,
+    const std::string& exceptionStr);
 
 } // namespace rpc
 } // namespace distributed
