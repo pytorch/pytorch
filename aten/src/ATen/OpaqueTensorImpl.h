@@ -61,10 +61,6 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have set_storage_offset");
   }
 
-  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override {
-      AT_ERROR("opaque tensors do not support maybe_zero_dim");
-  }
-
   bool has_storage() const override {
     return false;
     }
