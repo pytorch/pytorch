@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -exu -o pipefail
 
-#SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # Check if we should actually run
 echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT:-}"
