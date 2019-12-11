@@ -1624,6 +1624,12 @@ Functions don't change much, they can be decorated with :func:`@torch.jit.ignore
 
 TorchScript Classes
 ~~~~~~~~~~~~~~~~~~~
+.. warning::
+
+    TorchScript class support is experimental. Currently it is best suited
+    for simple record-like types (think a ``NamedTuple`` with methods
+    attached).
+
 Everything in a user defined `TorchScript Class`_ is exported by default, functions
 can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` if needed.
 
