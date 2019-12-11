@@ -6,7 +6,7 @@ import hypothesis
 from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
-from hypothesis.searchstrategy import SearchStrategy
+from hypothesis.strategies import SearchStrategy
 
 from common_quantized import _calculate_dynamic_qparams, _calculate_dynamic_per_channel_qparams
 
