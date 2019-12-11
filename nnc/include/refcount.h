@@ -1,6 +1,7 @@
 #ifndef NNC_INCLUDE_REFCOUNT_H_INCLUDED_
 #define NNC_INCLUDE_REFCOUNT_H_INCLUDED_
 
+#include <stdio.h>
 #include <atomic>
 
 namespace nnc {
@@ -14,7 +15,8 @@ namespace nnc {
 class RefCounted {
  public:
   // Initial reference count is one.
-  RefCounted() : ref_(1) {}
+  RefCounted() : ref_(1) {
+  }
 
   // Increments reference count by one.
   void Ref() const {
@@ -54,6 +56,52 @@ class RefCounted {
   void operator=(const RefCounted&) = delete;
 };
 
+template <class NodeType>
+class RefHandle
+{
+ protected:
+  virtual ~RefHandle() { reset(); }
+
+  RefHandle() {}
+  RefHandle(NodeType *node) : node_(node) {
+  }
+
+  RefHandle(const RefHandle& other) {
+    this->reset();
+    node_ = other.node_;
+    node_->Ref();
+  }
+
+  RefHandle(RefHandle&& other) {
+    node_ = other.node_;
+    other.node_ = nullptr;
+  }
+
+  RefHandle& operator=(const RefHandle& other) {
+    this->reset();
+    node_ = other.node_;
+    node_->Ref();
+  }
+
+  RefHandle& operator=(RefHandle&& other) {
+    node_ = other.node_;
+    other.node_ = nullptr;
+  }
+
+  void reset() {
+    if (node_) {
+      node_->Unref();
+    }
+    node_ = nullptr;
+  }
+
+  const NodeType* node() const { return node_; }
+  NodeType* node() { return node_; }
+
+ private:
+  NodeType *node_ = nullptr;
+};
+ 
 } /// namespace nnc
  
 #endif // NNC_INCLUDE_REFCOUNT_H_INCLUDED_
