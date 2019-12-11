@@ -29,8 +29,8 @@ def main():
     print("{:20s} {:>20s}      {:>20s}".format("", "baseline", "test"))
     print("{:20s} {:>20s}      {:>20s}".format("", "-" * 20, "-" * 20))
     for key in sorted(keys):
-        va = ja.get(key, "-")
-        vb = jb.get(key, "-")
+        va = str(ja.get(key, "-"))
+        vb = str(jb.get(key, "-"))
         print("{:20s} {:>20s}  vs  {:>20s}".format(key + ":", va, vb))
     print("")
 

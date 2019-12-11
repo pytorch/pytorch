@@ -79,7 +79,8 @@ def benchmark_process_group(pg, benchmark, use_ddp_for_single_rank=True):
             model,
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False,
-            process_group=pg)
+            process_group=pg,
+            bucket_cap_mb=benchmark.bucket_size)
 
     measurements = []
     warmup_iterations = 5
@@ -167,10 +168,11 @@ def sweep(benchmark):
 
 
 class Benchmark(object):
-    def __init__(self, device, distributed_backend):
+    def __init__(self, device, distributed_backend, bucket_size):
         self.device = device
         self.batch_size = 32
         self.distributed_backend = distributed_backend
+        self.bucket_size = bucket_size
 
     def __str__(self):
         raise NotImplementedError
@@ -186,8 +188,12 @@ class Benchmark(object):
 
 
 class TorchvisionBenchmark(Benchmark):
-    def __init__(self, device, distributed_backend, model):
-        super(TorchvisionBenchmark, self).__init__(device, distributed_backend)
+    def __init__(self, device, distributed_backend, bucket_size, model):
+        super(TorchvisionBenchmark, self).__init__(
+            device,
+            distributed_backend,
+            bucket_size,
+        )
         self.model = model
 
     def __str__(self):
@@ -208,6 +214,7 @@ def main():
     parser.add_argument("--rank", type=int, default=os.environ["RANK"])
     parser.add_argument("--world-size", type=int, required=True)
     parser.add_argument("--distributed-backend", type=str, default="nccl")
+    parser.add_argument("--bucket-size", type=int, default=25)
     parser.add_argument("--master-addr", type=str, required=True)
     parser.add_argument("--master-port", type=str, required=True)
     parser.add_argument("--model", type=str)
@@ -239,6 +246,7 @@ def main():
         print("* PyTorch version: {}".format(torch.__version__))
         print("* CUDA version: {}".format(torch.version.cuda))
         print("* Distributed backend: {}".format(args.distributed_backend))
+        print("* Maximum bucket size: {}MB".format(args.bucket_size))
         print("")
         print("--- nvidia-smi topo -m ---")
         print("")
@@ -255,6 +263,7 @@ def main():
             TorchvisionBenchmark(
                 device=device,
                 distributed_backend=args.distributed_backend,
+                bucket_size=args.bucket_size,
                 model=args.model))
     else:
         for model in ["resnet50", "resnet101", "resnext50_32x4d", "resnext101_32x8d"]:
@@ -262,6 +271,7 @@ def main():
                 TorchvisionBenchmark(
                     device=device,
                     distributed_backend=args.distributed_backend,
+                    bucket_size=args.bucket_size,
                     model=model))
 
     benchmark_results = []
@@ -281,6 +291,7 @@ def main():
             "pytorch_version": torch.__version__,
             "cuda_version": torch.version.cuda,
             "distributed_backend": args.distributed_backend,
+            "bucket_size": args.bucket_size,
             "benchmark_results": benchmark_results,
         }
         with open(args.json, 'w') as f:
