@@ -10,11 +10,15 @@ const std::unordered_map<std::string, c10::TypePtr> &string_to_type_lut();
 }
 
 using torch::jit::script::string_to_type_lut;
+using torch::jit::script::valid_single_char_tokens;
 
 namespace c10 {
 namespace {
 bool isSpecialChar(char a) {
-  return a == '[' || a == ',' || a == ']';
+  for (const char* c = valid_single_char_tokens; *c; c++) {
+    if (a == *c) return true;
+  }
+  return false;
 }
 
 class TypeParser {
@@ -28,6 +32,10 @@ class TypeParser {
     std::string token = next();
     auto simpleTypeIt = string_to_type_lut().find(token);
     if (simpleTypeIt != string_to_type_lut().end()) {
+      if (cur() != "]" && cur() != "," && cur()!= "") {
+        TORCH_CHECK(false, "Simple type ", token, " is followed by ",
+            "invalid chars.");
+      }
       return simpleTypeIt->second;
     } else if (token == "List") {
       return CreateSingleElementType<ListType>();
@@ -80,37 +88,33 @@ class TypeParser {
     while (start_ < pythonStr_.size() && pythonStr_[start_] == ' ') ++start_;
     if (start_ < pythonStr_.size()) {
       if (isSpecialChar(pythonStr_[start_])) {
-        next_tokens_.emplace(pythonStr_.substr(start_++, 1));
+        next_token_ = pythonStr_.substr(start_++, 1);
       } else { // A word
         size_t end = start_;
         for (; end < pythonStr_.size() && !isSpecialChar(pythonStr_[end]) &&
             pythonStr_[end] != ' '; ++end);
-        next_tokens_.emplace(pythonStr_.substr(start_, end - start_));
+        next_token_ = pythonStr_.substr(start_, end - start_);
         start_ = end;
       }
     }
   }
 
   std::string next() {
-    TORCH_CHECK(!next_tokens_.empty(), "Empty token queue in mobile type parser.",
+    TORCH_CHECK(!next_token_.empty(), "Empty token queue in mobile type parser.",
         "Check the format of the type string and make sure it's correct.");
-    std::string token = next_tokens_.front();
-    next_tokens_.pop();
-    if (next_tokens_.empty()) {
-      lex();
-    }
+    std::string token = next_token_;
+    next_token_ = "";
+    lex();
     return token;
   }
 
   std::string& cur() {
-    TORCH_CHECK(!next_tokens_.empty(), "Empty token queue in mobile type parser.",
-        "Check the format of the type string and make sure it's correct.");
-    return next_tokens_.front();
+    return next_token_;
   }
 
   std::string pythonStr_;
   size_t start_;
-  std::queue<std::string> next_tokens_;
+  std::string next_token_;
 };
 } // namespace
 

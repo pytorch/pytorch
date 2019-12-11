@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/core/Macros.h>
+#include <Aten/core/jit_type.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -104,8 +105,6 @@ namespace script {
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
   _(TK_IMPORT, "import", "import")
-
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|~";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
