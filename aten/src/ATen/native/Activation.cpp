@@ -13,6 +13,8 @@ namespace at { namespace native {
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
+DEFINE_DISPATCH(elu_stub);
+DEFINE_DISPATCH(elu_backward_stub);
 DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardshrink_stub);
@@ -42,6 +44,60 @@ Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, Scalar m
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
+  return iter.output();
+}
+
+Tensor& elu_out(
+    Tensor& result,
+    const Tensor& self,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale) {
+  auto iter = TensorIterator::unary_op(result, self);
+  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return result;
+}
+
+Tensor elu(
+    const Tensor& self,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return iter.output();
+}
+
+Tensor & elu_(
+    Tensor & self,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale) {
+  return at::elu_out(self, self, alpha, scale, input_scale);
+}
+
+Tensor& elu_backward_out(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    const Tensor& output) {
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  return grad_input;
+}
+
+Tensor elu_backward(
+    const Tensor& grad_output,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    const Tensor& output) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, output);
+  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
   return iter.output();
 }
 
