@@ -110,13 +110,8 @@ ProcessGroupAgent::ProcessGroupAgent(
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
-  try {
-    if (rpcRunning_) {
-      shutdown();
-    }
-  } catch (const std::exception& e) {
-    // Swallow exceptions in destructor since it is not safe to throw.
-    LOG(INFO) << "Error shutting down ProcessGroupAgent: " << e.what();
+  if (rpcRunning_) {
+    shutdown();
   }
 }
 
@@ -381,14 +376,6 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
                 rpc::createExceptionResponse(work.message_, ss.str());
             markFutureWithMessage(exceptionMsg);
           }
-        } catch (...) {
-          if (work.message_.isRequest()) {
-            auto exceptionStr =
-                "Encountered exception in ProcessGroupAgent::enqueueSend: Unknown exception occured";
-            auto exceptionMsg =
-                rpc::createExceptionResponse(work.message_, exceptionStr);
-            markFutureWithMessage(exceptionMsg);
-          }
         }
       },
       std::move(work)));
@@ -405,7 +392,18 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             work.type_,
             work.id_);
         if (message.isRequest()) {
-          send(work.from_, cb_->operator()(message));
+          auto futureResponse = cb_->operator()(message);
+          if (futureResponse->completed()) {
+            send(work.from_, std::move(*futureResponse).moveMessage());
+          } else {
+            auto fromId = work.from_.id_;
+            futureResponse->addCallback(
+                [this, fromId, futureResponse](const Message&) {
+                  send(
+                      getWorkerInfo(fromId),
+                      std::move(*futureResponse).moveMessage());
+                });
+          }
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
@@ -457,6 +455,11 @@ void ProcessGroupAgent::markFutureWithMessage(Message& message) {
     std::lock_guard<std::mutex> lock{futureMutex_};
     const auto& futureInfo = futures_.find(id);
 
+    if (futureInfo == futures_.end()) {
+      // Did not find future in map - this can occur when the future has timed
+      // out and been processed accordingly.
+      return;
+    }
     fm = futureInfo->second.future_;
     auto rpcEndTime = getRPCEndTime(futureInfo->second);
     futures_.erase(id);
