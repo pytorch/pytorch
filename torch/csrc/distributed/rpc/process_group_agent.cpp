@@ -28,6 +28,10 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
+const ProcessGroupAgent::steady_clock_time_point
+    ProcessGroupAgent::kInfiniteTimeoutTimePoint =
+        std::chrono::time_point<std::chrono::steady_clock>::max();
+
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
   const auto worldSize = pg_->getSize();
