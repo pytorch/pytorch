@@ -4,6 +4,7 @@ import collections
 import textwrap
 import functools
 import warnings
+import typing
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
@@ -72,7 +73,7 @@ def infer_concrete_type_builder(nn_module):
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type_builder.set_module_list()
 
-    class_annotations = getattr(nn_module, '__annotations__', {})
+    class_annotations = typing.get_type_hints(nn_module)
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
