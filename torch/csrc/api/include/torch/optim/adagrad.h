@@ -29,7 +29,7 @@ struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOption
 public:
   void serialize(torch::serialize::InputArchive& archive);
   void serialize(torch::serialize::OutputArchive& archive) const;
-  friend bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs);
+  TORCH_API friend bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs);
   ~AdagradOptions() = default;
 };
 
@@ -40,6 +40,7 @@ struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<Adagrad
 public:
   void serialize(torch::serialize::InputArchive& archive);
   void serialize(torch::serialize::OutputArchive& archive) const;
+  TORCH_API friend bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs);
   ~AdagradParamState() = default;
 };
 

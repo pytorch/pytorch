@@ -13,6 +13,7 @@
 #include <vector>
 
 using namespace torch::nn;
+using namespace torch::optim;
 using namespace torch::serialize;
 
 namespace {
@@ -32,6 +33,121 @@ torch::Tensor save_and_load(torch::Tensor input) {
   return tensor;
 }
 } // namespace
+
+template <typename DerivedOptions>
+bool is_param_groups_equal(OptimizerParamGroup lhs, OptimizerParamGroup rhs) {
+  auto lhs_params= lhs.params();
+  auto rhs_params = rhs.params();
+  if(lhs_params.size() != rhs_params.size()) {
+    return false;
+  }
+  for (int64_t j=0; j<lhs_params.size(); j++) {
+    if(!torch::equal(lhs_params[j], rhs_params[j]))
+      return false;
+  }
+  // if(!(static_cast<const DerivedOptions&>(lhs.options()) == static_cast<const DerivedOptions&>(rhs.options()))) {
+  //   return false;
+  // }
+  return true;
+}
+template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
+bool test_serialize_optimizer(DerivedOptimizerOptions options) {
+  auto model1 = Linear(5, 2);
+  auto model2 = Linear(5, 2);
+  auto model3 = Linear(5, 2);
+
+  // Models 1, 2, 3 will have the same parameters.
+  auto model_tempfile = c10::make_tempfile();
+  torch::save(model1, model_tempfile.name);
+  torch::load(model2, model_tempfile.name);
+  torch::load(model3, model_tempfile.name);
+
+  auto param1 = model1->named_parameters();
+  auto param2 = model2->named_parameters();
+  auto param3 = model3->named_parameters();
+  for (const auto& p : param1) {
+    if(!p->allclose(param2[p.key()]) && param2[p.key()].allclose(param3[p.key()])) {
+      return false;
+    }
+  }
+  // Make some optimizers with momentum (and thus state)
+  auto optim1 = OptimizerClass(
+      {torch::optim::OptimizerParamGroup(model1->parameters())}, options);
+  auto optim2 = OptimizerClass(
+      model2->parameters(), options);
+  auto optim2_2 = OptimizerClass(
+      model2->parameters(), options);
+  auto optim3 = OptimizerClass(
+      model3->parameters(), options);
+  auto optim3_2 = OptimizerClass(
+      model3->parameters(), options);
+
+  auto x = torch::ones({10, 5});
+
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
+    optimizer.zero_grad();
+    auto y = model->forward(x).sum();
+    y.backward();
+    optimizer.step();
+  };
+
+  // Do 2 steps of model1
+  step(optim1, model1);
+  step(optim1, model1);
+
+  // Do 2 steps of model 2 without saving the optimizer
+  step(optim2, model2);
+  step(optim2_2, model2);
+
+  // Do 2 steps of model 3 while saving the optimizer
+  step(optim3, model3);
+
+  auto optim_tempfile = c10::make_tempfile();
+  torch::save(optim3, optim_tempfile.name);
+  torch::load(optim3_2, optim_tempfile.name);
+  step(optim3_2, model3);
+
+  auto optim3_2_param_groups = optim3_2.param_groups();
+  auto optim1_param_groups = optim1.param_groups();
+  auto optim3_2_state = optim3_2.state();
+  auto optim1_state = optim1.state();
+
+  // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
+  if(optim3_2_param_groups.size() != optim1_param_groups.size()) {
+    return false;
+  }
+  if(optim3_2_state.size() != optim1_state.size()) {
+    return false;
+  }
+  for(int i=0; i<optim3_2_param_groups.size(); i++) {
+    if(!is_param_groups_equal<DerivedOptimizerOptions>(optim3_2_param_groups[i], optim1_param_groups[i])) {
+      return false;
+    }
+    // auto optim3_2_params = optim3_2_param_groups[i].params();
+    // auto optim1_params = optim1_param_groups[i].params();
+    // for (int j=0; j<optim3_2_params.size(); j++) {
+    //   auto key1 = c10::guts::to_string(optim3_2_params[j].unsafeGetTensorImpl());
+    //   auto key2 = c10::guts::to_string(optim1_params[j].unsafeGetTensorImpl());
+    //   const DerivedOptimizerParamState& optim3_2_curr_state = static_cast<const DerivedOptimizerParamState&>(*(optim3_2_curr_state[key1].get()));
+    //   const DerivedOptimizerParamState& optim1_curr_state = static_cast<const DerivedOptimizerParamState&>(*(optim1_curr_state[key2].get()));
+    //   if(!(optim3_2_curr_state == optim1_curr_state)) {
+    //     return false;
+    //   }
+    // }
+  }
+  param1 = model1->named_parameters();
+  param2 = model2->named_parameters();
+  param3 = model3->named_parameters();
+  for (const auto& p : param1) {
+    const auto& name = p.key();
+    // Model 1 and 3 should be the same
+    if(!((param1[name].norm().item<float>() == param3[name].norm().item<float>()) &&
+          (param1[name].norm().item<float>() != param2[name].norm().item<float>()))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 TEST(SerializeTest, Basic) {
   torch::manual_seed(0);
@@ -272,92 +388,10 @@ TEST(SerializeTest, Optim) {
 }
 
 TEST(SerializeTest, Optim_Adagrad) {
-  auto model1 = Linear(5, 2);
-  auto model2 = Linear(5, 2);
-  auto model3 = Linear(5, 2);
-
-  // Models 1, 2, 3 will have the same parameters.
-  auto model_tempfile = c10::make_tempfile();
-  torch::save(model1, model_tempfile.name);
-  torch::load(model2, model_tempfile.name);
-  torch::load(model3, model_tempfile.name);
-
-  auto param1 = model1->named_parameters();
-  auto param2 = model2->named_parameters();
-  auto param3 = model3->named_parameters();
-  for (const auto& p : param1) {
-    ASSERT_TRUE(p->allclose(param2[p.key()]));
-    ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
-  }
-  // Make some optimizers with momentum (and thus state)
-  auto optim1 = torch::optim::Adagrad(
-      {torch::optim::OptimizerParamGroup(model1->parameters())}, torch::optim::AdagradOptions(1e-1));
-  auto optim2 = torch::optim::Adagrad(
-      model2->parameters(), torch::optim::AdagradOptions(1e-1));
-  auto optim2_2 = torch::optim::Adagrad(
-      model2->parameters(), torch::optim::AdagradOptions(1e-1));
-  auto optim3 = torch::optim::Adagrad(
-      model3->parameters(), torch::optim::AdagradOptions(1e-1));
-  auto optim3_2 = torch::optim::Adagrad(
-      model3->parameters(), torch::optim::AdagradOptions(1e-1));
-
-  auto x = torch::ones({10, 5});
-
-  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
-    optimizer.zero_grad();
-    auto y = model->forward(x).sum();
-    y.backward();
-    optimizer.step();
-  };
-
-  // Do 2 steps of model1
-  step(optim1, model1);
-  step(optim1, model1);
-
-  // Do 2 steps of model 2 without saving the optimizer
-  step(optim2, model2);
-  step(optim2_2, model2);
-
-  // Do 2 steps of model 3 while saving the optimizer
-  step(optim3, model3);
-
-  auto optim_tempfile = c10::make_tempfile();
-  torch::save(optim3, optim_tempfile.name);
-  torch::load(optim3_2, optim_tempfile.name);
-  step(optim3_2, model3);
-
-  auto optim3_2_param_groups = optim3_2.param_groups();
-  //auto optim3_2_state = optim3_2.state();
-  auto optim1_param_groups = optim1.param_groups();
-  //auto optim1_state = optim1.state();
-
-  ASSERT_TRUE(optim3_2_param_groups.size() == optim1_param_groups.size());
-  for (int i=0; i<optim3_2_param_groups.size(); i++) {
-    auto params1 = optim3_2_param_groups[i].params();
-    auto params2 = optim1_param_groups[i].params();
-    ASSERT_TRUE(params1.size() == params2.size());
-    for(int j=0; j<params1.size(); j++) {
-      ASSERT_TRUE(torch::equal(params1[j], params2[j]));
-    }
-    //ASSERT_TRUE(operator==(static_cast<const torch::optim::AdagradOptions&>(optim3_2_param_groups[i].options()), static_cast<const torch::optim::AdagradOptions&>(optim1_param_groups[i].options())));
-  }
-
-  // ASSERT_TRUE(optim3_2_state.size() == optim1_state.size());
-  // for(int i=0; i<optim3_2_state.size(); i++) {
-  //
-  // }
-  param1 = model1->named_parameters();
-  param2 = model2->named_parameters();
-  param3 = model3->named_parameters();
-  for (const auto& p : param1) {
-    const auto& name = p.key();
-    // Model 1 and 3 should be the same
-    ASSERT_TRUE(
-        param1[name].norm().item<float>() == param3[name].norm().item<float>());
-    ASSERT_TRUE(
-        param1[name].norm().item<float>() != param2[name].norm().item<float>());
-  }
+  auto ret = test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
+  ASSERT_TRUE(ret);
 }
+
 TEST(SerializeTest, SerializationShouldPreserveIteration_SGD) {
   std::vector<torch::Tensor> parameters = {
       torch::randn({2, 2}), torch::randn({3, 3})};

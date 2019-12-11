@@ -23,6 +23,7 @@ bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs) {
             (lhs.eps() == rhs.eps());
   return eq;
 }
+
 void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(learning_rate);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(lr_decay);
@@ -37,6 +38,12 @@ void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, initial_accumulator_value);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
+}
+
+bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs) {
+  auto eq = (lhs.step() == rhs.step()) &&
+            torch::equal(lhs.sum(), rhs.sum());
+  return eq;
 }
 
 void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) const {

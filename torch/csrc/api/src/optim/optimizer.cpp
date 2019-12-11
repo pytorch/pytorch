@@ -59,8 +59,7 @@ void OptimizerBase::add_param_group(const OptimizerParamGroup& param_group) {
   for (const auto& param : param_group.params()) {
     TORCH_CHECK(param.is_leaf(), "can't optimize a non-leaf Tensor");
   }
-
-OptimizerParamGroup param_group_(param_group.params());
+  OptimizerParamGroup param_group_(param_group.params());
   if (!param_group.has_options()) {
     param_group_.set_options(defaults_->clone());
   } else {
@@ -69,6 +68,7 @@ OptimizerParamGroup param_group_(param_group.params());
   // TODO: check "some parameters appear in more than one parameter group"
   param_groups_.push_back(std::move(param_group_));
 }
+
 void OptimizerBase::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }
