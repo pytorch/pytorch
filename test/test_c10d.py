@@ -3171,9 +3171,12 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaises(RuntimeError):
+            try:
                 # Operation would time out in blocking mode.
                 work.wait()
+            except Exception as e:
+                self.assertEqual("Operation timed out!", str(e))
+                a = torch.rand(10).cuda(self.rank)
         else:
             func()
 
