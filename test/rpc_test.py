@@ -29,6 +29,7 @@ def requires_process_group_agent(message=""):
 
 
 VALUE_FUTURE = concurrent.futures.Future()
+DONE_FUTURE = concurrent.futures.Future()
 
 
 def _stub_construct_rpc_backend_options_handler(
@@ -45,6 +46,11 @@ def _stub_start_rpc_backend_handler(
 
 def set_value(value):
     VALUE_FUTURE.set_result(value)
+
+
+def set_and_check_done(value):
+    VALUE_FUTURE.set_result(value)
+    return DONE_FUTURE.result()
 
 
 # it is used to test python user defined function over rpc
@@ -1124,6 +1130,11 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
             )
 
+<<<<<<< HEAD
+        from torch.distributed.rpc import _rref_context_get_debug_info
+        rref1 = RRef(self.rank)
+        info = _rref_context_get_debug_info()
+=======
         from torch.distributed.rpc import _get_debug_info
         # Check 1: local RRef does not update owners_ map
         #################################################
@@ -1132,6 +1143,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # don't need a barrier here as local RRef is handled by this thread
         info = _get_debug_info()
+>>>>>>> 39cbeb6625... Re-enable test_rref_context_debug_info after enforcing proper synchronization
         self.assertIn("num_owner_rrefs", info)
         # RRef on local value is not added to context until shared across RPC
         self.assertEqual(0, int(info["num_owner_rrefs"]))
@@ -1148,11 +1160,15 @@ class RpcTest(RpcAgentTestFixture):
             set_global_rref,
             args=(rref1,)
         )
+<<<<<<< HEAD
+        info = _rref_context_get_debug_info()
+=======
 
         # barrier before check 2
         dist.barrier()
 
         info = _get_debug_info()
+>>>>>>> 39cbeb6625... Re-enable test_rref_context_debug_info after enforcing proper synchronization
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
 
@@ -1179,12 +1195,91 @@ class RpcTest(RpcAgentTestFixture):
 
         # barrier before check 3
         dist.barrier()
+<<<<<<< HEAD
+        info = _rref_context_get_debug_info()
+=======
 
         info = _get_debug_info()
+>>>>>>> 39cbeb6625... Re-enable test_rref_context_debug_info after enforcing proper synchronization
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
 
         # barrier after check 3
+        dist.barrier()
+
+    @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_process_group_debug_info(self):
+        from torch.distributed.rpc.api import _agent
+
+        NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
+
+        info = _agent.get_debug_info()
+        self.assertIn("num_pending_requests", info)
+        self.assertIn("thread_pool_size", info)
+        self.assertIn("num_idle_threads", info)
+        self.assertEqual(int(info["num_pending_requests"]), 0)
+        self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
+        self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
+
+        dst_rank = (self.rank + 1) % self.world_size
+        fut = rpc.rpc_async(
+            "worker{}".format(dst_rank),
+            set_and_check_done,
+            args=(dst_rank,)
+        )
+        # blocks until the request arrives
+        self.assertEqual(self.rank, VALUE_FUTURE.result())
+
+        info = _agent.get_debug_info()
+        self.assertIn("num_pending_requests", info)
+        self.assertIn("thread_pool_size", info)
+        self.assertIn("num_idle_threads", info)
+        self.assertEqual(int(info["num_pending_requests"]), 1)
+        self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
+        num_idle_threads = int(info["num_idle_threads"])
+        # as we cannot know for sure whether the send thread has returned, there
+        # might be either 1 or 2 busy threads
+        self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
+
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
+        # add a barrier to make sure the request is not finished before checking
+        # num_pending_requests
+        dist.barrier()
+
+        DONE_FUTURE.set_result(self.rank)
+        self.assertEqual(dst_rank, fut.wait())
+
+        # add a barrier to make sure the dst_rank has finished processing the
+        # request
+        dist.barrier()
+
+        info = _agent.get_debug_info()
+        self.assertIn("num_pending_requests", info)
+        self.assertIn("thread_pool_size", info)
+        self.assertIn("num_idle_threads", info)
+        self.assertEqual(int(info["num_pending_requests"]), 0)
+        self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
+
+        for retry in range(3):
+            # even if the future has completed, there is no guarantee that
+            # the local send/recv threads would have finished. We try three
+            # times. (NB: this might potentially be flaky. If flakiness does
+            # occur, then we have to relax the assert.)
+            info = _agent.get_debug_info()
+            if int(info["num_idle_threads"]) == NUM_THREAD:
+                break
+            time.sleep(0.1)
+        self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
+
+        # add a barrier to make sure SHUTDOWN message is not sent
         dist.barrier()
 
     @dist_init(setup_rpc=False)
@@ -1203,6 +1298,29 @@ class RpcTest(RpcAgentTestFixture):
         )
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
+
+    @dist_init
+    def test_debug_info(self):
+        # only test keys in this test case. Values should be covered by
+        # individual module debug info tests
+        from torch.distributed.rpc import (
+            _get_debug_info,
+            _rref_context_get_debug_info
+        )
+        from torch.distributed.rpc.api import _agent
+        import torch.distributed.autograd as dist_autograd
+
+        info = _get_debug_info()
+        rref_info = _rref_context_get_debug_info()
+        agent_info = _agent.get_debug_info()
+        autograd_info = dist_autograd._get_debug_info()
+        common_keys = rref_info.keys() & agent_info.keys() & autograd_info.keys()
+        self.assertEqual(0, len(common_keys))
+        expected = {}
+        expected.update(rref_info)
+        expected.update(agent_info)
+        expected.update(autograd_info)
+        self.assertEqual(expected, info)
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
