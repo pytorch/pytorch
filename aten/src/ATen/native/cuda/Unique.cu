@@ -1,11 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
-#include <thrust/execution_policy.h>
 
 #include <tuple>
 #include <iterator>
+#include <cub/cub.cuh>
+
+#include <THC/THCThrustAllocator.cuh>
+#include <thrust/execution_policy.h>
 #include <thrust/adjacent_difference.h>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
@@ -17,12 +20,95 @@ namespace native{
 
 namespace {
 
+// unique
+template <typename scalar_t>
+std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
+  const Tensor& self,
+  const bool consecutive,
+  const bool return_inverse,
+  const bool return_counts
+) {
 
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto options = self.options();
+
+  void *tmp_storage = nullptr;
+  size_t tmp_storage_size = 0;
+
+  int64_t num_inp = self.numel();
+  const scalar_t* self_data = self.data_ptr<scalar_t>();
+  int64_t *sorted_indices_data = nullptr;
+  Tensor sorted;
+  const scalar_t* sorted_data = self_data;
+
+  if (!consecutive) {
+    sorted = at::empty({num_inp}, options);
+    scalar_t *sorted_data_ = sorted.data_ptr<scalar_t>();
+    sorted_data = sorted_data_;  // const pointer
+    if (return_inverse) {
+      auto arange = at::arange(0, num_inp, options.dtype(kLong));
+      int64_t *arange_data = arange.data_ptr<int64_t>();
+      sorted_indices_data = static_cast<int64_t *>(c10::cuda::CUDACachingAllocator::raw_alloc(num_inp * sizeof(int64_t)));
+      // get tmp_storage_size
+      cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_size, self_data, sorted_data_, arange_data, sorted_indices_data, num_inp, 0, sizeof(scalar_t) * 8, stream);
+      // allocate tmp_storage and run the computation
+      tmp_storage = c10::cuda::CUDACachingAllocator::raw_alloc(tmp_storage_size);
+      cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_size, self_data, sorted_data_, arange_data, sorted_indices_data, num_inp, 0, sizeof(scalar_t) * 8, stream);
+    } else {
+      // get tmp_storage_size
+      cub::DeviceRadixSort::SortKeys(tmp_storage, tmp_storage_size, self_data, sorted_data_, num_inp, 0, sizeof(scalar_t) * 8, stream);
+      // llocate tmp_storage and run the computation
+      tmp_storage = c10::cuda::CUDACachingAllocator::raw_alloc(tmp_storage_size);
+      cub::DeviceRadixSort::SortKeys(tmp_storage, tmp_storage_size, self_data, sorted_data_, num_inp, 0, sizeof(scalar_t) * 8, stream);
+    }
+  }
+
+  // inverse indices
+  Tensor inverse_indices;
+  if (return_inverse) {
+    auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+    auto policy = thrust::cuda::par(allocator).on(stream);
+    Tensor inv_loc = at::empty({num_inp}, options);
+    inverse_indices = at::empty(self.sizes(), options);
+    int64_t* inv_loc_ptr = inv_loc.data_ptr<int64_t>();
+    int64_t* inverse_indices_ptr = inverse_indices.data_ptr<int64_t>();
+    thrust::adjacent_difference(policy, sorted_data, sorted_data + num_inp, inv_loc_ptr, thrust::not_equal_to<scalar_t>());
+    inv_loc[0] = 0;
+    thrust::inclusive_scan(policy, inv_loc_ptr, inv_loc_ptr + num_inp, inv_loc_ptr);
+    thrust::scatter(policy, inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_data, inverse_indices_ptr);
+    c10::cuda::CUDACachingAllocator::raw_delete(sorted_indices_data);
+  }
+
+  // cub always returns counts, so just ignore the return_counts flag and return counts always
+  Tensor output = at::empty({num_inp}, options);
+  Tensor counts = at::empty({num_inp}, options.dtype(kLong));
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+  int64_t* counts_data = counts.data_ptr<int64_t>();
+  auto num_out_tensor = at::empty({}, options.dtype(kInt));  // num_out used by cub is a device pointer
+  int *num_out_data = num_out_tensor.data_ptr<int>();
+  size_t new_tmp_storage_size = 0;
+  cub::DeviceRunLengthEncode::Encode(nullptr, new_tmp_storage_size, sorted_data, output_data, counts_data, num_out_data, num_inp, stream);
+  if (new_tmp_storage_size > tmp_storage_size) {
+    c10::cuda::CUDACachingAllocator::raw_delete(tmp_storage);
+    tmp_storage_size = new_tmp_storage_size;
+    tmp_storage = c10::cuda::CUDACachingAllocator::raw_alloc(tmp_storage_size);
+  }
+  cub::DeviceRunLengthEncode::Encode(tmp_storage, new_tmp_storage_size, sorted_data, output_data, counts_data, num_out_data, num_inp, stream);
+  c10::cuda::CUDACachingAllocator::raw_delete(tmp_storage);
+
+  int num_out = num_out_tensor.item().to<int>();  // synchronization happens here
+  output.resize_(num_out);
+  counts.resize_(num_out);
+
+  return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
+}
+
+// unique dim
 template <
   typename policy_t, typename scalar_t,
   typename equal_t, typename not_equal_t
 >
-std::tuple<Tensor, Tensor, int64_t> compute_unique(
+std::tuple<Tensor, Tensor, int64_t> compute_unique_dim(
   const policy_t &policy,
   scalar_t *data,
   int64_t num_inp,
@@ -72,53 +158,6 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
 }
 
 template <typename scalar_t>
-std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
-  const Tensor& self,
-  const bool consecutive,
-  const bool return_inverse,
-  const bool return_counts
-) {
-
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
-
-  auto options = self.options().dtype(kLong);
-  Tensor output = self.clone(at::MemoryFormat::Contiguous).reshape(-1);
-  int64_t num_inp = output.numel();
-  scalar_t* output_data = output.data_ptr<scalar_t>();
-
-  Tensor sorted_indices;
-  if (!return_inverse) {
-    if (!consecutive) {
-      thrust::sort(policy, output_data, output_data + num_inp);
-    }
-  } else {
-    sorted_indices = at::arange(0, num_inp, options);
-    if (!consecutive) {
-      int64_t *sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
-      thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
-    }
-  }
-
-  Tensor inverse_indices, counts;
-  int64_t num_out;
-  std::tie(inverse_indices, counts, num_out) = compute_unique(
-    policy, output_data, num_inp, sorted_indices,
-    return_inverse, return_counts, options,
-    thrust::equal_to<scalar_t>(),
-    thrust::not_equal_to<scalar_t>()
-  );
-  output.resize_(num_out);
-
-  if (return_inverse) {
-      inverse_indices.resize_(self.sizes());
-  }
-
-  return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
-}
-
-template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   const Tensor& self,
   const int64_t dim,
@@ -139,11 +178,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
-  
+
   auto sizes = self.sizes().vec();
   // check how many zero dimensions exist
   auto num_zero_dims = std::count(sizes.begin(), sizes.end(), 0);
-  
+
   // tensor is not well formed as it has 0 sized dimensions
   if (self.size(dim) == 0){
     TORCH_CHECK(
@@ -187,7 +226,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
 
   Tensor inverse_indices, counts;
   int64_t num_out;
-  std::tie(inverse_indices, counts, num_out) = compute_unique(
+  std::tie(inverse_indices, counts, num_out) = compute_unique_dim(
     policy, indices_data, num_inp, indices,
     return_inverse, return_counts, options,
     [=] __device__ (int64_t a, int64_t b) -> bool {
