@@ -53,7 +53,7 @@ def get_source_lines_and_file(obj):
     return sourcelines, file_lineno, filename
 
 
-def check_module_version_greater_or_equal(module, req_version_tuple, exit_if_error=True):
+def check_module_version_greater_or_equal(module, req_version_tuple, error_if_malformed=True):
     '''
     Check if a module's version satisfies requirements
 
@@ -65,7 +65,7 @@ def check_module_version_greater_or_equal(module, req_version_tuple, exit_if_err
     Args:
         module: the module to check the version of
         req_version_tuple: tuple (usually of ints) representing the required version
-        exit_if_error: whether we should exit if module version string is malformed
+        error_if_malformed: whether we should exit if module version string is malformed
 
     Returns:
         requirement_is_met: bool
@@ -81,7 +81,7 @@ def check_module_version_greater_or_equal(module, req_version_tuple, exit_if_err
     except:
         message = ("'%s' module version string is malformed '%s' and cannot be compared"
             " with tuple %s" % (module.__name__, module.__version__, str(req_version_tuple)))
-        if exit_if_error:
+        if error_if_malformed:
             raise Exception(message)
         else:
             warnings.warn(message + ', but continuing assuming that requirement is met')
