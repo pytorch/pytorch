@@ -547,7 +547,7 @@ class TestONNXRuntime(unittest.TestCase):
                     x.to(dtype=torch.float64) // 3, x.to(dtype=torch.float64) // 2., \
                     x.to(dtype=torch.int64) // 3, x.to(dtype=torch.int64) // 2., \
                     x // (y + 1.).to(dtype=torch.int64), x // y, \
-                    x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.int64), \
+                    x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
                     x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
 
         x = torch.randn(2, 3, 4)
