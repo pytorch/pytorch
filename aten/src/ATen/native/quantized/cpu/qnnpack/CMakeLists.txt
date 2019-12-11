@@ -147,6 +147,7 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/max-pooling.c
   src/sigmoid.c
   src/softargmax.c
+  src/tanh.c
   src/operator-delete.c)
 
 SET(PYTORCH_QNNPACK_EXEC_SRCS
@@ -446,6 +447,15 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
   TARGET_LINK_LIBRARIES(softargmax-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
   ADD_TEST(softargmax-test softargmax-test)
 
+  ADD_EXECUTABLE(tanh-test test/tanh.cc)
+  SET_TARGET_PROPERTIES(tanh-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  TARGET_INCLUDE_DIRECTORIES(tanh-test PRIVATE src test)
+  TARGET_LINK_LIBRARIES(tanh-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  ADD_TEST(tanh-test tanh-test)
+
   ADD_EXECUTABLE(max-pooling-test test/max-pooling.cc)
   SET_TARGET_PROPERTIES(max-pooling-test PROPERTIES
     CXX_STANDARD 14
@@ -666,6 +676,13 @@ IF(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(softargmax-bench PRIVATE pytorch_qnnpack benchmark)
+
+  ADD_EXECUTABLE(tanh-bench bench/tanh.cc)
+  SET_TARGET_PROPERTIES(tanh-bench PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  TARGET_LINK_LIBRARIES(tanh-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(q8gemm-bench bench/q8gemm.cc)
   SET_TARGET_PROPERTIES(q8gemm-bench PROPERTIES
