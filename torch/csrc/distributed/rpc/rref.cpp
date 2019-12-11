@@ -176,19 +176,45 @@ template class UserRRef<py::object>;
 
 template <typename T>
 const T& OwnerRRef<T>::getValue() const {
-  // TODO: use callback to make this non-blocking
   std::unique_lock<std::mutex> lock(mutex_);
   valueCV_.wait(lock, [this] { return value_.has_value(); });
   return value_.value();
 }
 
 template <typename T>
-void OwnerRRef<T>::setValue(T&& value) {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    value_ = std::move(value);
+bool OwnerRRef<T>::hasValue() const {
+  std::unique_lock<std::mutex> lock(mutex_);
+  return value_.has_value();
+}
+
+template <typename T>
+std::shared_ptr<FutureMessage> OwnerRRef<T>::getFuture() {
+  auto ret = std::make_shared<FutureMessage>();
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (value_.has_value()) {
+    ret->markCompleted();
+  } else {
+    futures_.push_back(ret);
   }
-  valueCV_.notify_all();
+  return ret;
+}
+
+template <typename T>
+void OwnerRRef<T>::setValue(T&& value) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  value_ = std::move(value);
+  if (!futures_.empty()) {
+    std::vector<std::shared_ptr<FutureMessage>> futures;
+    futures.swap(futures_);
+    lock.unlock();
+    valueCV_.notify_all();
+    for (auto& fut : futures) {
+      fut->markCompleted();
+    }
+  } else {
+    lock.unlock();
+    valueCV_.notify_all();
+  }
 }
 
 template class OwnerRRef<IValue>;
