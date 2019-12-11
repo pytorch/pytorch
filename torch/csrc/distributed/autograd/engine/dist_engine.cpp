@@ -224,7 +224,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   }
 }
 
-void DistEngine::executeSendFunction(
+std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& sendFunction) {
   std::unique_lock<std::mutex> lock(initializedContextIdsLock_);
@@ -248,13 +248,14 @@ void DistEngine::executeSendFunction(
     // Run the autograd engine.
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
 
-    // Wait for all of the outstanding rpcs to complete.
-    autogradContext->clearAndWaitForOutstandingRpcs();
+    // Return future for all of the outstanding rpcs to complete.
+    return autogradContext->clearAndWaitForOutstandingRpcsAsync();
   } else {
     lock.unlock();
     auto graphTask = autogradContext->retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
         graphTask, sendFunction, torch::autograd::InputBuffer(0)));
+    return std::make_shared<rpc::FutureMessage>(rpc::Message());
   }
 }
 
@@ -292,7 +293,7 @@ void DistEngine::execute(const variable_list& roots) {
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
-  autogradContext->clearAndWaitForOutstandingRpcs();
+  autogradContext->clearAndWaitForOutstandingRpcsAsync()->wait();
 }
 
 void DistEngine::clearInitializedContextId(int64_t contextId) {
