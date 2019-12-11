@@ -73,9 +73,9 @@ def infer_concrete_type_builder(nn_module):
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type_builder.set_module_list()
 
-    try:
+    if hasattr(nn_module, "__annotations__"):
         class_annotations = typing.get_type_hints(nn_module)
-    except TypeError:
+    else:
         class_annotations = dict()
 
     # try to infer the type from type annotation or from the object itself
