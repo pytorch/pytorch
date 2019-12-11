@@ -408,7 +408,7 @@ const std::vector<std::string> functions = {
                     tensor1,
                     tensor2,
                     *,
-                    value: number = 1.0):
+                    value: number):
             result = torch.addcmul(self, tensor1, tensor2, value=value)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             tensor1_size = torch._size_if_not_equal(tensor1.size(), result.size())
@@ -521,7 +521,7 @@ const std::vector<std::string> functions = {
 
         def split_with_sizes(self,
                              split_sizes: List[int],
-                             dim: int=0):
+                             dim: int):
             def backward(grad_outputs: List[Tensor]):
                 size = len(grad_outputs)
                 grad_self = torch.cat(grad_outputs, dim)
@@ -538,7 +538,7 @@ const std::vector<std::string> functions = {
             return torch.stack(tensors, dim), backward
 
         def unbind(self,
-                   dim: int=0):
+                   dim: int):
             def backward(grad_outputs: List[Tensor]):
                 grad_self = torch.stack(grad_outputs, dim)
                 return grad_self, None
@@ -546,7 +546,7 @@ const std::vector<std::string> functions = {
             return torch.unbind(self, dim), backward
 
         def cat(tensors: List[Tensor],
-                dim: int=0):
+                dim: int):
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
@@ -637,7 +637,7 @@ const std::vector<std::string> functions = {
 
         def rsub_0(self,
                    other,
-                   alpha: number = 1.0):
+                   alpha: number):
             result = torch.rsub(self, other, alpha)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             other_size = torch._size_if_not_equal(other.size(), result.size())
@@ -650,7 +650,7 @@ const std::vector<std::string> functions = {
 
         def rsub_1(self,
                    other: number,
-                   alpha: number = 1.0):
+                   alpha: number):
             def backward(grad_output):
                 grad_self = (- grad_output * alpha)
                 return grad_self, None, None
@@ -673,8 +673,8 @@ const std::vector<std::string> functions = {
         def to_0(self,
                  device: Optional[Device],
                  dtype: Optional[int],
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             self_device = self.device
             self_dtype = self.dtype
             if device is not None:
@@ -690,8 +690,8 @@ const std::vector<std::string> functions = {
 
         def to_1(self,
                  dtype: int,
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             self_dtype = self.dtype
             def backward(grad_output):
                 grad_self = grad_output.to(self_dtype, non_blocking, copy)
@@ -701,8 +701,8 @@ const std::vector<std::string> functions = {
 
         def to_2(self,
                  other,
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             def backward(grad_output):
                 grad_self = grad_output.to(self, non_blocking, copy)
                 return grad_self, None, None, None
@@ -1260,7 +1260,7 @@ const std::vector<std::string> functions = {
         def __interpolate_0(input,
                             size: Optional[int],
                             scale_factor: Optional[List[float]],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1273,7 +1273,7 @@ const std::vector<std::string> functions = {
         def __interpolate_1(input,
                             size: Optional[List[int]],
                             scale_factor: Optional[List[float]],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1286,7 +1286,7 @@ const std::vector<std::string> functions = {
         def __interpolate_2(input,
                             size: Optional[int],
                             scale_factor: Optional[float],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1299,7 +1299,7 @@ const std::vector<std::string> functions = {
         def __interpolate_3(input,
                             size: Optional[List[int]],
                             scale_factor: Optional[float],
-                            mode: str='nearest',
+                            mode: str,
                             align_corners: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
@@ -1316,7 +1316,7 @@ const std::vector<std::string> functions = {
         def add_0(self,
                   other,
                   *,
-                  alpha: number = 1.0):
+                  alpha: number):
             result = torch.add(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
@@ -1327,7 +1327,7 @@ const std::vector<std::string> functions = {
 
         def add_1(self,
                   other: number,
-                  alpha: number = 1.0):
+                  alpha: number):
             def backward(grad_output):
                 return grad_output, None, None
             return torch.add(self, other, alpha=alpha), backward
@@ -1335,7 +1335,7 @@ const std::vector<std::string> functions = {
         def sub_0(self,
                   other,
                   *,
-                  alpha: number = 1.0):
+                  alpha: number):
             result = torch.sub(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
@@ -1346,7 +1346,7 @@ const std::vector<std::string> functions = {
 
         def sub_1(self,
                   other: number,
-                  alpha: number = 1.0):
+                  alpha: number):
             def backward(grad_output):
                 return grad_output, None, None
             return torch.sub(self, other, alpha=alpha), backward
