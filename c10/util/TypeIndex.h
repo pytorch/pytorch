@@ -57,17 +57,17 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
+inline C10_HOST_CONSTEXPR c10::string_view fully_qualified_type_name_impl() noexcept {
 #if defined(_MSC_VER)
   return extract(
-      "class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<",
-      ">(void)",
-      __FUNCSIG__);
+      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
+      ">(void) noexcept",
+      string_view(__FUNCSIG__, sizeof(__FUNCSIG__) - 1));
 #elif defined(__clang__)
   return extract(
       "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
       "]",
-      __PRETTY_FUNCTION__);
+      string_view(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1));
 #elif defined(__GNUC__)
   return extract(
     #if C10_TYPENAME_SUPPORTS_CONSTEXPR
@@ -76,7 +76,7 @@ inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexc
       "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
     #endif
       "; c10::string_view = c10::basic_string_view<char>]",
-      __PRETTY_FUNCTION__);
+      string_view(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1));
 #endif
 }
 
@@ -87,13 +87,7 @@ inline C10_HOST_CONSTEXPR uint64_t type_index_impl() {
 // of this function, including its template parameter, i.e. including the
 // type we want an id for. We use this name and run crc64 on it to get a type
 // id.
-#if defined(_MSC_VER)
-  return crc64(__FUNCSIG__, sizeof(__FUNCSIG__)).checksum();
-#elif defined(__clang__)
-  return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
-#elif defined(__GNUC__)
-  return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
-#endif
+  return crc64(fully_qualified_type_name_impl<T>()).checksum();
 #else
   throw std::logic_error("This should not be called on device code");
 #endif
@@ -120,12 +114,7 @@ inline C10_HOST_CONSTEXPR type_index get_type_index() noexcept {
 
 template <typename T>
 inline C10_TYPENAME_CONSTEXPR string_view get_fully_qualified_type_name() noexcept {
-  #if C10_TYPENAME_SUPPORTS_CONSTEXPR
-  constexpr
-  #else
-  static
-  #endif
-  string_view name = detail::fully_qualified_type_name_impl<T>();
+  constexpr string_view name = detail::fully_qualified_type_name_impl<T>();
   return name;
 }
 } // namespace util
