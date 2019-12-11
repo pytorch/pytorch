@@ -18,10 +18,13 @@ from datetime import timedelta
 import functools
 import numbers
 import sys
+import logging
 import threading
 import torch
 import torch.distributed as dist
 
+logging.basicConfig()
+logger = logging.getLogger(__name__)
 
 _agent = None
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
@@ -64,7 +67,7 @@ def _require_initialized(func):
 # States used by `def _wait_all_workers()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-# `_SHUTDOWN_SHUTDOWN_INTENDED_WORKER_NAMES` is an empty set at beginning.
+# `_SHUTDOWN_INTENT_WORKER_NAMES` is an empty set at beginning.
 # It's only used by leader worker. Leader worker is elected as the first
 # worker in a sorted worker name list.
 # Whenever there is a worker showing shutdown intention to the leader,
@@ -72,11 +75,11 @@ _ALL_WORKER_NAMES = None
 # This set includes the leader's name, for marking that `_wait_all_workers()`
 # has been called. We need this because, we confine `_wait_all_workers()`
 # to be called only once.
-_SHUTDOWN_SHUTDOWN_INTENDED_WORKER_NAMES = set()
-# Once `_SHUTDOWN_SHUTDOWN_INTENDED_WORKER_NAMES == _ALL_WORKER_NAMES`,
-# we flip _PROCEED_SHUTDOWN_SIGNAL on the leader, and leader will send RPCs
-# to follower wowrkers to flip their `_PROCEED_SHUTDOWN_SIGNAL`s.
-_PROCEED_SHUTDOWN_SIGNAL = threading.Event()
+_SHUTDOWN_INTENT_WORKER_NAMES = set()
+# Once `_SHUTDOWN_INTENT_WORKER_NAMES == _ALL_WORKER_NAMES`,
+# we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
+# to follower wowrkers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
+_SHUTDOWN_PROCEED_SIGNAL = threading.Event()
 
 
 def _on_leader_follower_report_shutdown_intent(worker_name):
@@ -84,10 +87,10 @@ def _on_leader_follower_report_shutdown_intent(worker_name):
         worker_name in _ALL_WORKER_NAMES
     ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
     assert (
-        worker_name not in _SHUTDOWN_INTENDED_WORKER_NAMES
+        worker_name not in _SHUTDOWN_INTENT_WORKER_NAMES
     ), "{worker_name} reported intent twice. ".format(worker_name=worker_name)
-    _SHUTDOWN_INTENDED_WORKER_NAMES.add(worker_name)
-    if _ALL_WORKER_NAMES == _SHUTDOWN_INTENDED_WORKER_NAMES:
+    _SHUTDOWN_INTENT_WORKER_NAMES.add(worker_name)
+    if _ALL_WORKER_NAMES == _SHUTDOWN_INTENT_WORKER_NAMES:
         _set_proceed_shutdown_signal()
 
 
@@ -112,7 +115,7 @@ def _wait_all_workers():
 
     self_worker_name = _agent.get_worker_info().name
     assert (
-        self_worker_name not in _SHUTDOWN_INTENDED_WORKER_NAMES
+        self_worker_name not in _SHUTDOWN_INTENT_WORKER_NAMES
     ), "Can not call `_wait_all_workers()` twice."
 
     is_leader_worker = leader_worker_name == self_worker_name
