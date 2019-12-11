@@ -1,4 +1,4 @@
-from cimodel.lib.conf_tree import ConfigNode, XImportant, X
+from cimodel.lib.conf_tree import ConfigNode, XImportant
 from cimodel.lib.conf_tree import Ver
 
 
