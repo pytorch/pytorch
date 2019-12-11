@@ -1,4 +1,3 @@
-import torch
 from torch._six import PY2
 from collections import OrderedDict
 
