@@ -135,7 +135,6 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::op
   return tensor;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
@@ -155,7 +154,6 @@ Tensor empty(
   internal_set_names_inplace(result, names);
   return result;
 }
-#endif
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
   check_size_nonnegative(size);
@@ -275,11 +273,9 @@ Tensor empty_like(
     result = at::_empty(self.sizes(), dtype, layout, device, pin_memory, memory_format);
   }
 
-#ifdef BUILD_NAMEDTENSOR
   if (self.opt_names()) {
     namedinference::propagate_names(result, self.names());
   }
-#endif
 
   return result;
 }
@@ -1047,7 +1043,6 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   return self;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 // ~~~~~~~~~~~~~~~~~~~~~~~~~ named tensor overloads ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // In the short term, these exist.
 // In the long term, we should move DimnameList into TensorOptions to avoid
@@ -1129,7 +1124,6 @@ Tensor rand(
   return result.uniform_(0, 1, generator);
 }
 
-#endif
 
 } // namespace native
 } // namespace at

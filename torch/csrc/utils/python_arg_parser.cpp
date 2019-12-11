@@ -239,7 +239,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       }
       return false;
     }
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
     case ParameterType::DIMNAME_LIST: {
       if (THPUtils_checkDimnameList(obj)) {
@@ -248,7 +247,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
       return size == 1 && THPUtils_checkDimname(obj);
     }
-#endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -291,10 +289,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
-#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
