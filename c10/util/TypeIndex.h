@@ -10,6 +10,17 @@
 namespace c10 {
 namespace util {
 
+#if defined(_MSC_VER) || (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
+// MSVC and GCC<9 have issues with our implementation for constexpr typenames.
+// Any version of Clang and GCC 9 are fine with it.
+// TODO Make it work for more compilers
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
 struct type_index final : IdWrapper<type_index, uint64_t> {
   constexpr explicit type_index(uint64_t checksum) : IdWrapper(checksum) {}
 
@@ -46,7 +57,7 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline constexpr string_view fully_qualified_type_name_impl() noexcept {
+inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
 #if defined(_MSC_VER)
   return extract(
       "class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<",
@@ -59,7 +70,11 @@ inline constexpr string_view fully_qualified_type_name_impl() noexcept {
       __PRETTY_FUNCTION__);
 #elif defined(__GNUC__)
   return extract(
+    #if C10_TYPENAME_SUPPORTS_CONSTEXPR
       "constexpr c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
+    #else
+      "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
+    #endif
       "]",
       __PRETTY_FUNCTION__);
 #endif
@@ -104,8 +119,14 @@ inline constexpr type_index get_type_index() noexcept {
 }
 
 template <typename T>
-inline constexpr string_view get_fully_qualified_type_name() noexcept {
-  return detail::fully_qualified_type_name_impl<T>();
+inline C10_TYPENAME_CONSTEXPR string_view get_fully_qualified_type_name() noexcept {
+  #if C10_TYPENAME_SUPPORTS_CONSTEXPR
+  constexpr
+  #else
+  static
+  #endif
+  string_view name = detail::fully_qualified_type_name_impl<T>();
+  return name;
 }
 } // namespace util
 } // namespace c10
