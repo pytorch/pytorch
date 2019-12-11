@@ -22,56 +22,25 @@ class ExprNode : public BaseExprNode {
   }
 };
 
-// A refcounted pointer to the underlying Expr node.
+// A refcounted pointer to the underlying ExprNode.
 // Also serves the primary way to build and operate on other expressions.
-class Expr {
+class Expr : public RefHandle<BaseExprNode> {
  public:
-  explicit Expr(BaseExprNode *node) : node_(node) {}
-
-  ~Expr() { reset(); }
-
-  // Handling refcount of the underlyng BaseExprNode
-  Expr(const Expr& other) {
-    this->reset();
-    node_ = other.node_;
-    node_->Ref();
-  }
-
-  Expr(Expr&& other) {
-    node_ = other.node_;
-    other.node_ = nullptr;
-  }
-
-  Expr& operator=(const Expr& other) {
-    this->reset();
-    node_ = other.node_;
-    node_->Ref();
-  }
-
-  Expr& operator=(Expr&& other) {
-    node_ = other.node_;
-    other.node_ = nullptr;
-  }
+  using BaseHandle = RefHandle<BaseExprNode>;
+  explicit Expr(BaseExprNode *node) : BaseHandle(node) {}
 
   void accept(IRVisitor *visitor) const {
-    node_->accept(visitor);
+    node()->accept(visitor);
   }
+
+  explicit Expr(int v);
+  explicit Expr(float v);
 
   // Handling the math operators.
   Expr operator+(const Expr& other) const;
   Expr operator-(const Expr& other) const;
   Expr operator*(const Expr& other) const;
-  Expr operator/(const Expr& other) const;  
-
- private:
-  void reset() {
-    if (node_) {
-      node_->Unref();
-    }
-    node_ = nullptr;
-  }
-
-  BaseExprNode *node_ = nullptr;
+  Expr operator/(const Expr& other) const;
 };
 
 } // namespace nnc

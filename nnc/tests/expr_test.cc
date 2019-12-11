@@ -60,7 +60,7 @@ class SimpleExprEvaluator : public IRVisitor {
   T value() const { return value_; }
 
  private:
-  T value_ = T(0);
+  T value_ = T();
 };
 
 TEST(ExprTest, BasicValueTest) {
@@ -72,10 +72,10 @@ TEST(ExprTest, BasicValueTest) {
 }
 
 TEST(ExprTest, BasicValueTest02) {
-  Expr a = FloatImm::make(2);
-  Expr b = FloatImm::make(3);
-  Expr c = FloatImm::make(4);
-  Expr d = FloatImm::make(5);
+  Expr a(2.0f);
+  Expr b(3.0f);
+  Expr c(4.0f);
+  Expr d(5.0f);
   Expr f = (a + b) - (c + d);
   SimpleExprEvaluator<float> eval;
   f.accept(&eval);
