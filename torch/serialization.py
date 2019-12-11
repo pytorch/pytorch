@@ -12,7 +12,7 @@ import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
-from torch._utils_internal import get_source_lines_and_file
+from torch._utils_internal import get_source_lines_and_file, check_module_version_greater_or_equal
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
@@ -301,11 +301,11 @@ def _check_dill_version(pickle_module):
     '''
     if pickle_module.__name__ == 'dill':
         required_dill_version = (0, 3, 1)
-        dill_version = tuple(int(num) for num in pickle_module.__version__.split('.'))
-
-        if dill_version < required_dill_version:
-            raise ValueError(
-                "'torch' supports 'dill' >= %s, but you have 'dill' %s" % (
+        if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
+            raise ValueError((
+                "'torch' supports dill >= %s, but you have dill %s."
+                " Please upgrade dill or switch to 'pickle'"
+                ) % (
                     '.'.join([str(num) for num in required_dill_version]),
                     pickle_module.__version__
                 )
