@@ -15,8 +15,9 @@ static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
-DEFINE_DISPATCH(hardshrink_cpu_stub);
-DEFINE_DISPATCH(hardshrink_backward_cpu_stub);
+DEFINE_DISPATCH(hardshrink_stub);
+DEFINE_DISPATCH(softshrink_stub);
+DEFINE_DISPATCH(shrink_backward_stub);
 
 Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
   return at::clamp(self, min, max);
@@ -364,20 +365,45 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // -----------------------------------
 // hardshrink
 // -----------------------------------
-Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
+Tensor hardshrink(const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto iter = TensorIterator::unary_op(out_tensor, self);
-  hardshrink_cpu_stub(kCPU, iter, lambd);
+  hardshrink_stub(iter.device_type(), iter, lambd);
   return out_tensor;
 }
 
-Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
+Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto iter = TensorIterator::binary_op(out_tensor, grad, self);
-  hardshrink_backward_cpu_stub(kCPU, iter, lambd);
+  shrink_backward_stub(iter.device_type(), iter, lambd);
   return out_tensor;
 }
 
+Tensor& softshrink_out(Tensor& result, const Tensor & self, Scalar lambd) {
+  auto iter = TensorIterator::unary_op(result, self);
+  softshrink_stub(iter.device_type(), iter, lambd);
+  return result;
+}
+
+Tensor softshrink(const Tensor & self, Scalar lambd) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  softshrink_stub(iter.device_type(), iter, lambd);
+  return iter.output();
+}
+
+Tensor& softshrink_backward_out(Tensor& grad_input, const Tensor & grad, const Tensor & self, Scalar lambd) {
+  auto iter = TensorIterator::binary_op(grad_input, grad, self);
+  shrink_backward_stub(iter.device_type(), iter, lambd);
+  return grad_input;
+}
+
+Tensor softshrink_backward(const Tensor & grad, const Tensor & self, Scalar lambd) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad, self);
+  shrink_backward_stub(iter.device_type(), iter, lambd);
+  return iter.output();
+}
 
 Tensor gelu_cpu(const Tensor& self) {
   Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);

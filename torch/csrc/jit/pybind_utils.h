@@ -330,11 +330,9 @@ inline IValue createGenericDict(
 
 template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
-#ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
       "NYI: Named tensors are currently unsupported in TorchScript. As a  "
       "workaround please drop names via `tensor = tensor.rename(None)`.");
-#endif
 }
 
 inline IValue toIValue(
@@ -541,6 +539,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::QSchemeType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
