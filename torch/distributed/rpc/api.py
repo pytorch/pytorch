@@ -82,6 +82,7 @@ def _set_proceed_signal():
     _PROCEED_SIGNAL.set()
 
 
+@_require_initialized
 def _wait_all_workers():
     r"""
     Block until all local and remote RPC processes reach this method and wait
@@ -90,9 +91,6 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    if _agent is None:
-        return
-
     assert _ALL_WORKER_NAMES is not None, (
         "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
     )
@@ -131,6 +129,7 @@ def _wait_all_workers():
         import time
         time.sleep(0.2)
 
+@_require_initialized
 def shutdown(graceful=True):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
@@ -173,9 +172,6 @@ def shutdown(graceful=True):
         >>> rpc.shutdown()
     """
     global _agent
-
-    if _agent is None:
-        return
 
     if graceful:
         _wait_all_workers()

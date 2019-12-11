@@ -3016,6 +3016,22 @@ graph(%Ra, %Rb):
 
         self.checkScript(bad_index, (False,))
 
+    def test_constant_prop_aliasing_type(self):
+        @torch.jit.script
+        def foo():
+            return len([1]), len(torch.tensor([2]))
+
+        FileCheck().check_dag("aten::tensor").check_dag("aten::len").run(foo.graph)
+
+        @torch.jit.script
+        def fn():
+            if True:
+                return 1
+            else:
+                return 2
+
+        FileCheck().check_not("prim::If").run(fn.graph)
+
     def test_short_circuit_optimization(self):
         @torch.jit.script
         def const_expressions(x):
@@ -3035,6 +3051,34 @@ graph(%Ra, %Rb):
         self.assertEqual(redundant_expressions(0), (False, False))
         # and True / or False are removed from graph
         FileCheck().check("aten::eq").check_not("prim::If").run(redundant_expressions.graph)
+
+    @_inline_everything
+    def test_peephole_type_refinements(self):
+        def refine(x):
+            # type: (Optional[Tensor]) -> Tensor
+            return x if x is not None else torch.tensor(3)
+
+        @torch.jit.script
+        def test():
+            return refine(torch.tensor(4))
+
+        FileCheck().check("prim::unchecked_cast").run(test.graph)
+        self.run_pass('peephole', test.graph)
+        FileCheck().check_not("prim::unchecked_cast").run(test.graph)
+
+        # refinement not optimzied out
+        def is_int_tensor(x):
+            scalar = x.item()
+            if isinstance(scalar, int):
+                return scalar + 3
+            else:
+                return 8
+
+        self.checkScript(is_int_tensor, (torch.tensor(2),))
+        self.checkScript(is_int_tensor, (torch.tensor(2.5),))
+        graph = torch.jit.script(is_int_tensor).graph
+        self.run_pass('peephole', graph)
+        FileCheck().check("prim::unchecked_cast").run(graph)
 
     def test_trace_records_names(self):
         def foo(bar, baz):
@@ -5000,6 +5044,19 @@ a")
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
+        # test re-assignment on imported source
+        str = """
+        def foo(x):
+            # type: (bool)
+            a = float("-inf")
+            if not x:
+                a = float(torch.tensor([5]))
+            return a < 4
+        """
+        cu = torch.jit.CompilationUnit(str)
+        self.assertTrue(cu.foo(True))
+        self.assertFalse(cu.foo(False))
+
     def test_add(self):
         def func(a, b):
             c = a + b
@@ -6854,15 +6911,9 @@ a")
                 c1 = 0
             return c1
 
+        FileCheck().check_not("prim::If").run(testNoThrows.graph)
         self.assertEqual(0, testNoThrows(torch.randn(0)))
-        ifs = testNoThrows.graph.findAllNodes("prim::If", recurse=False)
-
-        # three ifs at the top level, and the second one has a nested if for
-        # the or (True or bool(t[1])) expression
-        self.assertTrue(len(ifs) == 3)
-        self.assertTrue(ifs[0].findNode("prim::If") is None)
-        self.assertTrue(ifs[1].findNode("prim::If").findNode("prim::If") is None)
-        self.assertTrue(ifs[2].findNode("prim::If") is None)
+        self.assertEqual(0, testNoThrows(torch.randn([2, 3])))
 
         @torch.jit.script
         def throwsOr(t):
@@ -9841,7 +9892,6 @@ a")
 
         self.assertFalse(foo())
         scripted = torch.jit.script(foo)
-        FileCheck().check("is_scripting").run(scripted.graph)
         self.assertTrue(scripted())
 
     def test_script_outputs(self):
@@ -10073,10 +10123,10 @@ a")
         @torch.jit.script
         def tensor_unifying(x, y, z):
             # testing dynamic is appropriately set for y and z
-            if True:
-                x, y, z = x, y, z
+            if bool(x):
+                x, y, z = x + 1, y, z
             else:
-                x, y, z = x, x, y
+                x, y, z = x + 1, x, y
 
             return x, y, z
 
@@ -12527,6 +12577,26 @@ a")
         for a, b in zip(eager_out, script_out):
             check_equal_and_dtype(a, b)
 
+    def test_floordiv(self):
+        funcs_template = dedent('''
+        def fn():
+            ten = {a_construct}
+            ten_or_scalar = {b_construct}
+            return ten // ten_or_scalar, torch.floor_divide(ten, ten_or_scalar)
+        ''')
+
+        lhs = ["torch.tensor([5.5, 3.2])", "torch.tensor([2, 2])", "torch.tensor([3, 2])"]
+        rhs = ["1.5", "2", "4", "1.1"] + lhs
+        for tensor in lhs:
+            for tensor_or_scalar in rhs:
+                funcs_str = funcs_template.format(a_construct=tensor, b_construct=tensor_or_scalar)
+                scope = {}
+                execWrapper(funcs_str, globals(), scope)
+                cu = torch.jit.CompilationUnit(funcs_str)
+                f_script = cu.fn
+                f = scope['fn']
+                self.assertEqual(f_script(), f())
+
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_traced_module(self):
         @_trace(torch.rand(3, 4))
@@ -13534,8 +13604,7 @@ a")
         with warnings.catch_warnings(record=True) as warns:
             torch.jit.trace(*args, **kwargs)
         self.assertGreater(len(warns), 0)
-        for warn in warns:
-            self.assertIn("cause the trace to be incorrect", str(warn.message))
+        self.assertTrue(any(["cause the trace to be incorrect" in str(warn.message) for warn in warns]))
 
     def test_trace_checker_slice_lhs(self):
         def foo(x):
@@ -17042,6 +17111,12 @@ additional_module_tests = [
         'input_size': (10, 8, 128),
         'extra_args': (torch.randn(10, 8, 128), torch.randn(10, 8, 128)),
         'slowTest': True
+    },
+    {
+        'module_name': 'Transformer',
+        'constructor_args': (1, 1, 1, 1, 2),
+        'input_size': (3, 1, 1),
+        'extra_args': (torch.randn(1, 1, 1),)
     }
 ]
 

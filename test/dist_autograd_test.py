@@ -70,6 +70,9 @@ def _compare_owner_value(context_id, rref, grad):
 def my_py_add(t1, t2):
     return torch.add(t1, t2)
 
+def my_scalar_add(a, b):
+    return a + b
+
 
 def my_rref_add(rref_t1, t2):
     ret = torch.add(rref_t1.local_value(), t2)
@@ -554,6 +557,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE)
 
     def _test_no_graph_with_tensors_not_require_grad(self, exec_mode):
+        self._initialize_pg()
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=False)
@@ -591,6 +595,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             # rpc/remote with udf (_set_rpc_done here) also always passes the
             # autograd context to the callee due to the same reason.
             self.assertNotEqual(-1, dist_autograd._retrieve_context(ctx_ids[1]))
+            dist.barrier()
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad(self):
@@ -601,6 +606,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
 
     def _test_grad_only_on_return_value(self, exec_mode):
+        self._initialize_pg()
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             if ExecMode.RPC_SYNC == exec_mode:
@@ -627,6 +633,9 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(1, len(grads))
             self.assertIn(requires_grad_tensor, grads)
             self.assertEqual(torch.ones_like(ret), grads[requires_grad_tensor])
+            # due to the above get_gradients call, ensure that dist autograd
+            # contexts aren't cleaned up until all workers exit context managers
+            dist.barrier()
 
     @dist_init
     def test_grad_only_on_return_value(self):
@@ -703,6 +712,45 @@ class DistAutogradTest(RpcAgentTestFixture):
         self.assertTrue(success)
 
     @dist_init
+    def test_context_cleanup_tensor_no_grad(self):
+        # test that in dist autograd, in the case that tensors communicated over RPC do
+        # NOT require grad, we still cleanup the dist autograd contexts created
+        # on other nodes. This is because the autograd context is still
+        # communicated over RPC even if tensor arguments do not require grad, as
+        #  it is possible that the response could.
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=False)
+            for dst_rank in dst_ranks:
+                rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t1))
+                rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+    @dist_init
+    def test_context_cleanup_no_tensors(self):
+        # test that in dist autograd, in the case that RPCs do not have tensors
+        # at all, we still cleanup the dist autograd contexts created
+        # on other nodes. This is because the autograd context is still
+        # communicated over RPC even if there are no tensors that require grad,
+        #  since it is possible that the response could have such tensors.
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        with dist_autograd.context() as context_id:
+            for dst_rank in dst_ranks:
+                rpc.rpc_sync("worker{}".format(dst_rank), my_scalar_add, args=(1, 1))
+                rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+    @dist_init
     def test_context_cleanup_nested_rpc(self):
         self._initialize_pg()
 
@@ -725,8 +773,8 @@ class DistAutogradTest(RpcAgentTestFixture):
     def test_worker_ids_recorded(self):
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
-            # if no tensors require grad, we do not add the send functions, so
-            # no worker ids should be recorded.
+            # if no tensors require grad, we should still record worker_ids, as
+            # the autograd context ID is still passed to other workers.
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
             for dst_rank in dst_ranks:
@@ -737,7 +785,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             # no worker ids should be recorded.
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
-            self.assertEqual(len(worker_ids), 0)
+            self.assertEqual(len(worker_ids), len(dst_ranks))
 
             # worker_ids should be recorded when tensors do require grad
             t1.requires_grad = True
