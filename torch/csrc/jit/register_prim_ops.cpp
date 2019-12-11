@@ -3391,9 +3391,9 @@ at::Tensor interpolate(
     }
   }
 
-  double scale_factors_1 = -1.0f;
-  double scale_factors_2 = -1.0f;
-  double scale_factors_3 = -1.0f;
+  double scale_factors_1 = -1.0;
+  double scale_factors_2 = -1.0;
+  double scale_factors_3 = -1.0;
 
   if(!scale_factors.isNone() && use_scale_factor == c10::nullopt) {
     use_scale_factor = false;
