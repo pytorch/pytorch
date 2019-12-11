@@ -278,9 +278,9 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
 class _Uninitialized final {};
 
 template <class T>
-inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
-  constexpr auto typeId = TypeIdentifier::Get<T>();
-  constexpr auto typeName = c10::util::get_fully_qualified_type_name<T>();
+inline C10_TYPENAME_CONSTEXPR TypeMetaData _makeTypeMetaDataInstance() {
+  C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
+  C10_TYPENAME_CONSTEXPR auto typeName = c10::util::get_fully_qualified_type_name<T>();
 
   return {sizeof(T),
           _PickNew<T>(),
@@ -389,7 +389,7 @@ class C10_API TypeMeta final {
     return data_->name_;
   }
 
-  friend constexpr bool operator==(
+  friend bool operator==(
       const TypeMeta& lhs,
       const TypeMeta& rhs) noexcept;
 
@@ -406,7 +406,7 @@ class C10_API TypeMeta final {
   }
 
   template <class T>
-  static constexpr c10::string_view TypeName() noexcept {
+  static C10_TYPENAME_CONSTEXPR c10::string_view TypeName() noexcept {
     return c10::util::get_fully_qualified_type_name<T>();
   }
 
@@ -420,7 +420,7 @@ class C10_API TypeMeta final {
    */
   template <typename T>
   static TypeMeta Make() {
-    static constexpr detail::TypeMetaData singleton =
+    static C10_TYPENAME_CONSTEXPR detail::TypeMetaData singleton =
         detail::_makeTypeMetaDataInstance<T>();
     return TypeMeta(&singleton);
   }
@@ -432,12 +432,12 @@ class C10_API TypeMeta final {
 inline TypeMeta::TypeMeta() noexcept
     : TypeMeta(TypeMeta::Make<detail::_Uninitialized>()) {}
 
-inline constexpr bool operator==(
+inline bool operator==(
     const TypeMeta& lhs,
     const TypeMeta& rhs) noexcept {
   return (lhs.id() == rhs.id());
 }
-inline constexpr bool operator!=(
+inline bool operator!=(
     const TypeMeta& lhs,
     const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
