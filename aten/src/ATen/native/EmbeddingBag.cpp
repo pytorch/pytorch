@@ -337,7 +337,12 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
 
   auto bag_size = make_bag_size(offsets, indices, mode, weight.requires_grad());
 
-  auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
+  Tensor output;
+  if (weight.requires_grad()) {
+    output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
+  } else {
+    output = at::empty({offsets.size(0), weight.size(1)}, weight.options());
+  }
 
   // To save compute, if we are going to go down the fast path case for the 'sum'
   // mode, we skip calculating offset2bag, since it is not going to be used.
