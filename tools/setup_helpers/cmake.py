@@ -168,6 +168,8 @@ class CMake:
 
         args = []
         if USE_NINJA:
+            # Avoid conflicts in '-G' and the `CMAKE_GENERATOR`
+            os.environ['CMAKE_GENERATOR'] = 'Ninja'
             args.append('-GNinja')
         elif IS_WINDOWS:
             generator = os.getenv('CMAKE_GENERATOR', 'Visual Studio 15 2017')
