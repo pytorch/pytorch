@@ -2153,7 +2153,7 @@ def _weight_norm(g, weight_v, weight_g, dim):
         # This conflicts the logic for negative axes to access dims backwards
         # TODO: Might need a fix in torch group_norm module
         axes = list(range(rank))
-        if dim:
+        if dim is not None:
             if dim < -1:
                 dim += rank
             if dim != -1:

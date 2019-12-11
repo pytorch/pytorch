@@ -73,13 +73,6 @@ void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
 int64_t SparseTensorImpl::dim() const {
   return sparse_dim_ + dense_dim_;
 }
-TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  TORCH_CHECK(condition_when_zero_dim == (dim() == 0),
-           "Attempted to maybe_zero_dim on a SparseTensorImpl to ", condition_when_zero_dim,
-           " but the SparseTensor's dim() is ", dim(), " and SparseTensors do not support"
-           " changing dimensionality via maybe_zero_dim");
-  return this;
-}
 bool SparseTensorImpl::has_storage() const {
   return false;
 }
