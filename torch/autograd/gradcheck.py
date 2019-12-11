@@ -244,9 +244,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                         'This check will likely fail if all the inputs are '
                         'not of double precision floating point. ')
                 any_input_requiring_grad = True
+                inp.retain_grad()
             else:
                 some_input_not_requiring_grad = True
-            inp.retain_grad()
     if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
