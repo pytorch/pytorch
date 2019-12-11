@@ -2577,6 +2577,20 @@ sqrt_() -> Tensor
 In-place version of :meth:`~Tensor.sqrt`
 """)
 
+add_docstr_all('square',
+               r"""
+square() -> Tensor
+
+See :func:`torch.square`
+""")
+
+add_docstr_all('square_',
+               r"""
+square_() -> Tensor
+
+In-place version of :meth:`~Tensor.square`
+""")
+
 add_docstr_all('squeeze',
                r"""
 squeeze(dim=None) -> Tensor
