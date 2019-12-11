@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -exu -o pipefail
+#NOT FOR COMMIT.GH STACK TESTING
 
 #SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
