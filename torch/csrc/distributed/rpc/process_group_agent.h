@@ -13,6 +13,12 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
+
+constexpr steady_clock_time_point kInfiniteTimeoutTimePoint =
+    std::chrono::time_point<std::chrono::steady_clock>::max();
+
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions() = default;
   int numSendRecvThreads;
@@ -77,12 +83,6 @@ class ProcessGroupAgent : public RpcAgent {
       override;
 
  private:
-  using steady_clock_time_point =
-      std::chrono::time_point<std::chrono::steady_clock>;
-
-  static constexpr steady_clock_time_point kInfiniteTimeoutTimePoint =
-      std::chrono::time_point<std::chrono::steady_clock>::max();
-
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);

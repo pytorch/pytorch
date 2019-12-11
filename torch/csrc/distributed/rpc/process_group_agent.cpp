@@ -249,13 +249,10 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           ? kInfiniteTimeoutTimePoint
           : futureStartTime + timeout;
       // Insert future into future map.
-      futures_
-          .emplace(
-              std::piecewise_construct,
-              std::forward_as_tuple(requestId),
-              std::forward_as_tuple(
-                  FutureInfo(future, endTime, to.id_, timeout)))
-          .first->second;
+      futures_.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(requestId),
+          std::forward_as_tuple(FutureInfo(future, endTime, to.id_, timeout)));
       // insert future into timeouts map to keep track of its timeout
       futureTimeouts_[endTime].push_back(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
@@ -371,7 +368,18 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             work.type_,
             work.id_);
         if (message.isRequest()) {
-          send(work.from_, cb_->operator()(message));
+          auto futureResponse = cb_->operator()(message);
+          if (futureResponse->completed()) {
+            send(work.from_, std::move(*futureResponse).moveMessage());
+          } else {
+            auto fromId = work.from_.id_;
+            futureResponse->addCallback(
+                [this, fromId, futureResponse](const Message&) {
+                  send(
+                      getWorkerInfo(fromId),
+                      std::move(*futureResponse).moveMessage());
+                });
+          }
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
@@ -530,7 +538,12 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
 
 std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
-  /* For now return an empty map, TODO add metrics like send/recv count etc */
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+  }
+  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
+  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
   return metrics;
 }
 
