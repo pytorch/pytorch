@@ -5,6 +5,8 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cpu/vec256/functional.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 namespace at {
 namespace native {
@@ -22,10 +24,11 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
+  using Vec = vec256::Vec256<T>;
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
-  const T* X_data = X.data_ptr<T>();
+  T* X_data = X.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
@@ -36,14 +39,17 @@ void LayerNormKernelImplInternal(
   const bool beta_null = beta_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; ++i) {
-      const T* X_ptr = X_data + i * N;
+      T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
-      T mean_val = T(0);
-      T rstd_val = T(0);
-      for (int64_t j = 0; j < N; ++j) {
-        mean_val += X_ptr[j];
-        rstd_val += X_ptr[j] * X_ptr[j];
-      }
+      T mean_val = vec256::reduce_all<T>(
+          [](Vec& x, Vec& y) { return x + y; },
+          X_ptr,
+          N);
+      T rstd_val = vec256::map_reduce_all<T>(
+          [](Vec x) { return x * x; },
+          [](Vec x, Vec y) { return x + y; },
+          X_ptr,
+          N);
       mean_val *= c;
       rstd_val = std::max(rstd_val * c - mean_val * mean_val, T(0));
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
