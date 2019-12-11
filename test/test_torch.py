@@ -4180,7 +4180,10 @@ class _TestTorchMixin(object):
                 error_was_raised = False
             self.assertTrue(requirement_is_met ^ error_was_raised)
 
-    @unittest.skipIf(not TEST_DILL, 'Dill not found')
+    @unittest.skipIf(
+        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0,3,1)),
+        'Dill not found or not correct version'
+    )
     def test_serialization_dill_no_encoding(self):
         x = torch.randn(5, 5)
         
@@ -4191,7 +4194,10 @@ class _TestTorchMixin(object):
             self.assertIsInstance(x2, type(x))
             self.assertEqual(x, x2)
 
-    @unittest.skipIf(not TEST_DILL, 'Dill not found')
+    @unittest.skipIf(
+        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0,3,1)),
+        'Dill not found or not correct version'
+    )
     def test_serialization_dill_encoding(self):
         x = torch.randn(5, 5)
         
