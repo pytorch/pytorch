@@ -503,7 +503,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, nullptr, nullptr},
   {"is_leaf", (getter)THPVariable_is_leaf, nullptr, nullptr, nullptr},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, nullptr, nullptr},
-  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // only for legacy reasons
+  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // Allows the python class to override .grad
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr},
   {"_base", (getter)THPVariable_get_base, nullptr, nullptr, nullptr},
   {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, nullptr, nullptr},
