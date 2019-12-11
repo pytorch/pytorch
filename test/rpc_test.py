@@ -1169,6 +1169,7 @@ class RpcTest(RpcAgentTestFixture):
         # checking debug info
         dist.barrier()
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/31112")
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
