@@ -62,18 +62,19 @@ def allequal(iterator):
     return all(first == rest for rest in iterator)
 
 
-def benchmark_process_group(pg, benchmark):
+def benchmark_process_group(pg, benchmark, use_ddp_for_single_rank=True):
     torch.manual_seed(pg.rank())
     torch.cuda.manual_seed(pg.rank())
 
     model = benchmark.create_model()
     data = [(benchmark.generate_inputs(), benchmark.generate_target())]
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(),
-                          0.001,
-                          momentum=0.9,
-                          weight_decay=1e-4)
-    if pg.size() > 1:
+    optimizer = optim.SGD(
+        model.parameters(),
+        0.001,
+        momentum=0.9,
+        weight_decay=1e-4)
+    if use_ddp_for_single_rank or pg.size() > 1:
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             device_ids=[torch.cuda.current_device()],
@@ -96,42 +97,18 @@ def benchmark_process_group(pg, benchmark):
     return measurements[warmup_iterations:]
 
 
-def run_benchmark(prefix, ranks, benchmark):
-    def local_print(msg):
-        if dist.get_rank() == 0:
-            print(msg, end='', flush=True)
-
-    def print_measurements(prefix, nelem, measurements):
-        measurements = sorted(measurements)
-        local_print("%s: " % prefix)
-        for p in [50, 75, 90, 95]:
-            v = np.percentile(measurements, p)
-            local_print("p%02d:  %1.3f  %4d/s  " % (p, v, nelem / v))
-        local_print("\n")
-
-    group_nccl = dist.new_group(ranks=ranks, backend="nccl")
-    group_gloo = dist.new_group(ranks=ranks, backend="gloo")
-    group_to_benchmark = group_nccl
-
+def run_benchmark(benchmark, ranks, opts):
+    group = dist.new_group(ranks=ranks, backend=benchmark.distributed_backend)
     measurements = []
     if dist.get_rank() in set(ranks):
-        measurements = benchmark_process_group(group_to_benchmark, benchmark)
-
-    dist.destroy_process_group(group_nccl)
-    dist.destroy_process_group(group_gloo)
+        if not opts:
+            opts = dict()
+        measurements = benchmark_process_group(group, benchmark, **opts)
+    dist.destroy_process_group(group)
     dist.barrier()
 
-    # Force destruction of everything that is no longer used.
-    # Most notably, this is needed to destroy the NCCL process group
-    # if the PyTorch 1.0 DistributedDataParallel class with Python
-    # side reduction is used. If we don't explicitly run GC,
-    # creation of NCCL process groups later on results in a crash.
-    gc.collect()
-
     # Aggregate measurements for better estimation of percentiles
-    measurements = list(itertools.chain(*allgather_object(measurements)))
-    print_measurements(prefix, benchmark.batch_size, measurements)
-    return measurements
+    return list(itertools.chain(*allgather_object(measurements)))
 
 
 def sweep(benchmark):
@@ -139,14 +116,34 @@ def sweep(benchmark):
     # This list contain tuples for ("string prefix", [rank...]).
     benchmarks = []
 
-    def append_benchmark(prefix, ranks):
+    def append_benchmark(prefix, ranks, opts=None):
         prefix = "%4d GPUs -- %s" % (len(ranks), prefix)
-        benchmarks.append((prefix, ranks))
+        benchmarks.append((prefix, ranks, opts))
+
+    def local_print(msg):
+        if dist.get_rank() == 0:
+            print(msg, end='', flush=True)
+
+    def print_header():
+        local_print("\n")
+        local_print("%22s" % "")
+        for p in [50, 75, 90, 95]:
+            local_print("%14s%10s" % ("sec/iter", "ex/sec"))
+        local_print("\n")
+
+    def print_measurements(prefix, nelem, measurements):
+        measurements = sorted(measurements)
+        local_print("%8s:" % prefix)
+        for p in [50, 75, 90, 95]:
+            v = np.percentile(measurements, p)
+            local_print("  p%02d:  %1.3fs  %6d/s" % (p, v, nelem / v))
+        local_print("\n")
 
     # Every process runs once by themselves to warm up (CUDA init, etc).
-    append_benchmark("  warmup", [dist.get_rank()])
+    append_benchmark("  warmup", [dist.get_rank()], {"use_ddp_for_single_rank": False})
 
     # Single machine baselines
+    append_benchmark("  no ddp", range(1), {"use_ddp_for_single_rank": False})
     append_benchmark("   1M/1G", range(1))
     append_benchmark("   1M/2G", range(2))
     append_benchmark("   1M/4G", range(4))
@@ -156,19 +153,24 @@ def sweep(benchmark):
         append_benchmark("   %dM/8G" % i, range(i * 8))
 
     # Run benchmarks in order of increasing number of GPUs
+    print_header()
     results = []
-    for prefix, ranks in sorted(benchmarks, key=lambda tup: len(tup[1])):
+    for prefix, ranks, opts in sorted(benchmarks, key=lambda tup: len(tup[1])):
         # Turn range into materialized list.
         ranks = list(ranks)
-        measurements = run_benchmark(prefix, ranks, benchmark)
-        results.append({"ranks": ranks, "measurements": measurements})
+        measurements = run_benchmark(benchmark, ranks, opts)
+        if not "warmup" in prefix:
+            print_measurements(prefix, benchmark.batch_size, measurements)
+            results.append({"ranks": ranks, "measurements": measurements})
+
     return results
 
 
 class Benchmark(object):
-    def __init__(self, device):
+    def __init__(self, device, distributed_backend):
         self.device = device
         self.batch_size = 32
+        self.distributed_backend = distributed_backend
 
     def __str__(self):
         raise NotImplementedError
@@ -184,8 +186,8 @@ class Benchmark(object):
 
 
 class TorchvisionBenchmark(Benchmark):
-    def __init__(self, device, model):
-        super(TorchvisionBenchmark, self).__init__(device)
+    def __init__(self, device, distributed_backend, model):
+        super(TorchvisionBenchmark, self).__init__(device, distributed_backend)
         self.model = model
 
     def __str__(self):
@@ -205,6 +207,7 @@ def main():
     parser = argparse.ArgumentParser(description='PyTorch distributed benchmark suite')
     parser.add_argument("--rank", type=int, default=os.environ["RANK"])
     parser.add_argument("--world-size", type=int, required=True)
+    parser.add_argument("--distributed-backend", type=str, default="nccl")
     parser.add_argument("--master-addr", type=str, required=True)
     parser.add_argument("--master-port", type=str, required=True)
     parser.add_argument("--model", type=str)
@@ -214,6 +217,8 @@ def main():
     num_gpus_per_node = torch.cuda.device_count()
     assert num_gpus_per_node == 8, "Expected 8 GPUs per machine"
 
+    # The global process group used only for communicating benchmark
+    # metadata, like measurements. Not for benchmarking itself.
     dist.init_process_group(
         backend="gloo",
         init_method="tcp://{}:{}".format(args.master_addr, args.master_port),
@@ -233,6 +238,7 @@ def main():
         print("")
         print("* PyTorch version: {}".format(torch.__version__))
         print("* CUDA version: {}".format(torch.version.cuda))
+        print("* Distributed backend: {}".format(args.distributed_backend))
         print("")
         print("--- nvidia-smi topo -m ---")
         print("")
@@ -245,10 +251,18 @@ def main():
 
     benchmarks = []
     if args.model:
-        benchmarks.append(TorchvisionBenchmark(device=device, model=args.model))
+        benchmarks.append(
+            TorchvisionBenchmark(
+                device=device,
+                distributed_backend=args.distributed_backend,
+                model=args.model))
     else:
         for model in ["resnet50", "resnet101", "resnext50_32x4d", "resnext101_32x8d"]:
-            benchmarks.append(TorchvisionBenchmark(device=device, model=model))
+            benchmarks.append(
+                TorchvisionBenchmark(
+                    device=device,
+                    distributed_backend=args.distributed_backend,
+                    model=model))
 
     benchmark_results = []
     for benchmark in benchmarks:
@@ -266,6 +280,7 @@ def main():
         report = {
             "pytorch_version": torch.__version__,
             "cuda_version": torch.version.cuda,
+            "distributed_backend": args.distributed_backend,
             "benchmark_results": benchmark_results,
         }
         with open(args.json, 'w') as f:

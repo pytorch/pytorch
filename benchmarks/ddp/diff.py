@@ -42,25 +42,37 @@ def main():
         if ra["batch_size"] != rb["batch_size"]:
             continue
 
-        name = "{} with batch size {}".format(ra["model"], ra["batch_size"])
+        model = ra["model"]
+        batch_size = int(ra["batch_size"])
+        name = "{} with batch size {}".format(model, batch_size)
         print("Benchmark: {}".format(name))
+
+        # Print header
+        print("")
+        print("{:>10s}".format(""), end='')
+        for _ in [75, 95]:
+            print("{:>16s}{:>10s}{:>10s}".format("sec/iter", "ex/sec", "diff"), end='')
+        print("")
+
+        # Print measurements
         for (i, (xa, xb)) in enumerate(zip(ra["result"], rb["result"])):
-            # Ignore warmup round
+            # Ignore round without ddp
             if i == 0:
                 continue
+            # Sanity check: ignore if number of ranks is not equal
             if len(xa["ranks"]) != len(xb["ranks"]):
                 continue
 
             ngpus = len(xa["ranks"])
             ma = sorted(xa["measurements"])
             mb = sorted(xb["measurements"])
-            print("{:>4d} GPUs: ".format(ngpus), end='')
+            print("{:>4d} GPUs:".format(ngpus), end='')
             for p in [75, 95]:
                 va = np.percentile(ma, p)
                 vb = np.percentile(mb, p)
                 # We're measuring time, so lower is better (hence the negation)
                 delta = -100 * ((vb - va) / va)
-                print("p{:02d}:  {:1.3f} ({:+5.1f}%)  ".format(p, vb, delta), end='')
+                print("  p{:02d}: {:8.3f}s {:7d}/s {:+8.1f}%".format(p, vb, int(batch_size / vb), delta), end='')
             print("")
         print("")
 
