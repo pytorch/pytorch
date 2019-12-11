@@ -98,7 +98,8 @@ void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
   futureMessage->addCallback(
       [this](
-          const rpc::Message& /* unused */, const utils::FutureError* futErr) {
+          const rpc::Message& /* unused */,
+          const c10::optional<utils::FutureError>& futErr) {
         if (futErr) {
           // If we have an error, let the local autograd engine know about it.
           std::runtime_error err((*futErr).what());

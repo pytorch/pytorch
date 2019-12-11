@@ -62,7 +62,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
 
 void finishAcceptUserRRef(
     const rpc::Message& message,
-    const utils::FutureError* futErr) {
+    const c10::optional<utils::FutureError>& futErr) {
   RRefContext::handleException(futErr);
   auto rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
@@ -71,7 +71,7 @@ void finishAcceptUserRRef(
 
 void finishCreatingOwnerRRef(
     const Message& message,
-    const utils::FutureError* futErr) {
+    const c10::optional<utils::FutureError>& futErr) {
   RRefContext::handleException(futErr);
   auto rr = RemoteRet::fromMessage(message);
   TORCH_INTERNAL_ASSERT(

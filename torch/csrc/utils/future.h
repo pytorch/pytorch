@@ -6,11 +6,11 @@ namespace torch {
 
 namespace utils {
 
-// FutuerError inherits from std::exception, it can return const char* or
+// FutureError inherits from std::exception, it can return const char* or
 // std::string error message
 class TORCH_API FutureError final : public std::exception {
 public:
-  FutureError(std::string&& errorMsg) : errorMsg_(std::move(errorMsg)) {}
+  FutureError(std::string errorMsg) : errorMsg_(std::move(errorMsg)) {}
 
   FutureError() = default;
 
@@ -28,7 +28,8 @@ private:
 template <typename T>
 class TORCH_API Future final {
  public:
-  using Callback = std::function<void(const T&, const FutureError*)>;
+  using Callback =
+      std::function<void(const T&, const c10::optional<FutureError>&)>;
 
   const T& wait() {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -52,11 +53,11 @@ class TORCH_API Future final {
     finished_cv_.notify_all();
   }
 
-  void setError(std::string&& errorMsg) {
+  void setError(std::string errorMsg) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
+    TORCH_CHECK(!completed());
     completed_ = true;
-    error_ = c10::guts::make_unique<FutureError>(std::move(errorMsg));
+    error_ = FutureError(std::move(errorMsg));
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -71,7 +72,7 @@ class TORCH_API Future final {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
-      callback(value_, error_.get());
+      callback(value_, error_);
       return;
     }
     callbacks_.push_back(callback);
@@ -84,7 +85,7 @@ class TORCH_API Future final {
     // Once completed_ is set to true, no one can add new callback to the list.
     // pass value_, error_ for callback to easily check state.
     for (auto& callback : callbacks_) {
-      callback(value_, error_.get());
+      callback(value_, error_);
     }
     callbacks_.clear();
   }
@@ -94,7 +95,7 @@ class TORCH_API Future final {
   std::condition_variable finished_cv_;
   std::vector<Callback> callbacks_;
   T value_;
-  std::unique_ptr<FutureError> error_;
+  c10::optional<FutureError> error_;
 };
 
 }
