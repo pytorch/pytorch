@@ -195,6 +195,7 @@ void initJITBindings(PyObject* module) {
             FoldQuantizeCallIntoBuffer(module, method_name);
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
+      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
@@ -360,6 +361,13 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, at::Tensor>& paramsDict){
                 UnpackQuantizedWeights(graph, paramsDict);
+                return paramsDict;
+             },
+             pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                insertPermutes(graph, paramsDict);
                 return paramsDict;
              },
              pybind11::return_value_policy::move);
