@@ -148,6 +148,15 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
 }
 
 ScalarType infer_scalar_type(PyObject *obj) {
+#ifdef USE_NUMPY
+  if (PyArray_Check(obj)) {
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
+  }
+  if (PyArray_CheckScalar(obj)) {
+    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+  }
+#endif
   if (PyFloat_Check(obj)) {
     // this is always guaranteed to be a floating-point type, and makes it more
     // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
@@ -163,15 +172,6 @@ ScalarType infer_scalar_type(PyObject *obj) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
     return var.scalar_type();
   }
-#ifdef USE_NUMPY
-  if (PyArray_Check(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
-  }
-  if (PyArray_CheckScalar(obj)) {
-    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
-  }
-#endif
   if (THPUtils_checkString(obj)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
   }
