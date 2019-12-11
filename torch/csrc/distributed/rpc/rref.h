@@ -307,7 +307,7 @@ class OwnerRRef final : public RRef {
   c10::optional<T> value_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
-  std::vector<std::shared_ptr<FutureMessage>> futures_;
+  std::shared_ptr<FutureMessage> future_;
 };
 
 } // namespace rpc

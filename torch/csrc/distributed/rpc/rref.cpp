@@ -189,12 +189,15 @@ bool OwnerRRef<T>::hasValue() const {
 
 template <typename T>
 std::shared_ptr<FutureMessage> OwnerRRef<T>::getFuture() {
-  auto ret = std::make_shared<FutureMessage>();
   std::unique_lock<std::mutex> lock(mutex_);
+  if (future_.get()) {
+    return future_;
+  }
+  future_ = std::make_shared<FutureMessage>();
+  std::shared_ptr<FutureMessage> ret = future_;
   if (value_.has_value()) {
+    lock.unlock();
     ret->markCompleted();
-  } else {
-    futures_.push_back(ret);
   }
   return ret;
 }
@@ -203,12 +206,12 @@ template <typename T>
 void OwnerRRef<T>::setValue(T&& value) {
   std::unique_lock<std::mutex> lock(mutex_);
   value_ = std::move(value);
-  std::vector<std::shared_ptr<FutureMessage>> futures;
-  futures.swap(futures_);
+  std::shared_ptr<FutureMessage> future;
+  future.swap(future_);
   lock.unlock();
   valueCV_.notify_all();
-  for (auto& fut : futures) {
-    fut->markCompleted();
+  if (future.get()) {
+    future->markCompleted();
   }
 }
 
