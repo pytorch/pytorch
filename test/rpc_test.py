@@ -158,18 +158,17 @@ def nested_rpc(dst):
     return rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 
-def multi_layer_nested_async_rpc(dst, world_size, ttl):
+def multi_layer_nested_sync_rpc(dst, world_size, ttl):
     # this method returns immediately without blocking the callee, but will
     # generate additional requests.
     if ttl > 0:
         current_dst = "worker{}".format(dst)
         next_dst = (dst + 1) % world_size
-        rpc.rpc_async(
+        return rpc.rpc_sync(
             current_dst,
             multi_layer_nested_async_rpc,
             args=(next_dst, world_size, ttl - 1),
         )
-        return 0
 
 
 def nested_rref(dst):
@@ -883,16 +882,13 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
-    def test_multi_layer_nested_async_rpc(self):
-        # This test will exit right away, but there will be a chain of async
-        # RPCs. The termination algorithm should detect those messages properly.
-        # Otherwise, some peer could exit early, leaving others to timeout
-        # errors or connection closed errors.
+    def test_multi_layer_nested_sync_rpc(self):
+        # This is a chain of nested RPCs.
         ttl = 20
         n = self.rank + 1
         dst_rank = n % self.world_size
 
-        multi_layer_nested_async_rpc(dst_rank, self.world_size, ttl)
+        multi_layer_nested_sync_rpc(dst_rank, self.world_size, ttl)
 
     @dist_init
     def test_remote_with_exception(self):
