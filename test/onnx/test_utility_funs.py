@@ -209,7 +209,7 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, ):
-                super(Reshape, self).__init__()
+                super(ReshapeModule, self).__init__()
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
