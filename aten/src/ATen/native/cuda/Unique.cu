@@ -30,7 +30,6 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
 ) {
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto options = self.options();
 
   void *tmp_storage = nullptr;
   size_t tmp_storage_size = 0;
@@ -42,11 +41,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   const scalar_t* sorted_data = self_data;
 
   if (!consecutive) {
-    sorted = at::empty({num_inp}, options);
+    sorted = at::empty({num_inp}, self.options());
     scalar_t *sorted_data_ = sorted.data_ptr<scalar_t>();
     sorted_data = sorted_data_;  // const pointer
     if (return_inverse) {
-      auto arange = at::arange(0, num_inp, options.dtype(kLong));
+      auto arange = at::arange(0, num_inp, self.options().dtype(kLong));
       int64_t *arange_data = arange.data_ptr<int64_t>();
       sorted_indices_data = static_cast<int64_t *>(c10::cuda::CUDACachingAllocator::raw_alloc(num_inp * sizeof(int64_t)));
       // get tmp_storage_size
@@ -68,8 +67,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   if (return_inverse) {
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);
-    Tensor inv_loc = at::empty({num_inp}, options);
-    inverse_indices = at::empty(self.sizes(), options);
+    Tensor inv_loc = at::empty({num_inp}, self.options());
+    inverse_indices = at::empty(self.sizes(), self.options());
     int64_t* inv_loc_ptr = inv_loc.data_ptr<int64_t>();
     int64_t* inverse_indices_ptr = inverse_indices.data_ptr<int64_t>();
     thrust::adjacent_difference(policy, sorted_data, sorted_data + num_inp, inv_loc_ptr, thrust::not_equal_to<scalar_t>());
@@ -80,11 +79,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   }
 
   // cub always returns counts, so just ignore the return_counts flag and return counts always
-  Tensor output = at::empty({num_inp}, options);
-  Tensor counts = at::empty({num_inp}, options.dtype(kLong));
+  Tensor output = at::empty({num_inp}, self.options());
+  Tensor counts = at::empty({num_inp}, self.options().dtype(kLong));
   scalar_t* output_data = output.data_ptr<scalar_t>();
   int64_t* counts_data = counts.data_ptr<int64_t>();
-  auto num_out_tensor = at::empty({}, options.dtype(kInt));  // num_out used by cub is a device pointer
+  auto num_out_tensor = at::empty({}, self.options().dtype(kInt));  // num_out used by cub is a device pointer
   int *num_out_data = num_out_tensor.data_ptr<int>();
   size_t new_tmp_storage_size = 0;
   cub::DeviceRunLengthEncode::Encode(nullptr, new_tmp_storage_size, sorted_data, output_data, counts_data, num_out_data, num_inp, stream);
