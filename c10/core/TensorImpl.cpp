@@ -126,18 +126,6 @@ bool TensorImpl::compute_strides_like_channels_last() const {
       }
     }
     return true;
-  } else if (sizes_.size() == 3) {
-    int64_t min = 0;
-    for (auto& d : {0, 2, 1}) {
-      if (sizes_[d] != 1) {
-        if (strides_[d] > min) {
-          min = strides_[d];
-        } else {
-          return false;
-        }
-      }
-    }
-    return true;
   }
   return false;
 }
@@ -283,7 +271,7 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->type_set_ = src_impl->type_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
-  dest_impl->is_channels_last_tag_ = src_impl->is_channels_last_tag_;
+  dest_impl->is_channels_last_ = src_impl->is_channels_last_;
   dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
