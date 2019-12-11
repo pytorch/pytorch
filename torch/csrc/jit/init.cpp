@@ -454,7 +454,7 @@ void initJITBindings(PyObject* module) {
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
 #else
-      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
+      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, n));
 #endif
       if (!memview) {
         throw python_error();

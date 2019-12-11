@@ -477,8 +477,18 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
     for key in sorted(serialized_storages.keys()):
         name = 'data/{}'.format(key)
         storage = serialized_storages[key]
-        num_bytes = storage.size() * storage.element_size()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        if storage.device.type == 'cpu':
+            # Copy data from tensor directly into zip archive
+            num_bytes = storage.size() * storage.element_size()
+            buf = io.BytesIO()
+            zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        else:
+            # Copy to a buffer, then serialize that
+            buf = io.BytesIO()
+            storage._write_file(buf, _should_read_directly(buf))
+            buf_value = buf.getvalue()
+            zip_file.write_record(name, buf_value, len(buf_value))
+
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
@@ -796,11 +806,15 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
     def load_tensor(obj, size, key, location):
         loaded_storages[key] = restore_location(obj, location)
         name = 'data/{}'.format(key)
-        size_long = struct.pack("<Q", size)
-        tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
+        if location == 'cpu':
+            size_long = struct.pack("<Q", size)
+            tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
+        else:
+            tensor_file = io.BytesIO(zip_file.get_record(name))
         offset = None
         is_real_file = False
-        loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+        l = loaded_storages[key]
+        l._set_from_file(tensor_file, offset, is_real_file)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
