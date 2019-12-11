@@ -87,6 +87,30 @@ class ProcessGroupAgent : public RpcAgent {
     std::mutex mutex_;
   };
 
+  // TODO: this class should inherit from a MetricsTracker, and can be extended
+  // to track num_sends, recvs, average size of messages, etc.
+  struct AverageMetricsTracker {
+    const std::string key_;
+    float currentAverage_;
+    float currentCount_;
+
+    AverageMetricsTracker(
+        const std::string key,
+        float currentAverage = 0,
+        float currentCount = 0)
+        : key_(key),
+          currentAverage_(currentAverage),
+          currentCount_(currentCount) {}
+
+    float computeAverage(float dataPoint) {
+      ++currentCount_;
+      auto newAvg = currentAverage_ +
+          (dataPoint - currentAverage_) / (float)currentCount_;
+      currentAverage_ = newAvg;
+      return currentAverage_;
+    }
+  };
+
   // The FutureInfo struct stores a shared_ptr to the future, as well as
   // additional information to manage timeouts and destination information,
   // which is needed for termination detection.
@@ -206,6 +230,10 @@ class ProcessGroupAgent : public RpcAgent {
   mutable std::condition_variable futureCV_;
   // CV to wake up watchdog thread that watches for timed out futures.
   std::condition_variable futureTimeoutCV_;
+  // Metrics tracked for ProcessGroupAgent.
+  std::unordered_map<std::string, std::unique_ptr<AverageMetricsTracker>>
+      metricsMap_;
+  void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 };
 
 } // namespace rpc

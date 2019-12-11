@@ -30,6 +30,10 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 const std::chrono::milliseconds INFINITE_TIMEOUT =
     std::chrono::milliseconds::max();
+const std::string kNumPendingRequests = "num_pending_requests";
+const std::string kThreadPoolSize = "thread_pool_size";
+const std::string kNumIdleThreads = "num_idle_threads";
+const std::string kGilAverageWaitTime = "gil_average_wait_time";
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -375,7 +379,18 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             work.type_,
             work.id_);
         if (message.isRequest()) {
-          send(work.from_, cb_->operator()(message));
+          auto futureResponse = cb_->operator()(message);
+          if (futureResponse->completed()) {
+            send(work.from_, std::move(*futureResponse).moveMessage());
+          } else {
+            auto fromId = work.from_.id_;
+            futureResponse->addCallback(
+                [this, fromId, futureResponse](const Message&) {
+                  send(
+                      getWorkerInfo(fromId),
+                      std::move(*futureResponse).moveMessage());
+                });
+          }
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
@@ -557,13 +572,28 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   {
     std::unique_lock<std::mutex> lock(futureMutex_);
-    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+    metrics[kNumPendingRequests] = c10::to_string(futures_.size());
   }
-  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
-  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
+  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  for (const auto& metricInfo : metricsMap_) {
+    metrics[metricInfo.first] = metricInfo.second->currentAverage_;
+  }
   return metrics;
 }
 
+// MetricsTracker has key, value, count
+void ProcessGroupAgent::addGilWaitTime(
+    const std::chrono::microseconds gilWaitTime) {
+  auto gilMetrics = metricsMap_.find(kGilAverageWaitTime);
+  if (gilMetrics == metricsMap_.end()) {
+    metricsMap_.insert({kGilAverageWaitTime,
+                        std::move(c10::guts::make_unique<AverageMetricsTracker>(
+                            kGilAverageWaitTime))});
+  } else {
+    gilMetrics->second->computeAverage(gilWaitTime.count());
+  }
+}
 
 } // namespace rpc
 } // namespace distributed

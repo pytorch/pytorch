@@ -17,22 +17,16 @@ py::object getFunction(const py::object& module, const char* name) {
   return fn;
 }
 
-class GilWaitTimeGuard {
- public:
-  explicit GilWaitTimeGuard()
-      : start(std::chrono::high_resolution_clock::now()) {}
-
-  void markAcquired() {
-    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::high_resolution_clock::now() - start);
-    RpcAgent::getDefaultRpcAgent()->addGilWaitTime(dur);
-  }
-
- private:
-  std::chrono::time_point<std::chrono::high_resolution_clock> start;
-};
-
 } // namespace
+
+PythonRpcHandler::GilWaitTimeGuard::GilWaitTimeGuard()
+    : start(std::chrono::high_resolution_clock::now()) {}
+
+void PythonRpcHandler::GilWaitTimeGuard::markAcquired() {
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::high_resolution_clock::now() - start);
+  RpcAgent::getDefaultRpcAgent()->addGilWaitTime(dur);
+}
 
 PythonRpcHandler::PythonRpcHandler() {
   pybind11::gil_scoped_acquire ag;

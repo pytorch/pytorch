@@ -41,11 +41,6 @@ std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
   return getMetrics();
 }
 
-void RpcAgent::addGilWaitTime(
-    const std::chrono::microseconds gilWaitTime /* unused */) {
-  // No-op default implementation
-}
-
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
