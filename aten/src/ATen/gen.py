@@ -16,7 +16,6 @@ import preprocess_declarations
 import function_wrapper
 
 from code_template import CodeTemplate
-from env import BUILD_NAMEDTENSOR
 
 
 # This file is the top-level entry point for code generation in ATen.
@@ -361,14 +360,6 @@ def filter_by_extension(files, *extensions):
     return filtered_files
 
 
-def is_namedtensor_only_decl(decl):
-    if 'Dimname' in decl['schema_string']:
-        return True
-    if decl['name'] == 'align_tensors' or decl['name'] == 'align_as':
-        return True
-    return False
-
-
 def generate_outputs():
     cwrap_files = filter_by_extension(options.files, '.cwrap')
     nn_files = filter_by_extension(options.files, 'nn.yaml', '.h')
@@ -388,14 +379,6 @@ def generate_outputs():
     output_declarations = function_wrapper.create_generic(top_env, declarations)
     output_declarations = postprocess_output_declarations(output_declarations)
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
-
-    # Filter out named-tensor only declarations.
-    # They are necessary in create_generic because that generates Type.h, TensorBody.h,
-    # and TensorMethods.h, all of which are checked in to the codebase and therefore
-    # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
-    if not BUILD_NAMEDTENSOR:
-        declarations = [decl for decl in declarations
-                        if not is_namedtensor_only_decl(decl)]
 
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(backend, density, declarations)

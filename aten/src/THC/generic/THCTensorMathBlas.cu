@@ -11,9 +11,7 @@
 
 accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   if ( (THTensor_nDimension(self) != 1) || (THTensor_nDimension(src) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
        THTensor_nDimension(self), THTensor_nDimension(src));
@@ -163,14 +161,10 @@ static void THCTensor_(addmvImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
 
 void THCTensor_(addmv)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *mat, THCTensor *vec, scalar_t beta, scalar_t alpha) {
   {
-#ifdef BUILD_NAMEDTENSOR
     at::NoNamesGuard guard;
-#endif
     THCTensor_(addmvImpl)(state, r_, t, mat, vec, beta, alpha);
   }
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
-#endif
 }
 
 void THCTensor_(addr)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *vec1, THCTensor *vec2, scalar_t beta, scalar_t alpha)
@@ -459,14 +453,10 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
 
 void THCTensor_(addmm)(THCState *state, THCTensor *r_, THCTensor *t, THCTensor *m1, THCTensor *m2, scalar_t beta, scalar_t alpha) {
   {
-#ifdef BUILD_NAMEDTENSOR
     at::NoNamesGuard guard;
-#endif
     THCTensor_(addmmImpl)(state, r_, t, m1, m2, beta, alpha);
   }
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
-#endif
 }
 
 void THCTensor_(addbmm)(THCState *state, THCTensor *result, THCTensor *t,
@@ -545,11 +535,9 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
              "equal number of batches expected");
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
              "equal number of batches expected");
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = at::namedinference::compute_baddbmm_outnames(result, batch1, batch2, t);
   {
     at::NoNamesGuard guard;
-#endif
   THArgCheck(THCTensor_(size)(state, t, 1) == THCTensor_(size)(state, batch1, 1), 6,
              "wrong matrix size");
   THArgCheck(THCTensor_(size)(state, t, 2) == THCTensor_(size)(state, batch2, 2), 7,
@@ -822,10 +810,8 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   if (result_ != result) {
     THCTensor_(freeCopyTo)(state, result_, result);
   }
-#ifdef BUILD_NAMEDTENSOR
   }
   at::namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");

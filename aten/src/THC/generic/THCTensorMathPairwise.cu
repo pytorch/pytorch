@@ -32,12 +32,10 @@ static int THCTensor_(equalImpl)(THCState *state, THCTensor *self_, THCTensor *s
 }
 
 int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_) {
-#ifdef BUILD_NAMEDTENSOR
   if (!at::namedinference::are_names_equal(self_, src_)) {
     return 0;
   }
   at::NoNamesGuard guard;
-#endif
   return THCTensor_(equalImpl)(state, self_, src_);
 }
 
