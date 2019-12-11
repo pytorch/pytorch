@@ -319,7 +319,7 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         #    recursively scripting them.
         for name, module_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            assert isinstance(orig_value, Module)
+            assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
