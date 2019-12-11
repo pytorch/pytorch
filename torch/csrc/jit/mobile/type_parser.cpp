@@ -1,4 +1,5 @@
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/script/parser_constants.h>
 #include <queue>
 
 namespace torch {

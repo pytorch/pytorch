@@ -1,10 +1,10 @@
 #pragma once
 #include <ATen/core/Macros.h>
-#include <Aten/core/jit_type.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/strtod.h>
+#include <torch/csrc/jit/script/parser_constants.h>
 #include <torch/csrc/jit/source_range.h>
 #include <algorithm>
 #include <clocale>

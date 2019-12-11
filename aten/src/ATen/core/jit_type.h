@@ -20,7 +20,6 @@ namespace jit {
 struct Function;
 namespace script {
 struct CompilationUnit;
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|~";
 }
 } // namespace jit
 } // namespace torch
