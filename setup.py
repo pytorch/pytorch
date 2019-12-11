@@ -758,6 +758,7 @@ if __name__ == '__main__':
 
     packages.append('torch.testlib')
     packages.append('torch.testlib.data')
+    packages.append('torch.testlib.expect')
     packages.append('torch.testlib.distributed.rpc')
     setup(
         name=package_name,
@@ -772,6 +773,7 @@ if __name__ == '__main__':
         package_dir={
             'torch.testlib' : './test',
             'torch.testlib.data' : './test/data',
+            'torch.testlib.expect' : './test/expect',
             'torch.testlib.distributed.rpc' : './test/distributed/rpc'
         },
         package_data={
@@ -877,6 +879,9 @@ if __name__ == '__main__':
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
+            ],
+            'torch.testlib.expect': [
+                '*',
             ]
         },
         url='https://pytorch.org/',

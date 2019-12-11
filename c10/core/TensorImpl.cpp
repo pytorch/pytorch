@@ -182,11 +182,6 @@ int64_t TensorImpl::stride(int64_t d) const {
   return strides_[d];
 }
 
-TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  TORCH_INTERNAL_ASSERT(false, "maybe_zero_dim should not be called anymore");
-  return this;
-}
-
 bool TensorImpl::has_storage() const {
   return storage_;
 }
