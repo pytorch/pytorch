@@ -7,12 +7,14 @@ from . import (
     _invoke_remote_python_udf,
     _invoke_rpc_builtin,
     _invoke_rpc_python_udf,
+    _set_rpc_timeout,
     _start_rpc_agent,
     backend_registry,
 )
 from .internal import _internal_rpc_pickler, PythonUDF
 
 import contextlib
+from datetime import timedelta
 import functools
 import numbers
 import sys
@@ -60,26 +62,38 @@ def _require_initialized(func):
 
 
 # States used by `def _wait_all_workers()`.
+# `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-_INTENDED_WORKER_NAMES = set()
-_PROCEED_SIGNAL = threading.Event()
+# `_SHUTDOWN_SHUTDOWN_INTENDED_WORKER_NAMES` is an empty set at beginning.
+# It's only used by leader worker. Leader worker is elected as the first
+# worker in a sorted worker name list.
+# Whenever there is a worker showing shutdown intention to the leader,
+# leader add this worker's name to the set.
+# This set includes the leader's name, for marking that `_wait_all_workers()`
+# has been called. We need this because, we confine `_wait_all_workers()`
+# to be called only once.
+_SHUTDOWN_SHUTDOWN_INTENDED_WORKER_NAMES = set()
+# Once `_SHUTDOWN_SHUTDOWN_INTENDED_WORKER_NAMES == _ALL_WORKER_NAMES`,
+# we flip _PROCEED_SHUTDOWN_SIGNAL on the leader, and leader will send RPCs
+# to follower wowrkers to flip their `_PROCEED_SHUTDOWN_SIGNAL`s.
+_PROCEED_SHUTDOWN_SIGNAL = threading.Event()
 
 
-def _on_leader_follower_report_intent(worker_name):
+def _on_leader_follower_report_shutdown_intent(worker_name):
     assert (
         worker_name in _ALL_WORKER_NAMES
     ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
     assert (
-        worker_name not in _INTENDED_WORKER_NAMES
+        worker_name not in _SHUTDOWN_INTENDED_WORKER_NAMES
     ), "{worker_name} reported intent twice. ".format(worker_name=worker_name)
-    _INTENDED_WORKER_NAMES.add(worker_name)
-    if _ALL_WORKER_NAMES == _INTENDED_WORKER_NAMES:
-        _set_proceed_signal()
+    _SHUTDOWN_INTENDED_WORKER_NAMES.add(worker_name)
+    if _ALL_WORKER_NAMES == _SHUTDOWN_INTENDED_WORKER_NAMES:
+        _set_proceed_shutdown_signal()
 
 
-def _set_proceed_signal():
-    assert not _PROCEED_SIGNAL.is_set(), "Termination signal got set twice."
-    _PROCEED_SIGNAL.set()
+def _set_proceed_shutdown_signal():
+    assert not _SHUTDOWN_PROCEED_SIGNAL.is_set(), "Termination signal got set twice."
+    _SHUTDOWN_PROCEED_SIGNAL.set()
 
 
 @_require_initialized
@@ -91,43 +105,59 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    assert _ALL_WORKER_NAMES is not None, (
-        "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
-    )
+    assert (
+        _ALL_WORKER_NAMES is not None
+    ), "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
     leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
 
     self_worker_name = _agent.get_worker_info().name
-    assert self_worker_name not in _INTENDED_WORKER_NAMES, (
-        "Can not call `_wait_all_workers()` twice."
-    )
+    assert (
+        self_worker_name not in _SHUTDOWN_INTENDED_WORKER_NAMES
+    ), "Can not call `_wait_all_workers()` twice."
 
     is_leader_worker = leader_worker_name == self_worker_name
 
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
     if is_leader_worker:
-        _on_leader_follower_report_intent(self_worker_name)
+        _on_leader_follower_report_shutdown_intent(self_worker_name)
     else:
         rpc_sync(
             leader_worker_name,
-            _on_leader_follower_report_intent,
+            _on_leader_follower_report_shutdown_intent,
             args=(self_worker_name,),
         )
 
-    _PROCEED_SIGNAL.wait()
+    _SHUTDOWN_PROCEED_SIGNAL.wait()
 
     # Phase 2: Leader asks followers to proceed.
     # Leader's signal is the first to be unblocked,
     # after receiving all followers' intents.
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
+        timeout = timedelta(seconds=5)
+        _set_rpc_timeout(timeout)
+        worker_name_to_response_future_dict = []
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            rpc_async(follower_worker_name, _set_proceed_signal, args=())
-
-        # This is a hack to make the leader linger for a while to finish
-        # sending out the last message.
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=())
+            worker_name_to_response_future_dict[follower_worker_name] = fut
+        for follower_worker_name, fut in worker_name_to_response_future_dict:
+            try:
+                fut.wait()
+            except RuntimeError as ex:
+                logger.error(
+                    "{worker_name} failed to respond to 'proceed shutdown' request in {timeout}".format(
+                        worker_name=worker_name,
+                        timeout=timeout,
+                    )
+                )
+    else:
+        # This is a hack to make the follower linger for a while to finish
+        # sending out the last response message.
         import time
+
         time.sleep(0.2)
+
 
 @_require_initialized
 def shutdown(graceful=True):
