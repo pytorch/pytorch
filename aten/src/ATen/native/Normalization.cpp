@@ -103,8 +103,8 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
-  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
@@ -156,8 +156,8 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
-  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
@@ -206,7 +206,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       && running_mean.is_contiguous()
       && running_var.is_contiguous()) {
 
-    Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+    Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     batch_norm_cpu_inference_contiguous<scalar_t>(
       output, input, weight, bias, running_mean, running_var, eps);
     return std::make_tuple(output, save_mean, save_invstd);
@@ -225,7 +225,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     return std::make_tuple(output, save_mean, save_invstd);
   }
 
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   int64_t n_input = input.size(1);
 
@@ -330,13 +330,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::empty_like(input, at::MemoryFormat::Contiguous);
+    grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_weight = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_bias = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto weight_a = conditional_accessor_1d<scalar_t>(weight);
@@ -393,8 +393,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
           if (train) {
             // when in training mode
             // Q(X) = X - E[x] ; i.e. input centered to zero mean
-            // Y = Q(X) / σ    ; i.e. BN output before weight and bias
-            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
+            // Y = Q(X) / sigma    ; i.e. BN output before weight and bias
+            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / sigma * w
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
@@ -531,6 +531,9 @@ Tensor batch_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
+  if (input.numel()==0){
+    return input; //return input instead of new empty tensor, because new empty tensor breaks the gradient chain
+  }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }

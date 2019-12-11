@@ -103,7 +103,7 @@ class BasePruningMethod(ABC):
             hooks_to_remove = []
             for k, hook in module._forward_pre_hooks.items():
                 # if it exists, take existing thing, remove hook, then
-                # go thru normal thing
+                # go through normal thing
                 if (
                     isinstance(hook, BasePruningMethod)
                     and hook._tensor_name == name
@@ -172,7 +172,7 @@ class BasePruningMethod(ABC):
         # has been done before in a previos pruning iteration, so we're good
         # to go
         else:
-            default_mask = getattr(module, name + "_mask").detach().clone()
+            default_mask = getattr(module, name + "_mask").detach().clone(memory_format=torch.contiguous_format)
 
         # Use try/except because if anything goes wrong with the mask 
         # computation etc., you'd want to roll back.
@@ -450,7 +450,7 @@ class RandomUnstructured(BasePruningMethod):
         # than the number of units in the tensor
         _validate_pruning_amount(nparams_toprune, tensor_size)
 
-        mask = default_mask.clone()
+        mask = default_mask.clone(memory_format=torch.contiguous_format)
 
         if nparams_toprune != 0:  # k=0 not supported by torch.kthvalue
             prob = torch.rand_like(t)
@@ -508,7 +508,7 @@ class L1Unstructured(BasePruningMethod):
         # than the number of units in the tensor
         _validate_pruning_amount(nparams_toprune, tensor_size)
 
-        mask = default_mask.clone()
+        mask = default_mask.clone(memory_format=torch.contiguous_format)
 
         if nparams_toprune != 0:  # k=0 not supported by torch.kthvalue
             # largest=True --> top k; largest=False --> bottom k

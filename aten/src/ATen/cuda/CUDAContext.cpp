@@ -51,11 +51,6 @@ Allocator* getCUDADeviceAllocator() {
   return at::globalContext().getTHCState()->cudaDeviceAllocator;
 }
 
-/* Handles */
-cusparseHandle_t getCurrentCUDASparseHandle() {
-  return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
-}
-
 } // namespace cuda
 
 } // namespace at
