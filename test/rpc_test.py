@@ -1173,10 +1173,25 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
+        # This test checks local states that are modified by remote workers.
+        # This means that we would need barrier before and after every check.
+        # The barrier before the check makes sure that all previous states are
+        # cleared globally, the barrier after ensures that no following states
+        # change gets into the current check.
         from torch.distributed.rpc.api import _agent
+
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
 
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
+        # Check 1: all threads are idle
+        #################################################
         info = _agent.get_debug_info()
         self.assertIn("num_pending_requests", info)
         self.assertIn("thread_pool_size", info)
@@ -1184,6 +1199,12 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["num_pending_requests"]), 0)
         self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
         self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
+
+        # barrier after check 1
+        dist.barrier()
+
+        # Check 2: receives one request
+        #################################################
 
         dst_rank = (self.rank + 1) % self.world_size
         fut = rpc.rpc_async(
@@ -1193,6 +1214,9 @@ class RpcTest(RpcAgentTestFixture):
         )
         # blocks until the request arrives
         self.assertEqual(self.rank, VALUE_FUTURE.result())
+
+        # barrier before check 2
+        dist.barrier()
 
         info = _agent.get_debug_info()
         self.assertIn("num_pending_requests", info)
@@ -1205,23 +1229,16 @@ class RpcTest(RpcAgentTestFixture):
         # might be either 1 or 2 busy threads
         self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
 
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
-
-        # add a barrier to make sure the request is not finished before checking
-        # num_pending_requests
+        # barrier after check 2
         dist.barrier()
+
+        # Check 3: done processing request
+        #################################################
 
         DONE_FUTURE.set_result(self.rank)
         self.assertEqual(dst_rank, fut.wait())
 
-        # add a barrier to make sure the dst_rank has finished processing the
-        # request
+        # barrier before check 3
         dist.barrier()
 
         info = _agent.get_debug_info()
@@ -1242,7 +1259,7 @@ class RpcTest(RpcAgentTestFixture):
             time.sleep(0.1)
         self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
 
-        # add a barrier to make sure SHUTDOWN message is not sent
+        # barrier after check 3
         dist.barrier()
 
     @dist_init(setup_rpc=False)
