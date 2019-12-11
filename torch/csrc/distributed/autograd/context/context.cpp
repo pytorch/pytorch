@@ -108,15 +108,31 @@ void DistAutogradContext::addOutstandingRpc(
   outStandingRpcs_.push_back(futureMessage);
 }
 
-void DistAutogradContext::clearAndWaitForOutstandingRpcs() {
-  // Copy futures under lock, but wait for them outside the lock.
+std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
+    clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
   lock.unlock();
 
-  for (const auto& outStandingRpc : outStandingRpcs) {
-    outStandingRpc->wait();
+  struct State {
+    explicit State(int32_t count)
+        : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
+    std::shared_ptr<rpc::FutureMessage> future;
+    std::atomic<int32_t> remaining;
+  };
+  auto state = std::make_shared<State>(outStandingRpcs.size());
+  if (outStandingRpcs.empty()) {
+    state->future->markCompleted();
+  } else {
+    for (auto& rpc : outStandingRpcs) {
+      rpc->addCallback([state](const rpc::Message&) {
+        if (--state->remaining == 0) {
+          state->future->markCompleted();
+        }
+      });
+    }
   }
+  return state->future;
 }
 
 std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
