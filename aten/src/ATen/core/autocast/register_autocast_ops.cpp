@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/operator.h>
 
 #include <iostream>
+#include <exception>
 
 namespace at {
 namespace autocast {
@@ -40,6 +41,12 @@ enum class CastPolicy : uint8_t {
   fp32,
   promote,
   passthrough
+};
+
+enum class Behavior : uint8_t {
+  wellbehaved = 0,
+  inplace,
+  user_supplied_out
 };
 
 /*****************************************************************
@@ -141,43 +148,41 @@ long as they have an at:: exposure.
 Fortunately, most of the ops I need to treat are well-behaved.
 ******************************************************************/
 
-// Trick to extract args and return type from arbitrary function type:
-// https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer
-// I could also use c10::guts::function_traits for this as in ATen/core/boxing/kernel_function.h, but
-// that seems no less verbose.
-template <CastPolicy policy, typename F, F* func> struct Patch {};
+// Copying the pattern used in core/boxing/kernel_function.h to extract args and return type
+// (see also https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer)
+template<CastPolicy policy, Behavior behavior, class FuncType, FuncType* F, class Ret, class ArgList> struct WrapFunction_ {};
 
 // Separate struct specializations for the four CastPolicies so the wrapper instantiation for each op
 // only compiles with the type selection logic it actually needs (ie, promote_type is only used by
 // CastPolicy::promote ops).
 
 // CastPolicy::fp16
-template <typename Ret, typename... Args, auto (*F)(Args...) -> Ret>
-struct Patch<CastPolicy::fp16, Ret (Args...), F> {
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp16, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     auto to_type = at::kHalf;
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-    return F(cached_cast(to_type, args)...);
+    return (*F)(cached_cast(to_type, args)...);
   }
 };
 
 // CastPolicy::fp32
-template <typename Ret, typename... Args, auto (*F)(Args...) -> Ret>
-struct Patch<CastPolicy::fp32, Ret (Args...), F> {
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp32, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     auto to_type = at::kFloat;
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-    return F(cached_cast(to_type, args)...);
+    return (*F)(cached_cast(to_type, args)...);
   }
 };
 
 // CastPolicy::promote
-template <typename Ret, typename... Args, auto (*F)(Args...) -> Ret>
-struct Patch<CastPolicy::promote, Ret (Args...), F> {
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::promote, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     auto to_type = promote_type(at::kHalf, args...);
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-    return F(cached_cast(to_type, args)...);
+    return (*F)(cached_cast(to_type, args)...);
   }
 };
 
@@ -186,75 +191,173 @@ struct Patch<CastPolicy::promote, Ret (Args...), F> {
 // - don't require casting, so in principle they should use the boxed fallback
 // - don't play well with the boxed fallback, unfortunately
 // - do play well with the templating logic
-template <typename Ret, typename... Args, auto (*F)(Args...) -> Ret>
-struct Patch<CastPolicy::passthrough, Ret (Args...), F> {
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::passthrough, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-    return F(args...);
+    return (*F)(args...);
   }
 };
 
-/*****************************************************************
-Special treatment for ops that aren't well-behaved
+/**********************************************************************************
+Different treatment for ops that aren't well-behaved
 
-Generally, these ops fall into three categories:
-- Ops that modify Tensor arguments in-place
-- Ops that write to a user-supplied `out=...` buffer
-- Ops that (for whatever reason) don't have an at:: exposure
+Generally, these ops fall into two categories, with two possible subcategories:
+1. Ops that modify Tensor arguments in-place
+  a. Ops that do have an at:: exposure
+  b. Ops that don't have an at:: exposure and can only be called as a Tensor method
+2. Ops that write to a user-supplied `out=...` buffer
+  a. Ops that do have an at:: exposure
+  b. Ops that don't have an at:: exposure and can only be called as a Tensor method
 
 There seems to be a correlation (perhaps coincidental) between
 not having an at::* exposure and being in-place.
 
-I could try writing additional templates for these black-sheep ops,
-but for now, I'll special-case them manually, imitating
+For now, I'll special-case them manually, imitating
 VariableType*.cpp.  Hopefully there aren't many.
-******************************************************************/
 
-// In-place ops
-Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
-  c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-  auto to_type = at::kHalf;
-  if (self.scalar_type() == at::kHalf) {
-    self.addmm_(cached_cast(to_type, mat1),
-                cached_cast(to_type, mat2),
-                cached_cast(to_type, beta),
-                cached_cast(to_type, alpha));
-  } else {
-    auto fp16_result = at::addmm(cached_cast(to_type, self),
-                                 cached_cast(to_type, mat1),
-                                 cached_cast(to_type, mat2),
-                                 cached_cast(to_type, beta),
-                                 cached_cast(to_type, alpha));
-    self.copy_(fp16_result);
-  }
-  return self;
-}
+The tools we have to reduce manual special casing are templates,
+macros, and codegen.  Based on the observed commonalities among
+in-place ops and the observed commonalities among ops with
+user-supplied out, I'll try templates for now.
+**********************************************************************************/
 
-// Functions with out=... arguments
-// These don't support automatic differentiation, so that's not something we need to worry about.
-Tensor & addmm_out(Tensor & out, const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
-  c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-  auto to_type = at::kHalf;
-  if (out.scalar_type() == to_type) {
-    at::addmm_out(out,
-                  cached_cast(to_type, self),
-                  cached_cast(to_type, mat1),
-                  cached_cast(to_type, mat2),
-                  cached_cast(to_type, beta),
-                  cached_cast(to_type, alpha));
-  } else {
-    AT_ASSERT(!out.requires_grad());
-    auto fp16_result = at::empty_like(out, out.options().dtype(to_type));
-    at::addmm_out(fp16_result,
-                  cached_cast(to_type, self),
-                  cached_cast(to_type, mat1),
-                  cached_cast(to_type, mat2),
-                  cached_cast(to_type, beta),
-                  cached_cast(to_type, alpha));
-    out.copy_(fp16_result);
+// In-place ops. Basically, I try to imitate what VariableType*.cpp is doing:
+// forward calls to an at:: function if available and a Tensor method, ie self.method, otherwise.
+
+// 1.a. Most of the time VariableType forwards to an at:: call.
+// For these, I can call into the "F" template parameter directly.
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
+  template<typename... RemainingArgs> static
+  Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) {
+    auto run_as_type = at::kHalf;
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    if (self.scalar_type() == run_as_type) {
+      (*F)(self, cached_cast(run_as_type, args)...);
+    } else {
+      auto fp16_self_lvalue = cached_cast(run_as_type, self);
+      (*F)(fp16_self_lvalue, cached_cast(run_as_type, args)...);
+      self.copy_(fp16_self_lvalue);
+    }
+    return self;
   }
-  return out;
-}
+  static Tensor & call(Args... args) {
+    return peel_first_arg_and_run(args...);
+  }
+};
+
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
+  template<typename... RemainingArgs> static
+  Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) {
+    auto run_as_type = at::kFloat;
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    // TODO:  how do we want to handle double-precision inputs?
+    if (self.scalar_type() == run_as_type) {
+      (*F)(self, cached_cast(run_as_type, args)...);
+    } else {
+      AT_ASSERT(false, "In-place operators that autocast to torch.float32 require that the argument modified in-place is already torch.float32.  (Other arguments may be any type.)");
+    }
+    return self;
+  }
+  static Tensor & call(Args... args) {
+    return peel_first_arg_and_run(args...);
+  }
+};
+
+// 1.b. For ops that don't have an at:: exposure, VariableType's functions forward to a Tensor method,
+// eg self_.addmm_.  For these, I need to create a specialized macro, so I can request self.FUNC.
+// Pure macros or codegen are looking better and better...
+#define SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(FUNC) \
+template<class Ret, class... Args> \
+struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, decltype(FUNC), FUNC, Ret, guts::typelist::typelist<Args...>> { \
+  template<typename... RemainingArgs> static \
+  Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) { \
+    auto run_as_type = at::kHalf; \
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId); \
+    if (self.scalar_type() == run_as_type) { \
+      self.FUNC(cached_cast(run_as_type, args)...); \
+    } else { \
+      auto fp16_self_lvalue = cached_cast(run_as_type, self); \
+      fp16_self_lvalue.FUNC(cached_cast(run_as_type, args)...); \
+      self.copy_(fp16_self_lvalue); \
+    } \
+    return self; \
+  } \
+  static Tensor & call(Args... args) { \
+    return peel_first_arg_and_run(args...); \
+  } \
+};
+
+// Declare the specializations that will serve each 1.b. FUNC.
+// For each specialization, I must also supply a dummy function with the right signature
+// (copied from VariableType) to provide the type information for instantiation.
+Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) { return self; }
+SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addmm_)
+Tensor & addr_(Tensor & self, const Tensor & vec1, const Tensor & vec2, Scalar beta, Scalar alpha) { return self; }
+SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addr_)
+
+// 2.a. Functions with out=... arguments
+// According to VariableType, these don't support automatic differentiation.
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp16, Behavior::user_supplied_out, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
+  template<typename... RemainingArgs>
+  static Tensor & peel_first_arg_and_run(Tensor & out, RemainingArgs... args) {
+    auto run_as_type = at::kHalf;
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    if (out.scalar_type() == run_as_type) {
+      (*F)(out, cached_cast(run_as_type, args)...);
+    } else {
+      auto fp16_out_lvalue = at::empty_like(out, out.options().dtype(run_as_type));
+      (*F)(fp16_out_lvalue, cached_cast(run_as_type, args)...);
+      out.copy_(fp16_out_lvalue);
+    }
+    return out;
+  }
+  static Tensor & call(Args... args) {
+    return peel_first_arg_and_run(args...);
+  }
+};
+
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp32, Behavior::user_supplied_out, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
+  template<typename... RemainingArgs>
+  static Tensor & peel_first_arg_and_run(Tensor & out, RemainingArgs... args) {
+    auto run_as_type = at::kFloat;
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    if (out.scalar_type() == run_as_type) {
+      (*F)(out, cached_cast(run_as_type, args)...);
+    } else {
+      AT_ASSERT(false, "If you supply an 'out=my_output' argument to an op that autocasts to torch.float32, my_output must be torch.float32.  (Other arguments may be any type.)");
+    }
+    return out;
+  }
+  static Tensor & call(Args... args) {
+    return peel_first_arg_and_run(args...);
+  }
+};
+
+// 2.b. Haven't encountered a 2b yet, luckily.
+
+
+/********************************************************
+Wrapper template as used by core/boxing/kernel_function.h
+********************************************************/
+template<CastPolicy policy, Behavior behavior, class FuncType, FuncType* F>
+struct WrapFunction final {
+  using type = WrapFunction_<
+      policy,
+      behavior,
+      FuncType,
+      F,
+      typename guts::function_traits<FuncType>::return_type,
+      typename guts::function_traits<FuncType>::parameter_types
+  >;
+};
+
+// Macro to reduce boilerplate
+#define PATCH(FUNC, POLICY, BEHAVIOR) &WrapFunction<CastPolicy::POLICY, Behavior::BEHAVIOR, decltype( FUNC ), FUNC>::type::call
 
 /*******************************
 Boxed fallback for all other ops
@@ -283,6 +386,7 @@ void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack
 // void autocast_fallback(const c10::OperatorHandle& op, c10::Stack* stack) {
 void autocast_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::cout << "autocast_fallback" << std::endl;
+
   c10::impl::ExcludeTensorTypeIdGuard no_autocast(TensorTypeId::AutocastTensorId);
   // Temporary workaround.
   // TODO:  Replace callBoxedWorkaround with op.callBoxed(stack) once callBoxed is possible for all ops.
@@ -322,15 +426,13 @@ auto register_fallback = c10::Dispatcher::singleton()
   .registerBackendFallbackKernel(TensorTypeId::AutocastTensorId,
                                  KernelFunction::makeFromBoxedFunction<&autocast_fallback>());
 
+/********************
+Explicit registration
+********************/
+
 /*****************************************
 Explicit registration for well-behaved ops
 *****************************************/
-
-#define PATCH_FUNCTION(FUNC, POLICY) &Patch<CastPolicy::POLICY, decltype( FUNC ), FUNC>::call
-// example:
-// PATCH_FUNCTION(at::cudnn_convolution, fp16)
-// becomes
-// &Patch<CastPolicy::fp16, decltype( at::cudnn_convolution ), at::cudnn_convolution>::call
 
 // TODO:  Codegen the stuff below?  Ed said
 // > you are going to have to write the function definition at some point, I wouldn't try to get clever about it
@@ -342,71 +444,99 @@ auto register_well_behaved = torch::RegisterOperators()
   // although if that code path is being used, it's probably unsalvageably slow regardless.
   .op(torch::RegisterOperators::options()
     .schema("aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), PATCH_FUNCTION(at::_convolution, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), PATCH(at::_convolution, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), PATCH_FUNCTION(at::_convolution_nogroup, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), PATCH(at::_convolution_nogroup, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), PATCH_FUNCTION(at::conv1d, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), PATCH(at::conv1d, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), PATCH_FUNCTION(at::conv2d, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), PATCH(at::conv2d, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), PATCH_FUNCTION(at::conv3d, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), PATCH(at::conv3d, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor")
-    .kernel<Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t)>(TensorTypeId::AutocastTensorId, PATCH_FUNCTION(at::conv_tbc, fp16))
+    .kernel<Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t)>(TensorTypeId::AutocastTensorId, PATCH(at::conv_tbc, fp16, wellbehaved))
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::conv_transpose1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] output_padding=0, int groups=1, int[1] dilation=1) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), PATCH_FUNCTION(conv_transpose1d, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), PATCH(conv_transpose1d, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), PATCH_FUNCTION(conv_transpose2d, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), PATCH(conv_transpose2d, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), PATCH_FUNCTION(conv_transpose3d, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, IntArrayRef), PATCH(conv_transpose3d, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), PATCH_FUNCTION(at::convolution, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t), PATCH(at::convolution, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), PATCH_FUNCTION(at::cudnn_convolution, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), PATCH(at::cudnn_convolution, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), PATCH_FUNCTION(at::cudnn_convolution_transpose, fp16)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t, bool, bool), PATCH(at::cudnn_convolution_transpose, fp16, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::prelu(Tensor self, Tensor weight) -> Tensor")
-    .kernel<Tensor (const Tensor &, const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH_FUNCTION(at::prelu, fp16))
+    .kernel<Tensor (const Tensor &, const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::prelu, fp16, wellbehaved))
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor")
-    .kernel<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(TensorTypeId::AutocastTensorId, PATCH_FUNCTION(at::addmm, fp16))
+    .kernel<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(TensorTypeId::AutocastTensorId, PATCH(at::addmm, fp16, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor")
+    .kernel<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(TensorTypeId::AutocastTensorId, PATCH(at::addmv, fp16, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor")
+    .kernel<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(TensorTypeId::AutocastTensorId, PATCH(at::addr, fp16, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::matmul(Tensor self, Tensor other) -> Tensor")
+    .kernel<Tensor (const Tensor &, const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::matmul, fp16, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+    .kernel<Tensor (const Tensor &, const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::mm, fp16, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::mv(Tensor self, Tensor vec) -> Tensor")
+    .kernel<Tensor (const Tensor &, const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::mv, fp16, wellbehaved))
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // CastPolicy::fp32
+  .op(torch::RegisterOperators::options()
+    .schema("aten::acos(Tensor self) -> Tensor")
+    .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::acos, fp32, wellbehaved))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // CastPolicy::promote
   // CastPolicy::passthrough
   .op(torch::RegisterOperators::options()
     .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH_FUNCTION(at::detach_, passthrough)>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::detach_, passthrough, wellbehaved)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::zero_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::zero_, passthrough, wellbehaved)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   ;
 
 /**************************************************************************************
-Registration for non-well-behaved ops part 1:  in-place ops
+Explicit registration for non-well-behaved ops part 1:  in-place ops
 
 It's not technically required to register these separately, but it helps organize them.
 **************************************************************************************/
@@ -414,24 +544,62 @@ auto register_inplace = torch::RegisterOperators()
   // fp16 ops
   .op(torch::RegisterOperators::options()
     .schema("aten::addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), &at::autocast::addmm_>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::autocast::addmm_, fp16, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::addmv_, fp16, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::autocast::addr_, fp16, inplace)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // fp32 ops
+  .op(torch::RegisterOperators::options()
+    .schema("aten::acos_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::acos_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // promote ops
   ;
 
-/*********************************************************************************************
-Registration for non-well-behaved ops part 2:  ops that write to a user-supplied output buffer
-*********************************************************************************************/
-auto register_user_supplied_output = torch::RegisterOperators()
+/******************************************************************************************************
+Explicit registration for non-well-behaved ops part 2:  ops that write to a user-supplied output buffer
+******************************************************************************************************/
+auto register_user_supplied_out = torch::RegisterOperators()
   // fp16 ops
   .op(torch::RegisterOperators::options()
     .schema("aten::addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), &at::autocast::addmm_out>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::addmm_out, fp16, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::addmv_out, fp16, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), PATCH(at::addr_out, fp16, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &), PATCH(at::matmul_out, fp16, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &), PATCH(at::mm_out, fp16, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &), PATCH(at::mv_out, fp16, user_supplied_out)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // fp32 ops
+  .op(torch::RegisterOperators::options()
+    .schema("aten::acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::acos_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // promote ops
   ;
+
+#undef PATCH
 }
 #endif
 

@@ -51,6 +51,7 @@ enum class TensorTypeId : uint8_t {
 
   // Autocasting must precede routing through VariableType functions,
   // to ensure inputs are saved for backward in the post-autocast type.
+  // TODO:  Does the WARNING above apply to AutocastTensorId?
   AutocastTensorId,
 
   // TESTING: This is intended to be a generic testing tensor type id.

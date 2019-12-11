@@ -1,0 +1,132 @@
+import torch
+
+# test_cuda.py's setUp creates an instance of this class to supply the ops Amp needs to test.
+class AmpLists(object):
+    def __init__(self):
+        super(AmpLists, self).__init__()
+        # Prepare some utility args.
+        conv_args_fp16 = [(torch.randn((8, 8, *(8,) * dims), dtype=torch.float16, device="cuda"),
+                     torch.randn((8, *(8,) * (dims + 1)), dtype=torch.float16, device="cuda"))
+                     for dims in (1, 2, 3)]
+        bias_fp16 = (torch.randn((8,), dtype=torch.float16, device="cuda"),)
+        pointwise0_fp16 = (torch.randn(8, dtype=torch.float16, device="cuda"),)
+        pointwise1_fp16 = (torch.randn(8, dtype=torch.float16, device="cuda"),)
+        pointwise2_fp16 = (torch.randn(8, dtype=torch.float16, device="cuda"),)
+        element0_fp16 = (torch.randn(1, dtype=torch.float16, device="cuda"),)
+        mat0_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
+        mat1_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
+        mat2_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
+        mat3_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
+        mat4_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
+        
+        conv_args_fp32 = [(torch.randn((8, 8, *(8,) * dims), dtype=torch.float32, device="cuda"),
+                     torch.randn((8, *(8,) * (dims + 1)), dtype=torch.float32, device="cuda"))
+                     for dims in (1, 2, 3)]
+        bias_fp32 = (torch.randn((8,), dtype=torch.float32, device="cuda"),)
+        pointwise0_fp32 = (torch.randn(8, dtype=torch.float32, device="cuda"),)
+        pointwise1_fp32 = (torch.randn(8, dtype=torch.float32, device="cuda"),)
+        pointwise2_fp32 = (torch.randn(8, dtype=torch.float32, device="cuda"),)
+        element0_fp32 = (torch.randn(1, dtype=torch.float32, device="cuda"),)
+        mat0_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
+        mat1_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
+        mat2_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
+        mat3_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
+        mat4_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
+
+        # The lists below organize the different kinds of ops Amp needs to handle.
+        # To assist tests, each op is associated with a tuple of valid arguments.
+        # Most of the lists are empty, but writing them all out makes the classification
+        # clear(er).  If I only wrote the non-empty ones, it would look like a total mess of
+        # special cases (and it still is), but there's a method to the madness and seeing
+        # the full classification gives you a sense why each case exists.
+        #
+        # Only non-empty lists are given a test in test_cuda.py.
+        self.torch_fp16 = [
+            ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1, False, False, True)),
+            ("_convolution_nogroup", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
+            ("conv1d", conv_args_fp32[0]),
+            ("conv2d", conv_args_fp32[1]),
+            ("conv3d", conv_args_fp32[2]),
+            ("conv_tbc", conv_args_fp32[0] + bias_fp32),
+            ("conv_transpose1d", conv_args_fp32[0]),
+            ("conv_transpose2d", conv_args_fp32[1]),
+            ("conv_transpose3d", conv_args_fp32[2]),
+            ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
+            ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, False)),
+            ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, False)),
+            ("prelu", pointwise0_fp32 + element0_fp32),
+            ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
+            ("addmv", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
+            ("addr", mat0_fp32 + pointwise0_fp32 + pointwise1_fp32),
+            ("matmul", mat0_fp32 + mat1_fp32),
+            ("mm", mat0_fp32 + mat1_fp32),
+            ("mv", mat0_fp32 + pointwise0_fp32),
+        ]
+        self.torch_fp16_inplace = [
+            ("addmv_", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
+        ]
+        self.torch_fp16_user_supplied_out = [
+            ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32 + mat4_fp32),
+            ("addmv", pointwise0_fp32 + pointwise1_fp32 + mat2_fp32 + pointwise2_fp32),
+            ("addr", mat0_fp32 + mat1_fp32 + pointwise0_fp32 + pointwise1_fp32),
+            ("matmul", mat0_fp32 + mat1_fp32 + mat2_fp32),
+            ("mm", mat0_fp32 + mat1_fp32 + mat2_fp32),
+            ("mv", pointwise0_fp32 + mat0_fp32 + pointwise1_fp32),
+        ]
+        self.torch_fp32 = [
+            ("acos", (pointwise0_fp16[0].clamp(-.9, 0.9),)),
+        ]
+        self.torch_fp32_inplace = [
+            ("acos_", (pointwise0_fp32[0].clamp(-.9, 0.9),)),
+        ]
+        self.torch_fp32_user_supplied_out = [
+            ("acos", pointwise0_fp32 + (pointwise0_fp16[0].clamp(-.9, 0.9),)),
+        ]
+        # self.torch_fp32 = []
+        # self.torch_fp32_inplace = []
+        # self.torch_fp32_user_supplied_out = []
+        # self.torch_need_autocast_promotion = []
+        # self.torch_need_autocast_promotion_inplace = []
+        # self.torch_need_autocast_promotion_user_supplied_out = []
+        # self.torch_expect_builtin_promotion = []
+        # self.torch_expect_builtin_promotion_inplace = []
+        # self.torch_expect_builtin_promotion_user_supplied_out = []
+        
+        # self.torch_need_autocast_sequence_cast_ops = [
+        #     ("cat", mat1_fp16 + mat1_fp32 + mat1_fp16),
+        #     ("stack", mat1_fp16 + mat1_fp32 + mat1_fp16)]
+        
+        # self.nn_fp16 = []
+        # self.nn_fp16_inplace = []
+        # self.nn_fp16_user_supplied_out = []
+        # self.nn_fp32 = []
+        # self.nn_fp32_inplace = []
+        # self.nn_fp32_user_supplied_out = []
+        # self.nn_fp32 = []
+        # self.nn_fp32_inplace = []
+        # self.nn_fp32_user_supplied_out = []
+        # self.nn_need_autocast_promotion = []
+        # self.nn_need_autocast_promotion_inplace = []
+        # self.nn_need_autocast_promotion_user_supplied_out = []
+        # self.nn_expect_builtin_promotion = []
+        # self.nn_expect_builtin_promotion_inplace = []
+        # self.nn_expect_builtin_promotion_user_supplied_out = []
+        
+        # self.tensor_only_fp16 = []
+        self.tensor_only_fp16_inplace = [
+            ("addmm_", mat1_fp32 + mat2_fp32 + mat3_fp32),
+            ("addr_", mat0_fp32 + pointwise0_fp32 + pointwise1_fp32),
+        ]
+        # self.tensor_only_fp16_user_supplied_out = []
+        # self.tensor_only_fp32 = []
+        # self.tensor_only_fp32_inplace = []
+        # self.tensor_only_fp32_user_supplied_out = []
+        # self.tensor_only_fp32 = []
+        # self.tensor_only_fp32_inplace = []
+        # self.tensor_only_fp32_user_supplied_out = []
+        # self.tensor_only_need_autocast_promotion = []
+        # self.tensor_only_need_autocast_promotion_inplace = []
+        # self.tensor_only_need_autocast_promotion_user_supplied_out = []
+        # self.tensor_only_expect_builtin_promotion = []
+        # self.tensor_only_expect_builtin_promotion_inplace = []
+        # self.tensor_only_expect_builtin_promotion_user_supplied_out = []
