@@ -237,7 +237,14 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
     auto shape_a = inputTensorValues[1].accessor<int64_t, 1>();
     for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
-      shape[i] = shape_a[i];
+      assert(shape_a[i] >= -1);
+      if (shape_a[i] == 0){
+        assert(i < inputTensorValues[0].sizes().size());  // dim with value zero < the dimension size input tensor
+        shape[i] = inputTensorValues[0].sizes()[i];
+      }
+      else {
+        shape[i] = shape_a[i];
+      }
     }
     return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
   } else {

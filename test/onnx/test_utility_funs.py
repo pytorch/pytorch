@@ -210,7 +210,7 @@ class TestUtilityFuns(TestCase):
         class ReshapeModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-                b = torch.reshape(a, (3, 2))
+                b = torch.reshape(a, (-1, 2))
                 return b + x
 
         _set_opset_version(self.opset_version)
@@ -219,7 +219,6 @@ class TestUtilityFuns(TestCase):
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Reshape"
-
         assert len(list(graph.nodes())) == 1
 
     def test_strip_doc_string(self):

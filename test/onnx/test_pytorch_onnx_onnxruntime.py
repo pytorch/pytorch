@@ -223,6 +223,56 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
+    def get_image_from_url(self, url):
+        import requests
+        from PIL import Image
+        from io import BytesIO
+        from torchvision import transforms
+
+        data = requests.get(url)
+        image = Image.open(BytesIO(data.content)).convert("RGB")
+        image = image.resize((300, 200), Image.BILINEAR)
+
+        to_tensor = transforms.ToTensor()
+        return to_tensor(image)
+
+    def get_test_images(self):
+        image_url = "http://farm3.staticflickr.com/2469/3915380994_2e611b1779_z.jpg"
+        image = self.get_image_from_url(url=image_url)
+        image_url2 = "https://pytorch.org/tutorials/_static/img/tv_tutorial/tv_image05.png"
+        image2 = self.get_image_from_url(url=image_url2)
+        images = [image]
+        test_images = [image2]
+        return images, test_images
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_faster_rcnn(self):
+        images, test_images = self.get_test_images()
+
+        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True,
+                                                                                 min_size=200,
+                                                                                 max_size=300)
+        model.eval()
+        model(images)
+        self.run_test(model, (images,), test_with_inputs=[(test_images,)])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_mask_rcnn(self):
+        images, test_images = self.get_test_images()
+
+        model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200, max_size=300)
+        model.eval()
+        model(images)
+        self.run_test(model, (images,), test_with_inputs=[(test_images,)])
+
+    def test_keypoint_rcnn(self):
+        images, test_images = self.get_test_images()
+
+        model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True, min_size=200, max_size=300)
+        model.eval()
+        model(test_images)
+        self.run_test(model, (images,), test_with_inputs=[(test_images,)])
+
     def run_word_language_model(self, model_name):
         ntokens = 50
         emsize = 5
@@ -847,16 +897,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6)
         update = torch.ones(1)
         self.run_test(CopyModel2(), (x, update))
-
-    def test_reshape_constant_fold(self):
-        class ReshapeModule(torch.nn.Module):
-            def forward(self, x):
-                a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-                b = torch.reshape(a, (3, 2))
-                return b + x
-
-        x = torch.ones(3, 2)
-        self.run_test(ReshapeModule(), x, do_constant_folding=True)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_flip(self):
@@ -2110,6 +2150,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.ConstantPad2d((3, 0, 2, 1), 3.5)
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
+
 
     # Dynamic padding is added in opset 11
     @skipIfUnsupportedMinOpsetVersion(11)
