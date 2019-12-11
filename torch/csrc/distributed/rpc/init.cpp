@@ -173,8 +173,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
                         [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
                         py::call_guard<py::gil_scoped_release>(),
                         R"(
-Wait on Future, it returns python object, and will throw exception if error is
-set in Future.
+Wait on future to complete and return the object it completed with.
+If the future completes with an error, an exception is thrown.
               )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
@@ -232,7 +232,7 @@ set in Future.
     RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
   });
 
-  module.def("_get_debug_info", []() {
+  module.def("_rref_context_get_debug_info", []() {
     return RRefContext::getInstance().getDebugInfo();
   });
 
