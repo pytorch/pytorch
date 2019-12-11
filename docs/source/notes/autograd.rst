@@ -3,9 +3,9 @@
 Advanced autograd
 =================
 
-This note presents advanced informations about the autograd in pytorch.
-The reader is assumed to be familiar with the `autograd introduction <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_ already.
-This note contains three independent sections:
+This note presents some more advanced topics about the autograd in PyTorch.
+If you are looking for more basic information about autograd, check out
+the `autograd introduction <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_.
 
 .. contents::
     :local:
@@ -14,44 +14,44 @@ This note contains three independent sections:
 Mathematical formulation
 ------------------------
 
-What does the autograd package do
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+What does the autograd package do?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The autograd package allows to use automatic differentiation techniques on top of tensors.
+The autograd package allows us to perform automatic differentiation on top of tensors.
 Automatic differentiation computes the dot product between a given vector and the Jacobian of a user-defined function.
-In this document, we will consider the function :math:`f: x \rightarrow y` where :math:`x` is a vector of size :math:`I` and :math:`y` is a vector of size :math:`O`.
-For simplicity, in this document, we will always consider inputs and ouputs to be 1D, in practice, they can be Tensors with an arbitrary number of dimensions.
-The Jacobian matrix associated with this function is that matrix :math:`J_f` of size :math:`(O, I)` such that each entry is
-given by :math:`(J_f)_{ij} = \dfrac{\partial{x_j}}{\partial{y_i}}`. For simplicity, we will write :math:`J_f = \dfrac{\partial{y}}{\partial{x}}`.
+Consider the function :math:`f: x \rightarrow y`, where :math:`x` is a vector of size :math:`I` and :math:`y` is a vector of size :math:`O`.
+For simplicity, we'll consider inputs and ouputs to be 1-D; in practice, they could have an arbitrary number of dimensions, but automatic differentiation is indifferent to the dimensionality of tensors.
+Then, the Jacobian matrix associated with this function is that matrix :math:`J_f` of size :math:`(O, I)` such that each entry is
+given by :math:`(J_f)_{ij} = \dfrac{\partial{x_j}}{\partial{y_i}}`. We will write :math:`J_f = \dfrac{\partial{y}}{\partial{x}}`.
 
 Currently, PyTorch only implements reverse mode automatic differentiation which, given
-an arbitrary vector :math:`v` of size :math:`O`, will compute :math:`v^T J_f`.
+an arbitrary vector :math:`v` of size :math:`O`, will compute :math:`v^T J_f` (the so-called vector-Jacobian product, or vjp, as opposed to the Jacobian-vector product, which is computed by forward mode automatic differentiation).
 
-Note the particularly interesting case where :math:`f`'s output is a scalar value because providing a vector :math:`v` containing
-the value :math:`1` will compute exactly :math:`J_f`.
-This is used extensively in deep learning for example where loss functions are scalar and reverse mode automatic
-differentiation is used to compute the gradients of the loss with respect to the weights of the model.
-It is also regularly called the backpropagation algorithm in this case.
-
+When :math:`f`'s output is a scalar value, a vector-Jacobian product where :math:`v` is :math:`1` will compute exactly :math:`J_f`.
+This fact is why reverse mode automatic differentiation used extensively in deep learning: loss functions are scalar and reverse mode automatic
+differentiation will compute the gradients of the loss with respect to the weights of the model.
+It is called the backpropagation algorithm in this case.
 
 
-How does it does that
-^^^^^^^^^^^^^^^^^^^^^
+
+How does it do that?
+^^^^^^^^^^^^^^^^^^^^
 
 One simple interpretation of what it is doing is splitting the user function :math:`f` into composition of smaller
 pre-defined operations.
 We will call such operations elementary.
-The gradient of the original function is the computed by using the chain rule on each of these elementary operations.
+The gradient of the original function is then computed by using the chain rule on each of these elementary operations.
 
 For example, if we split :math:`f` into two elementary operations, namely :math:`y = op_2(op_1(x))`,
 the automatic differentiation will compute :math:`v^T J_f = (v^T J_{op_2}) J_{op_1} =  v^T J_{op_2} J_{op_1}`.
 
-What is your code computing
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+What is your code computing?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The tensors for which the user want to compute the gradients can be marked using the :code:`.requires_grad_()` function.
-The user can then use any pytorch function on this tensor to compute the final value of its function.
-Each of these function is composed of one or more elementary operation.
+You can request that PyTorch computes gradients for a tensor by passing the keyword argument `requires_grad=True`
+when constructing the tensor (or, post facto, set this attribute with `requires_grad_(True)`).
+The user can then use any PyTorch function on this tensor to compute the final value of its function.
+Each of these functions is composed of one or more elementary operation.
 Each operation will add an element to the "chain" if Jacobian products that the backward pass will compute.
 In particular, consider the following function:
 
