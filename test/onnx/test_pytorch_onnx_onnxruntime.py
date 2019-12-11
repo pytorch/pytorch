@@ -1610,6 +1610,10 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 1, 5, requires_grad=True)
         self.run_test(model, x)
 
+        model = torch.nn.utils.weight_norm(torch.nn.Conv1d(3, 6, 3), name='weight')
+        x = torch.randn(3, 3, 5, requires_grad=True)
+        self.run_test(model, x)
+
     def test_weight_norm_nodim(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
         x = torch.randn(3, 4, 5, requires_grad=True)
