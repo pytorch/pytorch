@@ -50,6 +50,16 @@ void window_function_checks(
       window_length);
 }
 
+// bool inputs are considered integral
+static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
+  for (Scalar& s : l) {
+    if (!s.isIntegral(true)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -67,7 +77,10 @@ Tensor arange(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  Tensor result = at::empty({0}, options);  // to be filled by arange_out
+  bool set_to_integral_dtype = !options.has_dtype() && allIntegral({start, end, step});
+  Tensor result = set_to_integral_dtype
+      ? at::empty({0}, options.dtype(at::ScalarType::Long))
+      : at::empty({0}, options);
   return at::arange_out(result, start, end, step);
 }
 
@@ -86,7 +99,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.device().type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT(impl::variable_is_excluded());
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
@@ -116,7 +129,6 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
   return tensor;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
@@ -133,7 +145,6 @@ Tensor empty(
   internal_set_names_inplace(result, names);
   return result;
 }
-#endif
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
   check_size_nonnegative(size);
@@ -251,11 +262,9 @@ Tensor empty_like(
     result = at::empty(self.sizes(), options, memory_format);
   }
 
-#ifdef BUILD_NAMEDTENSOR
   if (self.opt_names()) {
     namedinference::propagate_names(result, self.names());
   }
-#endif
 
   return result;
 }
@@ -402,6 +411,18 @@ Tensor ones_like(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+  if (options.device() == at::kCPU) {
+    // This is a fast track to skip device dispatch for making scalar tensor on CPU.
+    // See https://github.com/pytorch/pytorch/pull/29915 for more detailed perf
+    // difference.
+    // In the future when we remove the overhead of device dispatch, we'll happily
+    // revert this to following:
+    //   auto result = at::empty({}, options);
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    auto result = empty_cpu({}, options);
+    at::native::fill_(result, s);
+    return result;
+  }
   return at::empty({}, options).fill_(s);
 }
 
@@ -954,7 +975,6 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   return self;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 // ~~~~~~~~~~~~~~~~~~~~~~~~~ named tensor overloads ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // In the short term, these exist.
 // In the long term, we should move DimnameList into TensorOptions to avoid
@@ -1015,7 +1035,6 @@ Tensor rand(
   return result.uniform_(0, 1, generator);
 }
 
-#endif
 
 } // namespace native
 } // namespace at

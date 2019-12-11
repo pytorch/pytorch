@@ -7,7 +7,6 @@
 #include <c10/util/C++17.h>
 #include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;
@@ -139,7 +138,7 @@ static std::vector<Dimname> tensornames_unify_from_right(
     DimnameList other_names) {
   auto names_wrapper = at::namedinference::TensorNames(names);
   auto other_wrapper = at::namedinference::TensorNames(other_names);
-  return names_wrapper.unifyFromRight(other_wrapper, "unify").toDimnameVec();
+  return names_wrapper.unifyFromRightInplace(other_wrapper).toDimnameVec();
 }
 
 static void check_unify(
@@ -249,4 +248,3 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
 }
 
 
-#endif

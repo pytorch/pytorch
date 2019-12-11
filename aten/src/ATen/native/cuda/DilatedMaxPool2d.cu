@@ -651,7 +651,7 @@ Tensor max_pool2d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_pool2d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput_,

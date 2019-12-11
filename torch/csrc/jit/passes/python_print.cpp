@@ -296,11 +296,10 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.type() == tensor_table_[i].type() && t.equal(tensor_table_[i])) {
+      if (t.options().type_equal(tensor_table_[i].options()) && t.equal(tensor_table_[i])) {
         return i;
       }
     }
-    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }
@@ -1114,22 +1113,38 @@ struct PythonPrintImpl {
     return body_;
   }
 
+  template <typename dtype>
+  IValue createBroadList(dtype value, const int64_t& N) {
+    c10::List<dtype> repeated;
+    repeated.reserve(N);
+    for (int i = 0; i < N; ++i) {
+      repeated.push_back(value);
+    }
+    return repeated;
+  }
+
   void printDefaultValue(
-      const TypePtr& typ,
+      const Argument& arg,
       TaggedStringStream& stmt,
       const IValue& value) {
-    // xxx - many weak script modules store default values for broadcasting
-    // lists that are not actually the same type as the argument. We can only
-    // serialize default values that will implicitly convert to their declared
-    // return type since we do not need to serialize these built-in modules with
-    // their defaults, we just drop them for now.
-    if (typ->kind() == ListType::Kind &&
-        (value.isInt() || value.isDouble() || value.isBool())) {
-      return;
-    }
     stmt << "=";
-    printConstant(stmt, value);
+    // handle broadcasting lists
+    if (arg.type()->kind() == ListType::Kind &&
+        (value.isInt() || value.isDouble() || value.isBool())) {
+      TORCH_INTERNAL_ASSERT(arg.N(), "expected broadcastinglist");
+      if (value.isInt()) {
+        printConstant(stmt, createBroadList<int64_t>(value.toInt(), *arg.N()));
+      } else if (value.isBool()) {
+        printConstant(stmt, createBroadList<bool>(value.toBool(), *arg.N()));
+      } else if (value.isDouble()) {
+        printConstant(
+            stmt, createBroadList<double>(value.toDouble(), *arg.N()));
+      }
+    } else {
+      printConstant(stmt, value);
+    }
   }
+
   void printBody(Block* body) {
     // we always print constants at the top of the function, in the order
     // in which they are used.
@@ -1177,7 +1192,7 @@ struct PythonPrintImpl {
         body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
       }
       if (arg.default_value()) {
-        printDefaultValue(arg.type(), body_, *arg.default_value());
+        printDefaultValue(arg, body_, *arg.default_value());
       }
       assignValue(*param_it++, arg_name);
     }
@@ -1240,6 +1255,18 @@ struct PythonPrintImpl {
         //   foo : SomeType
         body_ << name << " : " << type->python_str() << "\n";
       }
+    }
+
+    size_t numConstants = moduleType->numConstants();
+    for (size_t i = 0; i < numConstants; i++) {
+      const auto& name = moduleType->getConstantName(i);
+      const auto& v = moduleType->getConstant(name).value();
+
+      indent();
+      body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
+      auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      printConstant(*ss, v);
+      body_ << ss->str() << "\n";
     }
   }
 
@@ -1361,10 +1388,6 @@ std::string PythonPrint::str() const {
 
 const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
-}
-
-void PythonPrint::LEGACY_printOpVersion() {
-  pImpl->body_ << "op_version_set = 1\n";
 }
 
 PythonPrint::~PythonPrint() = default;
