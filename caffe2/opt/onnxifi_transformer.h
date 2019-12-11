@@ -24,6 +24,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Whether to adjust batch at the ouptuts or not
   bool adjust_batch{true};
+
+  // Whether to lower model blob by blob
+  bool load_model_by_blob{false};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
