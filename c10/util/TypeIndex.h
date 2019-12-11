@@ -70,11 +70,7 @@ inline C10_HOST_CONSTEXPR c10::string_view fully_qualified_type_name_impl() noex
       string_view(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1));
 #elif defined(__GNUC__)
   return extract(
-    #if C10_TYPENAME_SUPPORTS_CONSTEXPR
       "constexpr c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-    #else
-      "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-    #endif
       "; c10::string_view = c10::basic_string_view<char>]",
       string_view(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1));
 #endif
