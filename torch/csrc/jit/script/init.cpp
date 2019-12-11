@@ -354,21 +354,10 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const Def& implementation_def,
     ResolutionCallback rcb,
     const FunctionDefaults& implementation_defaults,
-    const FunctionDefaults& overload_defaults,
     const py::object& signature) {
   if (signature.is(py::none())) {
     throw ErrorReport(overload_decl.range())
         << "Must explicitly add type annotations to overloaded functions";
-  }
-  for (const auto& default_val : overload_defaults) {
-    auto impl_default = implementation_defaults.find(default_val.first);
-    if (impl_default == implementation_defaults.end() ||
-        !impl_default->second.equal(default_val.second)) {
-      throw ErrorReport(overload_decl.range())
-          << "Default parameters on overloads do not "
-          << "effect the runtime so they must equal to the default parameter on the implementation function."
-          << " found on parameter " << impl_default->first;
-    }
   }
 
   auto adjusted_decl = mergeDefaultsAndExtraParametersToOverloadDecl(
@@ -979,7 +968,6 @@ void initJitScriptBindings(PyObject* module) {
          const Def& implementation_def,
          ResolutionCallback rcb,
          const FunctionDefaults& implementation_defaults,
-         const FunctionDefaults& overload_defaults,
          const py::object& signature) {
         const auto name = c10::QualifiedName(qualname);
         return script_compile_overloaded_function(
@@ -988,7 +976,6 @@ void initJitScriptBindings(PyObject* module) {
             implementation_def,
             std::move(rcb),
             implementation_defaults,
-            overload_defaults,
             signature);
       });
   m.def(

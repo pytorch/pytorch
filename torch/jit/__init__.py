@@ -2065,6 +2065,14 @@ def _get_script_class(name):
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
 
+def _check_overload_defaults(impl_defaults, overload_defaults, loc):
+    for name, overload_value in overload_defaults.items():
+        if name not in impl_defaults or impl_defaults[name] != overload_value:
+            raise torch.jit.frontend.FrontendError(
+                loc, "Default parameters on overloads do not affect the runtime so they "
+                "must equal to the default parameter on the implementation function. Found on "
+                "parameter {name}".format(name=name))
+
 def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
     overload_decl = torch.jit.get_jit_def(overload_fn).decl()
     overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None)
@@ -2072,8 +2080,9 @@ def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
     overload_defaults = get_default_args(overload_fn)
     implementation_defaults = get_default_args(impl_fn)
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
+    _check_overload_defaults(implementation_defaults, overload_defaults, overload_decl.range())
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb,
-                                               implementation_defaults, overload_defaults, overload_signature)
+                                               implementation_defaults, overload_signature)
     return fn
 
 def _get_overloads(obj):
