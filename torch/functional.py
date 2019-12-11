@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-from torch._six import inf
 from itertools import product
 
 from ._overrides import torch_function_dispatch
