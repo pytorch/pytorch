@@ -42,13 +42,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
             An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc`
             in order to initialize RPC with specific configurations, such as the
              RPC timeout and init_method to be used. )")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout,
-            R"(A `datetime.timedelta` indicating the timeout to use for all RPCs.
+          .def_readwrite(
+              "rpc_timeout",
+              &RpcBackendOptions::rpcTimeout,
+              R"(A `datetime.timedelta` indicating the timeout to use for all RPCs.
                 If an RPC does not complete in this timeframe, it will complete
                 with an exception indicating that it has timed out.)")
-          .def_readwrite("init_method", &RpcBackendOptions::initMethod,
-            R"(URL specifying how to initialize the process group.
-                Default is “env://”)");
+          .def_readwrite(
+              "init_method",
+              &RpcBackendOptions::initMethod,
+              R"(URL specifying how to initialize the process group.
+                Default is env://)");
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
