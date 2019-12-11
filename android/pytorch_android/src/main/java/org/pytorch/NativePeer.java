@@ -25,4 +25,6 @@ class NativePeer implements INativePeer {
   public native IValue forward(IValue... inputs);
 
   public native IValue runMethod(String methodName, IValue... inputs);
+
+  public native void setNumThreads(int numThreads);
 }

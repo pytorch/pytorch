@@ -8,4 +8,6 @@ interface INativePeer {
   IValue forward(IValue... inputs);
 
   IValue runMethod(String methodName, IValue... inputs);
+
+  void setNumThreads(int numThreads);
 }
