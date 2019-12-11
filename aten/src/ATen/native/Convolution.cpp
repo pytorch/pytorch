@@ -36,7 +36,7 @@ struct ConvParams {
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_miopen(const at::Tensor& input, const bool& bias_defined) const;
+  bool use_miopen(const at::Tensor& input, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -163,7 +163,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   return !is_output_padding_big();
 }
 
-auto ConvParams::use_miopen(const at::Tensor& input, const bool& bias_defined) const -> bool {
+auto ConvParams::use_miopen(const at::Tensor& input, bool bias_defined) const -> bool {
 
   return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
          && detail::getCUDAHooks().compiledWithMIOpen()
