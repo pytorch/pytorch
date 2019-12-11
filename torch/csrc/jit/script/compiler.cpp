@@ -2778,7 +2778,8 @@ struct to_ir {
           auto types = fmap(values, [](const Value* v) { return v->type(); });
           auto maybe_elem_type = unifyTypeList(types, ss);
           if (!maybe_elem_type) {
-            throw ErrorReport(tree) << ss.str();
+            throw ErrorReport(tree) << "Lists must contain only a single type\n"
+                                    << ss.str();
           }
           elem_type = maybe_elem_type.value();
         }
