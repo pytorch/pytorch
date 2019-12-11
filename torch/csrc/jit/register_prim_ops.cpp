@@ -3408,10 +3408,10 @@ at::Tensor interpolate(
     } else if (scale_factors.isDoubleList()) {
       auto scale_factors_list = scale_factors.toDoubleList();
 
-      for (int i = 0; i < scale_factors_list.size(); i++) {
+      for (const auto & scales : scale_factors_list) {
         // only warn when the scales have floating values since
         // the result for ints is the same with/without use_scale_factor
-        if(_is_floating_value(scale_factors_list[i])) {
+        if(_is_floating_value(scales)) {
           warn_use_scale_factor = true;
           break;
         }
@@ -3445,51 +3445,55 @@ at::Tensor interpolate(
     }
   }
 
+  const auto dim1d = 3;
+  const auto dim2d = 4;
+  const auto dim3d = 5;
+
   auto input_dim = input.dim();
-  if (input_dim == 3 && mode == "nearest")
+  if (input_dim == dim1d && mode == "nearest")
     return at::upsample_nearest1d(
         input, _output_size(input, 1, size, scale_factors), scale_factors_1);
-  if (input_dim == 4 && mode == "nearest")
+  if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input, _output_size(input, 2, size, scale_factors), scale_factors_1, scale_factors_2);
-  if (input_dim == 5 && mode == "nearest")
+  if (input_dim == dim3d && mode == "nearest")
     return at::upsample_nearest3d(
         input, _output_size(input, 3, size, scale_factors), scale_factors_1, scale_factors_2, scale_factors_3);
-  if (input_dim == 3 && mode == "area")
+  if (input_dim == dim1d && mode == "area")
     return at::adaptive_avg_pool1d(
         input, _output_size(input, 1, size, scale_factors));
-  if (input_dim == 4 && mode == "area")
+  if (input_dim == dim2d && mode == "area")
     return at::adaptive_avg_pool2d(
         input, _output_size(input, 2, size, scale_factors));
-  if (input_dim == 5 && mode == "area")
+  if (input_dim == dim3d && mode == "area")
     return at::adaptive_avg_pool3d(
         input, _output_size(input, 3, size, scale_factors));
-  if (input_dim == 3 && mode == "linear")
+  if (input_dim == dim1d && mode == "linear")
     return at::upsample_linear1d(
         input, _output_size(input, 1, size, scale_factors), *align_corners, scale_factors_1);
-  if (input_dim == 3 && mode == "bilinear")
+  if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
-  if (input_dim == 3 && mode == "bicubic")
+  if (input_dim == dim1d && mode == "bicubic")
     throw std::runtime_error("Got 3D input, but bicubic mode needs 4D input");
-  if (input_dim == 3 && mode == "trilinear")
+  if (input_dim == dim1d && mode == "trilinear")
     throw std::runtime_error("Got 3D input, but trilinear mode needs 5D input");
-  if (input_dim == 4 && mode == "linear")
+  if (input_dim == dim2d && mode == "linear")
     throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
-  if (input_dim == 4 && mode == "bilinear")
+  if (input_dim == dim2d && mode == "bilinear")
     return at::upsample_bilinear2d(
         input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
-  if (input_dim == 4 && mode == "bicubic")
+  if (input_dim == dim2d && mode == "bicubic")
     return at::upsample_bicubic2d(
         input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
-  if (input_dim == 4 && mode == "trilinear")
+  if (input_dim == dim2d && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
-  if (input_dim == 5 && mode == "linear")
+  if (input_dim == dim3d && mode == "linear")
     throw std::runtime_error("Got 5D input, but linear mode needs 3D input");
-  if (input_dim == 5 && mode == "bilinear")
+  if (input_dim == dim3d && mode == "bilinear")
     throw std::runtime_error("Got 5D input, but bilinear mode needs 4D input");
-  if (input_dim == 5 && mode == "bicubic")
+  if (input_dim == dim3d && mode == "bicubic")
     throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
-  if (input_dim == 5 && mode == "trilinear")
+  if (input_dim == dim3d && mode == "trilinear")
     return at::upsample_trilinear3d(
         input, _output_size(input, 3, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2, scale_factors_3);
 
