@@ -479,13 +479,31 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       minEndTime = futureTimeouts_.begin()->first;
     }
 
-    std::cv_status waitStatus = std::cv_status::no_timeout;
+    const auto& shouldUpdateMinEndTimePredicate = [&, this]() -> bool {
+      // Do not wait on the cond var if RPC has shutdown.
+      // Notice, whoever modifying `rpcRunning_`
+      // must acquire lock on `futureMutex_`.
+      // Otherwise, this predicate could deadlock.
+      // When the predicate evaluates to false,
+      // the thread will start waiting on the cond var.
+      // So if, during running the predicate, `::shutdown()` is called, then
+      // the predicate missed the notification before it started waiting.
+      if (!rpcRunning_.load()) {
+        return true;
+      }
+      const steady_clock_time_point& minEndTimeInMap =
+          futureTimeouts_.begin()->first;
+      return minEndTimeInMap < minEndTime;
+    };
+
+    bool shutUpdateMinEndTime = true;
     if (minEndTime == kInfiniteTimeoutTimePoint) {
-      futureTimeoutCV_.wait(lock);
+      futureTimeoutCV_.wait(lock, shouldUpdateMinEndTimePredicate);
     } else {
-      futureTimeoutCV_.wait_until(lock, minEndTime);
+      shutUpdateMinEndTime = futureTimeoutCV_.wait_until(
+          lock, minEndTime, shouldUpdateMinEndTimePredicate);
     }
-    if (waitStatus == std::cv_status::no_timeout) {
+    if (shutUpdateMinEndTime) {
       continue;
     }
 
