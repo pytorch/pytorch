@@ -385,7 +385,7 @@ class C10_API TypeMeta final {
   /**
    * Returns a printable name for the type.
    */
-  constexpr c10::string_view name() const noexcept {
+  c10::string_view name() const noexcept {
     return data_->name_;
   }
 
@@ -394,7 +394,7 @@ class C10_API TypeMeta final {
       const TypeMeta& rhs) noexcept;
 
   template <typename T>
-  constexpr bool Match() const noexcept {
+  bool Match() const noexcept {
     return (id() == TypeIdentifier::Get<T>());
   }
 
