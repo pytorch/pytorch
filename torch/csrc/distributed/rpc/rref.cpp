@@ -183,7 +183,7 @@ const T& OwnerRRef<T>::getValue() const {
 
 template <typename T>
 bool OwnerRRef<T>::hasValue() const {
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(mutex_);
   return value_.has_value();
 }
 
@@ -203,17 +203,12 @@ template <typename T>
 void OwnerRRef<T>::setValue(T&& value) {
   std::unique_lock<std::mutex> lock(mutex_);
   value_ = std::move(value);
-  if (!futures_.empty()) {
-    std::vector<std::shared_ptr<FutureMessage>> futures;
-    futures.swap(futures_);
-    lock.unlock();
-    valueCV_.notify_all();
-    for (auto& fut : futures) {
-      fut->markCompleted();
-    }
-  } else {
-    lock.unlock();
-    valueCV_.notify_all();
+  std::vector<std::shared_ptr<FutureMessage>> futures;
+  futures.swap(futures_);
+  lock.unlock();
+  valueCV_.notify_all();
+  for (auto& fut : futures) {
+    fut->markCompleted();
   }
 }
 
