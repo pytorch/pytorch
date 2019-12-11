@@ -352,7 +352,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
     // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
     // and we concat the indices and values tensors instead.
     AT_DISPATCH_ALL_TYPES(
-      commonDtype, "add_out_sparse_cuda", [&] {
+      commonDtype, "add_out_sparse_cpu", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             s_values = s_values.mul(value);
           }
@@ -453,33 +453,33 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
     return r;
   }
 
-  Tensor values_buffer = values.to(commonDtype);
-  Tensor result_buffer = r;
+  Tensor valuesBuffer = values.to(commonDtype);
+  Tensor resultBuffer = r;
   if (r.scalar_type() != commonDtype) {
-    result_buffer = dense.to(commonDtype);
+    resultBuffer = dense.to(commonDtype);
   } else if (!is_same_tensor(r, dense)) {
-    result_buffer.copy_(dense);
+    resultBuffer.copy_(dense);
   }
 
   // accessors rely on nnz test
   if (nDim > nDimI) {
     auto indices_accessor = indices.accessor<int64_t, 2>();
     for (int64_t k = 0; k < sparse._nnz(); k++) {
-      Tensor dstBuffer = result_buffer;
+      Tensor& dstBuffer = resultBuffer;
       for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
         dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
       }
-      Tensor srcBuffer = values_buffer.select(0, k);
+      Tensor srcBuffer = valuesBuffer.select(0, k);
       dstBuffer.add_(srcBuffer, value);
     }
   } else {
     AT_DISPATCH_ALL_TYPES(
         commonDtype, "add_dense_sparse", [&] {
-          add_dense_sparse_worker_cpu<scalar_t>(result_buffer, value, sparse, indices, values_buffer);
+          add_dense_sparse_worker_cpu<scalar_t>(resultBuffer, value, sparse, indices, valuesBuffer);
         });
   }
   if (r.scalar_type() != commonDtype) {
-    r.copy_(result_buffer);
+    r.copy_(resultBuffer);
   }
   return r;
 }

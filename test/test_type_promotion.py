@@ -483,6 +483,8 @@ class TestTypePromotion(TestCase):
         if self.device_type == 'cpu' and common_dtype == torch.half:
             self.assertRaises(RuntimeError, lambda: op(s1, d2))
 
+        # Skip inplace tests that would fail due to inability to cast to the output type.
+        # Some of these would also raise errors due to not being a supported op.
         if inplace and not torch.can_cast(common_dtype, dtype1):
             self.assertRaises(RuntimeError, lambda: op(dense1, sparse2))
             self.assertRaises(RuntimeError, lambda: op(sparse1, sparse2))
