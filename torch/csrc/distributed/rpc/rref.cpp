@@ -210,7 +210,7 @@ void OwnerRRef<T>::setValue(T&& value) {
   future.swap(future_);
   lock.unlock();
   valueCV_.notify_all();
-  if (future.get()) {
+  if (future.get() && !future->completed()) {
     future->markCompleted();
   }
 }
