@@ -243,46 +243,31 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 // -----------------------------------
 // hardshrink
 // -----------------------------------
-template <typename scalar_t>
-void hardshrink_cuda_kernel(const Tensor& self, Tensor& out_tensor, scalar_t lambd) {
-  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
-    self,
-    out_tensor,
-    [=] __device__ (
-      scalar_t& self_val,
-      scalar_t& out_tensor_val) {
-        out_tensor_val = (self_val >= -lambd && self_val <= lambd) ? scalar_t(0) : self_val;
+void hardshrink_kernel(TensorIterator& iter, Scalar value) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_cuda", [&]() {
+    auto lambd = value.to<scalar_t>();
+    gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return (a >= -lambd && a <= lambd) ? scalar_t(0) : a;
+    });
   });
 }
 
-template <typename scalar_t>
-void hardshrink_backward_cuda_kernel(const Tensor& self, Tensor& out_tensor, scalar_t lambd, const Tensor& grad) {
-  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-    self,
-    grad,
-    out_tensor,
-    [=] __device__ (
-      scalar_t& self_val,
-      scalar_t& grad_val,
-      scalar_t& out_tensor_val) {
-        out_tensor_val = (self_val >= -lambd && self_val <= lambd) ? scalar_t(0) : grad_val;
+void softshrink_kernel(TensorIterator& iter, Scalar value) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cuda", [&]() {
+    auto lambd = value.to<scalar_t>();
+    gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return a > lambd ? a - lambd : (a < -lambd ? a + lambd : scalar_t(0));
+    });
   });
 }
 
-Tensor hardshrink_cuda(const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "hardshrink_cuda", [&] {
-    hardshrink_cuda_kernel<scalar_t>(self, out_tensor, lambd.to<scalar_t>());
+void shrink_backward_kernel(TensorIterator& iter, Scalar value) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "shrink_backward_cuda", [&]() {
+    auto lambd = value.to<scalar_t>();
+    gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
+      return (self_val >= -lambd && self_val <= lambd) ? scalar_t(0) : grad_val;
+    });
   });
-  return out_tensor;
-}
-
-Tensor hardshrink_backward_cuda(const Tensor & grad, const Tensor & self, Scalar lambd) {
-  auto out_tensor = at::empty_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "hardshrink_backward_cuda", [&] {
-    hardshrink_backward_cuda_kernel<scalar_t>(self, out_tensor, lambd.to<scalar_t>(), grad);
-  });
-  return out_tensor;
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
@@ -305,6 +290,29 @@ void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t va
 static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar value) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "threshold_cuda", [&] {
     threshold_kernel_impl<scalar_t>(iter, threshold.to<scalar_t>(), value.to<scalar_t>());
+  });
+}
+
+void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "elu_cuda", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return a <= scalar_t(0) ? (static_cast<scalar_t>(std::exp(a * negiptcoef))
+          - scalar_t(1.)) * negcoef : a * poscoef;
+    });
+  });
+}
+
+void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "elu_backward_cuda", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+    });
   });
 }
 
@@ -385,5 +393,10 @@ Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar th
 }
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
+REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
+REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
+REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
+REGISTER_DISPATCH(elu_stub, &elu_kernel);
+REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 
 }}  // namespace at::native

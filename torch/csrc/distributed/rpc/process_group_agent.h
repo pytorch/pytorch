@@ -80,8 +80,7 @@ class ProcessGroupAgent : public RpcAgent {
   using steady_clock_time_point =
       std::chrono::time_point<std::chrono::steady_clock>;
 
-  static constexpr steady_clock_time_point kInfiniteTimeoutTimePoint =
-      std::chrono::time_point<std::chrono::steady_clock>::max();
+  static const steady_clock_time_point kInfiniteTimeoutTimePoint;
 
   class MessageCounter {
    public:
@@ -124,8 +123,7 @@ class ProcessGroupAgent : public RpcAgent {
   // poll for timed out RPCs
   void pollTimedOutRPCs();
   // process timed out futures
-  const std::vector<FutureInfo> processTimedOutFutures(
-      std::unique_lock<std::mutex> lock);
+  const std::vector<FutureInfo> processTimedOutFutures();
   // compute the remaining time for an RPC, given its end time.
   const std::chrono::milliseconds getRPCRemainingTime(
       const std::chrono::milliseconds& rpcEndTime) const;
