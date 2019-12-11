@@ -3934,31 +3934,43 @@
 - func: ne_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
+- func: bitwise_and.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: bitwise_and_out
+    CUDA: bitwise_and_out
+
+- func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: bitwise_and_out
+    CUDA: bitwise_and_out
+
+- func: bitwise_and.Scalar(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: bitwise_and.Tensor(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  variants: method
+
+- func: bitwise_and_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+
 - func: __and__.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_and
-    CUDA: legacy::cuda::_th_and
 
 - func: __and__.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_and
-    CUDA: legacy::cuda::_th_and
 
 - func: __iand__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_iand_
-    CUDA: legacy::cuda::_th_iand_
 
 - func: __iand__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_iand_
-    CUDA: legacy::cuda::_th_iand_
 
 - func: __or__.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full

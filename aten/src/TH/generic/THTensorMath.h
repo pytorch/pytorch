@@ -74,8 +74,6 @@ TH_API void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value);
 
 TH_API accreal THTensor_(sumall)(THTensor *t);
 
-TH_API void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value);
-TH_API void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src);
 

@@ -825,6 +825,26 @@ Example::
     torch.Size([10, 3, 5])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_and,
+           r"""
+bitwise_and(input, other, out=None) -> Tensor
+
+Computes the bitwise AND of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical AND.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_and(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([1, 0,  3], dtype=torch.int8)
+    >>> torch.bitwise_and(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ False, True, False])
+""".format(**common_args))
+
 add_docstr(torch.bitwise_xor,
            r"""
 bitwise_xor(input, other, out=None) -> Tensor
