@@ -198,25 +198,25 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // to handle unification of container types which might contain two different
   // specialized tensors (ListType / FutureType)
   auto t1_unshaped = unshapedType(t1);
-  auto t2_unsahped = unshapedType(t2);
+  auto t2_unshaped = unshapedType(t2);
 
-  if (t1_unshaped->isSubtypeOf(t2_unsahped)) {
-    return t2_unsahped;
-  } else if (t2_unsahped->isSubtypeOf(t1_unshaped)) {
+  if (t1_unshaped->isSubtypeOf(t2_unshaped)) {
+    return t2_unshaped;
+  } else if (t2_unshaped->isSubtypeOf(t1_unshaped)) {
     return t1_unshaped;
   }
 
   // List unification is covered by direct subtyping relation check above
   // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
-  // int?[] = std::vector<IValue>  we don't allow unify list element types
+  // int?[] = std::vector<IValue>  we don't unify list element types
   // Without specializations we could attempt to unify the list element type
 
   // Dicts are not specialized, so we can unify contained types, but we do not
   // maintain Tensor Specialization in dictionary types bc of mutability
   // so we run this after calling unshapedType
-  if (t1_unshaped->cast<DictType>() && t2_unsahped->cast<DictType>()) {
+  if (t1_unshaped->cast<DictType>() && t2_unshaped->cast<DictType>()) {
     auto dict1 = t1_unshaped->cast<DictType>();
-    auto dict2 = t2_unsahped->cast<DictType>();
+    auto dict2 = t2_unshaped->cast<DictType>();
 
     auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
     auto unified_value = unifyTypes(dict1->getValueType(), dict2->getValueType());
