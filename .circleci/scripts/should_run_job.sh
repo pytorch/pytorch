@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -exu -o pipefail
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+#SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # Check if we should actually run
 echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT:-}"
@@ -17,7 +17,7 @@ if ! [ -e "$SCRIPT_DIR/COMMIT_MSG" ]; then
   echo "You should be running the copy in ~/workspace; SCRIPT_DIR=$SCRIPT_DIR"
   exit 1
 fi
-if [ -n "${CIRCLE_PULL_REQUEST:-}" ]; then
+if [ -n "${CIRCLE_PULL_REQUEST:-}" ] || [[ ${CIRCLE_BRANCH:-} =~ ^gh/.* ]]; then
   if [[ $CIRCLE_BRANCH != "ci-all/"* ]] && [[ $CIRCLE_BRANCH != "nightly" ]] &&  [[ $CIRCLE_BRANCH != "postnightly" ]] ; then
     # Don't swallow "script doesn't exist
     [ -e "$SCRIPT_DIR/should_run_job.py"  ]
