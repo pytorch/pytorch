@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/cpu/interface.h>
-#include <torch/csrc/jit/fuser/cpu/ir.h>
 #include <torch/csrc/jit/fuser/common/utils.h>
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 #include <torch/csrc/jit/fuser/common/management.h>
@@ -20,6 +19,8 @@ namespace fuser {
 namespace cpu {
 
 using namespace torch::jit::fuser;
+using namespace asmjit;
+using namespace asmjit::x86;
 
 static JitRuntime rt;
 typedef int (*FusionFn)(void);
