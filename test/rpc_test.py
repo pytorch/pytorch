@@ -1130,20 +1130,14 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
             )
 
-<<<<<<< HEAD
         from torch.distributed.rpc import _rref_context_get_debug_info
-        rref1 = RRef(self.rank)
-        info = _rref_context_get_debug_info()
-=======
-        from torch.distributed.rpc import _get_debug_info
         # Check 1: local RRef does not update owners_ map
         #################################################
 
         rref1 = RRef(self.rank)
 
         # don't need a barrier here as local RRef is handled by this thread
-        info = _get_debug_info()
->>>>>>> 39cbeb6625... Re-enable test_rref_context_debug_info after enforcing proper synchronization
+        info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         # RRef on local value is not added to context until shared across RPC
         self.assertEqual(0, int(info["num_owner_rrefs"]))
@@ -1160,15 +1154,11 @@ class RpcTest(RpcAgentTestFixture):
             set_global_rref,
             args=(rref1,)
         )
-<<<<<<< HEAD
-        info = _rref_context_get_debug_info()
-=======
 
         # barrier before check 2
         dist.barrier()
 
-        info = _get_debug_info()
->>>>>>> 39cbeb6625... Re-enable test_rref_context_debug_info after enforcing proper synchronization
+        info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
 
@@ -1195,12 +1185,8 @@ class RpcTest(RpcAgentTestFixture):
 
         # barrier before check 3
         dist.barrier()
-<<<<<<< HEAD
-        info = _rref_context_get_debug_info()
-=======
 
-        info = _get_debug_info()
->>>>>>> 39cbeb6625... Re-enable test_rref_context_debug_info after enforcing proper synchronization
+        info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
 
