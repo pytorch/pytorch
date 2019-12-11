@@ -13604,8 +13604,7 @@ a")
         with warnings.catch_warnings(record=True) as warns:
             torch.jit.trace(*args, **kwargs)
         self.assertGreater(len(warns), 0)
-        for warn in warns:
-            self.assertIn("cause the trace to be incorrect", str(warn.message))
+        self.assertTrue(any(["cause the trace to be incorrect" in str(warn.message) for warn in warns]))
 
     def test_trace_checker_slice_lhs(self):
         def foo(x):
@@ -17112,6 +17111,12 @@ additional_module_tests = [
         'input_size': (10, 8, 128),
         'extra_args': (torch.randn(10, 8, 128), torch.randn(10, 8, 128)),
         'slowTest': True
+    },
+    {
+        'module_name': 'Transformer',
+        'constructor_args': (1, 1, 1, 1, 2),
+        'input_size': (3, 1, 1),
+        'extra_args': (torch.randn(1, 1, 1),)
     }
 ]
 
