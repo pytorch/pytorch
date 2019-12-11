@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/tempfile.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <torch/torch.h>
 
@@ -35,9 +36,9 @@ torch::Tensor save_and_load(torch::Tensor input) {
 } // namespace
 
 template <typename DerivedOptions>
-bool is_param_groups_equal(OptimizerParamGroup lhs, OptimizerParamGroup rhs) {
-  auto lhs_params= lhs.params();
-  auto rhs_params = rhs.params();
+bool is_param_groups_equal(const OptimizerParamGroup& lhs, const OptimizerParamGroup& rhs) {
+  const auto& lhs_params= lhs.params();
+  const auto& rhs_params = rhs.params();
   if(lhs_params.size() != rhs_params.size()) {
     return false;
   }
@@ -45,9 +46,9 @@ bool is_param_groups_equal(OptimizerParamGroup lhs, OptimizerParamGroup rhs) {
     if(!torch::equal(lhs_params[j], rhs_params[j]))
       return false;
   }
-  // if(!(static_cast<const DerivedOptions&>(lhs.options()) == static_cast<const DerivedOptions&>(rhs.options()))) {
-  //   return false;
-  // }
+  if(!(static_cast<const DerivedOptions&>(lhs.options()) == static_cast<const DerivedOptions&>(rhs.options()))) {
+    return false;
+  }
   return true;
 }
 template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
@@ -107,10 +108,10 @@ bool test_serialize_optimizer(DerivedOptimizerOptions options) {
   torch::load(optim3_2, optim_tempfile.name);
   step(optim3_2, model3);
 
-  auto optim3_2_param_groups = optim3_2.param_groups();
-  auto optim1_param_groups = optim1.param_groups();
-  auto optim3_2_state = optim3_2.state();
-  auto optim1_state = optim1.state();
+  const auto& optim3_2_param_groups = optim3_2.param_groups();
+  const auto& optim1_param_groups = optim1.param_groups();
+  const auto& optim3_2_state = optim3_2.state();
+  const auto& optim1_state = optim1.state();
 
   // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
   if(optim3_2_param_groups.size() != optim1_param_groups.size()) {
@@ -123,17 +124,18 @@ bool test_serialize_optimizer(DerivedOptimizerOptions options) {
     if(!is_param_groups_equal<DerivedOptimizerOptions>(optim3_2_param_groups[i], optim1_param_groups[i])) {
       return false;
     }
-    // auto optim3_2_params = optim3_2_param_groups[i].params();
-    // auto optim1_params = optim1_param_groups[i].params();
-    // for (int j=0; j<optim3_2_params.size(); j++) {
-    //   auto key1 = c10::guts::to_string(optim3_2_params[j].unsafeGetTensorImpl());
-    //   auto key2 = c10::guts::to_string(optim1_params[j].unsafeGetTensorImpl());
-    //   const DerivedOptimizerParamState& optim3_2_curr_state = static_cast<const DerivedOptimizerParamState&>(*(optim3_2_curr_state[key1].get()));
-    //   const DerivedOptimizerParamState& optim1_curr_state = static_cast<const DerivedOptimizerParamState&>(*(optim1_curr_state[key2].get()));
-    //   if(!(optim3_2_curr_state == optim1_curr_state)) {
-    //     return false;
-    //   }
-    // }
+    const auto& optim3_2_params = optim3_2_param_groups[i].params();
+    const auto& optim1_params = optim1_param_groups[i].params();
+    for (int j=0; j<optim3_2_params.size(); j++) {
+      auto key1 = c10::guts::to_string(optim3_2_params[j].unsafeGetTensorImpl());
+      const auto& state1 = optim3_2_state.at(c10::guts::to_string(optim3_2_params[j].unsafeGetTensorImpl()));
+      const auto& state2 = optim1_state.at(c10::guts::to_string(optim1_params[j].unsafeGetTensorImpl()));
+      const DerivedOptimizerParamState& optim3_2_curr_state = static_cast<const DerivedOptimizerParamState&>(*(state1.get()));
+      const DerivedOptimizerParamState& optim1_curr_state = static_cast<const DerivedOptimizerParamState&>(*(state2.get()));
+      if(!(optim3_2_curr_state == optim1_curr_state)) {
+        return false;
+      }
+    }
   }
   param1 = model1->named_parameters();
   param2 = model2->named_parameters();
