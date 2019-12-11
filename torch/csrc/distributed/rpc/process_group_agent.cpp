@@ -486,7 +486,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       minEndTime = futureTimeouts_.begin()->first;
     }
 
-    const auto& shouldUpdateMinEndTimePredicate = [&, this]() -> bool {
+    auto shouldUpdateMinEndTimePredicate = [&, this]() -> bool {
       // Notice, whoever modifying `rpcRunning_`
       // must acquire lock on `futureMutex_`.
       // Otherwise, this predicate could deadlock.
@@ -496,8 +496,12 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       if (!rpcRunning_.load()) {
         return true;
       }
-      const steady_clock_time_point& minEndTimeInMap =
-          futureTimeouts_.begin()->first;
+      steady_clock_time_point minEndTimeInMap = kInfiniteTimeoutTimePoint;
+      if (futureTimeouts_.empty()) {
+        minEndTimeInMap = kInfiniteTimeoutTimePoint;
+      } else {
+        minEndTimeInMap = futureTimeouts_.begin()->first;
+      }
       return minEndTimeInMap < minEndTime;
     };
 
