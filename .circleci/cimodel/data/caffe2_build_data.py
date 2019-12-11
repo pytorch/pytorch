@@ -1,10 +1,10 @@
-from cimodel.lib.conf_tree import ConfigNode, XImportant, X
+from cimodel.lib.conf_tree import ConfigNode, XImportant
 from cimodel.lib.conf_tree import Ver
 
 
 CONFIG_TREE_DATA = [
     (Ver("ubuntu", "16.04"), [
-        ([Ver("gcc", "5")], [X("onnx_py3.6")]),
+        # ([Ver("gcc", "5")], [X("onnx_py3.6")]),
         ([Ver("clang", "7")], [XImportant("onnx_py3.6")]),
     ]),
 ]

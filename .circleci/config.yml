@@ -2042,30 +2042,6 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:405"
           resource_class: large
       - caffe2_linux_build:
-          name: caffe2_onnx_py3_6_gcc5_ubuntu16_04_build
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "caffe2-onnx-py3.6-gcc5-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-gcc5-ubuntu16.04:345"
-      - caffe2_linux_test:
-          name: caffe2_onnx_py3_6_gcc5_ubuntu16_04_test
-          requires:
-            - setup
-            - caffe2_onnx_py3_6_gcc5_ubuntu16_04_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "caffe2-onnx-py3.6-gcc5-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-gcc5-ubuntu16.04:345"
-          resource_class: large
-      - caffe2_linux_build:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           requires:
             - setup
