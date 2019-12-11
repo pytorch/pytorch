@@ -5078,6 +5078,25 @@ Example::
     tensor([    nan,  1.0112,  0.2883,  0.6933])
 """.format(**common_args))
 
+add_docstr(torch.square,
+           r"""
+square(input, out=None) -> Tensor
+
+Returns a new tensor with the square of the elements of :attr:`input`.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-2.0755,  1.0226,  0.0831,  0.4806])
+    >>> torch.square(a)
+    tensor([ 4.3077,  1.0457,  0.0069,  0.2310])
+""".format(**common_args))
+
 add_docstr(torch.squeeze,
            r"""
 squeeze(input, dim=None, out=None) -> Tensor
