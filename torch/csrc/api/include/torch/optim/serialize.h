@@ -91,7 +91,9 @@ namespace detail {
       param_groups.push_back(std::make_pair(params, c10::guts::make_unique<DerivedOptimizerParamOptions>(param_group_options)));
     }
   }
-}
+} // namespace detail
+
+
 // Note: These functions are all called `serialize()` so they can be called
 // inside a template where the archive type is a template type and can thus be
 // passed such that the appropriate overload is selected.
@@ -125,7 +127,7 @@ template <typename DerivedOptimizerParamState, typename DerivedOptimizerParamOpt
 void serialize(
     serialize::OutputArchive& archive,
     const detail::OptimizerBase& optimizer) {
-
+  archive.write("pytorch_version", IValue("1.5.0"));
   serialize::OutputArchive state_archive(archive.compilation_unit());
   detail::serialize<DerivedOptimizerParamState>(state_archive, optimizer.state());
   archive.write("state", state_archive);
@@ -141,26 +143,30 @@ void serialize(
     serialize::InputArchive& archive,
     detail::OptimizerBase& optimizer) {
 
-  serialize::InputArchive state_archive;
-  archive.read("state", state_archive);
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state;
-  detail::serialize<DerivedOptimizerParamState>(state_archive, state);
-
-  serialize::InputArchive param_groups_archive;
-  archive.read("param_groups", param_groups_archive);
-  std::vector<std::pair<std::vector<std::string>, std::unique_ptr<OptimizerOptions>>> param_groups;
-  detail::serialize<DerivedOptimizerParamOptions>(param_groups_archive, param_groups);
-
-  // update state
-  TORCH_CHECK(param_groups.size() == optimizer.param_groups().size(), "loaded state dict has a different number of parameter groups");
-  for(size_t i=0; i<param_groups.size(); i++) {
-    std::vector<std::string> saved_group_keys = param_groups[i].first;
-    std::vector<Tensor> params = optimizer.param_groups()[i].params();
-    TORCH_CHECK(saved_group_keys.size() == params.size(), "loaded state dict contains a parameter group that doesn't match the size of optimizer's group");
-    for(size_t idx = 0; idx<params.size(); idx++) {
-      optimizer.state()[c10::guts::to_string(params[idx].unsafeGetTensorImpl())]=std::move(state[saved_group_keys[idx]]);
+    if(archive.keys().size() == 3) {
+      IValue pytorch_version;
+      archive.read("pytorch_version", pytorch_version);
     }
-  }
+    serialize::InputArchive state_archive;
+    archive.read("state", state_archive);
+    ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state;
+    detail::serialize<DerivedOptimizerParamState>(state_archive, state);
+
+    serialize::InputArchive param_groups_archive;
+    archive.read("param_groups", param_groups_archive);
+    std::vector<std::pair<std::vector<std::string>, std::unique_ptr<OptimizerOptions>>> param_groups;
+    detail::serialize<DerivedOptimizerParamOptions>(param_groups_archive, param_groups);
+
+    // update state
+    TORCH_CHECK(param_groups.size() == optimizer.param_groups().size(), "loaded state dict has a different number of parameter groups");
+    for(size_t i=0; i<param_groups.size(); i++) {
+      std::vector<std::string> saved_group_keys = param_groups[i].first;
+      std::vector<Tensor> params = optimizer.param_groups()[i].params();
+      TORCH_CHECK(saved_group_keys.size() == params.size(), "loaded state dict contains a parameter group that doesn't match the size of optimizer's group");
+      for(size_t idx = 0; idx<params.size(); idx++) {
+        optimizer.state()[c10::guts::to_string(params[idx].unsafeGetTensorImpl())]=std::move(state[saved_group_keys[idx]]);
+      }
+    }
 }
 
 /// Utility function to save a vector of buffers.

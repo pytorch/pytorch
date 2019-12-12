@@ -131,7 +131,23 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 }
 
 void Adagrad::load(serialize::InputArchive& archive) {
-  serialize(*this, archive);
+  if(archive.keys().size() == 3){
+    serialize(*this, archive);
+  }
+  else {
+    std::vector<Tensor> sum_buffers;
+    std::vector<int64_t> step_buffers;
+    torch::optim::serialize(archive, "sum_buffers", sum_buffers);
+    torch::optim::serialize(archive, "step_buffers", step_buffers);
+    // since there were no param_groups before, assuming all tensors are now in one param_group
+    std::vector<Tensor> params = param_groups_[0].params();
+    for(size_t idx = 0; idx<params.size(); idx++) {
+      auto state = c10::guts::make_unique<AdagradParamState>();
+      state->step(step_buffers[idx]);
+      state->sum(sum_buffers[idx]);
+      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+    }
+  }
 }
 } // namespace optim
 } // namespace torch

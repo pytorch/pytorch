@@ -92,7 +92,7 @@ class TORCH_API InputArchive final {
        const std::function<size_t(void)>& size_func,
        c10::optional<torch::Device> device = c10::nullopt);
 
-  //todo description
+  // Returns the vector of keys in the input archive.
   std::vector<std::string> keys();
 
   /// Forwards all arguments to `read()`.
