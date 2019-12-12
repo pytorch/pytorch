@@ -34,13 +34,15 @@ def get_processor_arch_name(cuda_version):
 
 LINUX_PACKAGE_VARIANTS = OrderedDict(
     manywheel=[
+        "2.7m",
+        "2.7mu",
         "3.5m",
         "3.6m",
         "3.7m",
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
-        "3.7m",
+        "2.7m",
     ],
 )
 
@@ -50,7 +52,7 @@ CONFIG_TREE_DATA = OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
-            "3.7",
+            "2.7",
         ],
     )),
 )
