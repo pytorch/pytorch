@@ -9,10 +9,29 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE STRING "Choose the type of build" FORCE)
 endif()
 
-file(GLOB SRCS src/*.cc)
+find_package(LLVM REQUIRED CONFIG)
 
-add_library(nnc ${SRCS})
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+# Set your project compile flags.
+# E.g. if using the C++ header files
+# you will need to enable C++11 support
+# for your compiler.
+
+include_directories(${LLVM_INCLUDE_DIRS})
+add_definitions(${LLVM_DEFINITIONS})
+
+add_library(nnc
+  src/expr.cc
+  src/ir_visitor.cc
+  src/llvm_emitter.cc)
+
 target_include_directories(nnc PUBLIC "include")
+
+target_link_libraries(nnc
+  PRIVATE
+  LLVMExecutionSession)
 
 add_custom_target(cpptest)
 add_subdirectory(tests/googletest/ EXCLUDE_FROM_ALL)
