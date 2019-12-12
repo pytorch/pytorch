@@ -15,8 +15,8 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   at::Half* out = output->template mutable_data<at::Half>();
   auto N = input.numel();
 
-#ifdef USE_FBGEMM
-  fbgemm::FloatToFloat16_simd(
+#if defined(USE_FBGEMM) && defined(__AVX2__)
+  fbgemm::FloatToFloat16_avx2(
       data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
 #else
   if (clip_) {
@@ -43,8 +43,8 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   float* out = output->template mutable_data<float>();
   auto N = input.numel();
 
-#ifdef USE_FBGEMM
-  fbgemm::Float16ToFloat_simd(
+#if defined(USE_FBGEMM) && defined(__AVX2__)
+  fbgemm::Float16ToFloat_avx2(
       reinterpret_cast<const fbgemm::float16*>(data), out, N);
 #else
   for (size_t i = 0; i < N; ++i) {
