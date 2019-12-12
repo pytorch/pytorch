@@ -83,6 +83,51 @@ class FloatImm : public ExprNode<FloatImm> {
   float value_;
 };
 
+// The underlying representation node to a Variable.
+// Currently, each Variable object represents a unique variable, even though the names
+// might be the same. We should consider add a unique_name as well.
+class Variable : public ExprNode<Variable> {
+ public:
+  Variable() {}
+  Variable(const std::string& name_hint) : name_hint_(name_hint) {}
+  static Expr make(const std::string& name_hint = "") { return Expr(new Variable(name_hint)); }
+
+ private:
+  std::string name_hint_;
+};
+
+// An expression to construct the underlying variable node.
+// Note: do not store any info here, since it is often possible to slice this object.
+// For example: Var x('x'); Expr x2 = x;
+class Var : public Expr {
+ public:
+  Var() : Expr(std::move(Variable::make())) {}
+  Var(const std::string& name_hint) : Expr(std::move(Variable::make(name_hint))) {}
+};
+
+// Bind the value to the var and evaluate the body.
+class Let : public ExprNode<Let> {
+ public:
+  Expr& var() { return var_; }
+  const Expr& var() const { return var_; }
+  Expr& value() { return value_; }
+  const Expr& value() const { return value_; }
+  Expr& body() { return body_; }
+  const Expr& body() const { return body_; }
+
+  static Expr make(const Expr& var, const Expr& value, const Expr& body) {
+    return Expr(new Let(var, value, body));
+  }
+
+ private:
+  Let(const Expr& var, const Expr& value, const Expr& body)
+      : var_(var), value_(value), body_(body) {}
+
+  Expr var_;
+  Expr value_;
+  Expr body_;
+};
+
 }  // namespace nnc
 
 #endif  // NNC_INCLUDE_IR_H_INCLUDED_
