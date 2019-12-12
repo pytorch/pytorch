@@ -141,51 +141,43 @@ ListTypePtr ListType::ofBools() {
   return value;
 }
 
-c10::optional<TypePtr> tryEitherIsTheSuperType(const TypePtr& t1, const TypePtr& t2) {
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+  // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
   } else if (t2->isSubtypeOf(t1)) {
     return t1;
-  } else {
-    return c10::nullopt;
-  }
-}
-
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
-  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
-  if (auto maybe_supertype = tryEitherIsTheSuperType(t1, t2)) {
-    return *maybe_supertype;
   }
 
-  // NB: we do not return NumberType because there is not currently enough
-  // operator support for it
-
+  // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
     return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
   }
 
-  if (t1->isSubtypeOf(TensorType::get()) && t2->isSubtypeOf(TensorType::get())) {
-    return static_cast<TypePtr>(TensorType::get());;
-  }
-
-  // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
     return OptionalType::create(t2);
   } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
     return OptionalType::create(t1);
   }
 
-  //types which contain other types
-  if (t1->cast<ListType>() && t2->cast<ListType>()) {
-    // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
-    // int?[] = std::vector<IValue>  we don't allow type coercion,
-    // since t1 & t2 may have different runtime representations.
+  // NB: we do not return NumberType because there is not currently enough
+  // operator support for it
 
-    // allow Lists of different tensor types
-    auto unshaped_t1 = unshapedType(t1);
-    auto unshaped_t2 = unshapedType(t2);
-    return tryEitherIsTheSuperType(unshaped_t1, unshaped_t2);
-  } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
+  // Attempt to unify Complete Tensor Types for immutable type containers
+
+  // unify(Optional[t1], t2) => Optional[unify(t1, t2)]
+  if (auto opt_t1 = t1->cast<OptionalType>()) {
+    if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
+      return OptionalType::create(*elem);
+    }
+  } else if (auto opt_t2 = t2->cast<OptionalType>()) {
+    if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
+      return OptionalType::create(*elem);
+    }
+  }
+
+  if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
     auto tuple1 = t1->cast<TupleType>();
     auto tuple2 = t2->cast<TupleType>();
     if (tuple1->elements().size() != tuple2->elements().size()) {
@@ -200,14 +192,34 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
       }
     }
     return static_cast<TypePtr>(TupleType::create(elements));
-  } else if (t1->cast<DictType>() && t2->cast<DictType>()) {
-    auto dict1 = t1->cast<DictType>();
-    auto dict2 = t2->cast<DictType>();
+  }
+
+  // Check direct subtyping relations again with Unshaped Types,
+  // to handle unification of container types which might contain two different
+  // specialized tensors (ListType / FutureType)
+  auto t1_unshaped = unshapedType(t1);
+  auto t2_unshaped = unshapedType(t2);
+
+  if (t1_unshaped->isSubtypeOf(t2_unshaped)) {
+    return t2_unshaped;
+  } else if (t2_unshaped->isSubtypeOf(t1_unshaped)) {
+    return t1_unshaped;
+  }
+
+  // List unification is covered by direct subtyping relation check above
+  // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
+  // int?[] = std::vector<IValue>  we don't unify list element types
+  // Without specializations we could attempt to unify the list element type
+
+  // Dicts are not specialized, so we can unify contained types, but we do not
+  // maintain Tensor Specialization in dictionary types bc of mutability
+  // so we run this after calling unshapedType
+  if (t1_unshaped->cast<DictType>() && t2_unshaped->cast<DictType>()) {
+    auto dict1 = t1_unshaped->cast<DictType>();
+    auto dict2 = t2_unshaped->cast<DictType>();
 
     auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
-    auto unshaped_value1 = unshapedType(dict1->getValueType());
-    auto unshaped_value2 = unshapedType(dict2->getValueType());
-    auto unified_value = tryEitherIsTheSuperType(unshaped_value1, unshaped_value2);
+    auto unified_value = unifyTypes(dict1->getValueType(), dict2->getValueType());
     if (!unified_key || !unified_value) {
       return c10::nullopt;
     }
