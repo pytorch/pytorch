@@ -40,9 +40,9 @@ void testClassTypeAddRemoveConstant() {
   ASSERT_TRUE(cls->hasConstant("const3"));
   ASSERT_FALSE(cls->hasConstant("const4"));
 
-  ASSERT_EQ(cls->getConstant("const1").value().toInt(), 1);
-  ASSERT_EQ(cls->getConstant("const2").value().toInt(), 2);
-  ASSERT_EQ(cls->getConstant("const2").value().toInt(), 3);
+  ASSERT_EQ(cls->getConstant("const1").toInt(), 1);
+  ASSERT_EQ(cls->getConstant("const2").toInt(), 2);
+  ASSERT_EQ(cls->getConstant("const2").toInt(), 3);
 
   cls->unsafeRemoveConstant("const2");
   ASSERT_TRUE(cls->hasConstant("const1"));
