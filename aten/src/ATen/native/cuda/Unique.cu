@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <THC/THCGeneral.h>
 
 #include <tuple>
