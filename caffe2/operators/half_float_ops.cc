@@ -6,6 +6,29 @@
 
 namespace caffe2 {
 
+inline void FloatToFloat16_ref(
+    const float* in,
+    at::Half* out,
+    size_t N,
+    bool do_clip = false) {
+  if (do_clip) {
+    constexpr float FP16_MAX = 65504.f;
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = std::max(-FP16_MAX, std::min(in[i], FP16_MAX));
+    }
+  } else {
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = in[i];
+    }
+  }
+}
+
+inline void Float16ToFloat_ref(const at::Half* in, float* out, size_t N) {
+  for (size_t i = 0; i < N; ++i) {
+    out[i] = in[i];
+  }
+}
+
 template <>
 bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   auto& input = Input(0);
@@ -15,20 +38,15 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   at::Half* out = output->template mutable_data<at::Half>();
   auto N = input.numel();
 
-#if defined(USE_FBGEMM) && defined(__AVX2__)
-  fbgemm::FloatToFloat16_avx2(
-      data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
-#else
-  if (clip_) {
-    constexpr float FP16_MAX = 65504.f;
-    for (size_t i = 0; i < N; ++i) {
-      out[i] = std::max(-FP16_MAX, std::min(data[i], FP16_MAX));
-    }
+#ifdef USE_FBGEMM
+  if (GetCpuId().avx2()) {
+    fbgemm::FloatToFloat16_avx2(
+        data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
   } else {
-    for (size_t i = 0; i < N; ++i) {
-      out[i] = data[i];
-    }
+    FloatToFloat16_ref(data, out, N, clip_);
   }
+#else
+  FloatToFloat16_ref(data, out, N, clip_);
 #endif
 
   return true;
@@ -43,13 +61,15 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   float* out = output->template mutable_data<float>();
   auto N = input.numel();
 
-#if defined(USE_FBGEMM) && defined(__AVX2__)
-  fbgemm::Float16ToFloat_avx2(
-      reinterpret_cast<const fbgemm::float16*>(data), out, N);
-#else
-  for (size_t i = 0; i < N; ++i) {
-    out[i] = data[i];
+#ifdef USE_FBGEMM
+  if (GetCpuId().avx2()) {
+    fbgemm::Float16ToFloat_avx2(
+        reinterpret_cast<const fbgemm::float16*>(data), out, N);
+  } else {
+    Float16ToFloat_ref(data, out, N);
   }
+#else
+  Float16ToFloat_ref(data, out, N);
 #endif
 
   return true;
