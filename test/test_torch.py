@@ -6406,6 +6406,13 @@ class TestTorchDeviceType(TestCase):
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
 
+        # test bool tensor
+        a = torch.tensor([True, False, True], device=device)
+        expected = torch.tensor([[True, False, False],
+                                 [False, False, False],
+                                 [False, False, True]])
+        self.assertEqual(a.diag(), expected)
+
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
     @dtypes(torch.float)

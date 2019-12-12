@@ -994,6 +994,8 @@
 ]]
 [[
   name: _th_diag
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0

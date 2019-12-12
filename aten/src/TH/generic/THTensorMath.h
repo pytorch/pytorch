@@ -65,6 +65,8 @@ TH_API void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat,  THTensor
 TH_API void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *mat1, THTensor *mat2, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha);
 
+TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
+
 #if !defined(TH_REAL_IS_BOOL)
 TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value);
@@ -132,7 +134,6 @@ TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor 
 TH_API void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim);
 TH_API accreal THTensor_(trace)(THTensor *t);
 
-TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
