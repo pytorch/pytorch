@@ -49,7 +49,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(FunctionType)           \
   _(ClassType)              \
   _(CapsuleType)            \
-  _(InterfaceType)
+  _(InterfaceType)          \
+  _(QSchemeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1090,6 +1091,28 @@ struct CAFFE2_API GeneratorType : public Type {
   GeneratorType() : Type(TypeKind::GeneratorType) {}
 };
 
+struct QSchemeType;
+using QSchemeTypePtr = std::shared_ptr<QSchemeType>;
+// This type represents a QScheme
+struct CAFFE2_API QSchemeType : public Type {
+  static QSchemeTypePtr create() {
+    return QSchemeTypePtr(
+        new QSchemeType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "QScheme";
+  }
+  static const TypeKind Kind = TypeKind::QSchemeType;
+  // global singleton
+  static QSchemeTypePtr get();
+
+ private:
+  QSchemeType() : Type(TypeKind::QSchemeType) {}
+};
+
 struct DeviceObjType;
 using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
 // This type represents a Generator
@@ -1216,7 +1239,9 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
-CAFFE2_API c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements);
+CAFFE2_API c10::optional<TypePtr> unifyTypeList(
+    at::ArrayRef<TypePtr> elements,
+    std::ostream& why_not);
 
 namespace detail {
 template <typename T>
@@ -1258,6 +1283,12 @@ template <>
 struct getTypePtr_<at::Scalar> final {
   static TypePtr call() {
     return NumberType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::QScheme> final {
+  static TypePtr call() {
+    return QSchemeType::get();
   }
 };
 template <>
@@ -1392,8 +1423,8 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   std::string str() const override {
-    return python_str();
-  }
+     return python_str();
+   }
 
   std::string python_str() const override {
     const auto& n = name().value();

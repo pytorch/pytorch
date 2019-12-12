@@ -10,6 +10,9 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
 at::Tensor tensor_from_numpy(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
+bool is_numpy_int(PyObject* obj) {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
 bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
@@ -227,9 +230,12 @@ ScalarType numpy_dtype_to_aten(int dtype) {
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 
+bool is_numpy_int(PyObject* obj) {
+  return PyArray_IsScalar((obj), Integer);
+}
+
 bool is_numpy_scalar(PyObject* obj) {
-  return (PyArray_IsIntegerScalar(obj) ||
-          PyArray_IsScalar(obj, Floating));
+  return is_numpy_int(obj) || PyArray_IsScalar(obj, Floating);
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
@@ -299,18 +305,18 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       strides = seq_to_aten_shape(py_strides);
+
+      // __cuda_array_interface__ strides use bytes. Torch strides use element counts.
+      for (auto& stride : strides) {
+        if (stride%dtype_size_in_bytes != 0) {
+          throw ValueError(
+              "given array strides not a multiple of the element byte size. "
+              "Make a copy of the array to reallocate the memory.");
+          }
+        stride /= dtype_size_in_bytes;
+      }
     } else {
       strides = at::detail::defaultStrides(sizes);
-    }
-
-    // __cuda_array_interface__ strides use bytes. Torch strides use element counts.
-    for (auto& stride : strides) {
-      if (stride%dtype_size_in_bytes != 0) {
-        throw ValueError(
-            "given array strides not a multiple of the element byte size. "
-            "Make a copy of the array to reallocate the memory.");
-        }
-      stride /= dtype_size_in_bytes;
     }
   }
 

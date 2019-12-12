@@ -4,13 +4,13 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
 
-namespace torch { namespace autograd {
+namespace torch { namespace autograd { namespace VariableType {
 
-namespace {
 std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
@@ -22,9 +22,6 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   }
   return res;
 }
-}
-
-namespace VariableType {
 
 C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
@@ -35,6 +32,7 @@ C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
+namespace {
 const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
@@ -47,6 +45,7 @@ Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
+}
 }
 
 const Tensor & unpack(const Tensor & t, const char * name, int pos) {
@@ -75,6 +74,8 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   }
   return ret;
 }
+
+namespace {
 
 void backward(
     const Tensor& self,
@@ -157,20 +158,21 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
     auto& graph = state.graph;
-    if (state.force_outplace) {
+    if (state.force_outplace && self.storage().use_count() <= 1) {
       // if you have no views of self, then an in place copy is equivalent to
       // making sure we expand src to the same size as self
       jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
       jit::tracer::addInputs(node, "src", src);
       jit::tracer::addInputs(node, "self", self);
       graph->insertNode(node);
-      jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
       output = node->output();
     } else {
       output = graph->insert(
           jit::aten::copy_,
           {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
+      jit::tracer::recordSourceLocation(output->node());
     }
+    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
@@ -254,9 +256,7 @@ Tensor detach(const Tensor & self) {
   }
   // <NON_GENERATED_CODE>
   auto result = make_variable_view(self, self, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, self);
-#endif
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
@@ -297,6 +297,79 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-}  // namespace VariableType
+// Some ops in the following registration list are registered as catch-all kernels,
+// some as catch-all kernels and additionally as backend kernels for VariableTensorId.
+// The reason for this is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
+// kernels) need to get a separate VariableTensorId kernel instead of a catch-all kernel,
+// otherwise we won't ever call it for CPU/CUDA/QuantizedCPU tensors, because the backend
+// kernel has a higher priority than catch-all kernels.
+// Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
+// skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
+// (and that don't use dispatch), we register them as catch-all kernels instead.
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::resize_), &VariableType::resize_>(TensorTypeId::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(TensorTypeId::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach(Tensor self) -> Tensor")
+    .kernel<decltype(VariableType::detach)>(TensorTypeId::VariableTensorId, &VariableType::detach)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::detach_), &VariableType::detach_>(TensorTypeId::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(TensorTypeId::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()")
+    // For backward(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
+    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
+    // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
+    // tensor argument.
+    // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
+    //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
+    .impl_unboxedOnlyKernel<decltype(VariableType::backward), &VariableType::backward>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::backward), &VariableType::backward>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_data(Tensor(a!) self, Tensor new_data) -> ()")
+    .catchAllKernel<decltype(VariableType::set_data), &VariableType::set_data>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::data(Tensor self) -> Tensor")
+    .catchAllKernel<decltype(VariableType::data), &VariableType::data>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::is_leaf(Tensor self) -> bool")
+    .catchAllKernel<decltype(VariableType::is_leaf), &VariableType::is_leaf>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::output_nr(Tensor self) -> int")
+    .catchAllKernel<decltype(VariableType::output_nr), &VariableType::output_nr>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::_version(Tensor self) -> int")
+    .catchAllKernel<decltype(VariableType::_version), &VariableType::_version>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)")
+    // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
+    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
+    // which calls callBoxed(), which doesn't support mutable tensor arguments yet and requires_grad_() has a mutable
+    // tensor argument.
+    // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
+    //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
+    .impl_unboxedOnlyKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
 
-}} // namespace torch::autograd
+}  // namespace
+}}} // namespace torch::autograd::VariableType
