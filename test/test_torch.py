@@ -4154,7 +4154,7 @@ class _TestTorchMixin(object):
         self.assertEqual(j, j_loaded)
 
     @unittest.skipIf(
-        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0,3,1)),
+        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0, 3, 1)),
         '"dill" not found or not correct version'
     )
     def test_serialization_dill_version_supported(self):
@@ -4180,7 +4180,7 @@ class _TestTorchMixin(object):
             self.assertFalse(error_was_raised)
 
     @unittest.skipIf(
-        not TEST_DILL or check_module_version_greater_or_equal(dill, (0,3,1)),
+        not TEST_DILL or check_module_version_greater_or_equal(dill, (0, 3, 1)),
         '"dill" not found or is correct version'
     )
     def test_serialization_dill_version_not_supported(self):
@@ -4206,12 +4206,12 @@ class _TestTorchMixin(object):
             self.assertTrue(error_was_raised)
 
     @unittest.skipIf(
-        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0,3,1)),
+        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0, 3, 1)),
         '"dill" not found or not correct version'
     )
     def test_serialization_dill_no_encoding(self):
         x = torch.randn(5, 5)
-        
+
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f, pickle_module=dill)
             f.seek(0)
@@ -4220,12 +4220,12 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x2)
 
     @unittest.skipIf(
-        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0,3,1)),
+        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0, 3, 1)),
         '"dill" not found or not correct version'
     )
     def test_serialization_dill_encoding(self):
         x = torch.randn(5, 5)
-        
+
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f, pickle_module=dill)
             f.seek(0)

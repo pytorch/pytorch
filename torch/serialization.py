@@ -112,9 +112,13 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
         )
         requirement_is_met = module_version >= req_version_tuple
 
-    except:
-        message = ("'%s' module version string is malformed '%s' and cannot be compared"
-            " with tuple %s" % (module.__name__, module.__version__, str(req_version_tuple)))
+    except Exception as e:
+        message = (
+            "'%s' module version string is malformed '%s' and cannot be compared"
+            " with tuple %s"
+        ) % (
+            module.__name__, module.__version__, str(req_version_tuple)
+        )
         if error_if_malformed:
             raise RuntimeError(message)
         else:
@@ -342,11 +346,10 @@ def _check_dill_version(pickle_module):
             raise ValueError((
                 "'torch' supports dill >= %s, but you have dill %s."
                 " Please upgrade dill or switch to 'pickle'"
-                ) % (
-                    '.'.join([str(num) for num in required_dill_version]),
-                    pickle_module.__version__
-                )
-            )
+            ) % (
+                '.'.join([str(num) for num in required_dill_version]),
+                pickle_module.__version__
+            ))
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
     """Saves an object to a disk file.
