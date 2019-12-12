@@ -28,7 +28,8 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
-  auto tuple = THPObjectPtr{PyTuple_New(3)};
+  auto opt_memory_format = std::get<4>(parsed);
+  auto tuple = THPObjectPtr{PyTuple_New(4)};
   if (!tuple) throw python_error();
   if (device) {
     PyTuple_SET_ITEM(tuple.get(), 0, THPDevice_New(*device));
@@ -43,6 +44,12 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
   }
   PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
+  if (opt_memory_format.has_value()) {
+    PyTuple_SET_ITEM(tuple.get(), 3, THPMemoryFormat_New(opt_memory_format.value(), "unused_name"));
+  } else {
+    Py_INCREF(Py_None);
+    PyTuple_SET_ITEM(tuple.get(), 3, Py_None);
+  }
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }

@@ -357,6 +357,8 @@ class Module(object):
 
         .. function:: to(tensor, non_blocking=False)
 
+        .. function:: to(memory_format=torch.channels_last)
+
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point desired :attr:`dtype` s. In addition, this method will
         only cast the floating point parameters and buffers to :attr:`dtype`
@@ -378,6 +380,9 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
+            memory_format (:class:`torch.memory_format`): the desired memory
+                format for 4D parameters and buffers in this module (keyword
+                only argument)
 
         Returns:
             Module: self
@@ -412,7 +417,7 @@ class Module(object):
 
         """
 
-        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
@@ -420,6 +425,8 @@ class Module(object):
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
+            if convert_to_format is not None and t.dim() == 4:
+                return t.to(device, dtype if t.is_floating_point() else None, non_blocking, memory_format=convert_to_format)
             return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
